@@ -6,6 +6,12 @@ use super::RegisteredFrame;
 use crate::frontend::RequiredSite;
 use crate::ir::{RegisteredTypeParameter, TypeParameterKind};
 
+/// The source location of a function created by an expression.
+pub(crate) enum CallableSite {
+    Lambda(TextSize),
+    Generator(TextRange),
+}
+
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
 /// are the current activation's handles each time the declaration executes.
 pub(crate) struct CompiledDefinition {
@@ -195,7 +201,6 @@ pub(crate) trait SiteDefinitions {
         &mut self,
         site: TextSize,
     ) -> (CompiledDefinition, CompiledTypeParameters, TextRange);
-    fn generator(&mut self, site: TextRange) -> CompiledDefinition;
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String>;
     fn annotation_string(&mut self, site: TextSize) -> String;
 }
@@ -206,7 +211,6 @@ pub(crate) struct CheckedSites {
     pub(crate) definitions: HashMap<TextSize, Declaration>,
     pub(crate) class_namespaces:
         HashMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
-    pub(crate) generators: HashMap<TextRange, CompiledDefinition>,
     pub(crate) aliases: HashMap<TextSize, Result<CompiledAlias, String>>,
 }
 
@@ -220,16 +224,12 @@ impl CheckedSites {
             }
             RequiredSite::DefinitionAfterInputs(_)
             | RequiredSite::ExecLiteral(_)
-            | RequiredSite::Lambda(..) => {}
+            | RequiredSite::Lambda(..)
+            | RequiredSite::Generator(_) => {}
             RequiredSite::ClassNamespace(site) => {
                 self.class_namespaces
                     .entry(site)
                     .or_insert_with(|| definitions.class_namespace(site));
-            }
-            RequiredSite::Generator(site) => {
-                self.generators
-                    .entry(site)
-                    .or_insert_with(|| definitions.generator(site));
             }
             RequiredSite::Alias(site) => {
                 self.aliases
@@ -253,17 +253,6 @@ impl CheckedSites {
         let text = frame.source_text(spelling, None);
         frame.bind_annotation_expression(&text, &self.annotation_strings[&site]);
         text
-    }
-
-    pub(crate) fn bind_generator(
-        &self,
-        frame: &mut RegisteredFrame<'_, '_>,
-        site: TextRange,
-        scope: &str,
-        cursor: &str,
-    ) -> String {
-        let function = self.generators[&site].bind_defaults(frame, scope, &[]);
-        frame.op("generator", &[&function, cursor])
     }
 
     pub(crate) fn definition(

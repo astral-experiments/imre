@@ -1,4 +1,5 @@
 use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, RegisteredFrame};
+use ruff_text_size::TextRange;
 use std::path::Path;
 
 #[test]
@@ -58,13 +59,16 @@ fn checked_module_places_class_generator_and_following_lambda() {
     RegisteredBody::Suite(module.initializer()).emit(&mut function);
     let sites = &function.sites;
     assert_eq!(sites.definitions.len(), 2);
-    assert_eq!(location.callable_code.borrow().len(), 2);
-    assert!(sites.generators.contains_key(generator));
+    assert_eq!(location.callable_code.borrow().len(), 3);
     assert_eq!(sites.definitions[class].definition.qualname, "C");
     assert_eq!(sites.definitions[read].definition.name, "read");
-    for site in [first, last] {
+    for site in [
+        TextRange::empty(*first),
+        *generator,
+        TextRange::empty(*last),
+    ] {
         let symbols = location.callable_code.borrow();
-        let entry = &symbols[site];
+        let entry = &symbols[&site];
         assert!(function.frame.body.code.contains(&format!("ptr {entry},")));
     }
     let count = function.frame.output.count;
@@ -105,7 +109,8 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             0,
             module.source.module_start,
         );
-        let mut function = location.function(frame, &module.source.scopes.module_globals, "", false);
+        let mut function =
+            location.function(frame, &module.source.scopes.module_globals, "", false);
         let body = &module.initializer().checked.function.body;
         let mut required = Vec::new();
         RequiredSite::visit(body, Some(&module.source.exec_literals), &mut |site| {
@@ -129,7 +134,8 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
             sites.aliases[alias].as_ref().unwrap().definition.code,
             symbol(1)
         );
-        assert_eq!(location.callable_code.borrow()[last], symbol(2));
+        let last = TextRange::empty(*last);
+        assert_eq!(location.callable_code.borrow()[&last], symbol(2));
         let count = function.frame.output.count;
         RegisteredBody::Suite(module.initializer()).emit(&mut function);
         assert_eq!(function.frame.output.count, count);

@@ -1,4 +1,5 @@
 use super::CheckedSites;
+use super::sites::{CallableSite, CompiledDefinition};
 use super::{Output, PreparedSuiteEmitter, RegisteredBody, RegisteredFrame, SourcePositions};
 use crate::modules::SourceGraph;
 use ruff_text_size::{TextRange, TextSize};
@@ -28,8 +29,8 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
         (self.0, &self.1)
     }
     fn place_site(&mut self, _: crate::frontend::RequiredSite) {}
-    fn lambda_at(&mut self, _: TextSize, _: bool) -> super::sites::CompiledDefinition {
-        unreachable!("isolated writer tests have no lexical lambda definitions")
+    fn callable_at(&mut self, _: CallableSite, _: bool) -> CompiledDefinition {
+        unreachable!("isolated writer tests have no lexical callable definitions")
     }
     fn exec_literal_at(&mut self, _: TextRange) -> Option<super::sites::CompiledExec> {
         None

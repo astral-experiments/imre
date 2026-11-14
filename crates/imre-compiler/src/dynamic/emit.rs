@@ -16,7 +16,8 @@ use crate::frontend::{
 };
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::registered::sites::{
-    CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters, Declaration,
+    CallableSite, CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters,
+    Declaration,
 };
 use crate::llvm::registered::{AnnotationScope, Output, RegisteredFrame, SourcePositions, sites};
 use crate::llvm::{ModuleLauncher, ProviderBody};
@@ -842,8 +843,9 @@ enum Body<'a> {
 
 struct SourceMap<'a> {
     info: &'a SourceInfo<'a>,
-    /// A duplicated cleanup path still evaluates the same lexical definition.
-    callable_code: std::cell::RefCell<HashMap<ruff_text_size::TextSize, String>>,
+    /// A duplicated cleanup still uses the same code. Lambdas have source offsets and
+    /// generators have nonempty source ranges.
+    callable_code: std::cell::RefCell<HashMap<TextRange, String>>,
     exec_code: std::cell::RefCell<HashMap<TextRange, sites::CompiledExec>>,
     unit: usize,
     positions: &'a SourcePositions<'a>,
@@ -1138,10 +1140,18 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         sites.place(site, &mut definitions);
     }
 
-    fn lambda_at(&mut self, site: TextSize, comprehension: bool) -> CompiledDefinition {
-        let lambda = &self.source.lambdas[&site];
+    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition {
+        let (range, callable) = match site {
+            CallableSite::Lambda(start) => (
+                TextRange::empty(start),
+                Callable::Lambda(&self.source.lambdas[&start], scoped),
+            ),
+            CallableSite::Generator(range) => {
+                (range, Callable::Generator(&self.source.generators[&range]))
+            }
+        };
         let (_, mut definitions) = self.definitions();
-        definitions.compile_callable(site, Callable::Lambda(lambda, comprehension))
+        definitions.compile_callable(range, callable)
     }
 
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
@@ -1190,23 +1200,24 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
 impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
     fn declaration(&mut self, site: TextSize) -> Declaration {
         let source = self.source;
-        let (definition, decorator_offsets, type_params) =
-            if let Some(class) = source.class_bodies.get(&site) {
-                let definition = if let Some(header) = &class.header {
-                    let name = format!("<generic parameters of {}>", class.name);
-                    let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
-                    self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
-                } else {
-                    self.compile_class_namespace(site, class)
-                };
-                (definition, &class.decorator_offsets, None)
+        let (definition, decorator_offsets, type_params) = if let Some(class) =
+            source.class_bodies.get(&site)
+        {
+            let definition = if let Some(header) = &class.header {
+                let name = format!("<generic parameters of {}>", class.name);
+                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
+                self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
             } else {
-                let header = &source.scopes.functions[&site];
-                let definition = self.compile_callable(site, Callable::Named(header));
-                let parameters = (!header.type_params.is_empty())
-                    .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
-                (definition, &header.decorator_offsets, parameters)
+                self.compile_class_namespace(site, class)
             };
+            (definition, &class.decorator_offsets, None)
+        } else {
+            let header = &source.scopes.functions[&site];
+            let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
+            let parameters = (!header.type_params.is_empty())
+                .then(|| self.compile_type_parameters(&header.type_params, self.class_locals));
+            (definition, &header.decorator_offsets, parameters)
+        };
         Declaration {
             definition,
             decorator_offsets: decorator_offsets.clone(),
@@ -1223,11 +1234,6 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
         let header = class.header.as_ref().expect("generic class");
         let parameters = self.compile_scoped_type_parameters(&header.parameters);
         (namespace, parameters, class.range)
-    }
-
-    fn generator(&mut self, site: TextRange) -> CompiledDefinition {
-        let body = &self.source.generators[&site];
-        self.compile_callable(site.start(), Callable::Generator(body))
     }
 
     fn type_alias(&mut self, site: TextSize) -> Result<CompiledAlias, String> {
@@ -1286,7 +1292,7 @@ impl sites::SiteDefinitions for LexicalDefinitions<'_, '_> {
 }
 
 impl LexicalDefinitions<'_, '_> {
-    fn compile_callable(&mut self, site: TextSize, callable: Callable<'_>) -> CompiledDefinition {
+    fn compile_callable(&mut self, site: TextRange, callable: Callable<'_>) -> CompiledDefinition {
         let source = self.source;
         let (name, metadata, body, header) = match callable {
             Callable::Named(header) => (
@@ -1323,11 +1329,8 @@ impl LexicalDefinitions<'_, '_> {
         let provider = header.and_then(|h| self.parameter_provider(h, &qualname));
         let generic = header.is_some_and(|h| !h.type_params.is_empty());
         let suspension = metadata.suspension_flags();
-        // Several expression regions can place the same lexical lambda.
-        let cache = match callable {
-            Callable::Lambda(..) => Some(&source.callable_code),
-            Callable::Named(_) | Callable::Generator(_) => None,
-        };
+        // Several expression regions can place the same lexical function.
+        let cache = (!matches!(callable, Callable::Named(_))).then_some(&source.callable_code);
         let existing = cache.and_then(|cache| cache.borrow().get(&site).cloned());
         let code = existing.unwrap_or_else(|| {
             let prefix = if matches!(callable, Callable::Generator(_)) {
@@ -1340,7 +1343,7 @@ impl LexicalDefinitions<'_, '_> {
                 &prefix,
                 Body::Registered(body, &callable),
                 true,
-                Some((site, suspension)),
+                Some((site.start(), suspension)),
             );
             if let Some(cache) = cache {
                 cache.borrow_mut().insert(site, code.clone());
