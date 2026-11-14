@@ -1771,9 +1771,7 @@ impl Session {
             .iter()
             .filter(|(path, _, _)| path.extension().is_some_and(|ext| ext == "pyi"))
             .peekable();
-        if stubs.peek().is_none() {
-            return None;
-        }
+        stubs.peek()?;
         let resolved = fs.canonicalize(&stub).ok();
         let matched = resolved.as_ref().and_then(|identity| {
             let (path, _, _) = stubs.find(|(_, seen, _)| seen == identity)?;

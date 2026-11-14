@@ -379,13 +379,18 @@ impl Pending {
     }
 }
 
+/// An annotated sequence keeps its declared list layout and the layout observed at calls.
+struct SequenceParameter {
+    declared_list: Type,
+    observed: Option<Type>,
+}
+
 /// Checked calls and function bodies supply missing parameter and return types.
 /// Once signatures settle, the final body check produces the operations for local callbacks.
 #[derive(Default)]
 pub(super) struct Inference {
     pending: RefCell<Vec<Pending>>,
-    /// Declared list layout and the concrete layouts already observed at direct calls.
-    sequence_parameters: RefCell<HashMap<(usize, usize), (Type, Option<Type>)>>,
+    sequence_parameters: RefCell<HashMap<(usize, usize), SequenceParameter>>,
     document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Source contract checks shared by discovery, recovery and final body lowering.
     pub(super) source_checks: registered::SourceChecks,
@@ -435,11 +440,17 @@ impl Inference {
 
     pub(super) fn sequence_parameters(&self, id: usize, parameters: Vec<(usize, Type)>) {
         if !parameters.is_empty() {
-            self.sequence_parameters.borrow_mut().extend(
-                parameters
-                    .into_iter()
-                    .map(|(index, list)| ((id, index), (list, None))),
-            );
+            self.sequence_parameters
+                .borrow_mut()
+                .extend(parameters.into_iter().map(|(index, declared_list)| {
+                    (
+                        (id, index),
+                        SequenceParameter {
+                            declared_list,
+                            observed: None,
+                        },
+                    )
+                }));
             self.widened.set(true);
         }
     }
@@ -453,9 +464,9 @@ impl Inference {
         site: &ast::Expr,
     ) -> Type {
         if site.is_list_expr()
-            && let Some((list, _)) = self.sequence_parameters.borrow().get(&(id, index))
+            && let Some(parameter) = self.sequence_parameters.borrow().get(&(id, index))
         {
-            *list
+            parameter.declared_list
         } else {
             expected
         }
@@ -468,7 +479,11 @@ impl Inference {
         actual: Type,
         types: &Types,
     ) -> Option<Type> {
-        let (list, _) = *self.sequence_parameters.borrow().get(&(id, index))?;
+        let list = self
+            .sequence_parameters
+            .borrow()
+            .get(&(id, index))?
+            .declared_list;
         let item = types.element(list)?;
         if actual == list || types.sequence_union_element(actual) == Some(item) {
             Some(actual)
@@ -492,13 +507,13 @@ impl Inference {
     ) -> Result<Expr, String> {
         let value = checker.coerce(value, member, site)?;
         let mut sequences = self.sequence_parameters.borrow_mut();
-        let (list, observed) = sequences.get_mut(&(id, index)).unwrap();
-        let layout = if observed.is_none_or(|seen| seen == member) {
+        let parameter = sequences.get_mut(&(id, index)).unwrap();
+        let layout = if parameter.observed.is_none_or(|seen| seen == member) {
             member
         } else {
-            checker.types.sequence_union(*list)
+            checker.types.sequence_union(parameter.declared_list)
         };
-        *observed = Some(layout);
+        parameter.observed = Some(layout);
         if self.parameter(id, index) != Some(layout) {
             self.widen_parameter(id, index, layout);
         }
@@ -512,7 +527,7 @@ impl Inference {
             .sequence_parameters
             .borrow()
             .get(&slot)
-            .map(|(list, _)| *list)
+            .map(|parameter| parameter.declared_list)
             == Some(actual)
         {
             self.sequence_parameters.borrow_mut().remove(&slot);
