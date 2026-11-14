@@ -201,22 +201,27 @@ impl<'a> Plan<'a> {
         }
     }
 
-    /// Collect the body's local bindings while visiting the expressions it evaluates.
-    /// A name target binds directly, while an attribute or subscript still reads its operands.
+    /// Collect the private scope's bindings and visit its reads in symbol-table order.
     pub fn scope_bindings<T: Default + Extend<String>>(
         &self,
-        mut visit: impl FnMut(&'a ast::Expr),
+        visit: impl FnMut(&'a ast::Expr),
     ) -> T {
-        let mut names = T::default();
-        for operand in self.body_operands() {
-            match operand {
-                BodyOperand::Value(expr) => visit(expr),
-                BodyOperand::Target(target) => {
-                    visit_target(target, &mut names, |_| Ok(()), &mut visit)
-                        .expect("collecting names without validation");
-                }
+        struct Reads<F>(F);
+        impl<'a, F: FnMut(&'a ast::Expr)> Visitor<'a> for Reads<F> {
+            fn visit_expr(&mut self, expr: &'a ast::Expr) {
+                (self.0)(expr);
             }
         }
+
+        let mut names = T::default();
+        self.visit_symbol_body(
+            &mut Reads(visit),
+            |reads, target| {
+                visit_target(target, &mut names, |_| Ok(()), &mut reads.0)
+                    .expect("collecting names without validation");
+            },
+            Reads::visit_expr,
+        );
         names
     }
 
@@ -226,7 +231,7 @@ impl<'a> Plan<'a> {
     pub(super) fn visit_symbol_body<V: Visitor<'a>>(
         &self,
         visitor: &mut V,
-        target: impl Fn(&mut V, &'a ast::Expr),
+        mut target: impl FnMut(&mut V, &'a ast::Expr),
         iterable: impl Fn(&mut V, &'a ast::Expr),
     ) {
         for (depth, clause) in self.clauses.iter().enumerate() {
