@@ -463,16 +463,16 @@ pub(in crate::frontend) fn bound_call(
     let layout = registered_argument_layout(&call.arguments);
     invoke_value(
         ir::RegisteredCall::new(call.range(), selection, layout),
-        target,
+        Box::new(target),
         arguments,
     )
 }
 
-fn invoke_value(site: ir::RegisteredCall, target: Expr, arguments: Vec<Expr>) -> Expr {
+fn invoke_value(site: Box<ir::RegisteredCall>, target: Box<Expr>, arguments: Vec<Expr>) -> Expr {
     Expr {
         ty: Type::PythonObject,
         kind: ExprKind::Invoke {
-            callable: Box::new(target),
+            callable: target,
             args: ir::CallArgs::positional_at(arguments, ir::CallSite::Python(site.invoke_site())),
         },
     }
@@ -496,7 +496,7 @@ impl Checker<'_> {
             callable_target(call),
             ir::RegisteredArguments::Positional,
         );
-        let mut value = invoke_value(site, target, arguments);
+        let mut value = invoke_value(site, Box::new(target), arguments);
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
@@ -1452,24 +1452,27 @@ impl Checker<'_> {
         let is_bound_method = |callee: &ast::Expr| operands.is_bound_method(callee);
         let class = self.class;
         let mut live_receiver = false;
-        let mut callee = None;
+        if let Some(sites) = &mut self.settled_attributes
+            && let Some(call) = node.as_call_expr()
+            && self.namespace.is_none()
+            && let Some(field) = call.func.as_attribute_expr()
+            && let Some(module) = field.value.as_name_expr()
+            && !self.names.contains_key(module.id.as_str())
+            && let Some(FixedAttribute::Call(Some(target), mut site)) = sites.remove(&call.range())
+            && matches!(&site.target, ir::RegisteredCallTarget::Callable {
+                end, suspended_name: None,
+            } if *end == call.func.end())
+            && operands.is_original_operand(&call.func)
+            && source.direct_method(call).is_none()
+        {
+            // Forwarding can preserve the imported target and replace its arguments.
+            site.arguments = registered_argument_layout(&call.arguments);
+            let args = call_arguments(call, |arg| self.expr(arg))?;
+            return Ok(Some(
+                source.located_operation(node, invoke_value(site, target, args)),
+            ));
+        }
         let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
-            if let Some(call) = node.as_call_expr() {
-                if self.namespace.is_none()
-                    && let Some(field) = call.func.as_attribute_expr()
-                    && let Some(module) = field.value.as_name_expr()
-                    && !self.names.contains_key(module.id.as_str())
-                    && let Some(FixedAttribute::Call(saved)) = sites.remove(&call.range())
-                    && let (Some(target), site) = *saved
-                    && matches!(&site.call.target, ir::RegisteredCallTarget::Callable {
-                        end, suspended_name: None,
-                    } if *end == call.func.end())
-                    && operands.is_original_operand(&call.func)
-                {
-                    callee = Some((call.func.as_ref(), target));
-                }
-                return None;
-            }
             let field = node.as_attribute_expr()?;
             let FixedAttribute::Operation {
                 operation,
@@ -1531,10 +1534,7 @@ impl Checker<'_> {
                         .as_call_expr()
                         .is_some_and(|call| is_bound_method(&call.func))
             },
-            |child| match callee.take_if(|(target, _)| std::ptr::eq(*target, child)) {
-                Some((_, target)) => Ok(target),
-                None => self.expr(child),
-            },
+            |child| self.expr(child),
         )?
         else {
             return Ok(None);

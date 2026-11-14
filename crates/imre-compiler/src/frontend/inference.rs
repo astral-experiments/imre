@@ -1233,11 +1233,9 @@ impl Inference {
                         // A written global callee will be looked up again by the Python frame.
                         && source.attributes.values().all(|attribute| match attribute {
                             FixedAttribute::Operation { operation, .. } => matches!(**operation, Builtin::RegisteredAttribute { .. }),
-                            FixedAttribute::Call(call) => call.0.as_ref().is_some_and(|target| {
-                                matches!(&target.without_location().kind,
-                                    ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty())
-                            }),
-                            FixedAttribute::ModuleName(_) => false,
+                            FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
+                                ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
+                            FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
                         })
                     {
                         method_returns.insert(signature.id, Ok(checker.completed_body(params, body, Some(source), false)));

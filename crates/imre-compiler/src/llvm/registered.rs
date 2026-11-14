@@ -168,8 +168,7 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let Some(crate::frontend::FixedAttribute::Call(call)) = attribute
-            && call.0.is_none()
+        if let Some(crate::frontend::FixedAttribute::Call(None, _)) = attribute
             && let ExprKind::Builtin(_, operands) = &expr.kind
         {
             uses_python_protocol = true;
