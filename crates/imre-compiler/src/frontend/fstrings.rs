@@ -282,7 +282,7 @@ impl Checker<'_> {
                     match piece {
                         FStringLiteral::Adjacent(lit) => check_string_literal(lit, checker.source)?,
                         FStringLiteral::Middle(lit, false) => {
-                            check_string_escapes(lit.range(), checker.source)?
+                            check_string_escapes(&lit.value, lit.range(), checker.source)?
                         }
                         _ => {}
                     }

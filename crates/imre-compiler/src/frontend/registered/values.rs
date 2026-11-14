@@ -424,10 +424,7 @@ pub(crate) fn exec_source_operand(call: &ast::ExprCall) -> Option<&ast::Expr> {
 }
 
 fn has_surrogate(part: &ast::StringLiteral, source: &str) -> bool {
-    part.as_str().contains(char::REPLACEMENT_CHARACTER)
-        && !part.flags.prefix().is_raw()
-        && imre_ast::strings::replacements(&source[part.content_range()])
-            .any(|point| point != u32::from(char::REPLACEMENT_CHARACTER))
+    !part.flags.prefix().is_raw() && has_surrogate_escape(part, part.content_range(), source)
 }
 
 /// Ruff replaces lone surrogates in its UTF-8 view. The compiled source must
