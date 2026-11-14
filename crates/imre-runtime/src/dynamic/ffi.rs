@@ -2426,6 +2426,7 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
             ctx,
             span.as_ref(),
             mark,
+            callable,
             |ctx| {
                 let arguments = ctx.items(args)?;
                 if kwargs == NONE {
@@ -2592,6 +2593,7 @@ pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
                 context,
                 span.as_ref(),
                 mark,
+                callable,
                 |ctx| {
                     let fields = crate::objects::partition_text(
                         ctx.str_value(receiver)?,
@@ -2649,6 +2651,7 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
             ctx,
             span.as_ref(),
             mark,
+            callable,
             |ctx| {
                 let args = copy_ids(live_handles(values, count))?;
                 ctx.prepare_call_in_scope(scope, callable, args, Vec::new())
@@ -2677,6 +2680,7 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
             ctx,
             span.as_ref(),
             mark,
+            callable,
             |ctx| {
                 let values = live_handles(values, positional + keywords);
                 let (args, named) = values.split_at(positional);
@@ -2736,6 +2740,7 @@ unsafe fn scoped_call(
     context: *mut Context,
     span: Option<&[u32; 4]>,
     mark: usize,
+    callable: Id,
     prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
     release: impl FnOnce(&mut Context, usize, Id),
 ) -> Id {
@@ -2746,12 +2751,29 @@ unsafe fn scoped_call(
         return NONE;
     }
     let call = prepare(ctx);
+    let transferred = matches!(call, Ok(calls::RegisteredCall::Native(_)))
+        && match *ctx.heap.get(callable) {
+            Value::Function { .. } => true,
+            Value::Method { callable, .. } => {
+                matches!(ctx.heap.get(callable), Value::Function { .. })
+            }
+            _ => false,
+        };
+    if transferred {
+        // Binding succeeded. The native frame now owns the receiver and argument values.
+        ctx.heap.release_bound_call_operands(mark);
+    }
     // SAFETY: preparation returned any native activation with its frame already rooted.
     let result = call.and_then(|call| unsafe { call.run(context) });
     // SAFETY: the native frame has returned and the caller is active again.
     let ctx = unsafe { &mut *context };
     let mut result = result.and_then(|value| {
-        release(ctx, mark, value);
+        if transferred {
+            // Caller-side packed handles may already have been collected.
+            ctx.finish_call_operands(mark, value);
+        } else {
+            release(ctx, mark, value);
+        }
         ctx.check_call_return(value)
     });
     // Ordinary traceback nodes also own the saved call range, including when the

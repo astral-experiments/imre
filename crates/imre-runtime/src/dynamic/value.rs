@@ -5235,6 +5235,15 @@ impl Heap {
         }
     }
 
+    /// Bound Python arguments are now owned by the entered function's locals.
+    pub(super) fn release_bound_call_operands(&mut self, mark: usize) {
+        let [.., caller, callee] = self.execution.frames.as_mut_slice() else {
+            unreachable!("a bound Python call has both frames")
+        };
+        caller.live.truncate(mark);
+        caller.live.push(callee.owner.root());
+    }
+
     pub fn release_temporaries_since(&mut self, mark: usize) {
         self.execution.current_mut().live.truncate(mark);
     }
