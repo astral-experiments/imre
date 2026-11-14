@@ -6784,8 +6784,7 @@ impl<'a> Loader<'a> {
         let digest = bytes.as_deref().map_or_else(String::new, |bytes| {
             blake3::hash(bytes).to_hex().to_string()
         });
-        if path.extension().is_some_and(|ext| ext == "py")
-            && let Some(bytes) = bytes
+        if let Some(bytes) = bytes
             && let Ok((source, _)) = imre_ast::source_encoding::decode_disk_source(bytes, &path)
             && let Ok(source) = crate::normalize_source(&source, crate::SourceKind::DiskFile)
         {
