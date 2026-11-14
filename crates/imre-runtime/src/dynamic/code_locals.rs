@@ -2,22 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use indexmap::IndexSet;
-use serde_json::Value as Json;
-
-use super::{Context, Error, Id, NONE, Result, Value};
-
-pub(super) fn argument_slots(signature: &Json) -> impl Iterator<Item = &str> {
-    ["posonly", "positional", "kwonly"]
-        .into_iter()
-        .flat_map(|group| signature[group].as_array().into_iter().flatten())
-        .filter_map(Json::as_str)
-        .chain(
-            ["varargs", "kwargs"]
-                .into_iter()
-                .filter_map(|key| signature[key].as_str()),
-        )
-}
+use super::{CellLayout, Context, Error, Id, NONE, Result, Value};
 
 impl Context {
     /// Register the code attributes whose values the runtime can supply.
@@ -99,42 +84,28 @@ impl Context {
         if code.parameters == NONE {
             return Err(self.missing_attribute(object, field));
         }
-        let signature: Json = serde_json::from_str(self.str_value(code.parameters)?)
-            .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        if signature["scope_locals_complete"] != true
-            || signature.get("scope_cellvars") == Some(&Json::Null)
-        {
+        let parameters = self.parsed_parameters(object)?;
+        if !parameters.locals_complete {
             return Err(self.missing_attribute(object, field));
         }
+        let mut cells: BTreeSet<_> = match &parameters.cell_layout {
+            CellLayout::Complete(names) => names.iter().map(String::as_str).collect(),
+            CellLayout::Unspecified => BTreeSet::new(),
+            CellLayout::Incomplete => return Err(self.missing_attribute(object, field)),
+        };
         // Captured arguments keep their fast-local slots. Cell-only locals
         // follow the argument cells in lexical name order.
-        let mut cells: BTreeSet<_> = signature["scope_cellvars"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Json::as_str)
-            .collect();
-        let mut locals = IndexSet::new();
         let mut cell_names = Vec::new();
-        for arg in argument_slots(&signature) {
-            locals.insert(arg);
+        for arg in parameters.argument_slots() {
             if cells.remove(arg) {
                 cell_names.push(self.heap.code_name(arg));
             }
         }
-        for local in signature["scope_locals"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(Json::as_str)
-        {
-            if !cells.contains(local) {
-                locals.insert(local);
-            }
-        }
-        cell_names.extend(cells.into_iter().map(|name| self.heap.code_name(name)));
-        let local_names = locals
-            .into_iter()
+        cell_names.extend(cells.iter().map(|name| self.heap.code_name(name)));
+        let local_names = parameters
+            .locals
+            .iter()
+            .filter(|name| !cells.contains(name.as_str()))
             .map(|name| self.heap.code_name(name))
             .collect();
         let varnames = self.alloc(Value::Tuple(local_names));
