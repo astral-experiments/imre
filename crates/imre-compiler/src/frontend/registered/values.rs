@@ -532,9 +532,15 @@ impl Checker<'_> {
         field: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<Expr, String> {
-        // A refused fixed initializer still checks its operands and observes
-        // arbitrary Python effects. Its registered frame owns the live call.
-        if self.module_scope && self.inference.is_none() && self.unrepresented.borrow().is_some() {
+        // Once the fixed region has failed, its arguments still contribute checks and
+        // inference facts. The registered frame owns the live receiver and operands.
+        if self.unrepresented.borrow().as_ref().is_some_and(|failure| {
+            if self.module_scope {
+                self.inference.is_none()
+            } else {
+                failure.is_object() && self.registered.is_none() && self.fixed_sites.is_none()
+            }
+        }) {
             for argument in imre_ast::argument_values(&call.arguments) {
                 self.check_discarded_operand(argument)?;
             }
