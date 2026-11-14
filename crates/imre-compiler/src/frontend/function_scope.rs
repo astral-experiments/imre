@@ -626,7 +626,9 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
         if matches!(scope, Scope::Function { .. }) {
             for stmt in body {
                 self.function_names.visit_stmt(stmt);
-                if std::mem::take(&mut self.function_names.needs_discovery) {
+                if std::mem::take(&mut self.function_names.needs_discovery)
+                    || self.attribute_class.is_some()
+                {
                     self.visit_stmt(stmt);
                 }
             }
