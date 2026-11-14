@@ -136,7 +136,7 @@ impl RegisteredSource<'_> {
         }
     }
 
-    pub(super) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
+    pub(in crate::frontend) fn located(self, node: &ast::Expr, value: Expr) -> Expr {
         let range = node.range();
         let position = match value.python_call() {
             Some(ir::RegisteredCall {
@@ -1310,15 +1310,6 @@ impl Checker<'_> {
             if let Some(slot) = self.namespace {
                 in_namespace(&mut value, self.local(slot));
             }
-            return Ok(Some(source.located(node, value)));
-        }
-        if matches!(
-            node,
-            ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_)
-        ) && let Some(plan) = imre_ast::comprehension::Plan::from_expr(node)
-            && (self.asynchronous || !plan.suspends())
-        {
-            let value = self.lower_display(node, &plan, None)?;
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::Call(call) = node

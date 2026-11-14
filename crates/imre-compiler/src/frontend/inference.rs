@@ -1120,32 +1120,33 @@ impl Inference {
                             self.revision.set(self.revision.get() + 1);
                         }
                     }
-                    let retained = match &diagnostic {
-                        Failure::Diagnostic(report) if signature.method.is_none() => {
-                            match report.kind {
-                                Kind::GeneratorSuspension => registered::retain_generator(
-                                    graph,
-                                    owners[signature.id],
-                                    &self.source_checks,
-                                ),
-                                Kind::AsyncComprehension
-                                    if graph.modules[*module].is_program_source()
-                                        && physical =>
-                                {
-                                    match registered::place_checked_definition(
-                                        &checker, function, signature, self,
-                                    ) {
-                                        Ok(body) => body.is_some(),
-                                        Err(reason) => {
-                                            diagnostic = reason;
-                                            false
-                                        }
-                                    }
+                    let retained = if matches!(&diagnostic, Failure::Diagnostic(report)
+                        if report.kind == Kind::FrameSuspension && signature.method.is_none())
+                    {
+                        if let Some(retained) = registered::retain_generator(
+                            graph,
+                            owners[signature.id],
+                            &self.source_checks,
+                        ) {
+                            retained
+                        } else if physical
+                            && function.is_async
+                            && graph.modules[*module].is_program_source()
+                        {
+                            match registered::place_checked_definition(
+                                &checker, function, signature, self,
+                            ) {
+                                Ok(body) => body.is_some(),
+                                Err(reason) => {
+                                    diagnostic = reason;
+                                    false
                                 }
-                                _ => false,
                             }
+                        } else {
+                            false
                         }
-                        _ => false,
+                    } else {
+                        false
                     };
                     if retained {
                         suspended_bodies.insert(signature.id);

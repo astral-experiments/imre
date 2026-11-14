@@ -672,7 +672,7 @@ pub(crate) fn lower_with_caller_cache(
             let session = match source_checks {
                 Some(SourceCheckSession::SharedGraph) => {
                     for &owner in &checks.unresolved {
-                        registered::retain_generator(graph, owner, &checks);
+                        let _ = registered::retain_generator(graph, owner, &checks);
                     }
                     return lowered;
                 }
@@ -5301,14 +5301,31 @@ impl<'a> Checker<'a> {
         &mut self,
         expression: &ast::Expr,
         split_needle: Option<&str>,
+        pull: Option<ir::AsyncPull>,
     ) -> Result<Iteration, String> {
+        if pull.is_some() {
+            if !self.asynchronous {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "asynchronous iteration outside an async function",
+                ));
+            }
+            if self.registered.is_none() {
+                return Err(self.classified_error(
+                    Kind::FrameSuspension,
+                    expression,
+                    "asynchronous iteration requires a suspended frame",
+                ));
+            }
+        }
         if self.registered.is_some() {
             // The Python frame supplies the actual object, including subclass overrides.
             // Prepare the same pull/bind/cleanup IR used by the fixed-layout iterators.
             let value = self.expr(expression)?;
             // A Python handle still carries any established element contract. Only an
             // unknown object defers the validity of iteration to its live protocol.
-            let element = if value.ty == Type::PythonObject {
+            let element = if pull.is_some() || value.ty == Type::PythonObject {
                 Type::PythonObject
             } else {
                 self.types
@@ -5329,7 +5346,13 @@ impl<'a> Checker<'a> {
                         )
                     })?
             };
-            let input = self.python_cursor(value, expression.range());
+            let input = registered::cursor_input(
+                value,
+                Type::PythonObject,
+                Some(expression.range()),
+                pull,
+                |ty, _| self.hidden(ty),
+            );
             // The private item owns the Python handle returned by next(). Its
             // checked element type belongs to the subsequent target binding.
             if element != Type::PythonObject {
@@ -5401,14 +5424,12 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
-        if self.registered.is_none()
-            && let ast::Expr::Call(call) = loop_.iter.as_ref()
+        let mut input = if loop_.is_async || self.registered.is_some() {
+            self.iteration_input(&loop_.iter, None, registered::for_pull(loop_))?
+        } else if let ast::Expr::Call(call) = loop_.iter.as_ref()
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::GroupBy))
         {
             return self.groupby_iteration(loop_, call);
-        }
-        let mut input = if self.registered.is_some() {
-            self.iteration_input(&loop_.iter, None)?
         } else if let Some(fields) = self.prepared_split_iteration(&loop_.iter)? {
             fields
         } else if let Some(items) = self.environ_items_loop(&loop_.iter)? {
@@ -5416,7 +5437,7 @@ impl<'a> Checker<'a> {
         } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
             input
         } else {
-            let input = self.iteration_input(&loop_.iter, self.split_guard(loop_))?;
+            let input = self.iteration_input(&loop_.iter, self.split_guard(loop_), None)?;
             self.fuse_split(input)
         };
         if let Iteration::Container {
@@ -5629,6 +5650,16 @@ impl<'a> Checker<'a> {
         else {
             unreachable!("range iteration returned above")
         };
+        if !items && start.is_none() && matches!(iterable.ty, Type::Tuple(_)) {
+            let input = self.prepare_container(iterable, false, target, false)?;
+            return self.lower_prepared_iteration(
+                target,
+                input,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         if !items
             && start.is_none()
             && let Some(element) = self.types.cursor_element(iterable.ty)
@@ -6220,12 +6251,11 @@ impl<'a> Checker<'a> {
                     .as_name_expr()
                     .and_then(|name| self.registered_in_place_local(name.id.as_str()))
                     .is_some(),
-                ast::Stmt::For(loop_) => !loop_.is_async,
                 ast::Stmt::Assert(_) | ast::Stmt::FunctionDef(_) => {
                     self.registered_local_start.is_some()
                 }
                 ast::Stmt::With(scope) => !scope.is_async,
-                ast::Stmt::While(_) => true,
+                ast::Stmt::For(_) | ast::Stmt::While(_) => true,
                 ast::Stmt::If(_) => true,
                 ast::Stmt::Try(protected) => !protected.is_star,
                 ast::Stmt::Break(_) | ast::Stmt::Continue(_) => true,
@@ -8529,6 +8559,19 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.live_module_binding(expression) {
             return Ok(value);
         }
+        if matches!(
+            expression,
+            ast::Expr::ListComp(_) | ast::Expr::SetComp(_) | ast::Expr::DictComp(_)
+        ) {
+            let value = self.comprehension(expression, None)?;
+            return Ok(if let Some(module) = self.registered {
+                module
+                    .operands(self.source, self.graph.python_optimization())
+                    .located(expression, value)
+            } else {
+                value
+            });
+        }
         if let Some(literals) = self.registered {
             if let Some(value) = self.registered_operand(expression, literals)? {
                 return Ok(value);
@@ -9364,9 +9407,6 @@ impl<'a> Checker<'a> {
                         .collect::<StdResult<_, _>>()?;
                 }
                 (self.types.list(element), ExprKind::List(values))
-            }
-            ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
-                return self.comprehension(expression, None);
             }
             ast::Expr::Dict(dict) => {
                 if dict
@@ -11109,7 +11149,7 @@ impl<'a> Checker<'a> {
                     expression,
                     "generator suspension requires a registered frame",
                 )
-                .classify(Kind::GeneratorSuspension));
+                .classify(Kind::FrameSuspension));
             }
             _ => {
                 return Err(error(

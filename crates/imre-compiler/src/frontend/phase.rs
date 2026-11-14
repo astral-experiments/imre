@@ -14,8 +14,7 @@ pub(crate) type Result<T, M = String> = std::result::Result<T, Failure<M>>;
 pub(crate) enum Kind {
     Ordinary,
     UnsupportedRepresentation,
-    GeneratorSuspension,
-    AsyncComprehension,
+    FrameSuspension,
     UnresolvedParameter(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,

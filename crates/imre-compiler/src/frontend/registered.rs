@@ -386,12 +386,12 @@ pub(super) fn retain_generator(
     graph: &SourceGraph,
     owner: DefinitionId,
     checks: &SourceChecks,
-) -> bool {
-    let Some(definition) = generator_definition(&graph.modules, &graph.session, owner) else {
-        return false;
-    };
-    checks.accepts(graph, owner.module, definition.range())
-        && retain_generator_body(graph, owner.module, definition)
+) -> Option<bool> {
+    let definition = generator_definition(&graph.modules, &graph.session, owner)?;
+    Some(
+        checks.accepts(graph, owner.module, definition.range())
+            && retain_generator_body(graph, owner.module, definition),
+    )
 }
 
 /// Inference has released its shared graph borrow, so check the remaining declarations
@@ -1708,7 +1708,7 @@ pub(crate) struct StatementSites {
     omit_assertions: bool,
 }
 
-fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
+pub(super) fn for_pull(loop_: &ast::StmtFor) -> Option<ir::AsyncPull> {
     loop_.is_async.then(|| ir::AsyncPull {
         range: loop_.iter.range(),
         header: Some(loop_.start()),
@@ -7500,11 +7500,17 @@ publish(5, callback)
     }
 
     #[test]
-    fn checked_async_display_owns_its_resumable_pull() {
-        for (source, owner) in [
+    fn checked_async_iteration_owns_its_resumable_pull() {
+        for (source, owner, operand) in [
             (
                 "async def collect(feed):\n    return [item async for item in feed]\n",
                 0,
+                "item",
+            ),
+            (
+                "async def consume(feed):\n    async for item in feed:\n        pass\n",
+                0,
+                "feed",
             ),
             (
                 concat!(
@@ -7512,6 +7518,7 @@ publish(5, callback)
                     "async def collect():\n    return [item async for item in rows() if item]\n",
                 ),
                 1,
+                "item",
             ),
         ] {
             let mut graph = SourceGraph::single(source).unwrap();
@@ -7531,7 +7538,7 @@ publish(5, callback)
                 }
             });
             assert_eq!(pulls.len(), 1);
-            assert_eq!(&source[pulls[0]], "item");
+            assert_eq!(&source[pulls[0]], operand);
         }
     }
 

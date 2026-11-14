@@ -316,24 +316,7 @@ impl ClauseLowering for Checker<'_> {
     }
 
     fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
-        let Some(pull) = async_pull(clause) else {
-            return self.iteration_input(&clause.iter, None);
-        };
-        if !self.asynchronous {
-            return Err(error(
-                self.source,
-                clause,
-                "asynchronous comprehension outside an async function",
-            ));
-        }
-        let value = self.expr(&clause.iter)?;
-        Ok(Iteration::Prepared(registered::cursor_input(
-            value,
-            Type::PythonObject,
-            Some(clause.iter.range()),
-            Some(pull),
-            |ty, _| self.hidden(ty),
-        )))
+        self.iteration_input(&clause.iter, None, async_pull(clause))
     }
 
     fn with_target(
@@ -620,29 +603,20 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        self.lower_display(expression, &display, expected)
-    }
-
-    pub(super) fn lower_display(
-        &mut self,
-        expression: &ast::Expr,
-        display: &Plan<'_>,
-        expected: Option<Type>,
-    ) -> Result<Expr, String> {
         if self.registered.is_some() {
-            return self.comprehension_display(expression, display, Collector::Display(expected));
+            return self.comprehension_display(expression, &display, Collector::Display(expected));
         }
         let filtered = match display.output {
-            Output::Set(_) => self.character_set_filter(display, expected)?,
+            Output::Set(_) => self.character_set_filter(&display, expected)?,
             Output::List(_) => {
-                self.string_list_filter(display, expected.and_then(|ty| self.types.element(ty)))?
+                self.string_list_filter(&display, expected.and_then(|ty| self.types.element(ty)))?
             }
             _ => None,
         };
         if let Some(filtered) = filtered {
             return Ok(filtered);
         }
-        self.comprehension_display(expression, display, Collector::Display(expected))
+        self.comprehension_display(expression, &display, Collector::Display(expected))
     }
 
     pub(super) fn comprehension_display(
@@ -651,16 +625,6 @@ impl Checker<'_> {
         display: &Plan<'_>,
         collector: Collector,
     ) -> Result<Expr, String> {
-        // Native tasks cannot suspend a Python iterator. Only the registered
-        // function frame owns the resume point for an asynchronous pull.
-        if self.registered.is_none() && display.clauses.iter().any(|clause| clause.is_async) {
-            return Err(error(
-                self.source,
-                expression,
-                "asynchronous comprehensions are unsupported",
-            )
-            .classify(Kind::AsyncComprehension));
-        }
         let input = self.input(&display.clauses[0])?;
         let prepared = matches!(input, Iteration::Prepared(_));
         // A prepared iterator stays inline and may be empty. Its writes only
