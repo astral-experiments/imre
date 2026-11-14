@@ -489,20 +489,24 @@ pub(super) fn named_mapping<'a>(
     .then_some(&last.value)
 }
 
-pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
-    starred(call)
-        || call
-            .arguments
-            .keywords
-            .iter()
-            .any(|keyword| keyword.arg.is_none())
+pub(super) fn unpacked_keywords(call: &ast::ExprCall) -> bool {
+    call.arguments
+        .keywords
+        .iter()
+        .any(|keyword| keyword.arg.is_none())
 }
+
+pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
+    starred(call) || unpacked_keywords(call)
+}
+
+pub(super) const UNSUPPORTED_UNPACKING: &str = "argument unpacking is unsupported";
 
 /// Every dispatch route uses a closed signature, including methods reached
 /// through iterable consumers before ordinary call-expression lowering.
 pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
     if has_unpacking(call) {
-        return Err(error(source, call, "argument unpacking is unsupported"));
+        return Err(error(source, call, UNSUPPORTED_UNPACKING));
     }
     Ok(())
 }
@@ -868,7 +872,7 @@ impl Checker<'_> {
             if let ast::Expr::Starred(star) = arg {
                 let scope = scope
                     .as_deref_mut()
-                    .ok_or_else(|| error(self.source, arg, "argument unpacking is unsupported"))?;
+                    .ok_or_else(|| error(self.source, arg, UNSUPPORTED_UNPACKING))?;
                 for field in scope.spread(self, star)? {
                     bind(self, Supplied::Field(field, arg), Some(scope))?;
                 }

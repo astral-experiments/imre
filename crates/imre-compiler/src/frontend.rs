@@ -11963,11 +11963,11 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        if calls::has_unpacking(call)
+        if calls::unpacked_keywords(call)
             && !matches!(binding, Some(Binding::Definition(id))
                 if self.functions.get(&id).is_some_and(|s| calls::rest_keywords(call, &s.params).1.is_some() || calls::named_mapping(call, &s.params).is_some()))
         {
-            calls::reject_unpacking(call, self.source)?;
+            return Err(error(self.source, call, calls::UNSUPPORTED_UNPACKING));
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "dict" && !self.names.contains_key(name.id.as_str()))
             && binding.is_none()
