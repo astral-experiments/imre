@@ -578,7 +578,11 @@ pub(crate) fn check_registered_project<'a>(
         root,
         extension_roots,
         salsa::Storage::default(),
-        Some(&|path| sources.clone().any(|winner| winner.matches_bundled_source(path))),
+        Some(&|path| {
+            sources
+                .clone()
+                .any(|winner| winner.matches_bundled_source(path))
+        }),
     )?;
     let mut paths = Vec::with_capacity(capacity);
     for (path, source) in declarations {
@@ -594,7 +598,9 @@ pub(crate) fn check_registered_project<'a>(
             let stub = Path::new(path.as_str());
             if stub.extension().is_some_and(|ext| ext == "pyi") {
                 let implementation = stub.with_extension("py");
-                if sources.clone().any(|s| s.declares_signatures && s.path == implementation)
+                if sources
+                    .clone()
+                    .any(|s| s.declares_signatures && s.path == implementation)
                     && !paths.iter().any(|(path, _, _)| path == stub)
                 {
                     let source = ruff_db::source::source_text(&graph.session.db, file);
@@ -1899,7 +1905,10 @@ impl Session {
     ) -> Result<Self, String> {
         let selected = |path: &Path| {
             registrations.is_some_and(|sources| {
-                sources.winners.iter().any(|winner| winner.matches_bundled_source(path))
+                sources
+                    .winners
+                    .iter()
+                    .any(|winner| winner.matches_bundled_source(path))
             })
         };
         let mut copy = Self::with_storage(
@@ -1977,7 +1986,10 @@ impl Session {
         for (_, definition, _) in index.use_def_map(scope).definitions_with_usage() {
             match definition.kind(&self.db) {
                 DefinitionKind::Assignment(a) if a.owner() == BindingsOwner::Definition => {
-                    store(a.target(&parsed).as_name_expr()?.id.as_str(), a.value(&parsed))?;
+                    store(
+                        a.target(&parsed).as_name_expr()?.id.as_str(),
+                        a.value(&parsed),
+                    )?;
                 }
                 DefinitionKind::AnnotatedAssignment(a) if a.has_value() => return None,
                 _ => {}

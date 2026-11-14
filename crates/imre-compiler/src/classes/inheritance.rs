@@ -677,7 +677,8 @@ class Child(Fixed):
         let get = &fixed.methods[method(fixed, "get")].function;
         let property = &fixed.methods[method(fixed, "item")].function;
         let inherited = &child.methods[method(child, "item")].function;
-        let source = &graph.modules[fixed.definition.module].parsed.syntax().body[fixed.definition.statement];
+        let source = &graph.modules[fixed.definition.module].parsed.syntax().body
+            [fixed.definition.statement];
         let original = source.as_class_def_stmt().unwrap().body[1]
             .as_function_def_stmt()
             .unwrap();

@@ -3242,8 +3242,7 @@ impl Context {
                     .any(|name| name == "__class__")
         });
         let scope = if owner.exec_locals.is_some()
-            || ((owner.in_class_body || owner.class_namespace.is_some())
-                && !annotation_scope)
+            || ((owner.in_class_body || owner.class_namespace.is_some()) && !annotation_scope)
         {
             owner.parent.unwrap_or(scope)
         } else {
@@ -3640,7 +3639,9 @@ impl Context {
         );
         #[cfg(unix)]
         // SAFETY: the statement has published this frame and its live operands.
-        unsafe { Self::dispatch_pending_calls(self)? };
+        unsafe {
+            Self::dispatch_pending_calls(self)?
+        };
         Ok(())
     }
 

@@ -8,7 +8,10 @@ pub(super) enum AttributeName<'a> {
     Text(&'a str),
     /// A static method operand whose Python code name is needed only by lookup hooks.
     Linked(&'a str),
-    Python { key: Id, text: Option<&'a str> },
+    Python {
+        key: Id,
+        text: Option<&'a str>,
+    },
 }
 
 impl<'a> AttributeName<'a> {

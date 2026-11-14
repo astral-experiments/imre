@@ -57,7 +57,11 @@ pub(super) struct RegisteredBodies<'a> {
 }
 
 impl RegisteredBodies<'_> {
-    pub(super) fn provider_origin(&self, unit: usize, bundled: bool) -> Option<ModuleOrigin<'_, '_>> {
+    pub(super) fn provider_origin(
+        &self,
+        unit: usize,
+        bundled: bool,
+    ) -> Option<ModuleOrigin<'_, '_>> {
         if bundled {
             Some(ModuleOrigin::Bundled)
         } else {
@@ -2661,7 +2665,10 @@ mod tests {
             );
             if projects_pair {
                 assert!(llvm.find(pull).unwrap() < llvm.find(unpack).unwrap());
-                assert!(!llvm.contains("call i32 @imre_dyn_list_cursor_pull("), "{source}");
+                assert!(
+                    !llvm.contains("call i32 @imre_dyn_list_cursor_pull("),
+                    "{source}"
+                );
             }
         }
     }

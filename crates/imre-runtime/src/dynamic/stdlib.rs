@@ -923,10 +923,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_string", "formatter_parser" | "formatter_field_name_split")
         | (
             "inspect",
-            "_frame_position"
-            | "_abstract_flags"
-            | "_descriptor_get"
-            | "_native_data_descriptor"
+            "_frame_position" | "_abstract_flags" | "_descriptor_get" | "_native_data_descriptor",
         )
         | (
             "email.utils",

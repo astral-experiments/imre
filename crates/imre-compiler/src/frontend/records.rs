@@ -1800,7 +1800,8 @@ impl Checker<'_> {
                 // A keyword diagnostic covers its original spelling, including ** unpacking.
                 let module = &self.graph.modules[self.module];
                 let nodes = ast::find_node::covering_node(module.parsed.syntax().into(), range);
-                let operand = nodes.ancestors()
+                let operand = nodes
+                    .ancestors()
                     .take_while(|node| call.range().contains_range(node.range()))
                     .find_map(|node| match node {
                         ast::AnyNodeRef::Keyword(kw) => Some(kw.range()),

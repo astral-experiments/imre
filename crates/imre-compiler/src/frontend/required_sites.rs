@@ -49,7 +49,10 @@ impl RequiredSite {
     pub(crate) fn definition(site: &ir::DefinitionSite, header: &[Expr]) -> Self {
         if matches!(site, ir::DefinitionSite::Class { .. })
             && header.iter().any(|value| {
-                matches!(value.kind, ExprKind::Builtin(Builtin::RegisteredInput(_), _))
+                matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::RegisteredInput(_), _)
+                )
             })
         {
             Self::DefinitionAfterInputs(site.start())

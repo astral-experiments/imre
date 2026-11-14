@@ -2014,7 +2014,8 @@ impl<'a> SuitePreparation<'a> {
                         if lambda.body.is_some() {
                             return true;
                         }
-                        if let ExpressionSelection::Refused(range, reason) = lambda.binding.as_ref() {
+                        if let ExpressionSelection::Refused(range, reason) = lambda.binding.as_ref()
+                        {
                             child_refusal = Some(PreparedRefusal::Operand((*range, reason)));
                         }
                         false
@@ -2329,7 +2330,8 @@ impl<'a> SuitePreparation<'a> {
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        let otherwise = self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
+        let otherwise =
+            self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
         if body.falls_through {
             self.refusal = self.refusal.or(otherwise.refusal);
         }
@@ -4360,7 +4362,11 @@ mod tests {
         }
         assert_eq!(
             stores,
-            [("before", None), ("Alias", Some(body[1].start())), ("after", None)]
+            [
+                ("before", None),
+                ("Alias", Some(body[1].start())),
+                ("after", None)
+            ]
         );
     }
 
@@ -4727,7 +4733,13 @@ mod tests {
         assert_eq!(provider.start, def.parameters.start());
         let mut signature = serde_json::json!({});
         provider.scope.write_signature(&mut signature);
-        assert!(signature["scope_reads"].as_array().unwrap().iter().any(|name| name == "mod"));
+        assert!(
+            signature["scope_reads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|name| name == "mod")
+        );
         let class_text = "class C:\n mod = 1\n def f(a: mod.T): pass\n";
         let class_graph = SourceGraph::single(class_text).unwrap();
         let class_module = &class_graph.modules[class_graph.entry];
@@ -4740,8 +4752,19 @@ mod tests {
             panic!("expected a method");
         };
         let mut signature = serde_json::json!({});
-        method.annotations.as_ref().unwrap().scope.write_signature(&mut signature);
-        assert!(!signature["scope_reads"].as_array().into_iter().flatten().any(|name| name == "mod"));
+        method
+            .annotations
+            .as_ref()
+            .unwrap()
+            .scope
+            .write_signature(&mut signature);
+        assert!(
+            !signature["scope_reads"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|name| name == "mod")
+        );
         let body = &provider.body.as_ref().unwrap().function.body;
         let [
             Statement::Return(Expr {
@@ -7433,11 +7456,20 @@ publish(5, callback)
             let mut operations = Vec::new();
             ir::walk_nodes(&function.body, &mut |node, _| match node {
                 ir::Node::Expression(Expr {
-                    kind: ExprKind::Builtin(Builtin::RegisteredUnpack { count: 2, star: None, .. }, _),
+                    kind:
+                        ExprKind::Builtin(
+                            Builtin::RegisteredUnpack {
+                                count: 2,
+                                star: None,
+                                ..
+                            },
+                            _,
+                        ),
                     ..
                 })
                 | ir::Node::Statement(Statement::IterNext {
-                    kind: ir::IterNextKind::Pair(_), ..
+                    kind: ir::IterNextKind::Pair(_),
+                    ..
                 }) => operations.push("unpack"),
                 ir::Node::Statement(Statement::SetItem(..)) => operations.push("store"),
                 _ => {}
@@ -7575,7 +7607,10 @@ publish(5, callback)
                 acquired.push(*slot);
             }
             Statement::IterNext {
-                iterator, kind, value, ..
+                iterator,
+                kind,
+                value,
+                ..
             } => {
                 let ir::IterNextKind::Pair(range) = *kind else {
                     panic!("expected a single pair pull")
@@ -7733,7 +7768,10 @@ publish(5, callback)
             );
             std::fs::write(&app, source).unwrap();
             let diagnostic = crate::check_file(&app, None).unwrap_err();
-            assert!(diagnostic.contains("expected int, got bool"), "{diagnostic}");
+            assert!(
+                diagnostic.contains("expected int, got bool"),
+                "{diagnostic}"
+            );
         }
     }
 
@@ -7741,13 +7779,20 @@ publish(5, callback)
     fn a_returning_async_display_keeps_an_unreachable_child_refusal() {
         let dir = tempfile::tempdir().unwrap();
         let app = dir.path().join("app.py");
-        std::fs::write(&app, concat!(
-            "async def rows():\n    yield 1\n",
-            "async def collect():\n    return [i async for i in rows()]\n",
-            "    f = lambda row: -(not row)\nprint('uncalled')\n",
-        )).unwrap();
+        std::fs::write(
+            &app,
+            concat!(
+                "async def rows():\n    yield 1\n",
+                "async def collect():\n    return [i async for i in rows()]\n",
+                "    f = lambda row: -(not row)\nprint('uncalled')\n",
+            ),
+        )
+        .unwrap();
         let error = crate::check_file(&app, None).unwrap_err();
-        assert!(error.contains("cannot compile this lambda body ahead of time"), "{error}");
+        assert!(
+            error.contains("cannot compile this lambda body ahead of time"),
+            "{error}"
+        );
     }
 
     #[test]

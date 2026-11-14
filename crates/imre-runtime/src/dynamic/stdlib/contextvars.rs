@@ -128,7 +128,9 @@ pub(super) fn call(
                 Some((key, value)) if key == "default" => Some(*value),
                 Some((key, _)) => {
                     return Err(crate::dynamic::calls::unexpected_keyword_error(
-                        "ContextVar", key, &["default"],
+                        "ContextVar",
+                        key,
+                        &["default"],
                     ));
                 }
             };

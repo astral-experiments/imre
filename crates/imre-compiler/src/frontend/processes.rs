@@ -758,10 +758,7 @@ impl Checker<'_> {
     }
 
     /// Evaluate a fresh command list in source order, including mixed path representations.
-    fn process_argument_list(
-        &mut self,
-        display: &ast::ExprList,
-    ) -> Result<Expr, String> {
+    fn process_argument_list(&mut self, display: &ast::ExprList) -> Result<Expr, String> {
         let items = display
             .elts
             .iter()

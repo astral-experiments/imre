@@ -3363,10 +3363,13 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("sub nsw i64 {left}, {subtract}"))
                 }
             }
-            Binary::FloorDivide | Binary::Modulo => {
-                self.body
-                    .small_division(op, &left, &right, adjust_floor, bounds.map(|(_, rhs)| rhs))
-            }
+            Binary::FloorDivide | Binary::Modulo => self.body.small_division(
+                op,
+                &left,
+                &right,
+                adjust_floor,
+                bounds.map(|(_, rhs)| rhs),
+            ),
             Binary::BitAnd
             | Binary::BitOr
             | Binary::BitXor
