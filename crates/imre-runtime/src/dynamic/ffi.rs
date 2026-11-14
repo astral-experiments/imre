@@ -2749,6 +2749,30 @@ unsafe fn scoped_call(
         ctx.heap.set_call_position(None);
         return NONE;
     }
+    // SAFETY: the generated caller owns the marked operands throughout the call.
+    let mut result = unsafe { run_with_operands(context, mark, callable, prepare, release) };
+    // SAFETY: execution has returned to the generated caller.
+    let ctx = unsafe { &mut *context };
+    // Ordinary traceback nodes also own the saved call range, including when the
+    // emitter supplied no highlight for the traceback printer.
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Hidden));
+    finish_at(ctx, result, span)
+}
+
+/// Run a prepared call with the normal caller-to-frame operand transfer.
+///
+/// # Safety
+/// The current thread owns this context and its marked caller frame through return.
+#[inline]
+pub(super) unsafe fn run_with_operands(
+    context: *mut Context,
+    mark: usize,
+    callable: Id,
+    prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    release: impl FnOnce(&mut Context, usize, Id),
+) -> Result<Id> {
+    // SAFETY: borrow the caller only for preparation, before invoking native code.
+    let ctx = unsafe { &mut *context };
     let call = prepare(ctx);
     let transferred = matches!(call, Ok(calls::RegisteredCall::Native(_)))
         && match *ctx.heap.get(callable) {
@@ -2766,7 +2790,7 @@ unsafe fn scoped_call(
     let result = call.and_then(|call| unsafe { call.run(context) });
     // SAFETY: the native frame has returned and the caller is active again.
     let ctx = unsafe { &mut *context };
-    let mut result = result.and_then(|value| {
+    result.and_then(|value| {
         if transferred {
             // Caller-side packed handles may already have been collected.
             ctx.finish_call_operands(mark, value);
@@ -2774,11 +2798,7 @@ unsafe fn scoped_call(
             release(ctx, mark, value);
         }
         ctx.check_call_return(value)
-    });
-    // Ordinary traceback nodes also own the saved call range, including when the
-    // emitter supplied no highlight for the traceback printer.
-    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Hidden));
-    finish_at(ctx, result, span)
+    })
 }
 
 /// Definition sites carry either an ordinary entry or a coroutine resume entry.
