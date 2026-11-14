@@ -1,0 +1,91 @@
+{
+  "imre_commit": "e55edc68026f199566291717070a3bf8649260f6",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_source": "Lib/test/test_enum.py",
+  "test_file_sha256": "19b6bf1eb6c46023ba6d8575480728a36c0e719d6df312725d8abacef42b17d5",
+  "stock": {
+    "version": "3.14.5",
+    "argv": [
+      "python",
+      "-m",
+      "unittest",
+      "-v",
+      "test.test_enum"
+    ],
+    "exit": 0,
+    "originals_run": 1083,
+    "unittest_method_occurrences": 1077,
+    "doctest_suites": 6,
+    "passed": 1079,
+    "skipped": 4
+  },
+  "native": {
+    "declared": {
+      "argv": [
+        "imre",
+        "--include-module",
+        "test.test_enum",
+        "-m",
+        "unittest",
+        "-v",
+        "test.test_enum"
+      ],
+      "result_by_opt_level": {
+        "O0": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "7e616b1ec1b1892f2aecff555ad714cbc0c5dcfcedce5b41b46783a613ac6af0"
+        },
+        "O3": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "7e616b1ec1b1892f2aecff555ad714cbc0c5dcfcedce5b41b46783a613ac6af0"
+        }
+      },
+      "first_error": "test_enum.py:14: cannot import name 'EnumMeta' from 'enum'"
+    },
+    "named": {
+      "argv": [
+        "imre",
+        "-m",
+        "test.test_enum",
+        "-v"
+      ],
+      "result_by_opt_level": {
+        "O0": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "5e2ee5cdc578956d6c7fa176cb7b5efe6d0267ed1f19585a46342f158442fd36"
+        },
+        "O3": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "5e2ee5cdc578956d6c7fa176cb7b5efe6d0267ed1f19585a46342f158442fd36"
+        }
+      },
+      "first_error": "test_enum.py:14: cannot import name 'EnumMeta' from 'enum'"
+    },
+    "unittest-implicit": {
+      "argv": [
+        "imre",
+        "-m",
+        "unittest",
+        "-v",
+        "test.test_enum"
+      ],
+      "result_by_opt_level": {
+        "O0": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "f2b34201c072a322ccb5731933a6c9028e192b9c53d136e9a200e751bc1a7628"
+        },
+        "O3": {
+          "exit": 1,
+          "originals_run": 0,
+          "stderr_sha256": "f2b34201c072a322ccb5731933a6c9028e192b9c53d136e9a200e751bc1a7628"
+        }
+      },
+      "first_error": "No compiled body for test.test_enum"
+    }
+  }
+}
