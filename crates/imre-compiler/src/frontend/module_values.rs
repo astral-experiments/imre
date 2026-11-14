@@ -604,7 +604,10 @@ impl Checker<'_> {
         if let Some(groups) = self.globals.regex_groups(&value) {
             self.globals.regex_globals.borrow_mut().insert(slot, groups);
         }
-        if let Some(body) = body {
+        // The RHS can request the Python frame while establishing this slot's type.
+        if let Some(body) = body
+            && self.unrepresented.get_mut().is_none()
+        {
             body.push(Statement::store_global(slot, value));
         }
         Ok(())
