@@ -297,3 +297,15 @@ With [the inherited exception layout change](https://github.com/astral-sh/imre/p
 reachable-only entries still stopped on line 1613. The coordinator's source root
 and the shared runner with verified vendored files gave identical diagnostics.
 None of these startup checks executed an upstream method.
+
+## Original CPython 3.14.5 methods on public #8087
+
+The Linux comparison used the original seven test modules and all 1,369 distinct test IDs. CPython passed 978 and skipped 391 in the matched environment. Its frozen regression-runner environment passed 963 and skipped 406.
+
+The explicitly linked unittest runner used groups of original IDs. At both O0 and O3 it passed 962, skipped 392 and errored on 15. The two saved executables repeated all 1,369 outcomes after the test sources and original compiler cache were hidden. All 962 native passes were also stock passes. Across all dispositions, each native route matched 1,353 of the 1,369 stock outcomes. The [per-method ledger](public-8087-originals.tsv) preserves both stock environments.
+
+Twelve path representation methods reach a runtime `eval` of their constructed representation, and three methods start threads while inspecting `Path.parts`. The remaining stock difference is the CPython-only lazy import test, which the native runs skipped.
+
+The package has no `__main__`. Without explicitly linking the package and its children, the ordinary named unittest launcher stopped before running a method. After source withdrawal, directory discovery also stopped before the first method. The saved runner used the original explicit IDs. One uninterrupted package invocation reached 225 terminal outcomes before its 240-second guard stopped it in the next method. That method also passed in a separate run.
+
+The uninterrupted direct FILE command executes the upstream `test_pathlib.py` module and covers 1,139 methods. Both native tiers completed it with exit 1. Unittest printed 75 error entries across 15 parent methods. The historical 968/1,369 cumulative figure includes earlier configurations.
