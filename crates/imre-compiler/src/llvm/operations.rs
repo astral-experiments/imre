@@ -93,6 +93,16 @@ impl CheckedValue {
         }
     }
 
+    /// On a failed word projection the producer already supplied the Python result.
+    fn missing_word(&self, known_missing: bool) -> Option<Self> {
+        match self {
+            Self::IntOrHandle { fallback, .. } if known_missing => {
+                Some(Self::handle(fallback.clone()))
+            }
+            _ => None,
+        }
+    }
+
     fn frame_integer(value: Value, frame: &mut CheckedFrame<'_, '_, '_>, usage: ValueUse) -> Self {
         if matches!(usage, ValueUse::PythonHandle | ValueUse::CallOperand(..)) {
             return Self::handle(frame.take_integer(&value.operand));
@@ -544,14 +554,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             _ => out.instruction(format!("icmp ne i64 {b}, 0")),
         };
-        let guard = match (
-            check_a,
-            check_b
-                || matches!(
-                    op,
-                    Binary::FloorDivide | Binary::Modulo | Binary::RightShift
-                ),
-        ) {
+        let checks_right_value = matches!(
+            op,
+            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
+        );
+        let check_right = check_b || checks_right_value;
+        let guard = match (check_a, check_right) {
             (false, false) => None,
             (true, false) => Some(out.instruction(format!("icmp ne i64 {a}, 0"))),
             (false, true) => Some(right_guard(out)),
@@ -573,7 +581,18 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Self::body,
             |code, yes, no| code.body().branch(&guard, yes, no),
             exact,
-            |code| code.python_binary(op, left, right, span),
+            |code| {
+                // A sole projection guard identifies the exact missing word. A zero
+                // divisor or an invalid shift can fail with both words still present.
+                let lhs = left.missing_word(check_a && !check_right);
+                let rhs = right.missing_word(check_b && !check_a && !checks_right_value);
+                code.python_binary(
+                    op,
+                    lhs.as_ref().unwrap_or(left),
+                    rhs.as_ref().unwrap_or(right),
+                    span,
+                )
+            },
         )
         .expect("guarded integer arithmetic has a normal result")
     }
