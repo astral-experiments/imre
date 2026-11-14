@@ -5440,13 +5440,9 @@ impl<'a> Checker<'a> {
                         )
                     })?
             };
-            let input = registered::cursor_input(
-                value,
-                Type::PythonObject,
-                Some(expression.range()),
-                pull,
-                |ty, _| self.hidden(ty),
-            );
+            let input = registered::cursor_input(value, Some(expression.range()), pull, |ty, _| {
+                self.hidden(ty)
+            });
             // The private item owns the Python handle returned by next(). Its
             // checked element type belongs to the subsequent target binding.
             if element != Type::PythonObject {
@@ -5484,9 +5480,7 @@ impl<'a> Checker<'a> {
 
     /// Acquire the live Python iterator and own each item until the next pull.
     fn python_cursor(&mut self, value: Expr, range: TextRange) -> pipelines::Prepared {
-        registered::cursor_input(value, Type::PythonObject, Some(range), None, |ty, _| {
-            self.hidden(ty)
-        })
+        registered::cursor_input(value, Some(range), None, |ty, _| self.hidden(ty))
     }
 
     /// Prepare cursors and generators for pulling while preserving concrete container iteration.

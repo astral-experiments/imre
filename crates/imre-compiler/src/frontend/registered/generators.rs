@@ -78,7 +78,6 @@ impl RegisteredGenerator {
         let argument = scope.slot(".0");
         let input = cursor_input(
             Expr::local(argument, Type::PythonObject),
-            Type::PythonObject,
             None,
             pull,
             |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
