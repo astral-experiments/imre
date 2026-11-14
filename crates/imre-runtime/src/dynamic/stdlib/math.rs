@@ -146,21 +146,8 @@ pub(super) fn call(
         return Ok(ctx.alloc(Value::Int(result)));
     }
     if matches!(operation, "gcd" | "lcm") {
-        let mut result = if operation == "gcd" {
-            BigInt::ZERO
-        } else {
-            BigInt::one()
-        };
-        for &arg in args {
-            // Later arguments still run __index__ after GCD reaches one or LCM reaches zero.
-            let integer = ctx.index_integer(arg)?;
-            match operation {
-                "gcd" if !result.is_one() => result = result.gcd(&integer.big()),
-                "lcm" if !result.is_zero() => result = result.lcm(&integer.big()),
-                _ => {}
-            }
-        }
-        return Ok(ctx.alloc(Value::Int(crate::Int::new(result))));
+        let value = gcd_or_lcm(ctx, args, operation == "lcm")?;
+        return Ok(ctx.alloc(Value::Int(value)));
     }
     if matches!(
         operation,
@@ -1023,4 +1010,45 @@ fn modf(ctx: &mut Context, value: Id) -> Result<Id> {
     let fraction = ctx.alloc(Value::Float(fraction));
     let integral = ctx.alloc(Value::Float(integral));
     Ok(ctx.alloc(Value::Tuple(vec![fraction, integral])))
+}
+
+/// Reduces word-sized operands directly, promoting the accumulator on the first wide operation.
+fn gcd_or_lcm(ctx: &mut Context, args: &[Id], lcm: bool) -> Result<crate::Int> {
+    let mut result = usize::from(lcm);
+    let absorbing = usize::from(!lcm);
+    let mut args = args.iter();
+    while let Some(&arg) = args.next() {
+        // An absorbing result still requires every later argument to run __index__.
+        let integer = ctx.index_integer(arg)?;
+        if result == absorbing {
+            continue;
+        }
+        if let Some(right) = integer.as_small() {
+            let right = right.unsigned_abs() as usize;
+            let gcd = result.gcd(&right);
+            if !lcm {
+                result = gcd;
+                continue;
+            }
+            // The LCM accumulator is nonzero here, so its GCD is also nonzero.
+            if let Some(next) = (result / gcd).checked_mul(right) {
+                result = next;
+                continue;
+            }
+        }
+
+        let mut wide = BigInt::from(result);
+        for integer in std::iter::once(Ok(integer)).chain(args.map(|&arg| ctx.index_integer(arg))) {
+            let integer = integer?;
+            if lcm {
+                if !wide.is_zero() {
+                    wide = wide.lcm(&integer.big());
+                }
+            } else if !wide.is_one() {
+                wide = wide.gcd(&integer.big());
+            }
+        }
+        return Ok(crate::Int::new(wide));
+    }
+    Ok(crate::Int::from_usize(result))
 }
