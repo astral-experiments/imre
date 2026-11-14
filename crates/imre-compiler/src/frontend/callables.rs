@@ -166,6 +166,17 @@ pub(super) fn validate_targets(
 }
 
 impl Signature {
+    fn callable_type(&self, types: &Types, skip: usize) -> Type {
+        types.callable(
+            self.params[skip..].iter().map(|p| p.ty).collect(),
+            if self.asynchronous {
+                types.coroutine(self.returns)
+            } else {
+                self.returns
+            },
+        )
+    }
+
     fn has_defaults_after_receiver(&self) -> bool {
         self.params
             .iter()
@@ -348,17 +359,7 @@ impl Checker<'_> {
                 node,
             )?;
         }
-        let ty = self.types.callable(
-            signature.params[skip..]
-                .iter()
-                .map(|parameter| parameter.ty)
-                .collect(),
-            if signature.asynchronous {
-                self.types.coroutine(signature.returns)
-            } else {
-                signature.returns
-            },
-        );
+        let ty = signature.callable_type(self.types, skip);
         let unbound = receiver.is_none();
         let ty = if let Some(method) = method_site {
             // Inherited reads share a source binder even when they select different
@@ -397,7 +398,7 @@ impl Checker<'_> {
         };
         // The inherited spelling retains its checked receiver type. Its source
         // function accepts that instance through the declaring class's native ABI.
-        let function = if unbound
+        let declaration = if unbound
             && !signature.asynchronous
             && let Some(method) = signature.method
             && method.kind(self.classes.declarations) == crate::classes::MethodKind::Instance
@@ -416,29 +417,54 @@ impl Checker<'_> {
                         && original
                             .params
                             .first()
-                            .is_some_and(|p| p.ty == Type::Class(owner))
-                        && signature
-                            .params
-                            .first()
-                            .is_some_and(|p| p.ty == Type::Class(method.class))
+                            .zip(signature.params.first())
+                            .is_some_and(|(formal, receiver)| {
+                                formal.ty == Type::Class(owner)
+                                    && receiver.ty == Type::Class(method.class)
+                                    && self.record_upcast(receiver.ty, formal.ty)
+                            })
                         && original.params.iter().skip(1).map(|p| p.ty).eq(signature
                             .params
                             .iter()
                             .skip(1)
                             .map(|p| p.ty))
                 })
-                .map_or(signature.id, |original| original.id)
         } else {
-            signature.id
+            None
+        };
+        let (function, entry_ty) = if let Some(original) = declaration {
+            let receiver = signature.params[0].ty;
+            let formal = original.params[0].ty;
+            if self
+                .types
+                .may_own_file(receiver, &self.classes.fields, true)
+                != self.types.may_own_file(formal, &self.classes.fields, true)
+            {
+                return Err(self.scoped_builtin_error(
+                    "an inherited callable with different receiver ownership",
+                    node,
+                ));
+            }
+            (original.id, original.callable_type(self.types, 0))
+        } else {
+            (signature.id, ty)
         };
         let value = Expr {
-            ty,
+            ty: entry_ty,
             kind: ExprKind::Callable {
                 function,
                 receiver: receiver.map(Box::new),
             },
         };
         if unbound {
+            let value = if entry_ty == ty {
+                value
+            } else {
+                Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+                }
+            };
             Ok(Expr {
                 ty,
                 kind: ExprKind::Builtin(Builtin::StaticFunction(function), vec![value]),
