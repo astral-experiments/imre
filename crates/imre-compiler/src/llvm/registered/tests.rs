@@ -669,12 +669,13 @@ fn checked_cursor_pull_keeps_one_projection_for_both_representations() {
     let next = output.data(b"next");
     let body = &output.functions;
     for call in [
-        "call i32 @imre_dyn_list_cursor_pull(",
-        &format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {more},"),
-        &format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {next},"),
+        "call i32 @imre_dyn_pull_item(",
         "call i64 @imre_dyn_positional_call_at(",
     ] {
         assert_eq!(body.matches(call).count(), 1, "{call}");
+    }
+    for op in [more, next] {
+        assert!(!body.contains(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {op},")));
     }
 }
 

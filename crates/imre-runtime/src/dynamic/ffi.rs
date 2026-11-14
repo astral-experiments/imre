@@ -681,16 +681,6 @@ impl Context {
                 self.release_loop_iterator(a);
                 Ok(NONE)
             }
-            "more" | "more_else" => {
-                let more = self.iterator_has_item(a)?;
-                if !more && op == "more_else" {
-                    self.heap.release_unbound_finalizers();
-                }
-                Ok(flag(more))
-            }
-            "next" => self
-                .next_item(a)?
-                .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") =>
             {
@@ -1658,13 +1648,12 @@ fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id
     }
 }
 
-/// Pull directly from an acquired builtin sequence or range iterator.
-/// Return 1 for an item, 0 for exhaustion or error, and -1 for other iterators.
+/// Advance an acquired loop cursor. Return 1 for a rooted item or 0 on exhaustion or error.
 ///
 /// # Safety
 /// Generated code supplies a live cursor and one writable handle slot.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
+pub(super) unsafe extern "C" fn imre_dyn_pull_item(
     ctx: *mut Context,
     iter: Id,
     item: *mut Id,
@@ -1677,8 +1666,7 @@ pub(super) unsafe extern "C" fn imre_dyn_list_cursor_pull(
     }
     let next = match ctx.heap.get(iter) {
         Value::Iterator { .. } => ctx.next_builtin_sequence_item(iter),
-        Value::RangeIterator(_) => ctx.next_result(iter),
-        _ => return -1,
+        _ => ctx.next_item(iter),
     };
     let value = match next {
         Ok(value) => value,
@@ -1735,12 +1723,8 @@ pub(super) unsafe extern "C" fn imre_dyn_pull_pair(
 }
 
 fn pull_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2]) -> Result<i32> {
-    // A buffered row belongs to the wrapper. Otherwise advance its source directly.
     let source = match *ctx.heap.get(iter) {
-        Value::LoopIterator {
-            source,
-            peeked: None,
-        } => source,
+        Value::LoopIterator { source } => source,
         _ => iter,
     };
     if let Value::DictIterator(cursor) = *ctx.heap.get(source)
@@ -4124,12 +4108,12 @@ mod tests {
             let mut item = NONE;
             for expected in [start + 1, if reverse { start } else { start + 2 }] {
                 // SAFETY: the iterator is live and the item slot is writable.
-                let status = unsafe { imre_dyn_list_cursor_pull(&mut ctx, iter, &mut item, false) };
+                let status = unsafe { imre_dyn_pull_item(&mut ctx, iter, &mut item, false) };
                 assert_eq!(status, 1);
                 assert_eq!(ctx.repr(item), expected.to_string());
             }
             // SAFETY: exhaustion uses the same live context and slot.
-            let status = unsafe { imre_dyn_list_cursor_pull(&mut ctx, iter, &mut item, true) };
+            let status = unsafe { imre_dyn_pull_item(&mut ctx, iter, &mut item, true) };
             assert_eq!(status, 0);
             assert!(ctx.heap.execution.pending.is_none());
         }

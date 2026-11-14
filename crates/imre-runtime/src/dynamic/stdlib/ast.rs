@@ -183,24 +183,16 @@ fn parsed_instance(
     })
 }
 
-pub(in super::super) fn has_item(ctx: &Context, iter: Id) -> Result<bool> {
-    let Value::AstWalk { queue, running } = ctx.heap.get(iter) else {
+pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
+    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
         unreachable!()
     };
     if *running {
         return Err(Error::new("ValueError", "generator already executing"));
     }
-    Ok(!queue.is_empty())
-}
-
-pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
-    if !has_item(ctx, iter)? {
+    let Some(node) = queue.pop_front() else {
         return Ok(None);
-    }
-    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
-        unreachable!()
     };
-    let node = queue.pop_front().expect("checked nonempty AST walk");
     *running = true;
     let result = children(ctx, node);
     let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {

@@ -563,10 +563,7 @@ mod tests {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
         let source = heap.alloc(Value::List(Vec::new()));
-        let iterator = heap.alloc(Value::LoopIterator {
-            source,
-            peeked: None,
-        });
+        let iterator = heap.alloc(Value::LoopIterator { source });
         let selector = Rc::new(RefCell::new(Selector {
             poll: None,
             globals: NONE,

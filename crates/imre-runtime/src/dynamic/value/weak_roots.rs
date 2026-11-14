@@ -241,7 +241,7 @@ impl<'a> Links<'a> {
                 receiver, callable, ..
             } => ([Some(*receiver), Some(*callable)], Members::None),
             Value::Iterator { sequence, .. } => ([*sequence, None], Members::None),
-            Value::LoopIterator { source, peeked } => ([Some(*source), *peeked], Members::None),
+            Value::LoopIterator { source } => ([Some(*source), None], Members::None),
             Value::Instance {
                 fields,
                 namespace,
@@ -744,8 +744,8 @@ impl Heap {
             .clone()
             .find(|&(_, _, root)| {
                 root == owner
-                    || matches!(self.get(root), Value::LoopIterator { source, peeked }
-                if *peeked == Some(owner) || self.short_path_keeps_owner(*source, owner))
+                    || matches!(self.get(root), Value::LoopIterator { source }
+                if self.short_path_keeps_owner(*source, owner))
             })
             .or_else(|| operands.find(|&(_, _, root)| self.short_path_keeps_owner(root, owner)));
         if let Some((frame, slot, _)) = found {
