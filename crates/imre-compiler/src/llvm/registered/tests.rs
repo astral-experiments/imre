@@ -8,7 +8,7 @@ use std::path::Path;
 /// Isolated writer tests supply their completed sites without compiling a source module.
 pub(crate) struct TestFrame<'f, 'a, 'p>(
     pub(crate) &'f mut RegisteredFrame<'a, 'p>,
-    pub(crate) CheckedSites<'p>,
+    pub(crate) CheckedSites,
 );
 
 impl<'a, 'p> std::ops::Deref for TestFrame<'_, 'a, 'p> {
@@ -25,7 +25,7 @@ impl std::ops::DerefMut for TestFrame<'_, '_, '_> {
 }
 
 impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         (self.0, &self.1)
     }
     fn place_declaration(&mut self, site: TextSize) {

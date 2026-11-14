@@ -172,8 +172,7 @@ impl StatementLowering for Checker<'_> {
             let header = imre_ast::function_definition_expressions(def)
                 .map(|expr| self.expr(expr))
                 .collect::<Result<Vec<_>, _>>()?;
-            let site = ir::DefinitionSite::Function(def.start());
-            let value = registered::definition_value(site, header);
+            let value = registered::function_definition(def, header);
             let slot = self.declare(def.name.as_str(), Type::PythonObject, &def.name)?;
             self.assigned_value(slot, &value);
             return Ok(Some(Statement::Assign(slot, value)));

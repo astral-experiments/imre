@@ -1066,7 +1066,7 @@ enum Callable<'a> {
 }
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
         (&mut self.frame, &self.sites)
     }
 
@@ -1173,31 +1173,28 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 }
 
-impl<'p> Function<'_, 'p, '_> {
-    fn compile_declaration(&mut self, site: TextSize) -> Result<Declaration<'p>, String> {
+impl Function<'_, '_, '_> {
+    fn compile_declaration(&mut self, site: TextSize) -> Result<Declaration, String> {
         let source = self.source;
-        let (definition, decorator_offsets, type_params) = if let Some(scope) =
-            source.scopes.classes.get(&site)
-        {
+        let (definition, type_params) = if let Some(scope) = source.scopes.classes.get(&site) {
             let class = scope.prepared();
             let definition = if let Some(header) = &class.header {
                 self.compile_class_header(site, class, &header.body)
             } else {
                 self.compile_class_namespace(site, scope)
             };
-            (definition, &class.decorator_offsets, None)
+            (definition, None)
         } else if let Some(header) = source.scopes.functions.get(&site) {
             let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
             let parameters = (!header.type_params.is_empty()).then(|| {
                 self.compile_type_parameters(&header.type_params, self.frame.class_locals)
             });
-            (definition, &header.decorator_offsets, parameters)
+            (definition, parameters)
         } else {
             return self.compile_type_alias(site);
         };
         Ok(Declaration {
             definition,
-            decorator_offsets,
             type_params,
         })
     }
@@ -1338,13 +1335,12 @@ impl<'p> Function<'_, 'p, '_> {
         }
     }
 
-    fn compile_type_alias(&mut self, site: TextSize) -> Result<Declaration<'static>, String> {
+    fn compile_type_alias(&mut self, site: TextSize) -> Result<Declaration, String> {
         let alias = &self.source.type_aliases[&site];
         // Placement can visit children of a suite that exits before the alias binds.
         let outer_diagnostic = self.frame.output.diagnostic.take();
         let compiled = match &alias.body {
             Ok(code) => Some(Declaration {
-                decorator_offsets: &[],
                 definition: self.compile_evaluator(
                     site,
                     &alias.name,
@@ -1570,7 +1566,7 @@ impl SourceMap<'_> {
 }
 
 struct Function<'a, 'p, 'scope> {
-    sites: CheckedSites<'p>,
+    sites: CheckedSites,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     prefix: &'scope str,
@@ -2041,7 +2037,7 @@ mod tests {
         let mut defaults = Vec::new();
         crate::ir::walk_expressions(&maker.checked().function.body, &mut |expr| {
             if let ExprKind::Builtin(
-                Builtin::RegisteredDefinition(DefinitionSite::Function(site)),
+                Builtin::RegisteredDefinition(DefinitionSite::Function { start: site, .. }),
                 inputs,
             ) = &expr.kind
             {

@@ -6,7 +6,6 @@ use super::FunctionScope;
 use crate::frontend::{NamedBody, RegisteredBody};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
-use ruff_text_size::{Ranged, TextSize};
 use serde_json::{Value, json};
 
 fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<String> {
@@ -47,7 +46,6 @@ pub(crate) struct NamedFunction<'p> {
     pub(crate) name: String,
     /// Lookup and assignment use the lowered private name in class scopes.
     pub(crate) binding: String,
-    pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) doc: Option<String>,
     pub(crate) metadata: CallableMetadata,
     pub(crate) globals: std::collections::BTreeSet<String>,
@@ -76,11 +74,6 @@ impl NamedFunction<'_> {
             name: names.definition(&def.name).to_owned(),
             binding: def.name.to_string(),
             body: None,
-            decorator_offsets: def
-                .decorator_list
-                .iter()
-                .map(|d| d.expression.start())
-                .collect(),
             doc: crate::frontend::docstring(&def.body),
             metadata: CallableMetadata::new(Some(&def.parameters), lexical, suspension_flags),
             globals: std::mem::take(&mut lexical.names.globals),
@@ -403,10 +396,6 @@ mod tests {
         assert_eq!(ordinary.binding, "_Owner__method");
         assert_eq!(ordinary.doc.as_deref(), Some("method doc"));
         assert_eq!(ordinary.metadata.defaults.as_ref(), ["value", "flag"]);
-        assert_eq!(
-            ordinary.decorator_offsets,
-            [method.decorator_list[0].expression.start()]
-        );
         let signature = ordinary
             .metadata
             .signature(code_flags::METHOD | code_flags::HAS_DOCSTRING, true);

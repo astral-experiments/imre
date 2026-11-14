@@ -1442,12 +1442,19 @@ impl<'a> ArgumentPack<'a> {
 
 impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// Each decorator call consumes the operands from before its callable was evaluated.
-    pub(super) fn decorator_operands(&mut self, decorators: &[Expr]) -> Vec<(String, String)> {
+    pub(super) fn decorator_operands(
+        &mut self,
+        decorators: &[Expr],
+    ) -> Vec<(String, String, TextSize)> {
         decorators
             .iter()
             .map(|expr| {
                 let mark = self.temporary_mark();
-                (mark, self.evaluate_eager_handle(expr))
+                let start = expr
+                    .written_range()
+                    .expect("the checked decorator location")
+                    .start();
+                (mark, self.evaluate_eager_handle(expr), start)
             })
             .collect()
     }
