@@ -13,7 +13,7 @@ SizeofTest.test_gc_head_size	proposed	The two exact sizes use _testinternalcapi.
 SizeofTest.test_objecttypes	proposed	The assertions enumerate exact C struct sizes for Objects/ types, including pointers, PyLong digits and CPython Unicode caches. Imre uses different layouts; ordinary getsizeof stays open.
 SizeofTest.test_pythontypes	proposed	The _ast.AST, traceback and sys.flags byte sizes are calculated from CPython C pointer layouts and struct-sequence fields; those expressions do not specify Imre object sizes.
 SizeofTest.test_slots	proposed	This test derives subclass sizes from CPython's three additional slot pointers and, when needed, the GC header, including an additional GC header relative to the base object.
-SysModuleTest.test_attributes	blocked	The native TestCase cannot type-check assertIn(sys.byteorder, ("little", "big")) against its tuple argument.
+SysModuleTest.test_attributes	failed	The first assertion reads sys.api_version, which raises AttributeError in the native child. The measured O3 preflight exceeded its compiler timeout.
 SysModuleTest.test_c_locale_surrogateescape	blocked	The unchanged child calls getattr(sys, name) for each standard stream. Its first LC_ALL=C process stops compiling at the sys operand before any policy is read; see the stock six-child comparison in the occurrence report.
 SysModuleTest.test_call_tracing	blocked	sys.call_tracing must accept a real callable and tuple and reject the non-tuple argument. The native tracing/callable boundary is absent.
 SysModuleTest.test_clear_type_cache	proposed	The sole call is deprecated sys._clear_type_cache(), whose warning refers to CPython's method lookup cache. Imre statically resolves methods; this proposes only this private cache warning.
@@ -32,7 +32,6 @@ SysModuleTest.test_is_finalizing	blocked	The runtime must transition during fina
 SysModuleTest.test_is_gil_enabled	reference-only	The reference predicate is configured by CPython's build. The native thread model must supply an honest GIL capability; the host build flag is not target evidence.
 SysModuleTest.test_issue20602	blocked	Original child reads and prints sys.flags and sys.float_info from __del__ during shutdown; native destruction must keep both usable.
 SysModuleTest.test_posix_locale_surrogateescape	blocked	The original LC_ALL=POSIX child stops at getattr(sys, name) before any stream read. The report keeps its argv, first failed host assertion and six stock control children.
-SysModuleTest.test_recursionlimit_recovery	blocked	Repeated genuine native recursive calls must raise RecursionError at each configured depth and recover for the next depth.
 SysModuleTest.test_refcount	blocked	Native getrefcount must reject missing arguments, preserve the None singleton count across global bindings and expose total count only if available.
 SysModuleTest.test_setrecursionlimit_to_depth	blocked	Rejecting a limit below the current depth needs actual frame depth and exception-safe restoration of nested calls.
 SysModuleTest.test_stdlib_dir	blocked	The target directory must agree with the target os module's file origin; a CPython installation path is not a native standard library.
