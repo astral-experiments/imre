@@ -499,7 +499,10 @@ pub(super) fn place_checked_definition(
 ) -> Result<Option<LoweredBody>, String> {
     Ok(
         prepare_checked_definition(original, definition, signature, inference, callable_inputs)?
-            .map(|(body, placement)| {
+            .map(|(mut body, placement)| {
+                let frame = &placement.frame.function;
+                body.function.params = frame.params.clone();
+                body.function.locals = frame.locals.clone();
                 placement.place(original.graph, &inference.source_checks);
                 body
             }),
@@ -567,14 +570,14 @@ pub(super) fn prepare_checked_definition(
                 Ok(checked) => checked,
                 Err(failure) => return Some(Err(failure)),
             };
-            let input = ir::Function {
-                params: body.function.params.clone(),
-                returns: body.function.returns,
-                locals: body.function.locals.clone(),
-                body: std::mem::take(&mut body.function.body),
+            let frame =
+                RegisteredFunction::from_checked_body(body.function, names, body.frame_arguments)?;
+            body.function = ir::Function {
+                params: Vec::new(),
+                returns: signature.returns,
+                locals: Vec::new(),
+                body: Vec::new(),
             };
-            let frame = RegisteredFunction::from_checked_body(input, names, body.frame_arguments)?;
-            body.function.returns = signature.returns;
             Some(Ok((body, frame)))
         })
         .transpose()?;
