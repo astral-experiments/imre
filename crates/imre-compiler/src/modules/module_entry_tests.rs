@@ -327,6 +327,40 @@ fn decorated_shipped_import_and_attribute_share_the_defining_slot() {
 }
 
 #[test]
+fn imported_type_variable_uses_its_shipped_assignment() {
+    use super::Binding;
+    use ruff_text_size::Ranged;
+
+    let graph = SourceGraph::single(
+        "from typing import AnyStr as text\nimport typing\ntyping.AnyStr\n",
+    )
+    .unwrap();
+    let module = &graph.modules[graph.entry];
+    let (file, parsed, _) = graph
+        .session
+        .selected_file(&Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("typing.py"))
+        .unwrap();
+    let target = parsed
+        .suite()
+        .iter()
+        .filter_map(ruff_python_ast::Stmt::as_assign_stmt)
+        .flat_map(|assign| &assign.targets)
+        .find(|target| {
+            target
+                .as_name_expr()
+                .is_some_and(|name| name.id == "AnyStr")
+        })
+        .unwrap();
+    let expected = Some(Binding::RegisteredValue(ruff_db::files::FileRange::new(
+        file,
+        target.range(),
+    )));
+    assert_eq!(module.export("text"), expected);
+    let qualified = &module.parsed.suite()[2].as_expr_stmt().unwrap().value;
+    assert_eq!(graph.resolve(graph.entry, qualified), expected);
+}
+
+#[test]
 fn checked_cleandoc_keeps_the_complete_shipped_inspect_namespace() {
     let graph = SourceGraph::single_with_mode(
         "from inspect import cleandoc, isclass\nprint(cleandoc('  text'))\n",

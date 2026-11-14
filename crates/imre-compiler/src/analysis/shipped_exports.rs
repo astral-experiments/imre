@@ -4,6 +4,7 @@ use crate::modules::Binding;
 use ruff_db::files::FileRange;
 use ruff_python_ast::name::Name;
 use ty_python_core::definition::{Definition, DefinitionKind, DefinitionState};
+use ty_python_semantic::types::TypeDefinition;
 
 impl Session {
     /// Check the class bound by the selected runtime declaration.
@@ -276,6 +277,16 @@ fn local_declaration(
             }
             DefinitionKind::Function(_) => {
                 Some(Binding::RegisteredValue(source.focus_range(db, parsed)))
+            }
+            DefinitionKind::Assignment(assign)
+                if !name.starts_with('_') && assign.value(parsed).is_call_expr() =>
+            {
+                // A type variable created here has its own declaration. Import its live value.
+                let model = SemanticModel::new(db, db.program_file(file));
+                let ty = assign.value(parsed).inferred_type(&model)?;
+                let declaration = ty.definition(db, &model.program_environment());
+                (declaration == Some(TypeDefinition::TypeVar(source)))
+                    .then(|| Binding::RegisteredValue(source.focus_range(db, parsed)))
             }
             _ => None,
         });
