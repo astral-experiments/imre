@@ -4233,22 +4233,21 @@ pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)
     }
 }
 
-/// Only a plain function owns the writable third word used by wrapper links.
-pub(crate) fn retain_unknown_link_owners(
+/// A callable operand keeps its origin through scopes, wrapper assignments, and local copies.
+pub(crate) fn retain_unproven_operands(
     function: &Function,
     owners: &mut Vec<&Expr>,
     inputs: &[&CallArgs],
-    linked: impl Fn(&Expr) -> bool,
+    proven: impl Fn(&Expr) -> bool,
 ) {
-    fn origin(value: &Expr) -> &ExprKind {
+    fn origin(value: &Expr) -> &Expr {
         match &value.kind {
             ExprKind::Builtin(Builtin::FunctionWrappedSet, args) => origin(&args[0]),
             ExprKind::Scope { value, .. } => origin(value),
-            kind => kind,
+            _ => value,
         }
     }
 
-    let plain_function = |kind: &ExprKind| matches!(kind, ExprKind::Builtin(Builtin::StaticFunction(_), args) if linked(&args[0]));
     let mut plain = vec![true; function.locals.len()];
     for (index, &parameter) in function.params.iter().enumerate() {
         plain[parameter] = !inputs.is_empty()
@@ -4256,7 +4255,7 @@ pub(crate) fn retain_unknown_link_owners(
                 args.order
                     .get(index)
                     .and_then(|&source| args.values.get(source))
-                    .is_some_and(|value| plain_function(origin(value)))
+                    .is_some_and(|value| proven(origin(value)))
             });
     }
     let mut copies = Vec::new();
@@ -4269,15 +4268,21 @@ pub(crate) fn retain_unknown_link_owners(
         }) => {}
         Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
         _ => node_writes(node, &mut |slot, value| match value.map(origin) {
-            Some(ExprKind::Local(source)) => copies.push((*source, slot)),
-            Some(kind) if plain_function(kind) => {}
+            Some(Expr {
+                kind: ExprKind::Local(source),
+                ..
+            }) => copies.push((*source, slot)),
+            Some(value) if proven(value) => {}
             _ => plain[slot] = false,
         }),
     });
     propagate_copy_facts(&mut plain, &copies);
     owners.retain(|owner| match origin(owner) {
-        ExprKind::Local(slot) => !plain[*slot],
-        kind => !plain_function(kind),
+        Expr {
+            kind: ExprKind::Local(slot),
+            ..
+        } => !plain[*slot],
+        value => !proven(value),
     });
 }
 

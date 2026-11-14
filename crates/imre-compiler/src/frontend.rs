@@ -1757,7 +1757,7 @@ fn lower_graph(
         _ => {}
     };
     let mut validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
-        typing::validate_functions(functions, &entry, &types)?;
+        typing::validate_functions(functions, &entry, &types, graph, &callable_definitions)?;
         let mut callable_targets = HashMap::new();
         let mut indirect = Vec::new();
         let mut storage = Ok(());

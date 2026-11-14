@@ -3676,6 +3676,20 @@ impl SourceGraph {
         self.reachable.as_deref()
     }
 
+    /// Object namespaces can publish a function even when the fixed entry has no reference to it.
+    pub(crate) fn entry_may_call(&self) -> impl Fn(&DefinitionId) -> bool + '_ {
+        let entry = std::cell::LazyCell::new(|| reachability::Reachable::collect(self, false));
+        move |id| {
+            self.needs_object_runtime.get()
+                || self.modules[id.module].registered_namespace
+                || self
+                    .required_definitions(id.module)
+                    .unwrap_or_else(|| &entry)
+                    .definitions
+                    .contains(id)
+        }
+    }
+
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
         !self.modules[definition.module].registered_namespace
             && self
