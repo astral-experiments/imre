@@ -39,3 +39,7 @@ print(ScalarDefaults("λ"))
 print(ScalarDefaults("literal", optional="kept", marker=4))
 print(Keywords(argument("positional", 1), second=argument("second", 3), name="named"))
 print(SelfNamed(self=9))
+
+record = Keywords(8, name="Mira")
+for key in ["name", "first"]:
+    print(getattr(record, key, argument("default", 99)))
