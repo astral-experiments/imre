@@ -74,7 +74,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
                     path,
                     module,
                     0,
-                    emit::ModuleOrigin::Bundled,
+                    emit::ModuleOrigin::Bundled(None),
                     Default::default(),
                     Default::default(),
                 )

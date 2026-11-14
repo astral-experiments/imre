@@ -1221,6 +1221,10 @@ impl From<ruff_python_ast::Operator> for Binary {
 }
 
 impl Binary {
+    pub(crate) fn is_plain_arithmetic(self) -> bool {
+        matches!(self, Self::Add | Self::Subtract | Self::Multiply)
+    }
+
     pub(crate) fn protocol(self) -> &'static str {
         match self {
             Self::Add => "+",

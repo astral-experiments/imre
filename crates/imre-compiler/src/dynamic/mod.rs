@@ -1886,6 +1886,13 @@ pub(crate) fn compile(
                     {
                         if graph.modules[id].original_source() == source {
                             checked = Some(id);
+                            if graph.registered_functions().contains_key(&id) {
+                                let unit = registrations
+                                    .checked_units
+                                    .entry(sources.len())
+                                    .or_default();
+                                unit.module = Some(id);
+                            }
                         } else {
                             checked_sdk_providers.push((id, sources.len()));
                         }

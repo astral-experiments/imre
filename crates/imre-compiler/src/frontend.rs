@@ -1484,11 +1484,19 @@ fn lower_graph(
                 None
             }
         });
-        checker.fixed_sites = (prepare_sites && inferred.is_none())
+        // A later entry refusal can still place the provider's original definition.
+        let provider_frame = !needs_registered_entry
+            && cache.is_none()
+            && module.bundled
+            && signature.method.is_none()
+            && matches!(source, Cow::Borrowed(_))
+            && fixed_frame_entry(definition);
+        checker.fixed_sites = ((prepare_sites || provider_frame) && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         let mut attributes = HashMap::new();
         if signature.method.is_none()
+            && prepare_sites
             && checker.fixed_sites.is_some()
             && cache.is_none()
             && pending_capture.borrow().is_some()
@@ -1624,7 +1632,7 @@ fn lower_graph(
             ..
         } = body;
         if let Some(source) = body.source
-            && signature.physical_frame
+            && (signature.physical_frame || provider_frame)
         {
             let slot = completed.functions.len();
             completed.frames.push((slot, definition.range(), source));

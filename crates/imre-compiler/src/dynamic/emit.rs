@@ -63,7 +63,12 @@ impl RegisteredBodies<'_> {
         bundled: bool,
     ) -> Option<ModuleOrigin<'_, '_>> {
         if bundled {
-            Some(ModuleOrigin::Bundled)
+            let bodies = self
+                .checked_units
+                .get(&unit)
+                .and_then(|unit| unit.module)
+                .and_then(|module| self.functions.get(&module));
+            Some(ModuleOrigin::Bundled(bodies))
         } else {
             self.python_providers
                 .contains(&unit)
@@ -82,7 +87,7 @@ pub(super) enum ModuleOrigin<'a, 'syntax> {
     },
     Interactive(u32),
     Provider,
-    Bundled,
+    Bundled(Option<&'a super::CheckedFunctions>),
 }
 
 impl ModuleOrigin<'_, '_> {
@@ -92,7 +97,7 @@ impl ModuleOrigin<'_, '_> {
             Self::ExecLiteral {
                 python_annotations, ..
             } => python_annotations,
-            Self::Bundled => matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
+            Self::Bundled(_) => matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             _ => false,
         }
     }
@@ -450,7 +455,7 @@ impl<'a> PreparedBody<'a> {
         let interactive = matches!(origin, ModuleOrigin::Interactive(_));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
-        let bundled = matches!(origin, ModuleOrigin::Bundled);
+        let bundled = matches!(origin, ModuleOrigin::Bundled(_));
         let inherited_flags = match origin {
             ModuleOrigin::ExecLiteral {
                 inherited_flags, ..
@@ -458,8 +463,8 @@ impl<'a> PreparedBody<'a> {
             | ModuleOrigin::Interactive(inherited_flags) => inherited_flags,
             _ => 0,
         };
-        let program_bodies = match origin {
-            ModuleOrigin::Program(bodies) => bodies,
+        let checked_bodies = match origin {
+            ModuleOrigin::Program(bodies) | ModuleOrigin::Bundled(bodies) => bodies,
             _ => None,
         };
         let syntax = parsed.syntax();
@@ -620,7 +625,7 @@ impl<'a> PreparedBody<'a> {
             prepare.prepare_function(
                 header,
                 site,
-                program_bodies.and_then(|bodies| bodies.get(&start)),
+                checked_bodies.and_then(|bodies| bodies.get(&start)),
             );
         }
         let initializer = if interactive {
@@ -2941,7 +2946,7 @@ mod tests {
             Path::new("worker.py"),
             text,
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
         )
         .unwrap();
         // The ordinary compilation can already discard this function's syntax.
@@ -3172,9 +3177,14 @@ mod tests {
                 "async def create_datagram_endpoint(",
             ),
         ] {
-            let module =
-                PreparedBody::module(name, Path::new("module.py"), text, 0, ModuleOrigin::Bundled)
-                    .unwrap();
+            let module = PreparedBody::module(
+                name,
+                Path::new("module.py"),
+                text,
+                0,
+                ModuleOrigin::Bundled(None),
+            )
+            .unwrap();
             let start = ruff_text_size::TextSize::try_from(text.find(definition).unwrap()).unwrap();
             let suite = module.source.definition_body(start);
             assert!(suite.fully_checked(), "{name}");
@@ -3324,7 +3334,7 @@ mod tests {
             Path::new("<imre stdlib>/typing.py"),
             source,
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
             |typing| {
                 let expected = typing.standalone()?;
                 let mut body = typing.original_fixture_suite()?;
@@ -3386,7 +3396,7 @@ mod tests {
             Path::new("<imre stdlib>/typing.py"),
             source,
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
         )
         .unwrap();
         let class = source.find("class _IdentityCallable(Protocol):").unwrap();
@@ -3422,7 +3432,7 @@ mod tests {
             Path::new("<imre stdlib>/typing.py"),
             source,
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
         )
         .unwrap();
         let body = &typing.initializer.checked.function.body;
@@ -5464,7 +5474,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             Path::new("reader.py"),
             "class Reader:\n    def read(self):\n        value = self.source()\n        return value\n",
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
             |prepared| {
                 let methods = &prepared.source.scopes.functions;
                 assert_eq!(methods.len(), 1);
@@ -6529,7 +6539,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 source,
                 0,
                 if bundled {
-                    ModuleOrigin::Bundled
+                    ModuleOrigin::Bundled(None)
                 } else {
                     ModuleOrigin::Program(None)
                 },
@@ -6577,7 +6587,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             Path::new("example.py"),
             source,
             0,
-            ModuleOrigin::Bundled,
+            ModuleOrigin::Bundled(None),
         )
         .unwrap()
         .standalone()
@@ -6619,7 +6629,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             "answer = 42".into(),
         )];
         let (name, path, source) = &modules[3];
-        let (symbol, _) = PreparedBody::module(name, path, source, 0, ModuleOrigin::Bundled)
+        let (symbol, _) = PreparedBody::module(name, path, source, 0, ModuleOrigin::Bundled(None))
             .unwrap()
             .standalone()
             .unwrap();
@@ -6737,10 +6747,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let path = Path::new("<imre stdlib>/example.py");
         let declare = "declare void @imre_dyn_definition_position";
         for (source, expected) in [("value = 1", 0), ("with a, b:\n    pass", 1)] {
-            let (_, ir) = PreparedBody::module("example", path, source, 0, ModuleOrigin::Bundled)
-                .unwrap()
-                .standalone()
-                .unwrap();
+            let (_, ir) =
+                PreparedBody::module("example", path, source, 0, ModuleOrigin::Bundled(None))
+                    .unwrap()
+                    .standalone()
+                    .unwrap();
             assert_eq!(ir.matches(declare).count(), expected);
         }
     }
@@ -6751,7 +6762,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let path = root.join("example.py");
         let source = "value = t'{123}'";
         let compiled = |name, path: &Path, src, optimization| {
-            PreparedBody::module(name, path, src, optimization, ModuleOrigin::Bundled)
+            PreparedBody::module(name, path, src, optimization, ModuleOrigin::Bundled(None))
                 .unwrap()
                 .standalone()
                 .unwrap()
