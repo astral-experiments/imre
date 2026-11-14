@@ -1215,9 +1215,3 @@ class EmailMessage(MIMEPart):
         super().set_content(*args, **kw)
         if 'MIME-Version' not in self:
             self['MIME-Version'] = '1.0'
-
-
-# The shared HTTP header reader validates the field before storing the raw value.
-def _valid_field_name(name):
-    from email._policybase import valid_header_name_re
-    return valid_header_name_re.fullmatch(name) is not None
