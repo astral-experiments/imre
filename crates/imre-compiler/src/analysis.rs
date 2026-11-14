@@ -1138,19 +1138,6 @@ impl Session {
         Ok(())
     }
 
-    /// Virtual files keep immutable parser inputs outside the module search path.
-    fn virtual_source(&self, key: &str, text: &str) -> File {
-        let key = ruff_db::system::SystemVirtualPath::new(key);
-        self.db
-            .files
-            .try_virtual_file(key)
-            .unwrap_or_else(|| {
-                self.db.system.fs().write_virtual_file(key, text.as_bytes());
-                self.db.files.virtual_file(&self.db, key)
-            })
-            .file()
-    }
-
     pub(crate) fn selected_file(
         &self,
         path: &Path,
@@ -1542,7 +1529,7 @@ impl Session {
     ) -> Result<(ParsedModuleRef, HashMap<TextSize, usize>), String> {
         Self::with_checked_input(path, source, |path, input| {
             let file = self.write_file(path, &input.text)?;
-            let checked = self.checked_parse(file, path, source, input, kind)?;
+            let checked = Self::checked_parse(self.parsed(file), path, source, input, kind)?;
             self.files.push(file);
             Ok(checked)
         })
@@ -1560,14 +1547,12 @@ impl Session {
     }
 
     fn checked_parse(
-        &self,
-        file: File,
+        parsed: ParsedModuleRef,
         path: &str,
         source: &str,
         input: &imre_ast::indentation::Source<'_>,
         kind: crate::SourceKind,
     ) -> Result<(ParsedModuleRef, HashMap<TextSize, usize>), String> {
-        let parsed = self.parsed(file);
         if let Some(issue) = input.first_issue(parsed.errors().first()) {
             return Err(format!("{path}: {issue}"));
         }
@@ -3344,10 +3329,10 @@ pub(crate) enum FallbackCalls {
     DecoratorFactories,
 }
 
-/// The earliest initializer assignment through the module's actual globals dictionary.
+/// The earliest write to a module name through its namespace or a checked literal.
 #[salsa::tracked]
 fn first_global_item_write(
-    db: &dyn Db,
+    db: &dyn LiteralSourceDb,
     file: File,
     key: String,
     bound: TextSize,
@@ -3355,25 +3340,108 @@ fn first_global_item_write(
     let source = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
     let model = SemanticModel::new(db, source);
-    parsed
-        .syntax()
-        .body
-        .iter()
-        .filter_map(Stmt::as_assign_stmt)
-        .flat_map(|assignment| &assignment.targets)
-        .filter(|target| target.start() >= bound)
-        .find_map(|target| {
-            let item = target.as_subscript_expr()?;
-            if item.slice.as_string_literal_expr()?.value.to_str() != key {
-                return None;
+    let mut exec_write = None;
+    for stmt in parsed.suite() {
+        if let Some(assignment) = stmt.as_assign_stmt() {
+            for item in assignment
+                .targets
+                .iter()
+                .filter_map(Expr::as_subscript_expr)
+            {
+                let Some(literal) = item.slice.as_string_literal_expr() else {
+                    continue;
+                };
+                let name = literal.value.to_str();
+                if name != "exec" && (item.start() < bound || name != key) {
+                    continue;
+                }
+                let Some(call) =
+                    execution::assigned_value(db, file, &parsed, &item.value, Expr::is_name_expr)
+                        .and_then(Expr::as_call_expr)
+                else {
+                    continue;
+                };
+                if call.arguments.is_empty()
+                    && resolves_to_stdlib_function(&model, &call.func, "builtins", "globals")
+                {
+                    if name == key && item.start() >= bound {
+                        return Some(item.start());
+                    }
+                    if name == "exec" {
+                        exec_write = Some(item.start())
+                    }
+                }
             }
-            let receiver =
-                execution::assigned_value(db, file, &parsed, &item.value, Expr::is_name_expr)?;
-            let call = receiver.as_call_expr()?;
-            (call.arguments.is_empty()
-                && resolves_to_stdlib_function(&model, &call.func, "builtins", "globals"))
-            .then_some(item.start())
-        })
+            continue;
+        }
+        let Some(call) = stmt
+            .as_expr_stmt()
+            .and_then(|stmt| stmt.value.as_call_expr())
+        else {
+            continue;
+        };
+        if !call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "exec")
+            || call.arguments.len() != 1
+        {
+            continue;
+        }
+        if exec_write.is_some_and(|at| {
+            shipped_exports::binding_at_use(db, file, &call.func)
+                .is_none_or(|binding| at >= binding.focus_range(db, &parsed).end())
+        }) {
+            continue;
+        }
+        let Some(literal) = execution::selected_module_exec_literal(&model, file, &parsed, call)
+        else {
+            continue;
+        };
+        let source = ruff_db::source::source_text(db, file);
+        let Ok(text) = crate::frontend::exec_literal_text(literal, source.as_str()) else {
+            continue;
+        };
+        let Some(site) = call.arguments.args.first().map(Ranged::start) else {
+            continue;
+        };
+        let Ok((child, _, child_parsed)) = execution::checked_literal_source(db, file, site, text)
+        else {
+            continue;
+        };
+        let index = ty_python_core::semantic_index(db, db.program_file(child));
+        let scope = FileScopeId::global();
+        let binds = |name: &str| {
+            let Some(symbol) = index.place_table(scope).symbol_id(name) else {
+                return false;
+            };
+            index
+                .use_def_map(scope)
+                .end_of_scope_symbol_bindings(symbol)
+                .any(|binding| {
+                    let Some(definition) = binding.binding.definition() else {
+                        return false;
+                    };
+                    let range = definition.kind(db).target_range(&child_parsed);
+                    let body = child_parsed.suite();
+                    body.get(body.partition_point(|stmt| stmt.end() <= range.start()))
+                        .and_then(Stmt::as_assign_stmt)
+                        .is_some_and(|assignment| {
+                            assignment
+                                .targets
+                                .iter()
+                                .any(|target| target.range() == range)
+                        })
+                })
+        };
+        if call.start() >= bound && binds(&key) {
+            return Some(call.start());
+        }
+        if binds("exec") {
+            exec_write = Some(call.start())
+        }
+    }
+    None
 }
 
 /// Return the single global binding of a name read by a deferred function.
@@ -3393,12 +3461,12 @@ fn sole_global_name<'db>(
 
 /// A namespace store changes the call shape only while its binding is current.
 fn changed_module_binding<'db>(
+    db: &'db dyn LiteralSourceDb,
     model: &SemanticModel<'db>,
     call: &ExprCall,
     name: &ruff_python_ast::ExprName,
     definition: ty_python_core::definition::Definition<'db>,
 ) -> bool {
-    let db = model.db();
     let caller = model.file();
     let index = ty_python_core::semantic_index(db, model.program_file());
     let scope = index.try_expression_scope_id(call.func.as_ref());
@@ -3744,7 +3812,7 @@ fn dormant_returns(
 /// A per-file result depends on the ty queries it actually read, including any other source
 /// consulted to render a diagnostic. Every revision still requests the result for every file.
 #[salsa::tracked(returns(ref))]
-fn file_errors<'db>(db: &'db dyn Db, checked: CheckedFile<'db>) -> Vec<CheckedError> {
+fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> Vec<CheckedError> {
     let file = checked.file(db);
     let checks = checked.checks(db);
     let full = matches!(checks, FileChecks::Full | FileChecks::DeclaredSignatures);
@@ -4389,7 +4457,12 @@ fn declared_parameter(
 }
 
 /// Leave argument conversion on vendored callables to Python.
-fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rule: &str) -> bool {
+fn runtime_argument(
+    db: &dyn LiteralSourceDb,
+    checked: CheckedFile<'_>,
+    range: TextRange,
+    rule: &str,
+) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::Type;
     let checks = checked.checks(db);
@@ -4434,10 +4507,26 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
         return true;
     }
     let model = SemanticModel::new(db, file);
-    if let Some(declarations) = checked.declarations(db) {
-        let Some(name) = call.func.as_name_expr() else {
-            return true;
-        };
+    let declarations = checked.declarations(db);
+    let named = if declarations.is_some() || is_call_shape_rule(rule) {
+        call.func.as_name_expr().and_then(|name| {
+            let definition =
+                resolved_name_definition(&model, name, ImportAliasResolution::ResolveAliases)?;
+            Some((name, definition))
+        })
+    } else {
+        None
+    };
+    if let Some((name, definition)) = named
+        && matches!(
+            definition.kind(db),
+            ty_python_core::definition::DefinitionKind::Function(_)
+        )
+        && changed_module_binding(db, &model, call, name, definition)
+    {
+        return true;
+    }
+    if let Some(declarations) = declarations {
         if call.arguments.args.iter().any(Expr::is_starred_expr)
             || call
                 .arguments
@@ -4447,18 +4536,16 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
         {
             return true;
         }
-        return resolved_name_definition(&model, name, ImportAliasResolution::ResolveAliases)
-            .is_none_or(|definition| {
-                declarations
-                    .call_shapes(db)
-                    .binary_search(&definition)
-                    .is_err()
-                    || changed_module_binding(&model, call, name, definition)
-                    || declarations
-                        .program_files(db)
-                        .iter()
-                        .any(|&file| function_layout_writes(db, file).contains(&definition))
-            });
+        return named.is_none_or(|(_, definition)| {
+            declarations
+                .call_shapes(db)
+                .binary_search(&definition)
+                .is_err()
+                || declarations
+                    .program_files(db)
+                    .iter()
+                    .any(|&file| function_layout_writes(db, file).contains(&definition))
+        });
     }
     let Some(callee) = call.func.inferred_type(&model) else {
         return local_calls;
@@ -5211,6 +5298,26 @@ pub(crate) fn check_form_feeds(source: &str, tokens: &Tokens) -> Result<(), Stri
 
 #[salsa::db]
 impl salsa::Database for Database {}
+
+#[salsa::db]
+trait LiteralSourceDb: Db {
+    /// Virtual files keep immutable parser inputs outside the module search path.
+    fn virtual_source(&self, key: &str, text: &str) -> File;
+}
+
+#[salsa::db]
+impl LiteralSourceDb for Database {
+    fn virtual_source(&self, key: &str, text: &str) -> File {
+        let key = ruff_db::system::SystemVirtualPath::new(key);
+        self.files
+            .try_virtual_file(key)
+            .unwrap_or_else(|| {
+                self.system.fs().write_virtual_file(key, text.as_bytes());
+                self.files.virtual_file(self, key)
+            })
+            .file()
+    }
+}
 
 #[salsa::db]
 impl ruff_db::Db for Database {

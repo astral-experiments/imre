@@ -500,6 +500,19 @@ fn a_module_dictionary_write_only_replaces_a_live_module_name() {
         crate::compile_file(&path, None, &options)
     };
     compile(format!("{functions}def enter(): return target()\nprint(set([1, 2]))\nglobals()['target'] = replacement\nprint(enter())\n")).unwrap();
+    compile(format!(
+        "{functions}print(set([1, 2]))\nexec(\"target = replacement\")\nprint(target())\n"
+    ))
+    .unwrap();
+    let mut compiler = crate::IncrementalCompiler::default();
+    compiler.check_file(&path, None).unwrap();
+    fs::write(
+        &path,
+        format!("{functions}print(set([1, 2]))\nexec(\"other = replacement\")\nprint(target())\n"),
+    )
+    .unwrap();
+    let error = compiler.check_file(&path, None).unwrap_err();
+    assert!(error.contains("No argument provided"), "{error}");
     for source in [
         "def replacement(): return 37\nglobals()['target'] = replacement\ndef target(n: int): return n\nprint(set([1, 2]))\nprint(target())\n".to_owned(),
         "from helper import replacement\ndef enter():\n    from helper import target\n    return target()\nprint(set([1, 2]))\nglobals()['target'] = replacement\nprint(enter())\n".to_owned(),
