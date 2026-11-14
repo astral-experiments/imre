@@ -14379,6 +14379,7 @@ impl<'a> Checker<'a> {
                 }
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
                 "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),
+                "index" => return self.registered_method_call(call, attribute, receiver, Type::Int),
                 _ => {
                     return self.unsupported_method_call(
                         call,
