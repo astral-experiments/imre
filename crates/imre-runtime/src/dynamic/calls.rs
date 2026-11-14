@@ -5017,7 +5017,8 @@ impl Context {
             {
                 let class = class.as_str().to_owned();
                 let (module, short) = class.rsplit_once('.').unwrap();
-                if super::deque::iterator_class(&class).is_some()
+                if (class == "_contextvars.Context"
+                    || super::deque::iterator_class(&class).is_some())
                     && let Some(value) = self.own_class_attr(obj, name)
                 {
                     return Ok(value);
