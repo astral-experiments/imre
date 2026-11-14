@@ -4996,10 +4996,11 @@ impl Context {
                         return Ok(self.heap.code_name(module));
                     }
                     "__module__" => return Ok(self.text(module.to_owned())),
-                    "__class_getitem__" if let Some(method) = self.own_class_attr(obj, name) => {
-                        return self.bind_attribute(method, NONE, obj);
+                    "__class_getitem__" | "MISSING"
+                        if let Some(member) = self.own_class_attr(obj, name) =>
+                    {
+                        return self.bind_attribute(member, NONE, obj);
                     }
-                    "MISSING" if class == "_contextvars.Token" => return Ok(self.token_missing),
                     "__hash__" | "__doc__" | "__text_signature__" if class == KEY_WRAPPER => {
                         return Ok(NONE);
                     }
@@ -5571,9 +5572,7 @@ impl Context {
             {
                 return Ok(self.text(builtin.split('.').next().unwrap().to_owned()));
             }
-            Value::ContextVar { .. } | Value::ContextToken { .. } | Value::DefaultDict { .. }
-                if name == "__class_getitem__" =>
-            {
+            Value::ContextVar { .. } | Value::DefaultDict { .. } if name == "__class_getitem__" => {
                 let owner = self.exact_type(obj)?;
                 return self.lookup_attr(owner, name);
             }
@@ -5581,6 +5580,12 @@ impl Context {
             Value::ContextToken { variable, .. } if name == "var" => return Ok(variable),
             Value::ContextToken { old, .. } if name == "old_value" => {
                 return Ok(old.unwrap_or(self.token_missing));
+            }
+            Value::ContextToken { .. } => {
+                let owner = self.exact_type(obj)?;
+                if let Some(member) = self.own_class_attr(owner, name) {
+                    return self.bind_attribute(member, obj, owner);
+                }
             }
             Value::Native(ref builtin)
                 if matches!(builtin.as_str(), "binascii.a2b_hex" | "binascii.unhexlify") =>
