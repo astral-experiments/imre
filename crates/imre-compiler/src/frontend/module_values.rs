@@ -688,9 +688,13 @@ impl Initialization {
         let mut pending = None;
         let complete = range.end == module.parsed.syntax().body.len();
         for index in range {
-            // Inference and registered modules need the effects on bindings and types.
-            // Keep only the current statement's work until it has supplied those facts.
-            if output.is_none() {
+            // A refused region cannot publish a fixed initializer. Continue checking
+            // its bindings and diagnostics without retaining stores or their checkpoints.
+            if checker.unrepresented.get_mut().is_some() {
+                checkpoints = None;
+            }
+            let emit = checkpoints.is_some();
+            if !emit {
                 body.clear();
             }
             let statement = &module.parsed.syntax().body[index];
@@ -747,7 +751,7 @@ impl Initialization {
                             definition,
                             class,
                             available,
-                            output.is_some().then_some(&mut body),
+                            emit.then_some(&mut body),
                             checkpoints.as_mut(),
                         )?;
                     }
@@ -781,7 +785,7 @@ impl Initialization {
                             slot
                         };
                         checker.globals.publish_function(slot, signature.id);
-                        if output.is_some() {
+                        if emit {
                             body.push(Statement::store_global(slot, value));
                         }
                     }
@@ -861,11 +865,7 @@ impl Initialization {
                     Some(crate::modules::ImportSnapshot::Values(sources)) => Some(sources),
                     _ => None,
                 };
-                match checker.initialize_global(
-                    statement,
-                    definition,
-                    output.is_some().then_some(&mut body),
-                ) {
+                match checker.initialize_global(statement, definition, emit.then_some(&mut body)) {
                     Ok(()) => {}
                     Err(wait @ Failure::PendingSignature { .. }) => {
                         checker

@@ -626,16 +626,27 @@ impl Checker<'_> {
         fixed_result: Type,
         arguments: Vec<Expr>,
     ) -> Result<Expr, String> {
-        let ty = receiver.ty;
-        let target = loaded_attribute(method, receiver);
-        let mut value = self.call_with_values(call, target, arguments);
-        if self.registered.is_none() {
-            let failure = self.scoped_builtin_error(&format!("{ty}.{}", method.attr), call);
+        let result = if self.registered.is_none() {
+            let failure =
+                self.scoped_builtin_error(&format!("{}.{}", receiver.ty, method.attr), call);
             if !self.missing_operation(&failure) {
                 return Err(failure);
             }
-            value.ty = fixed_result;
-        }
+            // The module's Python frame will bind and invoke the method. Only the
+            // checked result type and possible call effects survive in this region.
+            if self.module_scope && self.inference.is_none() {
+                return Ok(super::operation(
+                    Builtin::UnrepresentedCall,
+                    fixed_result,
+                    vec![],
+                ));
+            }
+            fixed_result
+        } else {
+            Type::PythonObject
+        };
+        let mut value = self.call_with_values(call, loaded_attribute(method, receiver), arguments);
+        value.ty = result;
         Ok(value)
     }
 }
