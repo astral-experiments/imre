@@ -5320,6 +5320,16 @@ impl Context {
     }
 
     pub(super) fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        self.call_binary_operator(obj, name, other, false)
+    }
+
+    fn call_binary_operator(
+        &mut self,
+        obj: Id,
+        name: &str,
+        other: Id,
+        inplace: bool,
+    ) -> Result<Option<Id>> {
         // Rich comparison calls a native wrapper with an explicit receiver. In
         // particular, an alias on a foreign class raises the wrapper's call error.
         if comparison_op(name).is_some()
@@ -5416,7 +5426,20 @@ impl Context {
         {
             Some(self.lookup_attr(obj, name)?)
         } else {
-            self.bound_slot(obj, name)?
+            match self.bound_slot(obj, name) {
+                Err(error) if !inplace && self.is_attribute_error(&error) => {
+                    // A descriptor can retain the exception whose binding failure we consume.
+                    if error
+                        .trace
+                        .as_ref()
+                        .is_some_and(|trace| trace.instance.is_some())
+                    {
+                        self.raised_instance(error);
+                    }
+                    return Ok(None);
+                }
+                result => result?,
+            }
         };
         let Some(method) = method else {
             // An inherited integer addition accepts any integer storage, including bool.
@@ -6114,7 +6137,7 @@ impl Context {
             return builtins::call(self, "mappingproxy.__ior__", &[a, b], &[]);
         }
         if let Some((_, _, slot)) = binary_slots(op)
-            && let Some(result) = self.operator_slot(a, slot, b)?
+            && let Some(result) = self.call_binary_operator(a, slot, b, true)?
         {
             return Ok(result);
         }

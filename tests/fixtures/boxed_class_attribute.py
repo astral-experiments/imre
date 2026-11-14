@@ -150,6 +150,31 @@ def ordinary_slot_members():
         raise AssertionError("uninitialized slot fell through to instance dictionary")
     assert obj.__dict__["field"] == 3 and root.__get__(obj, Child) == 1
 
+    class Right:
+        def __radd__(self, left):
+            return "reflected"
+
+    Child.__add__ = child
+    right = Right()
+    assert obj + right == "reflected"
+    child.__set__(obj, lambda other: 7)
+    assert obj + right == 7
+    child.__delete__(obj)
+    assert obj + right == "reflected"
+
+    missing = AttributeError("missing operand")
+
+    class Absent:
+        def __get__(self, instance, owner):
+            raise missing
+
+    Child.__add__ = Absent()
+    try:
+        raise RuntimeError("outer")
+    except RuntimeError as outer:
+        assert obj + right == "reflected"
+        assert missing.__context__ is outer
+
 
 def reported_instance_checks():
     class Child(Loud):
