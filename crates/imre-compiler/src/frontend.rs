@@ -8906,7 +8906,9 @@ impl<'a> Checker<'a> {
         {
             return Ok(Expr::integer(level));
         }
-        if let Some(prefix) = self.cache_config(expression) {
+        if let Some(field) = expression.as_attribute_expr()
+            && let Some(prefix) = cache_paths::config(field, binding, || base_binding)
+        {
             return Ok(cache_paths::op(
                 ir::CachePathOperation::Get(prefix),
                 self.types.optional(Type::Str),
