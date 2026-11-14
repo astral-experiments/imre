@@ -696,23 +696,23 @@ impl<'f> Frame<'f, '_, '_> {
             return;
         }
         let (scope, name) = self.assignment_name(slot);
-        self.code.assign_owned_name(&scope, &name, &handle);
+        self.code.assign_owned_name(&scope, name, &handle);
     }
 
-    fn assignment_name(&mut self, slot: usize) -> (Cow<'static, str>, String) {
+    fn assignment_name(&mut self, slot: usize) -> (Cow<'static, str>, &'f str) {
         let binding = &self.names.expect("registered local names")[&slot];
         let scope = if let Some(slot) = binding.namespace {
             self.load_private(slot).into()
         } else {
             self.code.scope.clone()
         };
-        (scope, binding.name.clone())
+        (scope, &binding.name)
     }
 
     /// Retain the original RHS across a replaced owner's finalizer.
     pub(crate) fn bind_expression(&mut self, slot: usize, mark: &str, handle: &str) {
         let (scope, name) = self.assignment_name(slot);
-        let name = self.code.code_name(&name);
+        let name = self.code.code_name(name);
         let replaced = self
             .code
             .op("assign_named_target", &[&scope, &name, handle]);
