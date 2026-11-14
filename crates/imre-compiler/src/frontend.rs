@@ -10138,10 +10138,11 @@ impl<'a> Checker<'a> {
                         },
                     };
                     if python_comparison {
-                        return Ok(Expr {
-                            ty: Type::PythonObject,
-                            kind: ExprKind::Compare(values, vec![*op]),
-                        });
+                        return Ok(registered::values::comparison(
+                            compare,
+                            values,
+                            Some(operand_types),
+                        ));
                     }
                     if !values.iter().any(|value| value.ty.builtin_scalar_name().is_some()
                         && matches!(value.without_location().kind, ExprKind::Local(slot) if slot < first))
@@ -10419,7 +10420,6 @@ impl<'a> Checker<'a> {
                 {
                     values = values.into_iter().map(Self::enum_integer).collect();
                 }
-                let mut ops = Vec::new();
                 for (&op, pair) in compare.ops.iter().zip(values.windows(2)) {
                     let (ty, right) = (pair[0].ty, pair[1].ty);
                     if matches!(
@@ -10451,14 +10451,12 @@ impl<'a> Checker<'a> {
                         && self.types.is_counter(right)
                         && Compare::from_operator(op).is_some()
                     {
-                        ops.push(op);
                         continue;
                     }
                     if (self.types.is_ordered_dict(ty) || self.types.is_ordered_dict(right))
                         && self.types.mapping(ty) == self.types.mapping(right)
                         && matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
                     {
-                        ops.push(op);
                         continue;
                     }
                     let numeric = matches!(ty, Type::Int | Type::Float)
@@ -10624,14 +10622,13 @@ impl<'a> Checker<'a> {
                             "container and optional value comparisons are unsupported",
                         ));
                     }
-                    ops.push(op);
                 }
                 let result = if live_scalar_operands {
                     Type::PythonObject
                 } else {
                     Type::Bool
                 };
-                (result, ExprKind::Compare(values, ops))
+                (result, ExprKind::Compare(values, compare.ops.to_vec()))
             }
             ast::Expr::Subscript(subscript) => {
                 if let Some(ty) = self.environ_item_type(&subscript.value) {
