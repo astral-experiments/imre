@@ -4868,6 +4868,7 @@ for name in ("md4", "ripemd160"):
             "boxed_email_addresses.py",
             "boxed_html.py",
             "boxed_wave.py",
+            "boxed_xmlrpc_client.py",
             "boxed_http_message.py",
             "boxed_time.py",
             "boxed_timeit.py",

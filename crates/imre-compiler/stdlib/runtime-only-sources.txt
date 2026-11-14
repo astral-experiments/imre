@@ -15,3 +15,5 @@ venv/scripts/common/activate.fish
 venv/scripts/nt/activate.bat
 venv/scripts/nt/deactivate.bat
 venv/scripts/posix/activate.csh
+xmlrpc/__init__.py
+xmlrpc/client.py

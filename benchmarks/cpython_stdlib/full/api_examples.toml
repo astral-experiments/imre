@@ -87,6 +87,7 @@ unittest = ["Selected `TestCase` assertions, fixtures, discovery and result hand
 urllib = ["`urllib.parse.urlsplit` exposes named result fields. `quote` and `unquote` accept codec options, and `quote_from_bytes` escapes octets.","benchmarks/cpython_stdlib/full/urllib/README.md"]
 uuid = ["Construct a `UUID` from hexadecimal text or a 128-bit integer and read its canonical spelling, `hex` and `int`.","tests/fixtures/text/uuid_conversion.py"]
 warnings = ["Filter supported native warnings; format and display them with `formatwarning` and the default `showwarning`.","benchmarks/cpython_stdlib/full/warnings/README.md"]
+xmlrpc = ["Runtime-loaded modules can serialize and parse XML-RPC method calls, binary values and faults through `xmlrpc.client`.","tests/fixtures/boxed_xmlrpc_client.py"]
 zipfile = ["Read stored and deflated members and report CRC failures.","benchmarks/cpython_stdlib/native_zip_members.py"]
 zipimport = ["Read stored and deflated resources with `zipimporter.get_data()`. The Python import loader can run a compiled module when its ZIP origin and source bytes match the build. [Resource test](../tests/fixtures/files/zipimport_resources.py)","tests/python_cli.py"]
 wave = ["Read and write stereo PCM frames in a WAV stream, query parameters, and rewind.","tests/fixtures/boxed_wave.py"]
