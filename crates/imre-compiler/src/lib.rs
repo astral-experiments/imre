@@ -1795,6 +1795,26 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn list_index_checks_its_arguments_in_source_order() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        let check = |first, second| {
+            std::fs::write(&path, format!(
+                "def integer(n: int) -> int: return n\nanswer = [7, 8].index(\n    integer({first}),\n    integer({second}),\n)\nprint(answer)\n"
+            )).unwrap();
+            super::check_file(&path, None)
+        };
+        check("8", "0").unwrap();
+        for (first, line) in [("'needle'", 3), ("8", 4)] {
+            let error = check(first, "'start'").unwrap_err();
+            assert!(
+                error.contains(&format!("app.py:{line}:13: Imre: expected int, got str")),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
     fn indexed_store_keeps_the_original_module_list_layout() {
         let project = tempfile::tempdir().unwrap();
         let path = project.path().join("app.py");
