@@ -42,6 +42,18 @@ impl Value {
 }
 
 impl Context {
+    pub(super) fn property_is_abstract(&mut self, receiver: Id) -> Result<Id> {
+        // A marker's Python lookup or truth test can replace the remaining accessors.
+        let mut marked = |select: fn(&Property) -> Id| -> Result<bool> {
+            let property = self.heap.get(receiver).property().expect("validated property");
+            let accessor = select(property);
+            Ok(accessor != NONE && self.is_abstract_method(accessor)?)
+        };
+        Ok(super::builtins::boolean(
+            marked(|p| p.get)? || marked(|p| p.set)? || marked(|p| p.delete)?,
+        ))
+    }
+
     /// Install the new strong edge before releasing the previous name to Python.
     pub(super) fn replace_property_name(&mut self, receiver: Id, name: Option<Id>) {
         let property = self.heap.get_mut(receiver).property_mut().unwrap();

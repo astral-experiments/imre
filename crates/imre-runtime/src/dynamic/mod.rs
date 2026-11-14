@@ -3566,9 +3566,13 @@ impl Context {
             ),
             "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
             _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
-                if name == "function" {
-                    let descriptor = self.alloc(Value::LayoutDescriptor(value, "__code__"));
-                    entries.push((self.heap.code_name("__code__"), descriptor));
+                if let Some(field) = match name {
+                    "function" => Some("__code__"),
+                    "property" => Some("__isabstractmethod__"),
+                    _ => None,
+                } {
+                    let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
+                    entries.push((self.heap.code_name(field), descriptor));
                 } else if name == "method" {
                     for field in ["__func__", "__self__"] {
                         let descriptor = self.readonly_member("method", field);

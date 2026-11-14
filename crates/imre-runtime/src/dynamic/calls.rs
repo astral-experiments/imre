@@ -3221,6 +3221,7 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::PythonFrame { .. }
+                | Value::Property(_)
                 | Value::ThreadHandle(_)
                 | Value::ZstdCompressor(_)
                 | Value::ZstdDecompressor(_)
@@ -6847,6 +6848,7 @@ impl Context {
         if matches!(
             self.heap.get(obj),
             Value::Method { .. }
+                | Value::Property(_)
                 | Value::Code(_)
                 | Value::PythonFrame { .. }
                 | Value::LzmaDecompressor(_)
@@ -7134,6 +7136,10 @@ impl Context {
         receiver: Id,
     ) -> Result<Id> {
         match name {
+            "__isabstractmethod__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                self.property_is_abstract(receiver)
+            }
             "f_builtins" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 let Value::PythonFrame { builtins, .. } = *self.heap.get(receiver) else {
@@ -7235,7 +7241,7 @@ impl Context {
                 self.layout_receiver_class(owner, field, receiver)?;
                 self.write_exception_getset(receiver, field, value)
             }
-            "f_builtins" | "__mro__" | "__text_signature__" => {
+            "f_builtins" | "__mro__" | "__text_signature__" | "__isabstractmethod__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Err(self.readonly_getset_error(self.layout_owner_name(owner), name, receiver))
             }
