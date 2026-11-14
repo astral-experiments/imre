@@ -655,7 +655,6 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "truth" => Ok(flag(self.truth(a)?)),
             "generator" => self.generator(a, b),
             "iter" => self.loop_iterator(a),
             "get_iter" => self.iterator(a),
@@ -2384,7 +2383,6 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
             | "iter"
             | "await_iter"
             | "async_exit_context"
-            | "truth"
     ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
         || uniform_operand
     {
@@ -2423,6 +2421,26 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         ctx.heap.use_expression_line();
     }
     finish_at(ctx, result, span)
+}
+
+/// Test the operand at its source position, preserving exceptions raised by Python truth hooks.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_truth_at(
+    ctx: *mut Context,
+    value: Id,
+    span: *const [u32; 4],
+) -> bool {
+    // SAFETY: the caller owns its context and supplies null or a static module position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.heap.execution.pending.is_some() {
+        return false;
+    }
+    let mut result = ctx.truth(value);
+    finish_operand_position(ctx, &mut result, None);
+    result.unwrap_or_else(|error| {
+        finish_at(ctx, Err(error), span);
+        false
+    })
 }
 
 /// Publish a continued expression's source line without changing its statement's GC roots.
@@ -2739,9 +2757,9 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
 }
 
 /// Preserve the operation range when transferring an exception back to the caller.
-fn finish_operand_position(
+fn finish_operand_position<T>(
     ctx: &mut Context,
-    result: &mut Result<Id>,
+    result: &mut Result<T>,
     ordinary_anchor: Option<value::TracebackAnchor>,
 ) {
     if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()

@@ -720,11 +720,15 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let previous = range
             .filter(|_| span.is_none() || matches!(self.position, SourcePosition::Expression(_)))
             .map(|range| self.replace_position(SourcePosition::Expression(range)));
-        let boolean = self.op_at("truth", &[value], span);
+        self.take_matching_check();
+        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let condition = self.checked(&format!(
+            "call i1 @imre_dyn_truth_at(ptr %ctx, i64 {value}, ptr {position})"
+        ));
         if let Some(previous) = previous {
             self.leave_expression(previous);
         }
-        self.value(&format!("icmp eq i64 {boolean}, 2"))
+        condition
     }
 
     /// End the lifetime of the operands evaluated after the mark.

@@ -117,14 +117,6 @@ impl RegisteredFrame<'_, '_> {
         self.keep_operands(&mark, &awaitable, "0");
         self.await_at(&awaitable, "2", range, &mark)
     }
-
-    fn propagate_unless_suppressed(&mut self, exception: &str, result: &str, done: &str) {
-        let suppress = self.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE));
-        let propagate = self.name("b");
-        self.branch(&suppress, done, &propagate);
-        self.label(&propagate);
-        self.raise(exception, None, true);
-    }
 }
 
 impl<'p> Frame<'_, '_, 'p> {
@@ -275,15 +267,19 @@ impl Frame<'_, '_, '_> {
             },
             |frame, target, (error, result, outer_roots)| {
                 if matches!(target, Completion::Error) {
-                    if site.is_async {
+                    let suppress = if site.is_async {
                         frame.call_position(site.range);
-                        let suppress = frame.op("truth", &[result]);
-                        frame.keep_operands(&outer_roots.to_string(), error, &suppress);
+                        let suppress = frame.truth(result);
+                        frame.keep_operands(&outer_roots.to_string(), error, "0");
                         frame.op("restore_caught", &[&context.caught]);
-                        frame.propagate_unless_suppressed(error, &suppress, &done);
+                        suppress
                     } else {
-                        frame.propagate_unless_suppressed(error, result, &done);
-                    }
+                        frame.value(&format!("icmp eq i64 {result}, {}", super::permanent::TRUE))
+                    };
+                    let propagate = frame.name("b");
+                    frame.branch(&suppress, &done, &propagate);
+                    frame.label(&propagate);
+                    frame.raise(error, None, true);
                 } else if site.is_async {
                     frame.discard_truth(&outer_roots.to_string());
                 }
