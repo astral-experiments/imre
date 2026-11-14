@@ -334,6 +334,7 @@ pub(super) fn validate_functions(
         entry,
         types,
         &mut indirect,
+        |_| None,
         |value| direct_source(value, types).is_some(),
         |id| definitions.get(id).is_none_or(&entry_may_call),
     );

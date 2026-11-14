@@ -4240,10 +4240,11 @@ pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)
 }
 
 /// A callable operand keeps its origin through scopes, wrapper assignments, and local copies.
-pub(crate) fn retain_unproven_operands(
-    function: &Function,
-    owners: &mut Vec<&Expr>,
+pub(crate) fn retain_unproven_operands<'a>(
+    function: &'a Function,
+    owners: &mut Vec<&'a Expr>,
     inputs: &[&CallArgs],
+    operand: impl Fn(&'a Expr) -> Option<&'a Expr>,
     proven: impl Fn(&Expr) -> bool,
 ) {
     fn origin(value: &Expr) -> &Expr {
@@ -4265,22 +4266,29 @@ pub(crate) fn retain_unproven_operands(
             });
     }
     let mut copies = Vec::new();
-    walk_nodes(&function.body, &mut |node, _| match node {
-        // Clearing a slot does not give it a new callable.
-        Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
-        | Node::Expression(Expr {
-            kind: ExprKind::Scope { .. },
-            ..
-        }) => {}
-        Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
-        _ => node_writes(node, &mut |slot, value| match value.map(origin) {
-            Some(Expr {
-                kind: ExprKind::Local(source),
+    walk_nodes(&function.body, &mut |node, _| {
+        if let Node::Expression(value) = &node
+            && let Some(owner) = operand(value)
+        {
+            owners.push(owner);
+        }
+        match node {
+            // Clearing a slot does not give it a new callable.
+            Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+            | Node::Expression(Expr {
+                kind: ExprKind::Scope { .. },
                 ..
-            }) => copies.push((*source, slot)),
-            Some(value) if proven(value) => {}
-            _ => plain[slot] = false,
-        }),
+            }) => {}
+            Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
+            _ => node_writes(node, &mut |slot, value| match value.map(origin) {
+                Some(Expr {
+                    kind: ExprKind::Local(source),
+                    ..
+                }) => copies.push((*source, slot)),
+                Some(value) if proven(value) => {}
+                _ => plain[slot] = false,
+            }),
+        }
     });
     propagate_copy_facts(&mut plain, &copies);
     owners.retain(|owner| match origin(owner) {

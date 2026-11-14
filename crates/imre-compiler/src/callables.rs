@@ -29,21 +29,16 @@ pub(crate) struct TargetCollector {
     pub(crate) constructed: SourceTargets,
     wrapped: Vec<(Type, Target)>,
     open: HashSet<Type>,
-    wrapper_owners: Vec<usize>,
+    wrapper_owners: Vec<(usize, Type)>,
     pub(crate) constructors: BTreeMap<usize, Type>,
 }
 
 impl TargetCollector {
     pub(crate) fn inspect(&mut self, id: usize, types: &crate::types::Types, value: &ir::Expr) {
-        if matches!(
-            value.kind,
-            ExprKind::Builtin(
-                ir::Builtin::FunctionWrappedSet | ir::Builtin::FunctionWrappedGet(_),
-                _
-            )
-        ) && self.wrapper_owners.last() != Some(&id)
+        if let Some(owner) = wrapped_owner(value)
+            && self.wrapper_owners.last() != Some(&(id, owner.ty))
         {
-            self.wrapper_owners.push(id);
+            self.wrapper_owners.push((id, owner.ty));
         }
         if matches!(
             value.kind,
@@ -128,11 +123,12 @@ impl Targets {
 }
 
 /// Keep operands whose origin cannot be established from local writes and every closed call site.
-pub(crate) fn retain_unproven_operands(
-    functions: &[ir::Function],
-    entry: &ir::Function,
+pub(crate) fn retain_unproven_operands<'a>(
+    functions: &'a [ir::Function],
+    entry: &'a ir::Function,
     types: &crate::types::Types,
-    operands: &mut BTreeMap<usize, Vec<&ir::Expr>>,
+    operands: &mut BTreeMap<usize, Vec<&'a ir::Expr>>,
+    operand: impl Fn(&'a ir::Expr) -> Option<&'a ir::Expr>,
     proven: impl Fn(&ir::Expr) -> bool,
     may_enter_uncalled: impl Fn(usize) -> bool,
 ) {
@@ -167,9 +163,25 @@ pub(crate) fn retain_unproven_operands(
     operands.retain(|&id, owners| {
         let function = functions.get(id).unwrap_or(entry);
         let inputs = direct_inputs.get(&id);
-        ir::retain_unproven_operands(function, owners, inputs.map_or(&[], Vec::as_slice), &proven);
+        ir::retain_unproven_operands(
+            function,
+            owners,
+            inputs.map_or(&[], Vec::as_slice),
+            &operand,
+            &proven,
+        );
         !owners.is_empty() && (!inputs.is_some_and(Vec::is_empty) || may_enter_uncalled(id))
     });
+}
+
+fn wrapped_owner(expr: &ir::Expr) -> Option<&ir::Expr> {
+    match &expr.kind {
+        ExprKind::Builtin(
+            ir::Builtin::FunctionWrappedSet | ir::Builtin::FunctionWrappedGet(_),
+            args,
+        ) => Some(&args[0]),
+        _ => None,
+    }
 }
 
 /// Callable representation selected from the original checked operations.
@@ -180,26 +192,10 @@ pub(crate) struct Layouts {
 
 pub(crate) fn layouts(
     module: &ir::Module,
-    targets: TargetCollector,
+    mut targets: TargetCollector,
 ) -> Result<Layouts, LoweringDiagnostic> {
-    let mut function_link_types = HashSet::new();
-    let mut link_owners = BTreeMap::<usize, Vec<&ir::Expr>>::new();
-    for &id in &targets.wrapper_owners {
-        let function = module.functions.get(id).unwrap_or(&module.entry);
-        ir::walk_expressions(&function.body, &mut |expr| {
-            let ExprKind::Builtin(builtin, args) = &expr.kind else {
-                return;
-            };
-            match builtin {
-                ir::Builtin::FunctionWrappedSet | ir::Builtin::FunctionWrappedGet(_) => {
-                    let owner = &args[0];
-                    function_link_types.insert(owner.ty);
-                    link_owners.entry(id).or_default().push(owner);
-                }
-                _ => {}
-            }
-        });
-    }
+    let wrapper_owners = std::mem::take(&mut targets.wrapper_owners);
+    let mut link_types: HashSet<_> = wrapper_owners.iter().map(|&(_, ty)| ty).collect();
     let callable_targets = targets.finish();
     let cached = |id| module.types.cache_adapter(id).is_some();
     let unknown_signature = || {
@@ -208,33 +204,36 @@ pub(crate) fn layouts(
         )
         .classified(LoweringKind::Object)
     };
-    if function_link_types
+    if link_types
         .iter()
         .any(|&ty| module.types.dispatcher(ty).is_some() || callable_targets.get(ty).is_empty())
     {
         return Err(unknown_signature());
     }
-    let linked_functions = function_link_types
+    let linked_functions = link_types
         .iter()
         .flat_map(|&ty| callable_targets.get(ty))
         .filter(|target| !target.bound)
         .map(|target| target.function)
         .collect::<HashSet<_>>();
-    link_owners.retain(|_, owners| {
-        owners.retain(|owner| {
-            callable_targets
-                .get(owner.ty)
-                .iter()
-                .any(|target| target.bound && !cached(target.function))
-        });
-        !owners.is_empty()
+    link_types.retain(|ty| {
+        callable_targets
+            .get(*ty)
+            .iter()
+            .any(|target| target.bound && !cached(target.function))
     });
-
+    let mut link_owners = BTreeMap::<usize, Vec<&ir::Expr>>::new();
+    for (id, ty) in wrapper_owners {
+        if link_types.contains(&ty) {
+            link_owners.entry(id).or_default();
+        }
+    }
     retain_unproven_operands(
         &module.functions,
         &module.entry,
         &module.types,
         &mut link_owners,
+        |value| wrapped_owner(value).filter(|owner| link_types.contains(&owner.ty)),
         |value| {
             matches!(&value.kind, ExprKind::Builtin(ir::Builtin::StaticFunction(_), args)
             if matches!(args[0].kind, ExprKind::Callable { function, receiver: None }
