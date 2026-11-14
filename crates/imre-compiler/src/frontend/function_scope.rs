@@ -38,6 +38,14 @@ struct ClosureNames {
     locals_incomplete: bool,
 }
 
+struct LocalNames<'a>(&'a indexmap::IndexSet<String>);
+
+impl serde::Serialize for LocalNames<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0)
+    }
+}
+
 pub(crate) struct ClassBindings {
     pub(crate) locals: indexmap::IndexSet<String>,
     pub(crate) globals: BTreeSet<String>,
@@ -377,7 +385,7 @@ impl FunctionScope {
             json!(names.cell_reads)
         };
         if !names.locals.is_empty() {
-            signature["scope_locals"] = json!(names.locals.iter().collect::<Vec<_>>());
+            signature["scope_locals"] = json!(LocalNames(&names.locals));
         }
         if !names.reads.is_empty() {
             signature["scope_reads"] = json!(names.reads);
@@ -443,12 +451,7 @@ impl<'p> ScopeFacts<'p> {
                         if f_scope.globals.contains(name) {
                             return false;
                         }
-                        if f_scope
-                            .metadata
-                            .local_names()
-                            .iter()
-                            .any(|local| local.as_str() == Some(name))
-                        {
+                        if f_scope.metadata.locals.contains(name) {
                             return true;
                         }
                         f.type_params.as_deref()
@@ -536,7 +539,7 @@ impl<'p> ScopeFacts<'p> {
 pub(crate) enum LexicalSite<'a, 's> {
     Lambda(&'a ast::ExprLambda, super::RegisteredScope, bool),
     Template(&'a ast::Expr, super::RegisteredScope),
-    Generator(TextRange, &'s Plan<'a>, bool, &'s FunctionScope),
+    Generator(TextRange, &'s Plan<'a>, bool, &'s mut FunctionScope),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -770,7 +773,7 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                 self.visit_expr(plan.outer);
                 let is_async = plan.body_suspends();
                 let parent = std::mem::replace(&mut self.scope, Scope::Function { is_async });
-                let scope =
+                let mut scope =
                     FunctionScope::generator(&plan, self.names.string_annotations, |child| {
                         self.visit_expr(child)
                     });
@@ -779,7 +782,7 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     expr.range(),
                     &plan,
                     is_async,
-                    &scope,
+                    &mut scope,
                 ));
             }
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {

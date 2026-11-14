@@ -23,7 +23,7 @@ impl RegisteredLambda {
     pub(super) fn prepare(
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
-        scope: &FunctionScope,
+        scope: &mut FunctionScope,
         owner: RegisteredScope,
         yields: bool,
     ) -> Self {
@@ -218,7 +218,7 @@ async def factory(seed, rows, mark):
                 lambdas: Some(&sites),
                 ..source
             },
-            &FunctionScope::lambda(residual, false),
+            &mut FunctionScope::lambda(residual, false),
             owner,
             false,
         );
@@ -255,7 +255,7 @@ async def factory(seed, rows, mark):
         let plan = RegisteredLambda::prepare(
             lambda,
             literals.context(&module.source),
-            &FunctionScope::lambda(lambda, false),
+            &mut FunctionScope::lambda(lambda, false),
             RegisteredScope::Function { is_async: true },
             false,
         );
@@ -356,7 +356,7 @@ async def factory(seed, rows, mark):
         let plan = RegisteredLambda::prepare(
             lambda,
             source,
-            &FunctionScope::lambda(lambda, false),
+            &mut FunctionScope::lambda(lambda, false),
             RegisteredScope::Module,
             false,
         );
@@ -431,7 +431,7 @@ async def factory(seed, rows, mark):
         let plan = RegisteredLambda::prepare(
             lambda,
             source,
-            &FunctionScope::lambda(lambda, false),
+            &mut FunctionScope::lambda(lambda, false),
             RegisteredScope::Module,
             false,
         );

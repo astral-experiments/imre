@@ -35,8 +35,8 @@ impl LexicalOperands {
                 }
             }
             LexicalSite::Lambda(lambda, owner, yields) => {
-                let scope = FunctionScope::lambda(lambda, strings);
-                let plan = RegisteredLambda::prepare(lambda, source, &scope, owner, yields);
+                let mut scope = FunctionScope::lambda(lambda, strings);
+                let plan = RegisteredLambda::prepare(lambda, source, &mut scope, owner, yields);
                 if let Some(expressions) = &mut self.expressions {
                     expressions.register_lexical(lambda.into(), std::rc::Rc::clone(&plan.binding));
                 }
@@ -61,7 +61,7 @@ impl RegisteredGenerator {
         plan: &Plan<'_>,
         is_async: bool,
         source: values::RegisteredSource<'_>,
-        scope_facts: &FunctionScope,
+        scope_facts: &mut FunctionScope,
     ) -> Option<Self> {
         // The constructor installs the target declarations and the acquired cursor in
         // a fresh comprehension frame. Reads and writes now use that frame directly.
