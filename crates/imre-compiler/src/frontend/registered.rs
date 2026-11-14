@@ -399,7 +399,8 @@ pub(super) fn finish_source_checks(
     graph: &mut SourceGraph,
     checks: SourceChecks,
     mut source_checks: Option<&mut crate::analysis::Session>,
-) {
+) -> bool {
+    let mut retry_fixed = false;
     let mut accepted = |module,
                         range,
                         session: &mut crate::analysis::Session,
@@ -423,10 +424,11 @@ pub(super) fn finish_source_checks(
             &mut graph.session,
             graph.registered_source_errors.get_mut(),
         ) {
+            retry_fixed |= matches!(source, SourceFrame::ReplacesFixed);
             graph.defer_registered_function(
                 module,
                 range.start(),
-                matches!(source, SourceFrame::Registered),
+                !matches!(source, SourceFrame::Fixed),
             );
         }
     }
@@ -443,6 +445,7 @@ pub(super) fn finish_source_checks(
             retain_generator_body(graph, owner.module, definition);
         }
     }
+    retry_fixed
 }
 
 fn retain_generator_body(
@@ -523,7 +526,7 @@ impl CheckedPlacement {
         {
             solved
                 .borrow_mut()
-                .insert((self.module, self.range), SourceFrame::Registered);
+                .insert((self.module, self.range), SourceFrame::ReplacesFixed);
         }
         graph.register_function(self.module, self.range.start(), self.frame);
     }
@@ -630,6 +633,8 @@ fn checked_definition(
 pub(super) enum SourceFrame {
     Fixed,
     Registered,
+    /// This body also supplied the result of checking the original definition.
+    ReplacesFixed,
 }
 
 /// A registered body can supply an unresolved calling convention only if its other

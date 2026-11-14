@@ -4,6 +4,34 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn a_dormant_async_method_preserves_an_unrelated_definitions_field_contract() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let scores = project.path().join("scores.py");
+    fs::write(
+        &main,
+        "import scores\nclass Dormant:\n    async def __aiter__(self):\n        yield 1\n",
+    )
+    .unwrap();
+    let item = "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = [1]\n";
+    for (function, location) in [
+        (
+            "def store(x: Item) -> None:\n    x.values.append('wrong')\n",
+            "scores.py:7:21",
+        ),
+        (
+            "def store(x: Item) -> None:\n    def write() -> None:\n        x.values.append('wrong')\n    write()\n",
+            "scores.py:8:25",
+        ),
+    ] {
+        fs::write(&scores, format!("{item}\n{function}")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(error.contains(location), "{error}");
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
+}
+
+#[test]
 fn rebound_imported_cells_keep_their_storage_through_checking() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");

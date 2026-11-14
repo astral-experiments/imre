@@ -675,7 +675,7 @@ pub(crate) enum SourceCheckSession<'a> {
 pub(crate) fn lower_with_caller_cache(
     graph: &mut SourceGraph,
     mut cache: Option<&mut CallerCache>,
-    source_checks: Option<SourceCheckSession<'_>>,
+    mut source_checks: Option<SourceCheckSession<'_>>,
 ) -> StdResult<crate::CheckedProgram, Diagnostic> {
     let mut key_reprs = HashSet::new();
     loop {
@@ -694,17 +694,20 @@ pub(crate) fn lower_with_caller_cache(
         if let Some(lowered) = lowered.transpose()
             && key_reprs.len() == before
         {
-            let session = match source_checks {
+            let session = match &mut source_checks {
                 Some(SourceCheckSession::SharedGraph) => {
                     for &owner in &checks.unresolved {
                         let _ = registered::retain_generator(graph, owner, &checks);
                     }
                     return lowered;
                 }
-                Some(SourceCheckSession::Borrowed(session)) => Some(session),
+                Some(SourceCheckSession::Borrowed(session)) => Some(&mut **session),
                 None => None,
             };
-            registered::finish_source_checks(graph, checks, session);
+            if registered::finish_source_checks(graph, checks, session) {
+                // The cached refusal makes this definition use its original checked body.
+                continue;
+            }
             return lowered;
         }
         // Only the typed subscript knows the key's class. Include its missing
