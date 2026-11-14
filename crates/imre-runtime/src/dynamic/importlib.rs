@@ -616,9 +616,16 @@ impl Context {
             return Ok(None);
         };
         // A source-declared future already applies to its initializer. Additional
-        // inherited flags need different code. Only the loader owns legacy records
-        // without flags and registrations that carry a syntax diagnostic.
-        if inherited & !flags.unwrap_or(0) != 0 || (flags.is_none() && !loader) {
+        // inherited flags need different code. A registered archive parser error
+        // was checked on the same decoded exec input as ordinary compile(bytes).
+        let parser_error = matches!(
+            code,
+            ModuleInitializer::Invalid {
+                parser_line: Some(_),
+                ..
+            }
+        );
+        if inherited & !flags.unwrap_or(0) != 0 || (flags.is_none() && !loader && !parser_error) {
             return Ok(None);
         }
         if entries.any(|(_, other, hash, other_flags)| {
@@ -626,7 +633,8 @@ impl Context {
                 || other_flags != flags
                 || match (entry, other) {
                     (Some(a), Some(b)) => !std::ptr::fn_addr_eq(a, b),
-                    (None, None) => false,
+                    // Ordinary compile needs one unambiguous stored diagnostic.
+                    (None, None) => !loader,
                     _ => true,
                 }
         }) {
