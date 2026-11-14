@@ -3,17 +3,13 @@
 use super::thread_callback::Callback;
 use super::thread_lock::NativeWait;
 use super::value::Heap;
-use std::sync::{
-    Arc, Condvar, Mutex, MutexGuard, Weak,
-    atomic::{AtomicBool, AtomicUsize, Ordering},
-    mpsc,
-};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, atomic::Ordering, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::builtins::boolean;
 use super::stdlib::hashlib::digest::SharedHash;
-use super::{Context, Error, Id, NONE, Result, Value};
+use super::{Context, Error, Id, InterpreterState, NONE, Result, Value};
 use crate::objects::locks::{PrimitiveLock, thread_ident};
 use crate::objects::time::Deadline;
 
@@ -77,19 +73,19 @@ impl Join {
 // A detached worker must not keep its own join handle alive.
 struct WorkerExit {
     handle: Weak<Handle>,
-    count: Option<Arc<AtomicUsize>>,
+    interpreter: Option<Arc<InterpreterState>>,
 }
 
 impl WorkerExit {
     fn enter(
         &mut self,
-        count: Arc<AtomicUsize>,
+        interpreter: &Arc<InterpreterState>,
         handle: Arc<Handle>,
         ready: &mpsc::SyncSender<std::result::Result<Started, String>>,
         released: Option<mpsc::Receiver<WorkerStatus>>,
     ) -> bool {
-        count.fetch_add(1, Ordering::SeqCst);
-        self.count = Some(count);
+        interpreter.worker_count.fetch_add(1, Ordering::SeqCst);
+        self.interpreter = Some(Arc::clone(interpreter));
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let native_id = Some(crate::objects::locks::native_thread_id());
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -109,8 +105,8 @@ impl Drop for WorkerExit {
         let handle = self.handle.upgrade();
         let state = handle.as_ref().map(|handle| handle.state.lock().unwrap());
         // A count observer that reaps roots must see this same exit publication.
-        if let Some(count) = &self.count {
-            count.fetch_sub(1, Ordering::SeqCst);
+        if let Some(interpreter) = &self.interpreter {
+            interpreter.worker_count.fetch_sub(1, Ordering::SeqCst);
         }
         if let Some((mut state, handle)) = state.zip(handle.as_ref()) {
             *state = State::Done;
@@ -142,7 +138,7 @@ impl Handle {
         }
         let mut exit = WorkerExit {
             handle: Arc::downgrade(self),
-            count: None,
+            interpreter: None,
         };
         native.thread = Some(
             thread::Builder::new()
@@ -657,8 +653,8 @@ pub(super) struct Start {
     operation: Operation,
     registration: Registration,
     operands: Vec<Id>,
-    count: Arc<AtomicUsize>,
-    fault_workers: Option<(Arc<()>, Arc<AtomicBool>)>,
+    interpreter: Arc<InterpreterState>,
+    fault_workers: Option<Arc<()>>,
 }
 
 impl Start {
@@ -668,17 +664,13 @@ impl Start {
         registration: Registration,
         operands: Vec<Id>,
     ) -> Self {
-        let fault_workers = matches!(operation, Operation::Python(_)).then(|| {
-            (
-                ctx.heap.begin_fault_worker(),
-                Arc::clone(&ctx.interpreter.finalizing),
-            )
-        });
+        let fault_workers =
+            matches!(operation, Operation::Python(_)).then(|| ctx.heap.begin_fault_worker());
         Self {
             operation,
             registration,
             operands,
-            count: Arc::clone(&ctx.interpreter.worker_count),
+            interpreter: Arc::clone(&ctx.interpreter),
             fault_workers,
         }
     }
@@ -694,13 +686,16 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
     let (ready, started) = mpsc::sync_channel(1);
     let starting = Arc::clone(&handle);
     handle.spawn(move |exit| {
-        let (fault_workers, interpreter) = request.fault_workers.unzip();
-        let _publication = interpreter.map(crate::fault_handler::FramePublication::enter);
-        let enter = |released| exit.enter(request.count, starting, &ready, released);
+        let enter = |released| exit.enter(&request.interpreter, starting, &ready, released);
         let wait = match request.operation {
             Operation::Python(callback) => {
                 // Preparation and cancellation both belong to this pthread.
-                return match callback.into_call(fault_workers.as_ref().expect("Python worker")) {
+                let _publication =
+                    crate::fault_handler::FramePublication::enter(&request.interpreter.finalizing);
+                return match callback.into_call(
+                    Arc::clone(&request.interpreter),
+                    request.fault_workers.as_ref().expect("Python worker"),
+                ) {
                     Ok(invoke) => invoke(enter(None), detached_label),
                     Err(error) => {
                         let _ = ready.send(Err(error.to_string()));

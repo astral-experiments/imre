@@ -12,25 +12,25 @@ struct PreviousPublication {
 }
 
 /// The existing interpreter shutdown token is shared with its native Python workers.
-pub(crate) struct FramePublication {
+pub(crate) struct FramePublication<'a> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     previous: PreviousPublication,
-    _interpreter: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    _interpreter: &'a std::sync::atomic::AtomicBool,
 }
 
-impl FramePublication {
-    pub(crate) fn enter(interpreter: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+impl<'a> FramePublication<'a> {
+    pub(crate) fn enter(interpreter: &'a std::sync::atomic::AtomicBool) -> Self {
         Self {
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             // SAFETY: The token allocation lives until this thread leaves the publication.
-            previous: unsafe { imre_fault_enter(std::sync::Arc::as_ptr(&interpreter)) },
+            previous: unsafe { imre_fault_enter(interpreter) },
             _interpreter: interpreter,
         }
     }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-impl Drop for FramePublication {
+impl Drop for FramePublication<'_> {
     fn drop(&mut self) {
         // SAFETY: Runtime entry scopes unwind in order, on the entering pthread.
         unsafe { imre_fault_leave(&self.previous) }
