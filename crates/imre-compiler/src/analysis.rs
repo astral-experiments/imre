@@ -528,6 +528,19 @@ pub(crate) fn check_registered_project<'a>(
         && declarations.clone().next().is_none()
         && let Some(contract) = &graph.source_contract
     {
+        let session = &graph.session;
+        let entry_name = &graph.modules[graph.entry].name;
+        // runpy can select a physical entry whose spelling cannot appear in an import.
+        let file_entry = graph.registered_startup
+            // Type-only imports in this session are not all installed for the selected sources.
+            && session.declarations.is_empty()
+            && ty_module_resolver::ModuleName::new(entry_name).is_none()
+            && sources.clone().any(|s| {
+                s.main_body
+                    && s.is_program
+                    && s.checked_module == Some(graph.entry)
+                    && s.name == entry_name
+            });
         let mut matched = std::collections::HashSet::new();
         let admitted = sources.clone().all(|winner| {
             let Some(id) = winner.checked_module else {
@@ -538,12 +551,27 @@ pub(crate) fn check_registered_project<'a>(
             {
                 return false;
             }
+            let file = session.files[id];
+            if file_entry {
+                // Registration can select a different semantic file or check different parser text.
+                let module = &graph.modules[id];
+                if winner.semantic_path.unwrap_or(winner.path) != module.path
+                    || winner.source != module.original_source()
+                    || !session.file_matches_parser_input(
+                        file,
+                        &imre_ast::indentation::prepare(&module.source).text,
+                    )
+                {
+                    return false;
+                }
+                if id == graph.entry {
+                    return true;
+                }
+            }
             if winner.name == "__main__" {
                 return true;
             }
             // A checked bundled declaration can mask a different runtime definition.
-            let session = &graph.session;
-            let file = session.files[id];
             let model = SemanticModel::new(&session.db, session.db.program_file(file));
             model
                 .resolve_module(Some(winner.name), 0)
