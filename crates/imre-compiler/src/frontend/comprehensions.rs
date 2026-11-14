@@ -607,17 +607,10 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        if self.registered.is_some() {
-            return self.comprehension_display(expression, &display, Collector::Display(expected));
-        }
-        let filtered = match display.output {
-            Output::Set(_) => self.character_set_filter(&display, expected)?,
-            Output::List(_) => {
-                self.string_list_filter(&display, expected.and_then(|ty| self.types.element(ty)))?
-            }
-            _ => None,
-        };
-        if let Some(filtered) = filtered {
+        if self.registered.is_none()
+            && matches!(display.output, Output::Set(_))
+            && let Some(filtered) = self.character_set_filter(&display, expected)?
+        {
             return Ok(filtered);
         }
         self.comprehension_display(expression, &display, Collector::Display(expected))
@@ -629,7 +622,22 @@ impl Checker<'_> {
         display: &Plan<'_>,
         collector: Collector,
     ) -> Result<Expr, String> {
-        let input = self.input(&display.clauses[0])?;
+        let mut input = self.input(&display.clauses[0])?;
+        if self.registered.is_none()
+            && let (Output::List(_), Collector::Display(expected)) = (display.output, collector)
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &mut input
+            && let Some(filtered) = self.string_list_filter(
+                display,
+                expected.and_then(|ty| self.types.element(ty)),
+                Some(iterable),
+            )?
+        {
+            return Ok(filtered);
+        }
         let prepared = matches!(input, Iteration::Prepared(_));
         // A prepared iterator stays inline and may be empty. Its writes only
         // matter here when they can invalidate an enclosing narrowing.
