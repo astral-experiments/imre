@@ -18,6 +18,7 @@ use super::{Binary, Builtin, CallArgs, Expr, ExprKind, Statement, Type};
 use super::{Emitter, Value, none, small};
 use crate::llvm::registered::Frame as CheckedFrame;
 use ruff_text_size::TextRange;
+use std::borrow::Cow;
 
 use super::{Operand, Ownership, body::FunctionBody};
 
@@ -49,7 +50,28 @@ pub(super) enum ValueUse<'a> {
     FinalIntegerOperand,
 }
 
-impl ValueUse<'_> {
+impl<'a> ValueUse<'a> {
+    /// The caller can provide the root boundary above its preceding arguments.
+    pub(super) fn operand_mark(self, frame: &mut CheckedFrame<'_, '_, '_>) -> Cow<'a, str> {
+        match self {
+            Self::CallOperand(mark, _) => Cow::Borrowed(mark),
+            _ => Cow::Owned(frame.temporary_mark()),
+        }
+    }
+
+    /// Keep the result at this boundary and let the enclosing call continue above it.
+    pub(super) fn keep_operand(
+        self,
+        frame: &mut CheckedFrame<'_, '_, '_>,
+        mark: &str,
+        value: &str,
+    ) {
+        let next = frame.keep_operands(mark, value, "0");
+        if let Self::CallOperand(_, retained) = self {
+            retained.set(next).expect("one result per call operand");
+        }
+    }
+
     fn needs_integer(self) -> bool {
         matches!(self, Self::IntegerOperand | Self::FinalIntegerOperand)
     }
@@ -1099,6 +1121,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         } else {
                             DisplayKind::List
                         },
+                        usage,
                     )),
                 }
             }
@@ -1107,7 +1130,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     CheckedValue::owned(emitter.native_sequence(expr.ty, values, false))
                 }
                 Entry::Registered(frame) => {
-                    CheckedValue::handle(frame.sequence(values, DisplayKind::Set))
+                    CheckedValue::handle(frame.sequence(values, DisplayKind::Set, usage))
                 }
             },
             ExprKind::Compare(values, ops) => {
@@ -1198,23 +1221,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 let [receiver] = args else {
                     unreachable!("checked attribute receiver")
                 };
-                // A call argument can keep the descriptor result directly above its siblings.
-                let owned;
-                let (mark, retained) = if let ValueUse::CallOperand(mark, retained) = usage {
-                    (mark, Some(retained))
-                } else {
-                    owned = self.python().temporary_mark();
-                    (owned.as_str(), None)
-                };
+                let mark = usage.operand_mark(self.python());
                 let unwind = self.python().begin_operand_scope();
                 let receiver = self.rooted_operand(receiver);
                 let frame = self.python();
                 let value = frame.attribute_value(receiver.rooted_handle(), name, *range);
-                let next = frame.keep_operands(mark, &value, "0");
-                if let Some(retained) = retained {
-                    retained.set(next).expect("one result per call operand");
-                }
-                frame.finish_operand_scope(mark, unwind);
+                usage.keep_operand(frame, &mark, &value);
+                frame.finish_operand_scope(&mark, unwind);
                 CheckedValue::handle(value)
             }
             Builtin::ListGet(_)
