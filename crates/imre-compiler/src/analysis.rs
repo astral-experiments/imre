@@ -218,9 +218,11 @@ impl RegisteredLayouts {
     /// Reuse the registered checker's syntax only for a file it parsed with this input.
     fn syntax_file(&self, path: &Path, input: &str) -> Option<(&Session, File)> {
         let session = &self.session;
-        let file = session.file_at_path(path, &session.files)?;
-        session
-            .file_matches_parser_input(file, input)
+        let file = session
+            .db
+            .files
+            .try_system(&session.db, path.to_str()?.as_ref())?;
+        (session.files.contains(&file) && session.file_matches_parser_input(file, input))
             .then_some((session, file))
     }
 
