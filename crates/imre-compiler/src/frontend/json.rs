@@ -731,25 +731,14 @@ pub(super) fn schemas(
     graph: &SourceGraph,
     classes: &ClassInfo,
     types: &Types,
-    functions: &[ir::Function],
-    entry: &ir::Function,
+    decoded: &[Type],
+    encoded: &[Type],
 ) -> std::result::Result<Vec<JsonRecordSchema>, String> {
-    let mut decoded = Vec::new();
-    let mut encoded = Vec::new();
-    for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |value| match value.kind {
-            ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty), _) => {
-                decoded.push(ty);
-            }
-            ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
-            _ => {}
-        });
-    }
     let mut decode_pending = Vec::new();
     let mut encode_pending = Vec::new();
     for (roots, pending) in [
-        (&decoded, &mut decode_pending),
-        (&encoded, &mut encode_pending),
+        (decoded, &mut decode_pending),
+        (encoded, &mut encode_pending),
     ] {
         for &ty in roots {
             check_type(ty, types, pending).map_err(str::to_owned)?;

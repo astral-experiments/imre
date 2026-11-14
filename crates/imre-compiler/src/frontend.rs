@@ -1681,7 +1681,11 @@ fn lower_graph(
     let mut uses_builtin_module_names = false;
     let mut generator_sites = 0;
     let mut count = false;
-    let mut frame_use = |value: &Expr| match value.kind {
+    let mut decoded = Vec::new();
+    let mut encoded = Vec::new();
+    let mut record_builtin = |value: &Expr| match value.kind {
+        ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty), _) => decoded.push(ty),
+        ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
         ExprKind::Builtin(Builtin::SysGetFrameModuleName, _) => names = true,
         ExprKind::Builtin(Builtin::SysBuiltinModuleNames, _) => uses_builtin_module_names = true,
         ExprKind::Builtin(Builtin::SysSetRecursionLimit, _) => count = true,
@@ -1696,7 +1700,7 @@ fn lower_graph(
         for (slot, function) in functions.iter().chain([&entry]).enumerate() {
             let checked = callables::validate_storage(function, &types, |value| {
                 callables::record_target(value, &types, &mut callable_targets);
-                frame_use(value);
+                record_builtin(value);
                 if let Some(calls) = call_graph.get_mut(slot) {
                     if let Some(targets) = globals.invoked_functions(value) {
                         calls.extend(targets.iter().copied());
@@ -1758,7 +1762,7 @@ fn lower_graph(
     if graph.reachable_only() {
         classes.missing_key_reprs(functions, &entry, graph, &types, key_reprs);
     }
-    let json_records = json::schemas(graph, &classes, &types, functions, &entry)
+    let json_records = json::schemas(graph, &classes, &types, &decoded, &encoded)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     let functions = &mut completed.functions;
     // Fusing adjacent sums also inlines their generator bodies and scalar calls.
