@@ -2519,6 +2519,7 @@ impl IntrinsicModule {
             (Self::Dataclasses, "field") => Intrinsic::DATACLASS_FIELD,
             (Self::Dataclasses, "fields") => Intrinsic::ObjectOnlyExport("dataclasses.fields"),
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
+            (Self::Dataclasses, "KW_ONLY") => Intrinsic::ObjectRuntimeExport("dataclasses.KW_ONLY"),
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,
             (Self::Pathlib, "PurePath" | "PurePosixPath") => {
                 Intrinsic::PurePath(crate::ir::PathFlavor::Posix)
