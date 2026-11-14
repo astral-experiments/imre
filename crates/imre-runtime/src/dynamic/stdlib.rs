@@ -595,7 +595,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         )
         | (
             "_imre_importlib",
-            "find_spec"
+            "cached_spec"
             | "native_spec_info"
             | "native_source"
             | "native_code"
@@ -2563,8 +2563,8 @@ pub(super) fn call(
                     .find_module_from(&name, *key, source_globals, args.get(2).copied())?
                     .ok_or_else(|| Context::missing_module(&name, *key));
             }
-            ("find_spec", [fullname, original, finder], []) => {
-                return ctx.find_spec(*fullname, *original, false, Some(*finder));
+            ("cached_spec", [module, fullname, original], []) => {
+                return ctx.cached_spec(*module, *fullname, *original, false);
             }
             ("namespace_locations", [name, path], []) => {
                 let name = ctx.str_value(*name)?.to_owned();

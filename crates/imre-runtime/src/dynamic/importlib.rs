@@ -937,64 +937,69 @@ impl Context {
         result
     }
 
-    pub(super) fn find_spec(
+    pub(super) fn cached_spec(
         &mut self,
+        module: Id,
         key: Id,
         original: Id,
         for_resource: bool,
-        finder: Option<Id>,
     ) -> Result<Id> {
-        let fullname = self.str_value(key)?.to_owned();
-        let original = self.str_value(original)?.to_owned();
+        if module == NONE {
+            return Ok(NONE);
+        }
+        let invalid_spec = |ctx: &mut Self, detail| -> Result<Error> {
+            // The private resource caller already validated its package name.
+            let name = if for_resource {
+                original
+            } else {
+                super::builtins::format_value(ctx, original, None)?
+            };
+            Ok(Error::new(
+                "ValueError",
+                format!("{}.__spec__ {detail}", ctx.str_value(name)?),
+            ))
+        };
+        match self.lookup_attr(module, "__spec__") {
+            Ok(NONE) => Err(invalid_spec(self, "is None")?),
+            Err(e)
+                if self.is_attribute_error(&e)
+                    && matches!(
+                        self.heap.get(module),
+                        Value::Module { constructor: None, origin, .. }
+                            if origin.is_none() || self.str_value(key).is_ok_and(stdlib::is_module)
+                    ) =>
+            {
+                if for_resource {
+                    return Ok(NONE);
+                }
+                Err(Error::new(
+                    "NotImplementedError",
+                    "find_spec requires a registered source file",
+                ))
+            }
+            Err(e) if self.is_attribute_error(&e) => {
+                let caught = self.raised_instance(e);
+                self.with_import_exception(caught, |ctx| {
+                    let mut error = invalid_spec(ctx, "is not set")?;
+                    error.tracing().cause = Some(NONE);
+                    Err(error)
+                })
+            }
+            spec => spec,
+        }
+    }
+
+    pub(super) fn resource_spec(&mut self, key: Id) -> Result<Id> {
         let modules = self.public_modules()?;
         if self.contains(key, modules)? {
             let modules = self.public_modules()?;
             let module = self.get_item(modules, key)?;
-            if module == NONE {
-                return Ok(NONE);
-            }
-            return match self.lookup_attr(module, "__spec__") {
-                Ok(NONE) => Err(Error::new(
-                    "ValueError",
-                    format!("{original}.__spec__ is None"),
-                )),
-                Err(e)
-                    if self.is_attribute_error(&e)
-                        && matches!(
-                            self.heap.get(module),
-                            Value::Module { constructor: None, origin, .. }
-                                if origin.is_none() || stdlib::is_module(&fullname)
-                        ) =>
-                {
-                    if for_resource {
-                        return Ok(NONE);
-                    }
-                    Err(Error::new(
-                        "NotImplementedError",
-                        "find_spec requires a registered source file",
-                    ))
-                }
-                Err(e) if self.is_attribute_error(&e) => {
-                    let mut error =
-                        Error::new("ValueError", format!("{original}.__spec__ is not set"));
-                    error.context = self.raised_instance(e);
-                    error.tracing().cause = Some(NONE);
-                    Err(error)
-                }
-                spec => spec,
-            };
+            return self.cached_spec(module, key, key, true);
         }
+        let fullname = self.str_value(key)?.to_owned();
         let (child, search, top_level) =
             if let Some((parent_name, child)) = fullname.rsplit_once('.') {
-                let parent = if for_resource {
-                    self.module(parent_name)?
-                } else {
-                    let import = self.lookup(self.heap.current_scope(), "__import__")?;
-                    let name = self.text(parent_name);
-                    let path = self.heap.code_name("__path__");
-                    let fromlist = self.alloc(Value::List(vec![path]));
-                    self.call(import, vec![name], vec![("fromlist".into(), fromlist)])?
-                };
+                let parent = self.module(parent_name)?;
                 let path = match self.lookup_attr(parent, "__path__") {
                     Err(cause) if self.is_attribute_error(&cause) => {
                         let mut error = Error::new(
@@ -1018,20 +1023,10 @@ impl Context {
                 (fullname.as_str(), NONE, true)
             };
         if self.import_registry_installed {
-            let args = vec![key, search];
-            return match finder {
-                Some(finder) => self.call(finder, args, vec![]),
-                None => self.meta_call(NONE, "_find_spec", args),
-            };
+            return self.meta_call(NONE, "_find_spec", vec![key, search]);
         }
         if stdlib::is_module(&fullname) || self.is_frozen(&fullname) {
-            if for_resource {
-                return Ok(NONE);
-            }
-            return Err(Error::new(
-                "NotImplementedError",
-                "find_spec requires a registered source file",
-            ));
+            return Ok(NONE);
         }
         let search = if top_level {
             self.startup_search_path()?

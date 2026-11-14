@@ -4,7 +4,7 @@ from ._bootstrap import _find_spec, _resolve_name, module_from_spec, spec_from_l
 from ._bootstrap_external import (
     MAGIC_NUMBER, cache_from_source, decode_source, source_from_cache, spec_from_file_location,
 )
-from _imre_importlib import find_spec as _find_cached_spec
+from _imre_importlib import cached_spec as _cached_spec
 from ._abc import Loader
 
 __all__ = [
@@ -30,7 +30,21 @@ def resolve_name(name, package):
 
 def find_spec(name, package=None):
     fullname = resolve_name(name, package) if name.startswith(".") else name
-    return _find_cached_spec(fullname, name, _find_spec)
+    if fullname in sys.modules:
+        return _cached_spec(sys.modules[fullname], fullname, name)
+
+    parent_name = fullname.rpartition('.')[0]
+    if parent_name:
+        parent = __import__(parent_name, fromlist=['__path__'])
+        try:
+            parent_path = parent.__path__
+        except AttributeError as exc:
+            raise ModuleNotFoundError(
+                f"__path__ attribute not found on {parent_name!r} "
+                f"while trying to find {fullname!r}", name=fullname) from exc
+    else:
+        parent_path = None
+    return _find_spec(fullname, parent_path)
 
 import sys
 import types
