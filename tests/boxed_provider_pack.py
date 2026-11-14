@@ -25,6 +25,9 @@ import reprlib as bundled
 print('shadow', project.marker(), bundled.Repr().repr([1, 2]), project is bundled)
 print('docs', project.marker.__doc__, bundled.recursive_repr.__doc__, bundled.__doc__ is None)
 
+import os
+import xml
+xml.__path__[0] = os.path.abspath(xml.__path__[0])
 print('before xml.parsers', 'xml.parsers' in sys.modules)
 import xml.parsers
 from xml import parsers

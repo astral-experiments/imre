@@ -5,15 +5,31 @@ use std::path::Path;
 use super::{Context, Id, NONE, Result, TRUE, Value};
 
 impl Context {
-    /// Map the launcher's absolute bundle entry to its compiled source registry.
-    pub(super) fn registry_root<'a>(&'a self, path: &'a Path) -> &'a Path {
-        if self.config["bundle_entry"].as_str().map(Path::new) == Some(path)
-            && let Some(bundle) = self.config["bundled_root"].as_str()
+    /// Map a search path under the launcher's bundle entry to its compiled source registry.
+    pub(super) fn registry_root<'a>(&self, path: &'a Path) -> &'a Path {
+        if self.executable.is_absolute()
+            && let Ok(relative) = path.strip_prefix(&self.executable)
+            && self.config["bundled_root"]
+                .as_str()
+                .is_some_and(|bundle| relative.starts_with(bundle))
+            && !path.is_dir()
         {
-            Path::new(bundle)
+            relative
         } else {
             path
         }
+    }
+
+    /// Give bundled package search locations a stable spelling across working-directory changes.
+    pub(super) fn package_path_text(&mut self, path: &Path) -> Result<Id> {
+        if self.executable.is_absolute()
+            && self.config["bundled_root"]
+                .as_str()
+                .is_some_and(|bundle| path.starts_with(bundle))
+        {
+            return self.import_path_text(&self.executable.join(path));
+        }
+        self.import_path_text(path)
     }
 
     /// Pin a compiled search directory when the path hook creates its finder.
@@ -130,7 +146,7 @@ impl Context {
             self.set_attr(spec, "has_location", TRUE)?;
         }
         if let Some(portion) = package {
-            let portion = self.import_path_text(portion)?;
+            let portion = self.package_path_text(portion)?;
             let locations = self.alloc(Value::List(vec![portion]));
             self.set_attr(spec, "submodule_search_locations", locations)?;
         }
