@@ -40,28 +40,11 @@ impl ClassInfo<'_> {
 
     pub(super) fn missing_key_reprs(
         &self,
-        functions: &[ir::Function],
-        entry: &ir::Function,
+        keys: HashSet<Type>,
         graph: &SourceGraph,
         types: &Types,
         owners: &mut HashSet<DefinitionId>,
     ) {
-        let mut keys = HashSet::new();
-        for function in functions.iter().chain([entry]) {
-            ir::walk_expressions(&function.body, &mut |expr| {
-                if let ExprKind::Builtin(
-                    Builtin::DictGet
-                    | Builtin::DeleteItem
-                    | Builtin::DictPop
-                    | Builtin::ChainMapGetItem,
-                    args,
-                ) = &expr.kind
-                    && let [_, key] = args.as_slice()
-                {
-                    keys.insert(key.ty);
-                }
-            });
-        }
         let mut pending: Vec<_> = keys.into_iter().collect();
         let mut seen = HashSet::new();
         while let Some(ty) = pending.pop() {
