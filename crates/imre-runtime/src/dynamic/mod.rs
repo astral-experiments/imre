@@ -585,6 +585,9 @@ impl Context {
 
     /// Slot descriptors require the native layout even when a proxy passes isinstance.
     fn builtin_slot_accepts(&self, object: Id, owner: &str) -> bool {
+        if let Value::DictIterator(iter) = self.heap.get(object) {
+            return iter.class_name() == owner;
+        }
         if matches!(self.heap.get(object), Value::NamedTuple { class: Some(class), .. } if *class == owner)
         {
             return true;
@@ -3477,6 +3480,9 @@ impl Context {
             ],
             "set" | "frozenset" => builtins::set_methods(name),
             "set_iterator" => builtins::SET_ITERATOR_METHODS,
+            class if DictIterator::builtin_classes().any(|owner| owner == class) => {
+                DictIterator::methods(class)
+            }
             "bytearray" => {
                 additional = &["fromhex"];
                 builtins::BYTEARRAY_METHODS

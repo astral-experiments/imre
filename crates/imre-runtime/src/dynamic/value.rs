@@ -2905,7 +2905,7 @@ impl DictIterator {
         if class == Self::ORDERED {
             &["__iter__", "__next__", "__reduce__"]
         } else {
-            &["__iter__", "__next__"]
+            &["__iter__", "__next__", "__length_hint__"]
         }
     }
 
