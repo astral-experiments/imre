@@ -71,7 +71,8 @@ pub(super) struct EagerList {
 /// A suspended pipeline resumes at the innermost active pull.
 struct GeneratorPull {
     input: Prepared,
-    binding: Vec<Statement>,
+    /// The suffix of the pull which runs only when an item was produced.
+    binding_start: usize,
     filters: Vec<Expr>,
 }
 
@@ -109,19 +110,16 @@ impl ClauseLowering for GeneratorClauses<'_, '_> {
     fn with_target(
         &mut self,
         target: &ast::Expr,
-        input: Prepared,
+        mut input: Prepared,
         _: Output<'_>,
         body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Expr), String>,
     ) -> Result<Expr, String> {
         let row = self.checker.local(input.value);
-        let projected =
-            matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(input.value));
-        let mut binding = Vec::new();
-        unpacking::bind_input(self.checker, target, row, projected, &mut binding)?;
+        let binding_start = input.bind_ready_row(self.checker, target, row)?;
         let (filters, yielded) = body(self)?;
         self.pulls.push(GeneratorPull {
             input,
-            binding,
+            binding_start,
             filters,
         });
         Ok(yielded)
@@ -164,6 +162,25 @@ impl Prepared {
         }
     }
 
+    /// Bind a successful pull, then drop the private row before filters or user code run.
+    /// The next pull starts with an empty slot. The enclosing scope handles abrupt exits.
+    fn bind_ready_row<B: unpacking::PatternBinder>(
+        &mut self,
+        binder: &mut B,
+        target: &ast::Expr,
+        row: Expr,
+    ) -> StdResult<usize, B::Error> {
+        if matches!(self.next.first(), Some(Statement::Clear(slot)) if *slot == self.value) {
+            self.next.remove(0);
+        }
+        let start = self.next.len();
+        let projected =
+            matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(self.value));
+        unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
+        self.next.push(Statement::Clear(self.value));
+        Ok(start)
+    }
+
     /// A direct Python cursor can supply both target values without creating a row.
     pub(super) fn bind_loop_target<B: unpacking::PatternBinder>(
         &mut self,
@@ -173,23 +190,10 @@ impl Prepared {
     ) -> StdResult<&[Statement], B::Error> {
         let row = binder.pattern_local(self.value);
         if row.ty != Type::PythonObject || target.is_name_expr() {
-            // The item is private until a successful pull. Releasing it after binding
-            // leaves this slot empty on every backedge; the scope handles abrupt exits.
-            let release = if matches!(self.next.first(), Some(Statement::Clear(slot)) if *slot == self.value)
-            {
-                self.next.remove(0)
-            } else {
-                Statement::Clear(self.value)
-            };
             self.next
                 .push(Self::exhaust_if_empty(Expr::local(self.ready, Type::Bool)));
-            let start = self.next.len();
-            let projected =
-                matches!(row.ty, Type::Tuple(_)).then_some(unpacking::Row::Projected(self.value));
-            unpacking::bind_input(binder, target, row, projected, &mut self.next)?;
-            let end = self.next.len();
-            self.next.push(release);
-            return Ok(&self.next[start..end]);
+            let start = self.bind_ready_row(binder, target, row)?;
+            return Ok(&self.next[start..self.next.len() - 1]);
         }
         // The acquired Python cursor and its unadapted one-row pull must still
         // refer to the same slots. Typed rows keep their own snapshot layout.
@@ -2494,9 +2498,10 @@ impl Checker<'_> {
             let items = targets.map(|name| self.names[name]);
             let zip = &pulls[0].input;
             let mut next = zip.next.clone();
-            next.push(Prepared::exhaust_if_empty(self.local(zip.ready)));
-            next.extend_from_slice(&pulls[0].binding);
-            next.push(Statement::Clear(zip.value));
+            next.insert(
+                pulls[0].binding_start,
+                Prepared::exhaust_if_empty(self.local(zip.ready)),
+            );
             *out = Some(zip_sums::Sum {
                 lists,
                 items,
@@ -2536,9 +2541,8 @@ impl Checker<'_> {
             Statement::Assign(value, yielded),
             Statement::Assign(ready, Expr::boolean(true)),
         ];
-        for (depth, pull) in pulls.into_iter().enumerate().rev() {
-            let mut available = pull.binding;
-            available.push(Statement::Clear(pull.input.value));
+        for (depth, mut pull) in pulls.into_iter().enumerate().rev() {
+            let mut available = pull.input.next.split_off(pull.binding_start);
             available.extend(filter_suite(pull.filters, accepted));
             // An outer clause opens this iterator only after its own filters pass.
             accepted = pull.input.evaluate;
