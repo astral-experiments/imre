@@ -2882,13 +2882,6 @@ impl Context {
         });
         let attribute = if let Some(hook) = primary {
             self.attribute_hook(hook, obj, class, attr, original)
-        } else if name == "__class__"
-            && attr.nonexact_key(self).is_none()
-            && matches!(self.heap.get(obj), Value::Instance { .. })
-            && self.class_attr(class, name).is_none()
-        {
-            // object.__class__ is a data descriptor and takes precedence over instance fields.
-            Ok(class)
         } else if let Value::Module { scope, .. } = *self.heap.get(obj) {
             self.module_get_attribute(obj, scope, name, original, report_missing)
         } else {
@@ -3423,6 +3416,10 @@ impl Context {
                 return inline.ok_or_else(|| self.missing_attribute(obj, name));
             }
             let member = self.instance_class_member(class, name);
+            // The inherited object descriptor takes precedence over the instance dictionary.
+            if name == "__class__" && member.is_none() {
+                return Ok(class);
+            }
             if name == "__dict__"
                 && member.is_none()
                 && layout.dictionary
