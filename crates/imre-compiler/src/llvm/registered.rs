@@ -407,8 +407,10 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
-    fn place_site(&mut self, site: RequiredSite);
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
+    fn place_definition(&mut self, site: TextSize) -> usize;
+    fn place_class_namespace(&mut self, site: TextSize) -> usize;
+    fn place_type_alias(&mut self, site: TextSize) -> usize;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
@@ -1192,8 +1194,11 @@ impl<'f> Frame<'f, '_, '_> {
                 })
             }
             (Builtin::RegisteredDefinition(site), header) => {
-                let requested = RequiredSite::definition(site, header);
-                self.code.place_site(requested);
+                let early = matches!(
+                    RequiredSite::definition(site, header),
+                    RequiredSite::Definition(_)
+                )
+                .then(|| self.code.place_definition(site.start()));
                 let (decorators, defaults, arguments) = match site {
                     ir::DefinitionSite::Class {
                         arguments: Some(layout),
@@ -1206,8 +1211,9 @@ impl<'f> Frame<'f, '_, '_> {
                     ir::DefinitionSite::Class {
                         arguments: None, ..
                     } => (header, &[][..], None),
-                    ir::DefinitionSite::Function(start) => {
-                        let definition = &self.code.frame_and_sites().1.definitions[start];
+                    ir::DefinitionSite::Function(_) => {
+                        let index = early.expect("a function precedes its defaults");
+                        let definition = &self.code.frame_and_sites().1.definitions[index];
                         let (decorators, defaults) =
                             header.split_at(definition.decorator_offsets.len());
                         (decorators, defaults, None)
@@ -1220,16 +1226,14 @@ impl<'f> Frame<'f, '_, '_> {
                     .collect::<Vec<_>>();
                 let class_arguments =
                     arguments.map(|(layout, operands)| self.pack_arguments(layout, operands, None));
-                if let RequiredSite::DefinitionAfterInputs(start) = requested {
-                    self.code.place_site(RequiredSite::Definition(start));
-                }
+                let index = early.unwrap_or_else(|| self.code.place_definition(site.start()));
                 let (code, sites) = self.code.frame_and_sites();
-                sites.definition(code, site.start(), &decorators, &defaults, class_arguments)
+                sites.definition(code, index, &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
-                self.code.place_site(RequiredSite::ClassNamespace(*site));
+                let index = self.code.place_class_namespace(*site);
                 let (code, sites) = self.code.frame_and_sites();
-                let (_, parameters, range) = &sites.class_namespaces[site];
+                let (_, parameters, range) = &sites.class_namespaces[index];
                 let range = *range;
                 code.set_source_range(Some(range));
                 let enclosing = code.scope.clone();
@@ -1242,14 +1246,14 @@ impl<'f> Frame<'f, '_, '_> {
                 let arguments = self.pack_arguments(layout, operands, None);
                 let (code, sites) = self.code.frame_and_sites();
                 code.scope = scope;
-                sites.class_namespaces[site]
+                sites.class_namespaces[index]
                     .0
                     .instantiate_class(code, arguments, Some(range))
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
-                self.code.place_site(RequiredSite::Alias(*site));
+                let index = self.code.place_type_alias(*site);
                 let (code, sites) = self.code.frame_and_sites();
-                match &sites.aliases[site] {
+                match &sites.aliases[index] {
                     Ok(alias) => alias.instantiate(code),
                     Err(error) => {
                         code.output.diagnostic.get_or_insert_with(|| error.clone());
