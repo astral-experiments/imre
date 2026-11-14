@@ -1059,7 +1059,6 @@ pub(crate) enum Intrinsic {
     TomlDecode,
     Dataclass,
     Struct,
-    DataclassField,
     AsDict,
     SelfType,
     ClassVar,
@@ -1136,6 +1135,7 @@ pub(crate) enum Intrinsic {
 }
 
 impl Intrinsic {
+    pub(crate) const DATACLASS_FIELD: Self = Self::ScopedObjectExport("dataclasses.field");
     pub(crate) const ARGUMENT_PARSER: Self = Self::ScopedObjectExport("argparse.ArgumentParser");
     pub(crate) const REGEX_DEBUG: Self = Self::ScopedObjectExport("re.DEBUG");
 
@@ -2513,7 +2513,7 @@ impl IntrinsicModule {
             (Self::ImreToml, "decode") => Intrinsic::TomlDecode,
             (Self::Imre, "struct") => Intrinsic::Struct,
             (Self::Dataclasses, "dataclass") => Intrinsic::Dataclass,
-            (Self::Dataclasses, "field") => Intrinsic::DataclassField,
+            (Self::Dataclasses, "field") => Intrinsic::DATACLASS_FIELD,
             (Self::Dataclasses, "fields") => Intrinsic::ObjectOnlyExport("dataclasses.fields"),
             (Self::Dataclasses, "asdict") => Intrinsic::AsDict,
             (Self::Pathlib, "Path" | "PosixPath") => Intrinsic::Path,

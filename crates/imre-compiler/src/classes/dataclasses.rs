@@ -138,7 +138,7 @@ pub(super) fn field(
     };
     if let ast::Expr::Call(call) = value
         && graph.resolve(module_id, &call.func)
-            == Some(Binding::Intrinsic(Intrinsic::DataclassField))
+            == Some(Binding::Intrinsic(Intrinsic::DATACLASS_FIELD))
         && !shadowed(&call.func, class_names)
     {
         if !call.arguments.args.is_empty() {
