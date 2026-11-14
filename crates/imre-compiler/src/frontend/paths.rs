@@ -332,10 +332,12 @@ impl Checker<'_> {
             };
             if let Some(query) = query {
                 let kind = PathOperation::Query(query);
-                if matches!(
-                    query,
-                    PathQuery::Exists | PathQuery::Directory | PathQuery::File
-                ) {
+                if !call.arguments.is_empty()
+                    && matches!(
+                        query,
+                        PathQuery::Exists | PathQuery::Directory | PathQuery::File
+                    )
+                {
                     let param = ParameterKind::KeywordOnly.parameter(
                         "follow_symlinks",
                         Type::Bool,
@@ -360,12 +362,11 @@ impl Checker<'_> {
                     ));
                 }
                 self.reject_builtin_keywords(call)?;
-                let follow = !matches!(query, PathQuery::Symlink);
-                return Ok(operation(
-                    kind,
-                    Type::Bool,
-                    vec![receiver, Expr::boolean(follow)],
-                ));
+                let value = operation(kind, Type::Bool, vec![receiver]);
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.method(call, attribute, &value);
+                }
+                return Ok(value);
             }
             if info {
                 return Err(error(self.source, call, "unsupported Path.info method"));
