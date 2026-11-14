@@ -28,6 +28,7 @@ struct ClosureNames {
     globals: BTreeSet<String>,
     nonlocals: BTreeSet<String>,
     include_nested_reads: bool,
+    implicit_class: bool,
     // The enclosing statement contains a lexical site or a subtree the binder skips.
     needs_discovery: bool,
     cell_reads: BTreeSet<String>,
@@ -104,6 +105,7 @@ impl ClosureNames {
     ) -> std::collections::BTreeSet<String> {
         let mut child = Self {
             include_nested_reads: true,
+            implicit_class: self.implicit_class,
             string_annotations: self.string_annotations,
             ..Self::default()
         };
@@ -242,6 +244,9 @@ impl<'a> Visitor<'a> for ClosureNames {
             ast::Expr::Name(n) => match n.ctx {
                 ast::ExprContext::Load => {
                     self.reads.insert(n.id.to_string());
+                    if self.implicit_class && n.id.as_str() == "super" {
+                        self.reads.insert("__class__".to_string());
+                    }
                 }
                 ast::ExprContext::Store | ast::ExprContext::Del => {
                     self.locals.insert(n.id.to_string());
@@ -270,8 +275,11 @@ impl<'a> Visitor<'a> for ClosureNames {
             | ast::Expr::DictComp(_)
             | ast::Expr::Generator(_) => {
                 self.needs_discovery = true;
-                let (reads, bindings, captured) =
-                    class_metadata::comprehension_scope(expr, self.string_annotations);
+                let (reads, bindings, captured) = class_metadata::comprehension_scope(
+                    expr,
+                    self.string_annotations,
+                    self.implicit_class,
+                );
                 self.reads.extend(reads);
                 self.cell_reads.extend(captured);
                 self.locals.extend(bindings);
@@ -351,16 +359,14 @@ impl FunctionScope {
     pub(crate) fn lambda(expr: &ast::ExprLambda, string_annotations: bool) -> Self {
         let mut names = ClosureNames {
             include_nested_reads: true,
+            implicit_class: true,
             string_annotations,
             ..Default::default()
         };
         names.visit_expr(&expr.body);
-        let parameters = expr.parameters.as_deref();
-        Self::new(
-            names,
-            parameters,
-            imre_ast::class_cell::expression_needed(&expr.body, parameters, string_annotations),
-        )
+        let mut scope = Self::new(names, expr.parameters.as_deref(), false);
+        scope.captures_class = scope.names.reads.contains("__class__");
+        scope
     }
 
     pub(crate) fn write_signature(&self, signature: &mut serde_json::Value) {
