@@ -5717,19 +5717,14 @@ impl<'a> Checker<'a> {
                 self.narrowed.remove_mut(slot);
             }
         }
-        let is_range = matches!(&input, Iteration::Range(_));
         self.lower_iteration_after(
             &loop_.target,
             input,
             &loop_.orelse,
             Vec::new(),
             |checker, body| {
-                let discard_range_body = is_range
-                    && checker.inference.is_some()
-                    && checker.discarded_function_body()
-                    && checker.registered.is_none()
-                    && !checker.fault_enabled();
-                checker.lower_block(&loop_.body, (!discard_range_body).then_some(body))?;
+                let output = (!checker.discarded_function_body()).then_some(body);
+                checker.lower_block(&loop_.body, output)?;
                 // The loop body can select a Python frame while its source contracts are checked.
                 Ok(!checker.discarded_function_body())
             },
