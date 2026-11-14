@@ -598,10 +598,7 @@ impl<'f> Frame<'f, '_, '_> {
         if let Some((function, next)) = self.fixed_sites {
             return function.fixed_sites.get(next.get()).copied();
         }
-        match expr.kind {
-            ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(range),
-            _ => None,
-        }
+        expr.written_range()
     }
 
     pub(super) fn fixed_attribute(

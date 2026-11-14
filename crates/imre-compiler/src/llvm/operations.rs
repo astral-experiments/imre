@@ -291,13 +291,20 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             return CheckedValue::owned(native.native_call(target, args, returns));
         };
 
-        self.python_call(
-            &site.call,
-            site.scope.as_deref(),
-            callable,
-            &args.values,
-            CheckedFrame::kept_call_value,
-        )
+        let emit = |frame: &mut CheckedFrame<'f, 'a, 'p>| {
+            CheckedBody::registered(frame.reborrow()).python_call(
+                &site.call,
+                site.scope.as_deref(),
+                callable,
+                &args.values,
+                CheckedFrame::kept_call_value,
+            )
+        };
+        let frame = self.python();
+        match site.call.position {
+            Some((anchor, _)) => frame.at_expression(site.call.range, anchor, emit),
+            None => emit(frame),
+        }
     }
 
     /// Resolve the callable and any bound receiver before capturing the written arguments.

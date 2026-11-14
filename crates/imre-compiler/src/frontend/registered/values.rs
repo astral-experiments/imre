@@ -169,7 +169,7 @@ impl<'a> RegisteredSource<'a> {
     ) -> TextSize {
         value
             .python_call()
-            .filter(|call| call.range == range)
+            .filter(|call| call.position.is_none() && call.range == range)
             .and_then(|call| call.method_name_start().or(callable_start))
             .unwrap_or_else(|| {
                 imre_ast::expression_position(node, self.method_imports, self.private_names)
@@ -326,11 +326,20 @@ pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
 pub(in crate::frontend) fn located(
     range: TextRange,
     position: ruff_text_size::TextSize,
-    value: Expr,
+    mut value: Expr,
 ) -> Expr {
-    if matches!(&value.kind,
-        ExprKind::Builtin(Builtin::RegisteredLocation(existing, start, ..), _) if (*existing, *start) == (range, position)
-    ) {
+    if value
+        .source_position()
+        .is_some_and(|(existing, anchor, _)| (existing, anchor) == (range, position))
+    {
+        return value;
+    }
+    if let ExprKind::Invoke { args, .. } = &mut value.kind
+        && let ir::CallSite::Python(site) = &mut args.site
+        && site.call.range == range
+        && site.call.position.is_none()
+    {
+        site.call.position = Some((position, None));
         return value;
     }
     let hint = (value.ty == Type::PythonObject && matches!(value.kind, ExprKind::Int(_)))
@@ -956,8 +965,8 @@ fn display_operands<E>(
 
 fn refine_operand(types: crate::analysis::OperandTypes<'_>, node: &ast::Expr, value: &mut Expr) {
     if value.ty == Type::PythonObject
-        && let ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) = &mut value.kind
-        && *range == node.range()
+        && let Some((range, hint)) = value.source_hint_mut()
+        && range == node.range()
         && hint.is_none()
     {
         *hint = types.scalar_type(node);
@@ -1504,8 +1513,7 @@ impl Checker<'_> {
             if fixed_result
                 && !signature.asynchronous
                 && !self.classes.generators.contains(&signature.id)
-                && let ExprKind::Builtin(Builtin::RegisteredLocation(_, _, hint), _) =
-                    &mut located.kind
+                && let Some((_, hint)) = located.source_hint_mut()
             {
                 *hint = Some(self.enter_source_call(call, signature)?);
             } else {
@@ -1688,11 +1696,10 @@ mod tests {
     use super::*;
 
     fn value_and_position(value: &Expr) -> (&ExprKind, TextSize) {
-        let ExprKind::Builtin(Builtin::RegisteredLocation(_, position, ..), values) = &value.kind
-        else {
-            panic!("expected a located expression");
-        };
-        (&values[0].kind, *position)
+        let (_, position, _) = value
+            .source_position()
+            .expect("expected a located expression");
+        (&value.without_location().kind, position)
     }
 
     fn operation_and_position(value: &Expr) -> (&Builtin, &[Expr], TextSize) {

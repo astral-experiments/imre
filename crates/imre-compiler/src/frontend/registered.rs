@@ -6499,15 +6499,13 @@ publish(5, callback)
                     calls.push((&source[site.call.range], "method"));
                     return;
                 }
-                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), callee) =
-                    &callable.kind
-                else {
-                    panic!("expected the checked callable operand");
-                };
+                let range = callable
+                    .written_range()
+                    .expect("expected the checked callable operand");
                 assert!(
                     matches!(&site.call.target, ir::RegisteredCallTarget::Callable { end, .. } if *end == range.end())
                 );
-                let kind = match &callee[0].kind {
+                let kind = match &callable.without_location().kind {
                     ExprKind::Local(_)
                         if matches!(site.call.arguments, ir::RegisteredArguments::Packed(_)) =>
                     {
