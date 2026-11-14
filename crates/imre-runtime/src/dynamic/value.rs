@@ -3291,6 +3291,7 @@ impl<F: FnMut(Id)> VisitReferences for F {
 /// Reusable edges from the context roots supplied to a full collection.
 #[derive(Default)]
 struct RootTrace {
+    reuse_caller_scopes: bool,
     roots: Vec<Id>,
     next_roots: Vec<Id>,
     watched_containers: Vec<Id>,
@@ -3337,7 +3338,18 @@ impl RootTrace {
     }
 
     /// Mark cached values directly and trace the remaining roots normally.
-    fn mark(&mut self, heap: &Heap, mut roots: impl Iterator<Item = Id>) {
+    fn mark(&mut self, heap: &Heap, roots: impl Iterator<Item = Id>) {
+        // Clearing a frame drops its scope while enclosing calls can retain a large,
+        // unchanged object graph. Revalidate those live roots at the actual sweep.
+        let callers = if std::mem::take(&mut self.reuse_caller_scopes) {
+            heap.execution
+                .frames
+                .split_last()
+                .map_or(&[][..], |(_, callers)| callers)
+        } else {
+            &[]
+        };
+        let mut roots = roots.chain(callers.iter().map(|frame| frame.scope));
         self.next_roots.clear();
         while let Some(id) = roots.next() {
             if self.next_roots.try_reserve(1).is_err() {
@@ -5447,6 +5459,7 @@ impl Heap {
         };
         *scope = NONE;
         *unoptimized_locals = namespace;
+        self.root_trace.reuse_caller_scopes = true;
         self.collect_next_statement = true;
         Ok(())
     }
