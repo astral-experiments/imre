@@ -13907,11 +13907,23 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 };
-                let value = self.expr_expected_from(
+                let stopped = self.terminating_operand(&receiver);
+                let value = self.expr_in_context(
                     &call.arguments.args[0],
                     element,
+                    |_, _| stopped,
+                    Self::coerce,
                     self.value_declaration(&receiver),
                 )?;
+                if stopped {
+                    // The operand was checked, but the method never consumes it.
+                    return Ok(calls::ArgumentScope::stopped(
+                        self,
+                        Vec::new(),
+                        receiver,
+                        Type::None,
+                    ));
+                }
                 return Ok(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(builtin, vec![receiver, value]),
