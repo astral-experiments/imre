@@ -12,13 +12,7 @@ class Calendar:
     def setfirstweekday(self, firstweekday: int) -> None:
         self._firstweekday = firstweekday
 
-    @property
-    def firstweekday(self) -> int:
-        return self.getfirstweekday()
-
-    @firstweekday.setter
-    def firstweekday(self, value: int) -> None:
-        self.setfirstweekday(value)
+    firstweekday = property(getfirstweekday, setfirstweekday)
 
     def monthdayscalendar(self, year: int, month: int) -> list[list[int]]:
         return _monthgrid(year, month, self._firstweekday)
