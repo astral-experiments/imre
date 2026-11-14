@@ -497,17 +497,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         "email.quoprimime" => bundled_source!("email/quoprimime.py"),
         "email.utils" => bundled_source!("email/utils.py", from "email"),
         "http" => bundled_source!("http/__init__.py"),
-        "http.client" => Some((
-            "http/client.py",
-            concat!(
-                include_str!("../stdlib/http/client.py"),
-                include_str!("../stdlib/http/boxed_header_binding.py"),
-                include_str!(
-                    "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/client.py"
-                ),
-                include_str!("../stdlib/http/boxed_headers.py"),
-            ),
-        )),
+        "http.client" => bundled_source!("http/client.py", from "http"),
         "http.cookiejar" => Some((
             "http/cookiejar.py",
             include_str!(

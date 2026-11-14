@@ -1,6 +1,7 @@
 """Synchronous HTTP request handling on socketserver's TCP streams."""
 from __future__ import annotations
 
+import http.client
 import socket
 import socketserver
 import sys
@@ -266,20 +267,14 @@ class BaseHTTPRequestHandler(socketserver.StreamRequestHandler):
             empty_headers: dict[str, str] = {}
             self.headers = empty_headers
             return True
-        lines: list[str] = []
-        while True:
-            line = self.rfile.readline(65537)
-            if len(line) > 65536:
-                self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Line too long", "got more than 65536 bytes when reading header line")
-                return False
-            if len(lines) >= 100:
-                self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Too many headers", "got more than 100 headers")
-                return False
-            if line == b"\r\n" or line == b"\n" or not line:
-                break
-            lines.append(str(line, "iso-8859-1"))
-        message = self.MessageClass()
-        message._parse(lines)
+        try:
+            message = http.client.parse_headers(self.rfile, _class=self.MessageClass)
+        except http.client.LineTooLong as err:
+            self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Line too long", str(err))
+            return False
+        except http.client.HTTPException as err:
+            self.send_error(HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, "Too many headers", str(err))
+            return False
         self.headers = message
         connection = (message.get("Connection", "") or "").lower()
         if connection == "close":
