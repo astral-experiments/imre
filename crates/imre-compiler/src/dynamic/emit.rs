@@ -441,9 +441,8 @@ impl<'a> PreparedBody<'a> {
         #[cfg(test)]
         crate::single_emission_tests::record_preparation(&path, matches!(parsed, Cow::Borrowed(_)));
         // Layouts can parse the same physical bytes in another session.
-        let checked_source = checked_source.filter(|source| {
-            source.is_program_source() && std::ptr::eq(source.source.as_str(), text.as_ref())
-        });
+        let checked_source =
+            checked_source.filter(|source| std::ptr::eq(source.source.as_str(), text.as_ref()));
         let interactive = matches!(origin, ModuleOrigin::Interactive(_));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();

@@ -187,16 +187,17 @@ pub(super) fn units<'a>(
                     Some(parsed) => ParsedModule { text, parsed },
                     None => ParsedModule::parse(path, text)?,
                 };
-                let checked_source = match origin {
-                    ModuleOrigin::Program(_) => file.map(|file| file.module(registrations.modules)),
-                    _ => None,
-                };
+                let checked_source = file.map(|file| file.module(registrations.modules));
                 let initializer = module_id.zip(checked_source).and_then(|(id, source)| {
                     let winner = match entry {
                         Some((root, main)) if root == id => main == Some(unit),
                         _ => source.name == *name,
                     };
-                    if winner && std::ptr::eq(source, &registrations.modules[id]) {
+                    if winner
+                        && matches!(origin, ModuleOrigin::Program(_))
+                        && source.is_program_source()
+                        && std::ptr::eq(source, &registrations.modules[id])
+                    {
                         initializers.remove(&id)
                     } else {
                         None
