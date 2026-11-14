@@ -4324,6 +4324,9 @@ impl Context {
             self.text(name.rsplit_once('.').map_or("", |(pkg, _)| pkg))
         };
         self.bind(scope, "__package__", package);
+        if main {
+            self.bind(scope, "__spec__", NONE);
+        }
         if name == "builtins" {
             self.install_builtins(scope)?;
         } else if source.is_some() || main {
@@ -4361,7 +4364,6 @@ impl Context {
             }
         }
         if main && source.is_none() {
-            self.bind(scope, "__spec__", NONE);
             let loader = self.lookup_attr(self.bootstrap_module, "_NativeImporter")?;
             self.bind(scope, "__loader__", loader);
         }

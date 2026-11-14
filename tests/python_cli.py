@@ -2528,6 +2528,15 @@ def main():
         compare("-Bm", "module_pkg.child", "-m", "tail", "--include-module", "untouched")
         compare("-B", "-mmodule_pkg", "tail")
 
+        script_spec = root / "script_spec.py"
+        script_spec.write_text(
+            "import builtins, sys\n"
+            "assert sys.modules['__main__'].__dict__['__spec__'] is __spec__\n"
+            "print(getattr(__spec__, 'name', None), builtins.__spec__.name)\n"
+        )
+        compare("-B", script_spec)
+        compare_module(script_spec)
+
         json_input = root / "input.json"
         json_input.write_text('{"items": [1, 2]}')
         for module in ("json", "json.tool"):
