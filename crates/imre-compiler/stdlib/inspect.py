@@ -282,13 +282,8 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if isinstance(obj, types.FunctionType) or _signature_is_functionlike(obj):
         return _signature_from_function(
             obj, sigcls, globals, locals, eval_str, annotation_format, skip_bound_arg=skip_bound_arg)
-    kind = type(obj)
-    if (kind is types.BuiltinFunctionType or kind is types.WrapperDescriptorType
-            or kind is types.MethodWrapperType or kind is types.MethodDescriptorType):
-        text_signature = getattr(obj, "__text_signature__", None)
-        if not text_signature:
-            raise ValueError(f"no signature found for builtin {obj!r}")
-        return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
+    if _signature_is_builtin(obj):
+        return _signature_from_builtin(sigcls, obj, skip_bound_arg=skip_bound_arg)
 
     def signature_of_method(method, drop_first):
         inner = _signature_from_callable(
@@ -306,6 +301,22 @@ def _signature_from_callable(obj, *, sigcls, follow_wrapper_chains=True,
     if text_signature:
         return _signature_fromstr(sigcls, obj, text_signature)
     return signature_of_method(_descriptor_get(call, obj), False)
+
+
+def _signature_from_builtin(cls, func, skip_bound_arg=True):
+    """Private helper function to get signature for
+    builtin callables.
+    """
+
+    if not _signature_is_builtin(func):
+        raise TypeError("{!r} is not a Python builtin "
+                        "function".format(func))
+
+    s = getattr(func, "__text_signature__", None)
+    if not s:
+        raise ValueError("no signature found for builtin {!r}".format(func))
+
+    return _signature_fromstr(cls, func, s, skip_bound_arg)
 
 
 def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_format,
