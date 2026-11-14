@@ -2145,17 +2145,7 @@ impl Context {
         self.heap.reserve_temporaries(2)?;
         self.heap.keep(iterator);
         let buffer = self.alloc(Value::List(items));
-        let step = self.heap.temporary_mark();
-        while let Some(item) = self.next_item(iterator)? {
-            let Value::List(items) = self.heap.get_mut(buffer) else {
-                unreachable!()
-            };
-            items
-                .try_reserve(1)
-                .map_err(|_| crate::Error::memory_error())?;
-            items.push(item);
-            self.comprehension_step(step);
-        }
+        self.extend_list_from_iterator(buffer, iterator)?;
         if tuple {
             let Value::List(items) = self.heap.get_mut(buffer) else {
                 unreachable!()
@@ -2164,6 +2154,22 @@ impl Context {
             return Ok(self.alloc(Value::Tuple(items)));
         }
         Ok(buffer)
+    }
+
+    /// Append each yielded item before releasing that iteration's temporaries.
+    fn extend_list_from_iterator(&mut self, list: Id, iterator: Id) -> Result<()> {
+        let step = self.heap.temporary_mark();
+        while let Some(item) = self.next_item(iterator)? {
+            let Value::List(items) = self.heap.get_mut(list) else {
+                unreachable!()
+            };
+            items
+                .try_reserve(1)
+                .map_err(|_| crate::Error::memory_error())?;
+            items.push(item);
+            self.comprehension_step(step);
+        }
+        Ok(())
     }
 
     /// Test tp_iter without binding a descriptor, including a declaration set to None.

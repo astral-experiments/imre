@@ -162,8 +162,10 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             args.len()
         )));
     };
-    let values = ctx.items(*iterable)?;
-    let list = ctx.alloc(Value::List(values));
+    let list = ctx.alloc(Value::List(Vec::new()));
+    let mark = ctx.heap.temporary_mark();
+    list_extend(ctx, list, *iterable)?;
+    ctx.heap.release_temporaries_since(mark);
     list_sort(ctx, list, &[], kwargs)?;
     Ok(list)
 }
@@ -1434,13 +1436,7 @@ pub(in crate::dynamic) fn list_extend(ctx: &mut Context, receiver: Id, source: I
                 .try_reserve(hint)
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
-        while let Some(item) = ctx.next_item(iterator)? {
-            let items = list_items_mut(ctx, receiver)?;
-            items
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.push(item);
-        }
+        ctx.extend_list_from_iterator(receiver, iterator)?;
     }
     Ok(())
 }
