@@ -260,6 +260,11 @@ impl Context {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        if name == "__length_hint__" {
+            let receiver =
+                super::builtins::noargs_method_receiver(self, owner, name, args, kwargs)?;
+            return self.length_hint(receiver, None);
+        }
         let Some((&cursor, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
@@ -294,7 +299,6 @@ impl Context {
         }
         match name {
             "__iter__" => Ok(cursor),
-            "__length_hint__" => self.length_hint(cursor, None),
             "__next__" => self
                 .next_result(storage)?
                 .ok_or_else(|| Error::new("StopIteration", "")),

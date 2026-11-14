@@ -222,7 +222,7 @@ impl BuiltinDescriptor {
                 Some(("set_iterator", attr, builtins::SET_ITERATOR_METHODS))
             }
             Some(("list_iterator", attr)) => {
-                Some(("list_iterator", attr, &["__iter__", "__next__"][..]))
+                Some(("list_iterator", attr, builtins::ITERATOR_METHODS_WITH_HINT))
             }
             Some(("tuple_iterator", attr)) => {
                 Some(("tuple_iterator", attr, &["__iter__", "__next__"][..]))
@@ -234,7 +234,7 @@ impl BuiltinDescriptor {
             Some((value::STRUCT_UNPACK_ITERATOR, attr)) => Some((
                 value::STRUCT_UNPACK_ITERATOR,
                 attr,
-                builtins::UNPACK_ITERATOR_METHODS,
+                builtins::ITERATOR_METHODS_WITH_HINT,
             )),
             Some(("memory_iterator", attr)) => {
                 Some(("memory_iterator", attr, &["__iter__", "__next__"][..]))
@@ -329,8 +329,10 @@ impl BuiltinDescriptor {
                 name,
                 method: !name.starts_with("__")
                     || (name == "__length_hint__"
-                        && (matches!(owner, "set_iterator" | value::STRUCT_UNPACK_ITERATOR)
-                            || deque::iterator_class(owner).is_some()
+                        && (matches!(
+                            owner,
+                            "list_iterator" | "set_iterator" | value::STRUCT_UNPACK_ITERATOR
+                        ) || deque::iterator_class(owner).is_some()
                             || DictIterator::class(owner).is_some()))
                     || (owner == "type" && name == "__subclasses__")
                     || (owner == "list" && name == "__getitem__")
@@ -750,7 +752,7 @@ impl BuiltinDescriptor {
             "__doc__" if self.name == "__getattribute__" => ctx.text("Return getattr(self, name)."),
             "__text_signature__" if self.name == "__getattribute__" => ctx.text("($self, name, /)"),
             "__doc__" | "__text_signature__" if self.name == "__length_hint__"
-                && (self.owner == "itertools.repeat" || DictIterator::class(self.owner).is_some()) =>
+                && (matches!(self.owner, "itertools.repeat" | "list_iterator") || DictIterator::class(self.owner).is_some()) =>
             {
                 ctx.text(if name == "__doc__" {
                     "Private method returning an estimate of len(list(it))."

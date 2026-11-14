@@ -600,7 +600,7 @@ pub(super) const STRUCT_METHODS: &[&str] = &[
 pub(super) const SET_ITERATOR_METHODS: &[&str] =
     &["__iter__", "__next__", "__length_hint__", "__reduce__"];
 
-pub(super) const UNPACK_ITERATOR_METHODS: &[&str] = &["__iter__", "__next__", "__length_hint__"];
+pub(super) const ITERATOR_METHODS_WITH_HINT: &[&str] = &["__iter__", "__next__", "__length_hint__"];
 
 /// Native iterator classes implement both iterator slots in the runtime.
 pub(super) fn is_iterator_type(name: &str) -> bool {
@@ -979,8 +979,11 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
             iter.class_name()
         }
         Value::Iterator {
-            kind:
-                kind @ ("list_iterator" | "tuple_iterator" | "str_ascii_iterator" | "str_iterator"),
+            kind: "list_iterator",
+            ..
+        } if ITERATOR_METHODS_WITH_HINT.contains(&attr) => "list_iterator",
+        Value::Iterator {
+            kind: kind @ ("tuple_iterator" | "str_ascii_iterator" | "str_iterator"),
             ..
         } if matches!(attr, "__iter__" | "__next__") => kind,
         Value::RangeIterator(iter) if super::range::ITER_METHODS.contains(&attr) => iter.kind,
@@ -1045,7 +1048,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Bytes(_) if BYTES_METHODS.contains(&attr) => "bytes",
         Value::Complex(_) if super::complex::METHODS.contains(&attr) => "complex",
         Value::ByteArray(_) if BYTEARRAY_METHODS.contains(&attr) => "bytearray",
-        Value::StructUnpackIterator { .. } if UNPACK_ITERATOR_METHODS.contains(&attr) => {
+        Value::StructUnpackIterator { .. } if ITERATOR_METHODS_WITH_HINT.contains(&attr) => {
             value::STRUCT_UNPACK_ITERATOR
         }
         Value::Struct { .. } if STRUCT_METHODS.contains(&attr) => "struct.Struct",
