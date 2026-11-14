@@ -879,29 +879,6 @@ impl<'f> Frame<'f, '_, '_> {
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"
         ));
     }
-    /// Use the pull's exhaustion edge when its next statement tests that same private flag.
-    pub(crate) fn pull_and_exhaust(&mut self, statements: &[Statement]) -> usize {
-        let [
-            Statement::IterNext {
-                iterator,
-                key,
-                value,
-                ready,
-                kind,
-            },
-            guard,
-            ..,
-        ] = statements
-        else {
-            return 0;
-        };
-        if let Some(([], [edge @ Statement::Exhaust])) = guard.branches_for_flag(*ready) {
-            self.pull(*iterator, *key, *value, *ready, *kind, Some(edge));
-            return 2;
-        }
-        0
-    }
-
     pub(crate) fn pull(
         &mut self,
         iterator: usize,
@@ -909,8 +886,19 @@ impl<'f> Frame<'f, '_, '_> {
         second: Option<usize>,
         ready: usize,
         kind: ir::IterNextKind,
-        exhaust: Option<&Statement>,
+        tail: &mut &[Statement],
     ) {
+        let exhaust = match *tail {
+            [guard, rest @ ..]
+                if self.fixed_sites.is_none()
+                    && let Some(([], [edge @ Statement::Exhaust])) =
+                        guard.branches_for_flag(ready) =>
+            {
+                *tail = rest;
+                Some(edge)
+            }
+            _ => None,
+        };
         let cursor = self.load_private(iterator);
         let done = self.code.name("b");
         let exhausted = exhaust.map(|edge| (self.code.name("b"), edge));
@@ -938,17 +926,29 @@ impl<'f> Frame<'f, '_, '_> {
             .loops
             .last()
             .is_some_and(|(target, _)| target.edges.exhausted != target.edges.done);
-        if let Some(second) = second {
+        let item = if let Some(second) = second {
             let available = self.code.name("b");
             self.code
                 .next_item_pair(&cursor, has_else, &available, empty);
             self.code.label(&available);
             self.code.store_item_pair([key, second]);
+            None
         } else {
             let item = self.code.pull_item(&cursor, kind, has_else, empty);
             self.store_private(key, &item);
-        }
+            Some(item)
+        };
         self.store_private(ready, &permanent::TRUE.to_string());
+        if let (Some(item), [Statement::Assign(target, rhs), rest @ ..]) = (item, *tail)
+            && exhaust.is_some()
+            && kind == ir::IterNextKind::Generic
+            && key != ready
+            && matches!(rhs.kind, ExprKind::Local(slot) if slot == key)
+        {
+            // The private slot roots the item across the replaced target's finalizer.
+            self.assign(*target, CheckedValue::handle(item));
+            *tail = rest;
+        }
         self.code.jump(&done);
         if let Some((label, edge)) = exhausted {
             self.code.label(&label);
