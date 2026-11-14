@@ -9,7 +9,7 @@ use crate::frontend::push_codepoints;
 use crate::ir;
 use crate::ir::{Constant, DisplayKind, Expr};
 use crate::llvm::body::{FunctionBody, write_definition};
-use crate::llvm::operations::CheckedValue;
+use crate::llvm::operations::{CheckedValue, ValueUse};
 use indexmap::IndexSet;
 use ruff_python_ast::UnaryOp;
 use ruff_text_size::{TextRange, TextSize};
@@ -1623,12 +1623,17 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         result
     }
 
-    pub(in crate::llvm) fn sequence(&mut self, values: &[Expr], display: DisplayKind) -> String {
+    pub(in crate::llvm) fn sequence(
+        &mut self,
+        values: &[Expr],
+        display: DisplayKind,
+        usage: ValueUse<'_>,
+    ) -> String {
         match (display, values) {
             (DisplayKind::List, []) => return self.op("list", &[]),
             (DisplayKind::Tuple, []) => return permanent::EMPTY_TUPLE.to_string(),
             (DisplayKind::Set, []) => return self.op("set", &[]),
-            (DisplayKind::Set, _) => return self.sequence_display(values, display, None),
+            (DisplayKind::Set, _) => return self.sequence_display(values, display, None, usage),
             (DisplayKind::List | DisplayKind::Tuple, _) => {}
         }
         let tuple = display == DisplayKind::Tuple;
@@ -1654,11 +1659,13 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             }
             return self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {data}, i64 {count}, i1 true, i1 {tuple}, ptr {slot})"));
         }
-        let build = |code: &mut Self| code.sequence_display(values, display, slot.as_deref());
         let Some(slot) = slot.as_deref() else {
-            return build(self);
+            return self.sequence_display(values, display, None, usage);
         };
-        self.cached_tuple(slot, build)
+        // A cache hit skips the display. Its caller retains the joined result.
+        self.cached_tuple(slot, |code| {
+            code.sequence_display(values, display, Some(slot), ValueUse::General)
+        })
     }
 
     pub(super) fn cached_tuple(
@@ -1701,9 +1708,10 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         items: &[Expr],
         display: DisplayKind,
         slot: Option<&str>,
+        usage: ValueUse<'_>,
     ) -> String {
         let tuple = display == DisplayKind::Tuple;
-        let mark = self.temporary_mark();
+        let mark = usage.operand_mark(self);
         self.unwind_stack_operands(&mark, |code| {
             let initial = |code: &mut Self, values: Vec<String>, complete| {
                 let slot = if complete { slot } else { None };
@@ -1740,7 +1748,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                     result = code.checked(&format!("call i64 @imre_dyn_linked_value(ptr %ctx, ptr {slot}, i64 {result})"));
                 }
             }
-            code.keep_operands(&mark, &result, "0");
+            usage.keep_operand(code, &mark, &result);
             result
         })
     }
@@ -1768,7 +1776,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// A producer that releases its own intermediates can place its result
     /// directly above the preceding arguments and return that root boundary.
     pub(in crate::llvm) fn kept_call_value(&mut self, expr: &Expr, next: &mut String) -> String {
-        use crate::llvm::operations::{CheckedBody, ValueUse};
+        use crate::llvm::operations::CheckedBody;
         let retained = std::cell::OnceCell::new();
         let value = CheckedBody::registered(self.reborrow())
             .value_for(expr, ValueUse::CallOperand(next, &retained));
