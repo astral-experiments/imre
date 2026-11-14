@@ -140,6 +140,7 @@ pub(super) const SYS_BOUND_FUNCTIONS: &[&str] = &[
     "addaudithook",
     "getsizeof",
     "getrecursionlimit",
+    "gettrace",
     "get_asyncgen_hooks",
     "set_asyncgen_hooks",
     "is_finalizing",
@@ -1552,7 +1553,7 @@ pub(super) fn call(
     }
     if matches!(
         name,
-        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks"
+        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks" | "sys.gettrace"
     ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1572,6 +1573,10 @@ pub(super) fn call(
                 fixed_structseq::ASYNCGEN_HOOKS,
                 ctx.threads.asyncgen_hooks.to_vec(),
             ));
+        }
+        if name == "sys.gettrace" {
+            // Native threads have no trace callback until trace registration is supported.
+            return Ok(NONE);
         }
         if name == "sys.is_finalizing" {
             return Ok(builtins::boolean(
