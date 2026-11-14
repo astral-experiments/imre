@@ -11530,6 +11530,16 @@ impl<'a> Checker<'a> {
                 if let Some(bound) = self.bound_unittest_assertion(attribute, &receiver) {
                     return Ok(bound);
                 }
+                if matches!(base_binding, Some(Binding::Module(_)))
+                    && let Some(Binding::Definition(definition)) = binding
+                    && self.classes.declarations.ids.contains_key(&definition)
+                {
+                    return Err(self.classified_error(
+                        Kind::ScopedObject,
+                        attribute,
+                        "using this definition as a value requires object dispatch",
+                    ));
+                }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
                     && let Some(&slot) = self.names.get(name.id.as_str())

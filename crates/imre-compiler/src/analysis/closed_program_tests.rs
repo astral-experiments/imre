@@ -4,6 +4,27 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn module_qualified_class_value_uses_its_python_binding() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    fs::write(
+        project.path().join("scores.py"),
+        "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = 0\n",
+    )
+    .unwrap();
+    fs::write(
+        &main,
+        "import scores\ninstance = scores.Item()\nsetattr(scores.Item, 'value', property(None, lambda _, value: print(value)))\ninstance.value = 2\n",
+    )
+    .unwrap();
+    crate::check_file(&main, None).unwrap();
+
+    fs::write(&main, "import scores\nprint(scores.Item().missing)\n").unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(error.contains("main.py:2:7: Imre: unknown field"), "{error}");
+}
+
+#[test]
 fn a_dormant_async_method_preserves_an_unrelated_definitions_field_contract() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
