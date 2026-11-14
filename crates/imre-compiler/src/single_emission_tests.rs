@@ -745,17 +745,27 @@ fn dormant_thread_preserves_the_declared_call_diagnostic_across_edits() {
     );
 
     let mixed = format!("{source}\ndef other() -> int:\n    return 'unrelated'\n");
-    std::fs::write(&scores, mixed).unwrap();
+    std::fs::write(&scores, &mixed).unwrap();
     let diagnostic = compiler.check_file(&entry, None).unwrap_err();
     assert_eq!(check_file(&entry, None).unwrap_err(), diagnostic);
-    assert!(
-        diagnostic.starts_with("error[invalid-return-type]"),
-        "{diagnostic}"
-    );
-    assert!(diagnostic.contains("scores.py:8:12"), "{diagnostic}");
-    assert!(!diagnostic.contains(expected), "{diagnostic}");
+    let (first, later) = diagnostic.split_once('\n').unwrap();
+    assert_source_diagnostic(first, &scores, expected);
+    assert!(later.starts_with("error[invalid-return-type]"), "{later}");
+    assert!(later.contains("scores.py:8:12"), "{later}");
 
-    std::fs::write(&scores, source.replace("take('x')", "take(3)")).unwrap();
+    std::fs::write(&scores, mixed.replace("take('x')", "take(3)")).unwrap();
+    let remaining = compiler.check_file(&entry, None).unwrap_err();
+    assert_eq!(check_file(&entry, None).unwrap_err(), remaining);
+    assert_source_diagnostic(
+        &remaining,
+        &scores,
+        ":8:12: Imre: expected int, got str; annotations are enforced contracts",
+    );
+
+    let fixed = mixed
+        .replace("take('x')", "take(3)")
+        .replace("'unrelated'", "4");
+    std::fs::write(&scores, fixed).unwrap();
     compiler.check_file(&entry, None).unwrap();
     check_file(&entry, None).unwrap();
 }

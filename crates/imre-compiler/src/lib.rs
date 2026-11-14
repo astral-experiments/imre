@@ -716,6 +716,7 @@ fn object_fallback(
                             && replaced.is_none_or(|r| !r.provider_sources.contains_key(id))
                     }),
                     checked_file.then_some(&graph.modules),
+                    replaced.is_none().then_some(refusal.as_ref()).flatten(),
                 )
             };
             if incremental || replaced.is_some() {

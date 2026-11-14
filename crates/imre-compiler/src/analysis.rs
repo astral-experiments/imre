@@ -2843,11 +2843,15 @@ impl Session {
         calls: FallbackCalls,
         roots: impl Iterator<Item = usize> + Clone,
         checked_modules: Option<&[crate::modules::SourceModule]>,
+        native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
         let checks = match calls {
             FallbackCalls::All | FallbackCalls::DecoratorFactories => FileChecks::FallbackCalls,
             FallbackCalls::FunctionBodies => FileChecks::FunctionBodyCalls,
             FallbackCalls::NamedFunctions => FileChecks::NamedFunctionCalls,
+            FallbackCalls::None | FallbackCalls::Entry(_) if checked_modules.is_some() => {
+                FileChecks::NamedFunctionCalls
+            }
             FallbackCalls::None | FallbackCalls::Entry(_) => FileChecks::FallbackReturns,
         };
         self.set_fallback_rules(
@@ -2855,7 +2859,14 @@ impl Session {
             matches!(calls, FallbackCalls::DecoratorFactories),
             checked_modules.is_some(),
         );
-        self.errors(roots.clone(), skipped, overloads, checks, checked_modules)?;
+        self.errors(
+            roots.clone(),
+            skipped,
+            overloads,
+            checks,
+            checked_modules,
+            native,
+        )?;
 
         let entry = match calls {
             FallbackCalls::Entry(id) => Some(id),
@@ -2974,7 +2985,7 @@ impl Session {
         DiagnosticRules::get(&self.db)
             .set_rules(&mut self.db)
             .to(self.rules.clone());
-        self.errors(modules, skipped, overloads, FileChecks::Full, None)
+        self.errors(modules, skipped, overloads, FileChecks::Full, None, None)
     }
 
     /// Check explicit source signatures before choosing a representation.
@@ -3226,13 +3237,8 @@ impl Session {
                 Some(declarations),
             );
             for error in file_errors(&self.db, checked) {
-                let original = native.and_then(|report| {
-                    let (owner, annotation) = error.declaration?;
-                    let owner = self.files.iter().position(|&file| file == owner)?;
-                    let (declaration, _) = modules[owner].checked_source(owner)?;
-                    let (_, path) = module.checked_source(index)?;
-                    report.matching_declared_operand(path, error.range?, declaration, annotation)
-                });
+                let original =
+                    native.and_then(|report| self.original_operand(error, modules, index, report));
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
         }
@@ -3273,6 +3279,21 @@ impl Session {
         Ok(())
     }
 
+    /// Preserve the original error only for the same operand and parameter declaration.
+    fn original_operand<'a>(
+        &self,
+        error: &CheckedError,
+        modules: &[impl ClosedSource],
+        index: usize,
+        report: &'a crate::frontend::phase::Diagnostic,
+    ) -> Option<&'a crate::frontend::phase::Diagnostic> {
+        let (owner, annotation) = error.declaration?;
+        let owner = self.files.iter().position(|&file| file == owner)?;
+        let (declaration, _) = modules[owner].checked_source(owner)?;
+        let (_, path) = modules[index].checked_source(index)?;
+        report.matching_declared_operand(path, error.range?, declaration, annotation)
+    }
+
     fn errors(
         &self,
         roots: impl Iterator<Item = usize>,
@@ -3280,6 +3301,7 @@ impl Session {
         overloads: &[Vec<CheckedDiagnostic>],
         checks: FileChecks,
         checked_modules: Option<&[crate::modules::SourceModule]>,
+        native: Option<&crate::frontend::phase::Diagnostic>,
     ) -> Result<(), String> {
         let errors: Vec<_> = roots
             .flat_map(|index| {
@@ -3294,9 +3316,16 @@ impl Session {
                     self.explicit_check,
                     None,
                 );
-                file_errors(&self.db, checked)
+                file_errors(&self.db, checked).iter().map(move |error| {
+                    let original = native.and_then(|report| {
+                        self.original_operand(error, checked_modules?, index, report)
+                    });
+                    original.map_or_else(
+                        || std::borrow::Cow::Borrowed(error.rendered.as_str()),
+                        |report| std::borrow::Cow::Owned(report.to_string()),
+                    )
+                })
             })
-            .map(|error| error.rendered.as_str())
             .collect();
         if errors.is_empty() {
             Ok(())
@@ -3955,6 +3984,25 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     None
                 }
                 Some(_) => return None,
+                None if checks == FileChecks::NamedFunctionCalls
+                    && diagnostic.id().is_lint_named("invalid-argument-type") =>
+                {
+                    parameter_labels(diagnostic).find_map(|(owner, range)| {
+                        use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
+                        let parsed = ruff_db::parsed::parsed_module(
+                            db,
+                            db.program_file(owner).python_file(db),
+                        )
+                        .load(db);
+                        let nodes = covering_node(parsed.syntax().into(), range);
+                        nodes.ancestors().find_map(|node| match node {
+                            AnyNodeRef::Parameter(parameter) if parameter.annotation.is_some() => {
+                                Some((owner, parameter.range()))
+                            }
+                            _ => None,
+                        })
+                    })
+                }
                 None => None,
             };
             Some(CheckedError {
@@ -4467,23 +4515,25 @@ fn declared_parameter(
     diagnostic: &Diagnostic,
     parameters: &[(File, TextRange)],
 ) -> Option<(File, TextRange)> {
+    parameter_labels(diagnostic).find_map(|(owner, range)| {
+        parameters
+            .iter()
+            .copied()
+            .find(|(file, parameter)| *file == owner && parameter.contains_range(range))
+    })
+}
+
+fn parameter_labels(diagnostic: &Diagnostic) -> impl Iterator<Item = (File, TextRange)> + '_ {
     diagnostic
         .sub_diagnostics()
         .iter()
         .flat_map(|sub| sub.annotations())
-        .find_map(|label| {
+        .filter_map(|label| {
             let span = label.get_span();
             let ruff_db::diagnostic::UnifiedFile::Ty(owner) = span.file() else {
                 return None;
             };
-            let range = span.range()?;
-            if label.is_primary() {
-                return None;
-            }
-            parameters
-                .iter()
-                .copied()
-                .find(|(file, parameter)| file == owner && parameter.contains_range(range))
+            (!label.is_primary()).then_some((*owner, span.range()?))
         })
 }
 
@@ -4981,6 +5031,7 @@ impl AnalysisCache {
                 skipped,
                 overloads,
                 FileChecks::Full,
+                None,
                 None,
             );
         }
@@ -5500,6 +5551,7 @@ mod diagnostic_mode_tests {
                 FallbackCalls::NamedFunctions,
                 0..session.files.len(),
                 None,
+                None,
             )
             .unwrap_err();
         assert_eq!(
@@ -5528,6 +5580,7 @@ mod diagnostic_mode_tests {
                 &[vec![]],
                 FallbackCalls::All,
                 0..session.files.len(),
+                None,
                 None,
             )
             .unwrap();
@@ -5606,13 +5659,21 @@ mod diagnostic_mode_tests {
                     Some(&[vec![whole]]),
                     &[],
                     FileChecks::Full,
-                    None
+                    None,
+                    None,
                 )
                 .is_ok()
         );
         assert_eq!(
             session
-                .errors(0..session.files.len(), None, &[], FileChecks::Full, None)
+                .errors(
+                    0..session.files.len(),
+                    None,
+                    &[],
+                    FileChecks::Full,
+                    None,
+                    None
+                )
                 .unwrap_err(),
             message
         );
