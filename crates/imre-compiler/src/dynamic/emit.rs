@@ -46,6 +46,7 @@ pub(super) struct RegisteredBodies<'a> {
     pub(super) checked_units: HashMap<usize, CheckedUnit>,
     pub(super) functions: HashMap<crate::modules::ModuleId, super::CheckedFunctions>,
     pub(super) modules: &'a [crate::modules::SourceModule],
+    pub(super) bundled_doctest_prompts: HashMap<String, Vec<Prompt>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
     pub(super) physical_files: HashMap<PathBuf, PhysicalFile>,
     pub(super) archive_members: HashMap<PathBuf, [u8; 32]>,

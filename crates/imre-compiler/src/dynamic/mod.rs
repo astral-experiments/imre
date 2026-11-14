@@ -2737,7 +2737,10 @@ pub(crate) fn compile(
     registrations.functions = functions;
     let modules = project
         .take()
-        .map(|graph| graph.modules)
+        .map(|graph| {
+            registrations.bundled_doctest_prompts = graph.bundled_doctest_prompts;
+            graph.modules
+        })
         .unwrap_or_default();
     registrations.modules = &modules;
     if let Some(file) = entry_file {

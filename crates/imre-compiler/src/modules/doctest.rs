@@ -583,7 +583,10 @@ impl Loader<'_> {
         self.scan(id)
     }
 
-    pub(super) fn doctest_program(&mut self) -> Result<Vec<String>, String> {
+    pub(super) fn doctest_program(
+        &mut self,
+        bundled: &mut HashMap<String, Vec<Prompt>>,
+    ) -> Result<Vec<String>, String> {
         use ruff_python_ast::statement_visitor::StatementVisitor;
 
         let Some(suite) = self
@@ -628,16 +631,19 @@ impl Loader<'_> {
                 self.session.prepare_shipped_source(catalog.module)?;
             }
             if executes {
-                let Some((_, docs)) = documents(&self.modules, target, &self.session) else {
+                let Some((owner, docs)) = documents(&self.modules, target, &self.session) else {
                     continue;
+                };
+                let module = match target {
+                    Binding::Module(id) => Some(id),
+                    Binding::IntrinsicModule(_) => None,
+                    _ => continue,
                 };
                 let mut prepared = Vec::new();
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
                     if !sources.is_empty() {
-                        if let Binding::Module(id) = target
-                            && recorded.insert((id, name.clone()))
-                        {
+                        if recorded.insert((module, name.clone())) {
                             prepared.extend(sources.iter().enumerate().filter_map(
                                 |(index, source)| {
                                     Prompt::new(
@@ -651,8 +657,13 @@ impl Loader<'_> {
                         cases.insert(name.clone(), (sources, target));
                     }
                 }
-                if let Binding::Module(id) = target {
+                if let Some(id) = module {
                     self.modules[id].doctest_prompts.extend(prepared);
+                } else if !prepared.is_empty() {
+                    bundled
+                        .entry(owner.to_owned())
+                        .or_default()
+                        .extend(prepared);
                 }
             }
         }
