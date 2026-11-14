@@ -79,3 +79,7 @@ python "$suite/focused.py" --imre target/release/imre --runtime target/release/l
 python "$suite/run.py" --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang --cpython-source /path/to/cpython --result /tmp/native-contextvars.json
 cmp "$suite/native-linux.json" /tmp/native-contextvars.json
 ```
+
+## Public #8127
+
+The complete unchanged FILE and both saved executables reproduced the 29 passes, two failures, two errors and 23 private-HAMT skips at O0 and O3. Fresh CPython 3.14.5 passed all 56 original IDs. Each native ID retained its public #8074 outcome. The [paired rows](paired-public-8127.tsv) identify all original method source ranges and hashes.
