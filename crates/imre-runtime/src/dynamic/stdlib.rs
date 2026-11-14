@@ -578,7 +578,8 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("tempfile", "TemporaryFile") => ctx.builtin("tempfile.TemporaryFile"),
         (
             "gc",
-            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked",
+            "enable" | "disable" | "isenabled" | "get_threshold" | "set_threshold" | "is_tracked"
+            | "is_finalized",
         ) => ctx.builtin(&format!("gc.{name}")),
         ("unicodedata", "unidata_version") => ctx.text(imre_ast::UNICODE_DATA_VERSION),
         (
@@ -3045,6 +3046,10 @@ pub(super) fn call(
     if name == "gc.is_tracked" {
         let obj = builtins::one_positional_arg(name, args, kwargs)?;
         return Ok(builtins::boolean(ctx.heap.is_gc_tracked(obj)));
+    }
+    if name == "gc.is_finalized" {
+        let obj = builtins::one_positional_arg(name, args, kwargs)?;
+        return Ok(builtins::boolean(ctx.heap.is_gc_finalized(obj)));
     }
     if name == "gc.collect" {
         let generation = if args.is_empty() && kwargs.is_empty() {

@@ -175,6 +175,12 @@ impl Context {
         if !found {
             return;
         }
+        // Cyclic GC sets the observable bit before calling tp_finalize. Ordinary
+        // deallocation sets it after the callback, even when it resurrected the owner.
+        // Releasing an iterator's exported buffer is internal deallocation.
+        if !unpack_iterator && self.heap.in_full_collection(owner) {
+            self.heap.mark_gc_finalized(owner);
+        }
         super::stdlib::io::hand_file_finalization_to_python(self, owner);
         // The selected slot owns the implicit close. An override can resurrect the
         // socket or release its fd through os.close without calling the base slot.
@@ -236,6 +242,9 @@ impl Context {
                     super::unraisable::deallocator(self, error, method);
                 }
             }
+        }
+        if !unpack_iterator {
+            self.heap.mark_gc_finalized(owner);
         }
         self.heap.execution.pending = pending;
         self.heap.release_temporaries_since(mark);

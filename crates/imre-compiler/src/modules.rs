@@ -2403,6 +2403,7 @@ impl IntrinsicModule {
             (Self::Operator | Self::OperatorNative, "not_") | (Self::Operator, "__not__") => {
                 Intrinsic::OperatorNot
             }
+            (Self::Gc, "is_finalized") => Intrinsic::ScopedObjectExport("gc.is_finalized"),
             (Self::Gc, "is_tracked") => Intrinsic::ScopedObjectExport("gc.is_tracked"),
             (Self::Math, "acos") => Intrinsic::MathAcos,
             (Self::Math, "acosh") => Intrinsic::ScopedObjectExport("math.acosh"),
