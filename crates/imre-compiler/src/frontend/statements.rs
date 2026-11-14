@@ -354,7 +354,7 @@ impl StatementLowering for Checker<'_> {
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> Result<Block, String> {
-        self.iteration(loop_)
+        self.iteration(loop_, true)
     }
 
     fn raised_value(

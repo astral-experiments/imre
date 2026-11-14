@@ -5708,7 +5708,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Keeps the original container rooted and owns each item before user code runs.
-    fn iteration(&mut self, loop_: &ast::StmtFor) -> Result<(Vec<Statement>, bool), String> {
+    fn iteration(&mut self, loop_: &ast::StmtFor, emit: bool) -> Result<statements::Block, String> {
         let mut input = if loop_.is_async || self.registered.is_some() {
             self.iteration_input(&loop_.iter, None, registered::for_pull(loop_))?
         } else if let ast::Expr::Call(call) = loop_.iter.as_ref()
@@ -5782,10 +5782,10 @@ impl<'a> Checker<'a> {
             &loop_.orelse,
             Vec::new(),
             |checker, body| {
-                let output = (!checker.discarded_function_body()).then_some(body);
-                checker.lower_block(&loop_.body, output)?;
+                let keep = emit && !checker.discarded_function_body();
+                checker.lower_block(&loop_.body, keep.then_some(body))?;
                 // The loop body can select a Python frame while its source contracts are checked.
-                Ok(!checker.discarded_function_body())
+                Ok(keep && !checker.discarded_function_body())
             },
         )
     }
@@ -6378,12 +6378,14 @@ impl<'a> Checker<'a> {
             } else {
                 let depth = self.present_fields.len();
                 self.guard_return_field(std::slice::from_ref(statement), fallthrough_field);
-                // A later statement can inspect these instructions for narrowing.
-                let output = (emitting
-                    || !statement.is_if_stmt()
-                    || index + 1 < statements.len()
-                    || self.fixed_sites.is_some())
-                .then_some(&mut *body);
+                // A loop joins its own exits. A later statement can inspect an if for narrowing.
+                let scratch = match statement {
+                    ast::Stmt::For(_) => false,
+                    ast::Stmt::If(_) => index + 1 < statements.len(),
+                    _ => true,
+                };
+                let output =
+                    (emitting || self.fixed_sites.is_some() || scratch).then_some(&mut *body);
                 let result = self.statement(statement, output);
                 self.present_fields.truncate(depth);
                 result?
@@ -6694,8 +6696,12 @@ impl<'a> Checker<'a> {
             }
             return Ok(true);
         }
-        if checking && let ast::Stmt::If(branch) = statement {
-            return self.if_chain(branch, None);
+        if checking {
+            match statement {
+                ast::Stmt::If(branch) => return self.if_chain(branch, None),
+                ast::Stmt::For(loop_) => return Ok(self.iteration(loop_, false)?.1),
+                _ => {}
+            }
         }
         statements::StatementLowering::source_statement(self, statement, self.module_scope, body)
     }
