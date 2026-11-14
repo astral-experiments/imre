@@ -256,7 +256,10 @@ impl Session {
             if let Some((owner, loaded)) = binding {
                 let stmt = &suite[start - 1];
                 let before = progress[&owner.module];
-                if !self.passive_import_binding(stmt, owner.module, before) {
+                let mut bindings = Vec::new();
+                let capture =
+                    (owner.declares_signatures && captures.is_some()).then_some(&mut bindings);
+                if !self.passive_import_binding(stmt, owner.module, before, capture) {
                     return None;
                 }
                 let site = if let Stmt::Import(import) = stmt {
@@ -270,12 +273,11 @@ impl Session {
                 };
                 if owner.declares_signatures {
                     if let Some(captures) = captures.as_deref_mut()
-                        && let Stmt::ImportFrom(import) = stmt
+                        && stmt.is_import_from_stmt()
                     {
                         self.capture_function_sources(
-                            import,
+                            &bindings,
                             (owner.module, owner.path),
-                            before,
                             &mut captures.entry(module).or_default().functions,
                         );
                     }
@@ -387,7 +389,13 @@ impl Session {
         None
     }
 
-    fn passive_import_binding(&self, stmt: &Stmt, owner: usize, before: Option<TextSize>) -> bool {
+    fn passive_import_binding<'db>(
+        &'db self,
+        stmt: &Stmt,
+        owner: usize,
+        before: Option<TextSize>,
+        mut capture: Option<&mut Vec<(TextRange, Definition<'db>)>>,
+    ) -> bool {
         let file = self.files[owner];
         // A from-import can query __path__ or a missing member during initialization.
         stmt.as_import_from_stmt().is_none_or(|import| {
@@ -396,9 +404,15 @@ impl Session {
                 .place_table(FileScopeId::global())
                 .symbol_id("__getattr__")
                 .is_none()
-                && import.names.iter().all(|a| {
-                    self.initialized_member(owner, a.name.as_str(), before)
-                        .is_some()
+                && import.names.iter().all(|alias| {
+                    let Some(binding) = self.initialized_member(owner, alias.name.as_str(), before)
+                    else {
+                        return false;
+                    };
+                    if let Some(capture) = capture.as_deref_mut() {
+                        capture.push((alias.range(), binding));
+                    }
+                    true
                 })
         })
     }
@@ -438,19 +452,14 @@ impl Session {
 
     fn capture_function_sources(
         &self,
-        import: &ruff_python_ast::StmtImportFrom,
+        bindings: &[(TextRange, Definition<'_>)],
         owner: (usize, &Path),
-        before: Option<TextSize>,
         captures: &mut super::execution::FunctionImports,
     ) {
         let file = self.files[owner.0];
         let parsed = self.parsed(file);
         let model = SemanticModel::new(&self.db, self.db.program_file(file));
-        for alias in &import.names {
-            let Some(binding) = self.initialized_member(owner.0, alias.name.as_str(), before)
-            else {
-                continue;
-            };
+        for &(site, binding) in bindings {
             let DefinitionKind::Function(definition) = binding.kind(&self.db) else {
                 continue;
             };
@@ -460,7 +469,7 @@ impl Session {
                     .is_generator_definition(owner.0, function)
                     .then(|| self.generator_execution_error(owner, &parsed, &model, function))
                     .flatten();
-                captures.insert(alias.range(), (owner.0, source));
+                captures.insert(site, (owner.0, source));
             }
         }
     }
