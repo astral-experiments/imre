@@ -40,7 +40,6 @@ from keyword import iskeyword
 from inspect import (
     _descriptor_get,
     _native_data_descriptor,
-    _signature_layout,
     _static_member,
 )
 
@@ -52,15 +51,16 @@ def getargs(co):
     """Return the named, variadic positional and variadic keyword arguments of a code object."""
     if not iscode(co):
         raise TypeError(f"{co!r} is not a code object")
-    args = []
+    nargs = co.co_argcount + co.co_kwonlyargcount
+    flags = co.co_flags
+    names = co.co_varnames if nargs or flags & (CO_VARARGS | CO_VARKEYWORDS) else ()
+    args = list(names[:nargs])
     varargs = varkw = None
-    for kind, name in _signature_layout(co):
-        if kind == _VAR_POSITIONAL:
-            varargs = name
-        elif kind == _VAR_KEYWORD:
-            varkw = name
-        else:
-            args.append(name)
+    if flags & CO_VARARGS:
+        varargs = names[nargs]
+        nargs += 1
+    if flags & CO_VARKEYWORDS:
+        varkw = names[nargs]
     return Arguments(args, varargs, varkw)
 
 
@@ -223,26 +223,45 @@ def _signature_from_function(obj, sigcls, globals, locals, eval_str, annotation_
     text_signature = getattr(obj, "__text_signature__", None)
     if text_signature:
         return _signature_fromstr(sigcls, obj, text_signature, skip_bound_arg=skip_bound_arg)
-    layout = _signature_layout(obj.__code__ if is_duck else obj)
+    Parameter = sigcls._parameter_cls
+    code = obj.__code__
+    pos_count = code.co_argcount
+    posonly_count = code.co_posonlyargcount
+    kw_end = pos_count + code.co_kwonlyargcount
+    flags = code.co_flags
+    names = code.co_varnames if kw_end or flags & (CO_VARARGS | CO_VARKEYWORDS) else ()
+    positional = names[:pos_count]
     annotations = get_annotations(
         obj, globals=globals, locals=locals, eval_str=eval_str, format=annotation_format)
     defaults = obj.__defaults__
-    keyword_defaults = obj.__kwdefaults__
-    positional = [name for kind, name in layout if kind < _VAR_POSITIONAL]
-    # CPython slices the names first; a replaced __defaults__ may be longer
-    # than the argument list, in which case the slice uses a negative start.
-    default_count = len(defaults) if defaults else 0
-    default_names = positional[len(positional) - default_count:]
-    default_indices = {name: index for index, name in enumerate(default_names)}
+    kwdefaults = obj.__kwdefaults__
+    # Slice the names before indexing defaults: an assigned tuple can be oversized.
+    non_default_count = pos_count - (len(defaults) if defaults else 0)
     parameters = []
-    for kind, name in layout:
-        default = _empty
-        if kind == _KEYWORD_ONLY and keyword_defaults is not None:
-            default = keyword_defaults.get(name, _empty)
-        elif name in default_indices:
-            default = defaults[default_indices[name]]
-        parameters.append(sigcls._parameter_cls(name, kind, default=default,
-                                                annotation=annotations.get(name, _empty)))
+    for name in positional[:non_default_count]:
+        kind = _POSITIONAL_ONLY if posonly_count else _POSITIONAL_OR_KEYWORD
+        parameters.append(Parameter(name, annotation=annotations.get(name, _empty), kind=kind))
+        if posonly_count:
+            posonly_count -= 1
+    for offset, name in enumerate(positional[non_default_count:]):
+        kind = _POSITIONAL_ONLY if posonly_count else _POSITIONAL_OR_KEYWORD
+        parameters.append(Parameter(name, annotation=annotations.get(name, _empty),
+                                    kind=kind, default=defaults[offset]))
+        if posonly_count:
+            posonly_count -= 1
+    if flags & CO_VARARGS:
+        name = names[kw_end]
+        parameters.append(Parameter(name, annotation=annotations.get(name, _empty),
+                                    kind=_VAR_POSITIONAL))
+    for name in names[pos_count:kw_end]:
+        default = kwdefaults.get(name, _empty) if kwdefaults is not None else _empty
+        parameters.append(Parameter(name, annotation=annotations.get(name, _empty),
+                                    kind=_KEYWORD_ONLY, default=default))
+    if flags & CO_VARKEYWORDS:
+        index = kw_end + 1 if flags & CO_VARARGS else kw_end
+        name = names[index]
+        parameters.append(Parameter(name, annotation=annotations.get(name, _empty),
+                                    kind=_VAR_KEYWORD))
     return sigcls(parameters, return_annotation=annotations.get("return", _empty),
                   __validate_parameters__=is_duck)
 

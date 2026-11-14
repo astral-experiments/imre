@@ -2733,8 +2733,9 @@ impl Context {
             },
             value::CodeDefinition {
                 module_definition: true,
-                // Parsed module metadata records only the future flags.
+                // The supported module compile modes admit only future flags.
                 flags: module.flags,
+                flags_complete: true,
                 ..Default::default()
             },
             name,
