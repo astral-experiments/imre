@@ -6830,14 +6830,20 @@ impl<'a> Checker<'a> {
                 let ty = if document == Some(documents::ANY) {
                     Type::ObjectValue
                 } else {
-                    annotation_in_class(
+                    match annotation_in_class(
                         &assign.annotation,
                         self.graph,
                         self.module,
                         self.classes.declarations,
                         self.types,
                         self.class,
-                    )?
+                    ) {
+                        Ok(ty) => ty,
+                        // The checked Python function stores the RHS. Its local annotation
+                        // has no runtime value and the source checker owns its validity.
+                        Err(_) if self.checked_call_contracts => Type::PythonObject,
+                        Err(error) => return Err(error.into()),
+                    }
                 };
                 if let Some(slot) = self.names.get(name.id.as_str()) {
                     self.inferred_containers.remove(slot);
