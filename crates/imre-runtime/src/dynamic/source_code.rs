@@ -2923,23 +2923,28 @@ impl Context {
         kwdefaults: Id,
     ) -> Id {
         let data = self.code_object(code);
-        let freevars = data.definition.freevars().to_vec();
+        let freevars = data.definition.freevars();
         let code_doc = data.doc;
         let (closure, cells) = match closure {
-            FunctionClosure::Cells(cells) => (NONE, Cow::Borrowed(cells)),
-            FunctionClosure::Tuple(NONE) => (NONE, Cow::Borrowed(&[][..])),
+            FunctionClosure::Cells(cells) => (NONE, cells),
+            FunctionClosure::Tuple(NONE) => (NONE, &[][..]),
             FunctionClosure::Tuple(tuple) => {
                 let Value::Tuple(cells) = self.heap.get(tuple) else {
                     unreachable!("validated function closure")
                 };
-                (tuple, Cow::Owned(cells.to_vec()))
+                (tuple, cells.as_slice())
             }
         };
         let class_cell = freevars
             .iter()
             .position(|name| name == "__class__")
             .map(|index| cells[index]);
-        let scope = self.closure_environment(globals, freevars, &cells);
+        let cells = freevars
+            .iter()
+            .cloned()
+            .zip(cells.iter().copied())
+            .collect();
+        let scope = self.environment_with_cells(globals, cells);
         let fields = super::function_fields::FunctionFields::new(
             self, scope, module, name, qualname, code_doc, NONE,
         );
