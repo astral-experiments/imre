@@ -838,8 +838,9 @@ fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
 
 /// Apply the type's format method and return its string, including a string subclass.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<Id>) -> Result<Id> {
+    let spec_storage = spec.and_then(|id| ctx.string_storage(id));
     if let Some(spec) = spec
-        && ctx.string_storage(spec).is_none()
+        && spec_storage.is_none()
     {
         return Err(type_error(format!(
             "format() argument 2 must be str, not {}",
@@ -847,6 +848,13 @@ pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<
         )));
     }
     let method = match ctx.heap.get(value) {
+        Value::Str(_) | Value::SurrogateStr(_)
+            if spec_storage.is_none_or(
+                |id| matches!(ctx.heap.get(id), Value::Str(text) if text.is_empty()),
+            ) =>
+        {
+            return Ok(value);
+        }
         Value::Calendar {
             value: calendar, ..
         } if matches!(calendar.class(), "date" | "datetime" | "time") => {
