@@ -326,10 +326,14 @@ impl ClauseLowering for Checker<'_> {
         _: Output<'_>,
         body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Vec<Statement>), String>,
     ) -> Result<Vec<Statement>, String> {
-        self.lower_iteration(target, input, &[], |checker, output| {
+        self.lower_iteration_after(target, input, &[], Vec::new(), |checker, output| {
             let (conditions, body) = body(checker)?;
+            // A discarded display has checked its filters and item without emitting a store.
+            if body.is_empty() {
+                return Ok(false);
+            }
             statements::append_block(output, filter_suite(conditions, body));
-            Ok(())
+            Ok(true)
         })
         .map(|(body, _)| body)
     }

@@ -2946,7 +2946,7 @@ impl Checker<'_> {
         mut input: Prepared,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
-        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<(), String>,
+        lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<bool, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         self.forget_pull_writes(&input);
         let before = self.assigned.clone();
@@ -2954,11 +2954,14 @@ impl Checker<'_> {
         let binding = input.bind_loop_target(self, target, true)?;
         assignments::forget_binding_writes(&mut facts, binding);
         self.loop_breaks.push(None);
-        lower_body(self, &mut input.next)?;
+        let emit = lower_body(self, &mut input.next)?;
         let breaks = self.loop_breaks.pop().unwrap();
         self.assigned.after_iteration(before);
         self.narrowed = facts;
         let (orelse, falls) = self.loop_else(orelse, breaks, true)?;
+        if !emit {
+            return Ok((Vec::new(), falls));
+        }
         Ok((input.loop_suite(orelse, before_iteration), falls))
     }
 

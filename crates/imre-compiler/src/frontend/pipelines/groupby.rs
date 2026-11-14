@@ -245,7 +245,7 @@ impl Checker<'_> {
                         // A break leaves the outer iterator to skip the rest of this group.
                         each.push(Statement::Assign(ready, Expr::boolean(false)));
                         checker.lower_block(&inner.body, Some(each))?;
-                        Ok(())
+                        Ok(true)
                     },
                 )?;
                 body.extend(statements);
@@ -286,7 +286,7 @@ impl Checker<'_> {
                 });
             }
             checker.lower_block(rest, Some(body))?;
-            Ok(())
+            Ok(true)
         })
     }
 }
