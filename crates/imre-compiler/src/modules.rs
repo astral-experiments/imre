@@ -3799,7 +3799,7 @@ impl SourceGraph {
             .push(CheckedDiagnostic::PositionalKeyword(keyword));
     }
 
-    /// Lowering checked this exact operand against the native integer protocol.
+    /// Lowering settled the type check for this exact argument.
     pub(crate) fn checked_argument_type(&self, module: ModuleId, argument: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::ArgumentType(argument));

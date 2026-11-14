@@ -39,6 +39,13 @@ REJECTED = {
     "wrong_parameter": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[str], int] = identity\nrun()\n",
     "wrong_return": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], str] = identity\nrun()\n",
     "bool_is_not_int": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(True))\nrun()\n",
+    "raising_before_declared_argument": (
+        IMPORT + FUNCTION
+        + 'def stop() -> int:\n    raise ValueError("stop")\n'
+        + "def pair(x: int, y: int) -> int:\n    return x + y\n"
+        + "def run(f: Callable[[int, int], int]) -> int:\n"
+        + "    return f(stop(), identity('x'))\nprint(run(pair))\n"
+    ),
     "indirect_keyword": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(value=1))\nrun()\n",
     "indirect_missing": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn())\nrun()\n",
     "indirect_extra": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(1, 2))\nrun()\n",
@@ -92,6 +99,8 @@ ERRORS = {
 
 
 def check_redefinition_error(name: str, stderr: str) -> None:
+    if name == "raising_before_declared_argument":
+        assert "main.py:9:31: Imre: expected int, got str" in stderr, stderr
     line = {"redefined_first_return": 2, "redefined_second_return": 5}.get(name)
     if line is not None:
         assert f"main.py:{line}:12: Imre: expected int, got str" in stderr, (name, stderr)

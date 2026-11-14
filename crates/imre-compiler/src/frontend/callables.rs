@@ -814,48 +814,65 @@ impl Checker<'_> {
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
-        let values =
-            call.arguments
-                .args
-                .iter()
-                .zip(params)
-                .enumerate()
-                .map(|(slot, (argument, ty))| {
-                    if registered_site.is_some() {
-                        // A Python activation passes the source object, including its identity.
-                        // A native conversion or expected display layout cannot supply that handle.
-                        let value = self.expr(argument)?;
-                        if value.ty != ty {
-                            return Err(self
-                                .scoped_builtin_error("a converted callable argument", argument));
+        let mut values = Vec::with_capacity(call.arguments.args.len());
+        let source = self.source;
+        // An omitted expression may have a source contract of its own. The ordinary
+        // binder checks the call whenever its unevaluated tail contains one.
+        let last_source_operand = std::cell::LazyCell::new(|| {
+            call.arguments.args.iter().rposition(|arg| {
+                !arg.is_literal_expr() || calls::scalar_literal(arg, source).is_err()
+            })
+        });
+        for (slot, (argument, ty)) in call.arguments.args.iter().zip(params).enumerate() {
+            let checked_tail = || last_source_operand.is_none_or(|last| last <= slot);
+            let value = if registered_site.is_some() || slot == 0 && index_callable {
+                let value = self.expr(argument)?;
+                if self.terminating_operand(&value) && checked_tail() {
+                    value
+                } else if registered_site.is_none() {
+                    self.index_value(value, argument)?
+                } else if value.ty == ty {
+                    // A Python activation passes the original object, without conversion.
+                    value
+                } else {
+                    return Err(
+                        self.scoped_builtin_error("a converted callable argument", argument)
+                    );
+                }
+            } else {
+                calls::Supplied::Source(argument).check_with(
+                    self,
+                    ty,
+                    false,
+                    None,
+                    |checker, value, expected, site| {
+                        if checker.terminating_operand(&value) && checked_tail() {
+                            return Ok(value);
                         }
-                        return Ok(value);
-                    }
-                    if slot == 0 && index_callable {
-                        self.integer_index(argument)
-                    } else {
-                        calls::Supplied::Source(argument).check_with(
-                            self,
-                            ty,
-                            false,
-                            None,
-                            |checker, value, expected, site| {
-                                checker.coerce(value, expected, site).map_err(|error| {
-                                    error.at_callable_argument(site.range(), || {
-                                        local_callable
-                                            && checker.graph.session.calls_annotated_parameter(
-                                                checker.module,
-                                                call,
-                                                site.range(),
-                                                &checker.graph.modules[checker.module].parsed,
-                                            )
-                                    })
-                                })
-                            },
-                        )
-                    }
-                })
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+                        checker.coerce(value, expected, site).map_err(|error| {
+                            error.at_callable_argument(site.range(), || {
+                                local_callable
+                                    && checker.graph.session.calls_annotated_parameter(
+                                        checker.module,
+                                        call,
+                                        site.range(),
+                                        &checker.graph.modules[checker.module].parsed,
+                                    )
+                            })
+                        })
+                    },
+                )?
+            };
+            if self.terminating_operand(&value) && checked_tail() {
+                if value.ty != ty {
+                    self.graph
+                        .checked_argument_type(self.module, argument.range());
+                }
+                values.insert(0, callable);
+                return Ok(calls::ArgumentScope::stopped(self, values, value, returns));
+            }
+            values.push(value);
+        }
         if needs_cell_default {
             // The checked positional ABI constrains supplied arguments. The current
             // function in the shared cell owns the defaults for the remaining slots.
