@@ -924,6 +924,11 @@ fn create_node(ctx: &mut Context, name: &str, args: &[Id], kwargs: &[(String, Id
     if name == "mkfifo" {
         return mkfifo::create(&pathname, mode as libc::mode_t, dir_fd);
     }
+    if !ctx.audit_hooks.is_empty() {
+        let audit_mode = ctx.int(i64::from(mode));
+        let audit_directory = audit_fd(ctx, dir_fd);
+        super::audit::event(ctx, "os.mkdir", &[path, audit_mode, audit_directory])?;
+    }
     // SAFETY: pathname is NUL-terminated and stays live through the synchronous call.
     if unsafe { libc::mkdirat(dir_fd, pathname.as_ptr(), mode as libc::mode_t) } != 0 {
         let error = crate::objects::errno_error(std::io::Error::last_os_error());
