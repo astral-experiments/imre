@@ -142,6 +142,10 @@ class Child(Base):
     "wrong_constructor_arity": CELL + "Cell()\n",
     "wrong_method_type": CELL + 'value = Cell(1)\nvalue.add("wrong")\n',
     "wrong_method_arity": CELL + "value = Cell(1)\nvalue.add()\n",
+    "indirect_constructor_unknown_keyword": CELL + """    def copy(self, fields: dict[str, int]):
+        return type(self)(**fields)
+Cell(1).copy({"unknown": 2})
+""",
     "explicit_initializer_call": CELL + "value = Cell(1)\nvalue.__init__(2)\n",
     "missing_method_annotation": CELL.replace("amount: int", "amount"),
     "wrong_method_return": CELL.replace("return self.value", 'return "wrong"'),
