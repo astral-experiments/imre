@@ -30,7 +30,6 @@ pub(super) struct Callback {
     receiver: Option<Argument>,
     config: Arc<serde_json::Value>,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
-    interpreter: super::InterpreterState,
     allocation_traces: super::allocation_traces::AllocationTraces,
 }
 
@@ -353,7 +352,6 @@ impl Callback {
             receiver: None,
             config: Arc::clone(&ctx.config),
             gc_settings: ctx.heap.gc_settings.clone(),
-            interpreter: ctx.interpreter.clone(),
             allocation_traces: ctx.heap.allocation_traces.worker(),
         })
     }
@@ -361,6 +359,7 @@ impl Callback {
     /// Prepare on the child. Publication decides whether to invoke or discard its operands.
     pub(super) fn into_call(
         self,
+        interpreter: Arc<super::InterpreterState>,
         fault_workers: &Arc<()>,
     ) -> Result<impl FnOnce(bool, Option<String>) -> WorkerStatus + use<>> {
         let heap = super::Heap::with_worker_stack(
@@ -372,7 +371,7 @@ impl Callback {
             self.config,
             std::iter::empty::<String>(),
             heap,
-            Some(self.interpreter),
+            Some(interpreter),
         );
         let mark = ctx.heap.temporary_mark();
         let globals = ctx.scope(&self.module, None);

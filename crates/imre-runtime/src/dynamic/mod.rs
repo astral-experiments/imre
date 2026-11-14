@@ -211,15 +211,15 @@ struct ExposedClassBody {
 }
 
 /// Native state shared by the main context and its registered workers.
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct InterpreterState {
-    worker_count: Arc<AtomicUsize>,
-    socket_default_timeout: Arc<Mutex<Option<Duration>>>,
-    finalizing: Arc<AtomicBool>,
+    worker_count: AtomicUsize,
+    socket_default_timeout: Mutex<Option<Duration>>,
+    finalizing: AtomicBool,
 }
 
 pub(crate) struct Context {
-    interpreter: InterpreterState,
+    interpreter: Arc<InterpreterState>,
     // Active calls to an overridable socket.send from sendfile. Receivers stay rooted by the call.
     sendfile_writes: Vec<(Id, crate::objects::socket::SendfileIdentity, Id)>,
     threads: lowlevel_threads::Workers,

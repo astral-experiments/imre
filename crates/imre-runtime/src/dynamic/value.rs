@@ -7538,7 +7538,7 @@ mod tests {
             Arc::clone(&parent.gc_settings),
             parent.allocation_traces.worker(),
         );
-        let interpreter = crate::dynamic::InterpreterState::default();
+        let interpreter = Arc::new(crate::dynamic::InterpreterState::default());
         let config = Arc::new(serde_json::json!({}));
         let worker = crate::dynamic::ffi::new_context_with_heap(
             Arc::clone(&config),
@@ -7548,18 +7548,7 @@ mod tests {
         );
         assert!(worker.threads.private_context);
         assert!(Arc::ptr_eq(&worker.config, &config));
-        assert!(Arc::ptr_eq(
-            &interpreter.worker_count,
-            &worker.interpreter.worker_count
-        ));
-        assert!(Arc::ptr_eq(
-            &interpreter.finalizing,
-            &worker.interpreter.finalizing
-        ));
-        assert!(Arc::ptr_eq(
-            &interpreter.socket_default_timeout,
-            &worker.interpreter.socket_default_timeout
-        ));
+        assert!(Arc::ptr_eq(&interpreter, &worker.interpreter));
         assert!(worker.heap.gc_schedule.requested());
         assert!(worker.heap.allocation_traces.get(worker.argv).is_some());
         assert!(parent.allocation_traces.get(worker.argv).is_none());

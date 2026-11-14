@@ -929,7 +929,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
     config: Arc<serde_json::Value>,
     args: impl IntoIterator<Item = S>,
     heap: Heap,
-    worker_interpreter: Option<InterpreterState>,
+    worker_interpreter: Option<Arc<InterpreterState>>,
 ) -> Context {
     let launcher = config["executable"].as_str();
     let helper_executable =
@@ -1326,8 +1326,8 @@ fn register_source(
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
-    let _publication =
-        crate::fault_handler::FramePublication::enter(ctx.interpreter.finalizing.clone());
+    let interpreter = Arc::clone(&ctx.interpreter);
+    let _publication = crate::fault_handler::FramePublication::enter(&interpreter.finalizing);
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
     // With unfrozen modules, importing site can execute a filesystem replacement for stat.
