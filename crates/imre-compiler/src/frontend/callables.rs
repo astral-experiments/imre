@@ -59,22 +59,30 @@ pub(super) fn validate_storage(
     dictionaries: &mut HashMap<Type, bool>,
     mut visit: impl FnMut(&Expr),
 ) -> std::result::Result<(), String> {
-    let mut check = |ty, display| {
-        if !invalid_aggregate(ty, types) {
-            return false;
-        }
-        if let Some(signature) = handler_signature(ty, types) {
-            *dictionaries.entry(signature).or_default() |= display;
-            return false;
-        }
-        true
-    };
+    let unsupported = |ty| invalid_aggregate(ty, types) && handler_signature(ty, types).is_none();
     let mut invalid = invalid_aggregate(function.returns, types)
-        || function.locals.iter().any(|&ty| check(ty, false));
+        || function.locals.iter().copied().any(unsupported);
+    // Only an insertion can give a dictionary a callable to own. Declarations,
+    // empty displays and reads don't need to borrow a target from another body.
+    let mut insertion = |dict, display| {
+        if let Some(item) = handler_signature(dict, types)
+            && !types.is_plain_callback(item)
+        {
+            *dictionaries.entry(item).or_default() |= display;
+        }
+    };
     // A cold indirect call owns a private argument frame for its continuation.
     // Its callable cannot enter a language-visible tuple or container.
     let mut frames = HashSet::new();
-    ir::walk_expressions(&function.body, &mut |value| {
+    ir::walk_nodes(&function.body, &mut |node, _| {
+        let value = match node {
+            ir::Node::Statement(Statement::SetItem(_, dict, _, _)) => {
+                insertion(dict.ty, false);
+                return;
+            }
+            ir::Node::Statement(_) => return,
+            ir::Node::Expression(value) => value,
+        };
         visit(value);
         if let ExprKind::Builtin(
             Builtin::Process(
@@ -89,8 +97,12 @@ pub(super) fn validate_storage(
             frames.insert(std::ptr::from_ref(&args[0]));
         }
         if !frames.contains(&std::ptr::from_ref(value)) {
-            let display = matches!(&value.kind, ExprKind::Dict(entries) if !entries.is_empty());
-            invalid |= check(value.ty, display);
+            invalid |= unsupported(value.ty);
+            match &value.kind {
+                ExprKind::Dict(entries) if !entries.is_empty() => insertion(value.ty, true),
+                ExprKind::Builtin(Builtin::DictSetDefault, args) => insertion(args[0].ty, false),
+                _ => {}
+            }
         }
     });
     if invalid {
