@@ -3491,6 +3491,7 @@ struct Checker<'a> {
     globals: &'a ModuleValues,
     inference: Option<&'a inference::Inference>,
     inferred_returns: Option<Vec<Type>>,
+    return_declaration: Option<phase::TypeDeclaration>,
     /// An explicit return can still escape the enclosing cleanup.
     explicit_return: bool,
     discover_document_return: Option<Type>,
@@ -3618,6 +3619,7 @@ impl<'a> Checker<'a> {
             globals,
             inference: None,
             inferred_returns: None,
+            return_declaration: None,
             explicit_return: false,
             discover_document_return: None,
             comprehension_targets: HashSet::new(),
@@ -3715,6 +3717,17 @@ impl<'a> Checker<'a> {
         self.method_context(signature.method);
         self.context_method = self.classes.contexts.contains(&signature.id);
         self.generator_item = self.classes.producer_items.get(&signature.id).copied();
+        self.return_declaration = definition
+            .returns
+            .as_deref()
+            .filter(|_| {
+                self.generator_item.is_none()
+                    && self.graph.modules[self.module].checks_source_contracts()
+            })
+            .map(|annotation| phase::TypeDeclaration {
+                module: self.module,
+                annotation: annotation.range(),
+            });
         // The signature builder appends **kwargs after the ordinary parameters and *args.
         let parameters = closed_calls::parameters(&definition.parameters)
             .chain(definition.parameters.kwarg.as_deref());

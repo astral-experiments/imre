@@ -577,9 +577,11 @@ impl Session {
         for ((p, value), actual) in supplied.clone() {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
-                && let Some(error) = self.scalar_argument_error(model, expected, value, actual)
+                && let Some(error) = Session::scalar_contract_error(model, expected, value, actual)
             {
-                return Some(Err(error.with_path(path)));
+                return Some(Err(error
+                    .classified(Kind::DeclaredArgument)
+                    .with_path(path)));
             }
         }
         if !iterated
@@ -689,30 +691,24 @@ impl Session {
             .then_some(def)
     }
 
-    pub(super) fn scalar_argument_error<'db>(
-        &'db self,
+    pub(super) fn scalar_contract_error<'db>(
         model: &SemanticModel<'db>,
         expected: Type<'db>,
-        operand: &Expr,
+        operand: &impl Ranged,
         actual: Type<'db>,
     ) -> Option<Diagnostic> {
+        let db = model.db();
         let env = model.program_environment();
-        if !concrete_scalar(&self.db, &env, expected)
-            || actual.is_assignable_to(&self.db, &env, expected)
-        {
+        if !concrete_scalar(db, &env, expected) || actual.is_assignable_to(db, &env, expected) {
             return None;
         }
-        let actual = self
-            .scalar_layout(&env, actual, ScalarMatch::Assignable)
-            .map_or_else(
-                || actual.display(&self.db, &env).to_string(),
-                |t| t.to_string(),
-            );
+        let actual = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable)
+            .map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
         let message = format!(
             "expected {}, got {actual}; annotations are enforced contracts",
-            expected.display(&self.db, &env)
+            expected.display(db, &env)
         );
-        let text = ruff_db::source::source_text(&self.db, model.file());
-        Some(Diagnostic::at(text.as_str(), operand, message).classified(Kind::DeclaredArgument))
+        let text = ruff_db::source::source_text(db, model.file());
+        Some(Diagnostic::at(text.as_str(), operand, message))
     }
 }

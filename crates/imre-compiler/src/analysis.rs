@@ -307,11 +307,14 @@ impl OperandTypes<'_> {
                 let env = model.program_environment();
                 !value.is_unknown()
                     && value.is_assignable_to(&session.db, &env, expected)
-                    && session
-                        .scalar_layout(&env, expected, ScalarMatch::Assignable)
+                    && Session::scalar_layout(&session.db, &env, expected, ScalarMatch::Assignable)
                         .is_none_or(|layout| {
-                            session.scalar_layout(&env, value, ScalarMatch::Assignable)
-                                == Some(layout)
+                            Session::scalar_layout(
+                                &session.db,
+                                &env,
+                                value,
+                                ScalarMatch::Assignable,
+                            ) == Some(layout)
                         })
             })
     }
@@ -2493,11 +2496,11 @@ impl Session {
         use ty_python_semantic::types::ProgramEnvironment;
         let ty = self.inferred_layout_type(module, value)?;
         let env = ProgramEnvironment::from_file(self.db.program_file(self.files[module]));
-        self.scalar_layout(&env, ty, rule)
+        Self::scalar_layout(&self.db, &env, ty, rule)
     }
 
     fn scalar_layout<'db>(
-        &'db self,
+        db: &'db dyn Db,
         env: &ty_python_semantic::types::ProgramEnvironment<'db>,
         ty: ty_python_semantic::types::Type<'db>,
         rule: ScalarMatch,
@@ -2505,7 +2508,7 @@ impl Session {
         use crate::ir::Type;
         use ty_python_semantic::types::{KnownClass, Type as Ty};
 
-        if matches!(rule, ScalarMatch::Exact) && ty.is_none(&self.db) {
+        if matches!(rule, ScalarMatch::Exact) && ty.is_none(db) {
             return Some(Type::None);
         }
         if !matches!(
@@ -2525,19 +2528,19 @@ impl Session {
         ]
         .into_iter()
         .find(|(class, _)| {
-            let mut instance = class.to_instance(&self.db, env);
+            let mut instance = class.to_instance(db, env);
             if matches!(rule, ScalarMatch::Exact) {
                 return ty == instance;
             }
             if matches!(class, KnownClass::Float) {
                 instance = ty_python_semantic::types::UnionType::from_two_elements(
-                    &self.db,
+                    db,
                     env,
                     instance,
-                    KnownClass::Int.to_instance(&self.db, env),
+                    KnownClass::Int.to_instance(db, env),
                 );
             }
-            ty.is_assignable_to(&self.db, env, instance)
+            ty.is_assignable_to(db, env, instance)
         })
         .map(|(_, ty)| ty)
     }
@@ -2832,7 +2835,8 @@ impl Session {
                     )
                     && let Some(expected) = param.inferred_type(&owner_model)
                     && let Some(actual) = value.inferred_type(&model)
-                    && let Some(error) = self.scalar_argument_error(&model, expected, value, actual)
+                    && let Some(error) =
+                        Self::scalar_contract_error(&model, expected, value, actual)
                 {
                     errors.push(error.with_path(path).to_string());
                 }
@@ -2860,10 +2864,11 @@ impl Session {
         if !modules.iter().any(|module| module.project_path().is_some()) {
             return Ok(());
         }
+        let mut written_return = None;
         let mut parameters = Vec::new();
         let mut result_scopes = Vec::new();
         let mut class_files = Vec::new();
-        for (module, &file) in modules.iter().zip(&self.files) {
+        for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
             if !module.supplies_declarations() {
                 continue;
             }
@@ -2883,10 +2888,24 @@ impl Session {
                     // A generator's annotation describes the iterator, including a separate
                     // completion value. Leave that contract with the generator checker.
                     if module.project_path().is_some()
-                        && function.returns.is_some()
+                        && let Some(annotation) = function.returns.as_deref()
                         && !scope.file_scope_id(&self.db).is_generator_function(index)
                     {
-                        result_scopes.push((file, scope.file_scope_id(&self.db)));
+                        let scope = scope.file_scope_id(&self.db);
+                        result_scopes.push((file, scope));
+                        if written_return.is_none()
+                            && let Some((module, path)) = module.checked_source(id)
+                            && path.extension().is_none_or(|ext| ext != "pyi")
+                            && let Some((operand, report)) = native
+                                .and_then(|r| r.declared_return(module, path, annotation.range()))
+                            && !skipped.is_some_and(|ranges| {
+                                ranges[id].iter().any(|r| r.contains_range(operand))
+                            })
+                            && !index.is_in_type_checking_block(scope, operand)
+                            && dormant_operand(&self.db, source, scope, operand)
+                        {
+                            written_return = Some(report);
+                        }
                     }
                     parameters.extend(
                         function
@@ -2949,17 +2968,41 @@ impl Session {
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
         }
-        if errors.is_empty() {
-            native.map_or(Ok(()), |report| {
-                let selected = modules
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(id, module)| module.checked_source(id));
-                report.check_declared_operand(selected)
-            })
-        } else {
-            Err(errors.join("\n"))
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
         }
+        if let Some(report) = native {
+            let selected = modules
+                .iter()
+                .enumerate()
+                .filter_map(|(id, module)| module.checked_source(id));
+            report.check_declared_operand(selected)?;
+        }
+        if let Some(report) = written_return {
+            return Err(report.to_string());
+        }
+        for (id, (module, &file)) in modules.iter().zip(&self.files).enumerate() {
+            let Some(path) = module.project_path() else {
+                continue;
+            };
+            if path.extension().is_some_and(|ext| ext == "pyi") {
+                continue;
+            }
+            let results = declarations.result_scopes(&self.db);
+            let results = &results[results.partition_point(|&(f, _)| f < file)..];
+            let results = &results[..results.partition_point(|&(f, _)| f == file)];
+            if !results.is_empty()
+                && let Some(error) = dormant_returns(
+                    &self.db,
+                    file,
+                    results.iter().map(|&(_, scope)| scope).collect(),
+                    skipped.map_or_else(Vec::new, |ranges| ranges[id].clone()),
+                )
+            {
+                return Err(error.clone());
+            }
+        }
+        Ok(())
     }
 
     fn errors(
@@ -3211,6 +3254,95 @@ struct CheckedError {
     range: Option<TextRange>,
     declaration: Option<(File, TextRange)>,
     rendered: String,
+}
+
+/// The fixed report already has the declaration and the checked operand. Straight-line
+/// dead code has an unconditional constraint in the owner's existing use-def map.
+fn dormant_operand(
+    db: &dyn Db,
+    source: ProgramFile<'_>,
+    scope: FileScopeId,
+    operand: TextRange,
+) -> bool {
+    use ty_python_core::reachability_constraints::ScopedReachabilityConstraintId as Reachability;
+    let index = ty_python_core::semantic_index(db, source);
+    let mut conditional = false;
+    for (scope, _) in index.ancestor_scopes(scope) {
+        for (range, condition) in index.use_def_map(scope).range_reachability() {
+            if range.contains_range(operand) {
+                if condition == Reachability::ALWAYS_FALSE {
+                    return true;
+                }
+                conditional |= condition != Reachability::ALWAYS_TRUE;
+            }
+        }
+    }
+    conditional
+        && ty_python_semantic::types::ide_support::unreachable_ranges(db, source)
+            .iter()
+            .any(|r| r.range.contains_range(operand))
+}
+
+/// Only the selected scopes of this file participate in its residual result. An edit to
+/// another file invalidates it only when one of the types read here actually changes.
+#[salsa::tracked(returns(ref))]
+fn dormant_returns(
+    db: &dyn Db,
+    file: File,
+    scopes: Vec<FileScopeId>,
+    skipped: Vec<TextRange>,
+) -> Option<String> {
+    let source = db.program_file(file);
+    let index = ty_python_core::semantic_index(db, source);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let mut functions = scopes
+        .into_iter()
+        .filter_map(|scope| {
+            let ty_python_core::scope::NodeWithScopeKind::Function(node) =
+                index.scope(scope).node()
+            else {
+                return None;
+            };
+            let function = node.node(&parsed);
+            (!skipped.iter().any(|r| r.contains_range(function.range()))
+                && !index.is_in_type_checking_block(scope, function.range()))
+            .then_some((scope, function))
+        })
+        .peekable();
+    functions.peek()?;
+    let dead = ty_python_semantic::types::ide_support::unreachable_ranges(db, source);
+    if dead.is_empty() {
+        return None;
+    }
+    let model = SemanticModel::new(db, source);
+    functions.find_map(|(scope, function)| {
+        let dead = &dead[dead.partition_point(|r| r.range.end() <= function.start())..];
+        let dead = &dead[..dead.partition_point(|r| r.range.start() < function.end())];
+        if dead.is_empty() {
+            return None;
+        }
+        let expected = annotation_type(db, &model, function.returns.as_deref()?);
+        explicit_returns(function).into_iter().find_map(|ret| {
+            let site = ret.range();
+            if !dead.iter().any(|r| r.range.contains_range(site))
+                || skipped.iter().any(|r| r.contains_range(site))
+                || index.is_in_type_checking_block(scope, site)
+            {
+                return None;
+            }
+            let value = ret.value.as_deref();
+            let operand = value.map_or(site, Ranged::range);
+            let actual = match value {
+                Some(value) => value.inferred_type(&model)?,
+                None => ty_python_semantic::types::Type::none(db, &model.program_environment()),
+            };
+            Session::scalar_contract_error(&model, expected?, &operand, actual).map(|error| {
+                error
+                    .with_path(Path::new(file.path(db).as_str()))
+                    .to_string()
+            })
+        })
+    })
 }
 
 /// A per-file result depends on the ty queries it actually read, including any other source

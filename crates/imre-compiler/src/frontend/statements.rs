@@ -331,7 +331,9 @@ impl StatementLowering for Checker<'_> {
                     .coerce(value, self.returns, &origin)
                     .map_err(|failure| {
                         if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
-                            failure.classify(Kind::ReturnType)
+                            failure
+                                .expected_from(self.return_declaration, origin)
+                                .classify(Kind::ReturnType)
                         } else {
                             failure
                         }
