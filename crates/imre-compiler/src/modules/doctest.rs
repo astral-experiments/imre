@@ -325,17 +325,29 @@ impl<'a> Visitor<'a> for Interactive<'_> {
 }
 
 /// Register sources mentioned only in prompts without executing their initializers.
-struct PromptImports<'a, 'fs> {
-    loader: &'a Loader<'fs>,
-    origin: Option<ModuleId>,
+#[derive(Default)]
+struct Dependencies {
     targets: std::collections::BTreeSet<String>,
     needs_runtime: bool,
 }
 
+impl Dependencies {
+    fn extend(&mut self, other: Self) {
+        self.targets.extend(other.targets);
+        self.needs_runtime |= other.needs_runtime;
+    }
+}
+
+struct PromptImports<'a, 'fs> {
+    loader: &'a Loader<'fs>,
+    origin: Option<ModuleId>,
+    dependencies: Dependencies,
+}
+
 impl PromptImports<'_, '_> {
     fn module(&mut self, name: &str) {
-        self.needs_runtime |= IntrinsicModule::named(name).is_none();
-        self.targets.insert(name.to_owned());
+        self.dependencies.needs_runtime |= IntrinsicModule::named(name).is_none();
+        self.dependencies.targets.insert(name.to_owned());
     }
 }
 
@@ -351,14 +363,14 @@ impl<'a> ruff_python_ast::statement_visitor::StatementVisitor<'a> for PromptImpo
                 let module = if import.level == 0 {
                     import.module.as_ref().map(ToString::to_string)
                 } else {
-                    self.needs_runtime = true;
+                    self.dependencies.needs_runtime = true;
                     self.origin
                         .and_then(|id| self.loader.import_name(id, import).ok())
                 };
                 if let Some(module) = module {
                     self.module(&module);
                     // A from-list may bind an existing attribute or load a child module.
-                    self.targets.extend(
+                    self.dependencies.targets.extend(
                         import
                             .names
                             .iter()
@@ -635,7 +647,7 @@ impl Loader<'_> {
         }
         let mut cases = std::collections::BTreeMap::new();
         let mut recorded = HashSet::new();
-        let mut string_inputs = Vec::new();
+        let mut dependencies = Dependencies::default();
         for variable in uses.variables {
             if let Some(bindings) = uses.assignments.get(&variable) {
                 uses.targets.extend(bindings);
@@ -659,22 +671,46 @@ impl Loader<'_> {
                     _ => continue,
                 };
                 let mut prepared = Vec::new();
-                let mut record = |name: &str, sources: &[String]| {
-                    prepared.extend(sources.iter().enumerate().filter_map(|(index, source)| {
-                        Prompt::new(
-                            format!("<doctest {name}[{index}]>").into(),
-                            source.clone(),
-                            self.python_optimization,
-                        )
-                    }));
+                let mut record = |name: &str, sources: &[String], emit: bool| {
+                    let mut imports = PromptImports {
+                        loader: self,
+                        origin: module,
+                        dependencies: Dependencies::default(),
+                    };
+                    for (index, source) in sources.iter().enumerate() {
+                        let inspect = source.contains("import");
+                        if !emit && !inspect {
+                            continue;
+                        }
+                        // prompts() has already expanded tabs, as DocTestParser does.
+                        let Ok(parsed) = ruff_python_parser::parse_module(source) else {
+                            continue;
+                        };
+                        if inspect {
+                            imports.visit_body(&parsed.syntax().body);
+                        }
+                        if emit {
+                            let path = format!("<doctest {name}[{index}]>").into();
+                            let module = crate::frontend::module_source::ParsedModule {
+                                text: Cow::Owned(source.clone()),
+                                parsed: Cow::Owned(parsed),
+                            };
+                            prepared.extend(Prompt::from_parsed(
+                                path,
+                                module,
+                                self.python_optimization,
+                            ));
+                        }
+                    }
+                    imports.dependencies
                 };
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
                     if !sources.is_empty() {
-                        if self.python_optimization < 2 && recorded.insert((module, name.clone())) {
-                            record(name, &sources);
-                        }
-                        cases.insert(name.clone(), (sources, target));
+                        let emit =
+                            self.python_optimization < 2 && recorded.insert((module, name.clone()));
+                        let imports = record(name, &sources, emit);
+                        cases.insert(name.clone(), (sources, target, imports));
                     }
                 }
                 // These strings survive -OO. Only the live discovery can select them.
@@ -690,8 +726,7 @@ impl Loader<'_> {
                             && let ast::Expr::StringLiteral(doc) = value
                         {
                             let sources = prompts(doc.value.to_str());
-                            record(&name, &sources);
-                            string_inputs.push((sources, target));
+                            dependencies.extend(record(&name, &sources, true));
                         }
                     });
                 }
@@ -705,27 +740,12 @@ impl Loader<'_> {
                 }
             }
         }
-        let mut imports = PromptImports {
-            loader: self,
-            origin: None,
-            targets: Default::default(),
-            needs_runtime: false,
-        };
-        for (sources, target) in cases.values().chain(&string_inputs) {
-            imports.origin = match target {
-                Binding::Module(id) => Some(*id),
-                _ => None,
-            };
-            for source in sources.iter().filter(|source| source.contains("import")) {
-                // The runner handles a skipped prompt or an expected SyntaxError.
-                if let Ok(parsed) = ruff_python_parser::parse_module(source) {
-                    imports.visit_body(&parsed.syntax().body);
-                }
-            }
+        for (_, _, imports) in cases.values_mut() {
+            dependencies.extend(std::mem::take(imports));
         }
-        if imports.needs_runtime {
+        if dependencies.needs_runtime {
             // Run the original prompt with its globals, output capture and option flags.
-            let targets = imports.targets.into_iter().collect();
+            let targets = dependencies.targets.into_iter().collect();
             self.needs_object_imports = true;
             return Ok(targets);
         }
@@ -735,7 +755,7 @@ impl Loader<'_> {
         let mut body = String::from(
             "\ndef _execute(test: DocTest, debug: bool, optionflags: int = 0, checker: OutputChecker | None = None) -> None:\n    if checker is None:\n        checker = OutputChecker()\n    if not test.examples:\n        attempted = 0\n",
         );
-        for (i, (name, (prompts, context))) in cases.into_iter().enumerate() {
+        for (i, (name, (prompts, context, _))) in cases.into_iter().enumerate() {
             let module = format!("{CASE_PREFIX}{i}");
             let program = case_program(&name, &prompts, context, &self.modules)?;
             self.add_doctest_module(module.clone(), &program)
