@@ -13835,11 +13835,12 @@ impl<'a> Checker<'a> {
                     ("close", 0) => (Builtin::TextClose, Type::None),
                     ("fileno", 0) => (Builtin::FileFileno, Type::Int),
                     _ => {
-                        return Err(error(
-                            self.source,
+                        return self.unsupported_method_call(
                             call,
+                            attribute,
+                            receiver,
                             "supported file methods are read(), binary read(size), readline(), write(data), flush(), and close()",
-                        ));
+                        );
                     }
                 };
                 let mut args = vec![receiver];
@@ -13966,11 +13967,12 @@ impl<'a> Checker<'a> {
                     "add" if call.arguments.args.len() == 1 => Builtin::SetAdd,
                     "discard" if call.arguments.args.len() == 1 => Builtin::SetDiscard,
                     _ => {
-                        return Err(error(
-                            self.source,
+                        return self.unsupported_method_call(
                             call,
+                            attribute,
+                            receiver,
                             "supported set methods are add(value) and discard(value)",
-                        ));
+                        );
                     }
                 };
                 let stopped = self.terminating_operand(&receiver);
@@ -14102,11 +14104,12 @@ impl<'a> Checker<'a> {
                 "pop" if call.arguments.args.is_empty() => (Builtin::Pop, element),
                 "clear" if call.arguments.args.is_empty() => (Builtin::ListClear, Type::None),
                 _ => {
-                    return Err(error(
-                        self.source,
+                    return self.unsupported_method_call(
                         call,
+                        attribute,
+                        receiver,
                         "supported list methods are append(value), extend(iterable), pop(), and clear()",
-                    ));
+                    );
                 }
             };
             if self.checked_call_contracts && !matches!(builtin, Builtin::JoinBufferAppend) {

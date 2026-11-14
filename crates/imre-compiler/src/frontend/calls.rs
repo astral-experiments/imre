@@ -512,6 +512,38 @@ pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(),
 }
 
 impl Checker<'_> {
+    /// Preserve the live lookup and eager arguments when a checked operand prevents
+    /// an otherwise unsupported method invocation from reaching its binder.
+    pub(super) fn unsupported_method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+        diagnostic: &str,
+    ) -> Result<Expr, String> {
+        let operands = self.graph.session.operand_types(self.module);
+        if !call.arguments.is_empty()
+            && operands.is_bound_method(&call.func)
+            && let Some(returns) = operands.stopped_call_result(call)
+        {
+            let mut stopped = false;
+            let args = registered::values::call_arguments(call, |arg| {
+                self.expr(arg)
+                    .inspect(|value| stopped |= self.terminating_operand(value))
+            });
+            if stopped {
+                return self.registered_method_call_with_values(
+                    call,
+                    method,
+                    receiver,
+                    returns,
+                    Some(args?),
+                );
+            }
+        }
+        Err(error(self.source, call, diagnostic))
+    }
+
     /// Format an unexpected keyword using the runtime's CPython spelling rules.
     pub(super) fn keyword_error_message(
         &self,
