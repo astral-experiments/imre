@@ -192,7 +192,7 @@ impl CheckedSites {
             };
             let key = frame.code_name(".type_params");
             let parameters = frame.op("lookup", &[&scope, &key]);
-            (scope, parameters)
+            (scope.into(), parameters)
         } else {
             (outer, "0".into())
         };
@@ -227,7 +227,7 @@ impl CheckedSites {
                 let Some(scope) = frame.bind_type_parameters(&scope, params, false) else {
                     return "0".into();
                 };
-                scope
+                scope.into()
             } else {
                 scope
             };

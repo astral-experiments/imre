@@ -24,6 +24,7 @@ use sites::{CallableSite, CheckedSites, CompiledClassNamespace, CompiledDefiniti
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges, ValueUse};
 use context::Region;
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -698,10 +699,10 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.assign_owned_name(&scope, &name, &handle);
     }
 
-    fn assignment_name(&mut self, slot: usize) -> (String, String) {
+    fn assignment_name(&mut self, slot: usize) -> (Cow<'static, str>, String) {
         let binding = &self.names.expect("registered local names")[&slot];
         let scope = if let Some(slot) = binding.namespace {
-            self.load_private(slot)
+            self.load_private(slot).into()
         } else {
             self.code.scope.clone()
         };
@@ -790,7 +791,9 @@ impl<'f> Frame<'f, '_, '_> {
         parent: Option<String>,
         names: &[String],
     ) -> String {
-        let parent = parent.unwrap_or_else(|| self.code.scope.clone());
+        let parent = parent
+            .map(Cow::Owned)
+            .unwrap_or_else(|| self.code.scope.clone());
         let names = self.code.lit(1, names.join(" ").as_bytes());
         self.code.op("comprehension_scope", &[&parent, &names])
     }
@@ -1108,10 +1111,10 @@ impl<'f> Frame<'f, '_, '_> {
         let Some(scope) = code.bind_type_parameters(&enclosing, &namespace.parameters, true) else {
             return "0".into();
         };
-        code.scope = code.op("class_base_scope", &[&scope, &outer]);
+        code.scope = code.op("class_base_scope", &[&scope, &outer]).into();
         code.set_source_range(None);
         let arguments = self.pack_arguments(layout, operands, None);
-        self.code.scope = scope;
+        self.code.scope = scope.into();
         namespace
             .definition
             .instantiate_class(self.code, arguments, Some(range))
@@ -1207,6 +1210,7 @@ impl<'f> Frame<'f, '_, '_> {
                 let mut operands = operands.iter();
                 let scope = if *scoped {
                     self.evaluate_handle(operands.next().expect("explicit lambda scope"))
+                        .into()
                 } else {
                     self.code.scope.clone()
                 };
@@ -1222,7 +1226,7 @@ impl<'f> Frame<'f, '_, '_> {
                 let (scope, iterable) =
                     ir::generator_operands(*scoped, operands).expect("checked generator operands");
                 let scope = scope
-                    .map(|scope| self.evaluate_handle(scope))
+                    .map(|scope| Cow::Owned(self.evaluate_handle(scope)))
                     .unwrap_or_else(|| self.code.scope.clone());
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
