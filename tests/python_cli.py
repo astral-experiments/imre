@@ -4536,6 +4536,7 @@ for name in ("md4", "ripemd160"):
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare_module(boxed_call_args)
         compare_module(fixtures / "boxed_doctest_results.py")
+        compare_module(fixtures / "boxed_decorator_operand_lifetime.py")
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         patch_multiple = root / "patch_multiple.py"
         for call in ("with patch.multiple", "replace = patch.multiple\nwith replace"):
@@ -4954,7 +4955,6 @@ for name in ("md4", "ripemd160"):
             "boxed_delete_eager_key.py",
             "boxed_delete_operand_lifetime.py",
             "boxed_store_operand_lifetime.py",
-            "boxed_decorator_operand_lifetime.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_reprlib.py",
