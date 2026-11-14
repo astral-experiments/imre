@@ -1765,10 +1765,11 @@ fn a_guarded_reexport_resolves_to_its_linked_class_without_running_the_module() 
             !error.contains(shadow.path().file_name().unwrap().to_str().unwrap()),
             "{error}"
         );
-        assert!(inputs.declared_file_resolutions.contains(&(
-            link.join(".."),
-            Some(root.canonicalize().unwrap()),
-        )));
+        assert!(
+            inputs
+                .declared_file_resolutions
+                .contains(&(link.join(".."), Some(root.canonicalize().unwrap()),))
+        );
         assert!(inputs.fresh());
         fs::remove_file(&link).unwrap();
         std::os::unix::fs::symlink(&other, &link).unwrap();
