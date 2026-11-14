@@ -1,0 +1,258 @@
+{
+  "commit": "a97be428e771fb0dff75ae8104e3ad39e9c990e2",
+  "stdlib_sha256": "8b26d7ab3be29c1d577f411324d84aa3552a6a340a73cd0235ffc0d84d0bc74d",
+  "compiler_sha256": "42eb4263311cb2e0de02a6fc51f8b6b9d14ff16836d622fd896559f38f7e92c2",
+  "runtime_sha256": "0185bcebfe0d54ef76428e7688ef1ff7011baff2e93268e3d898e4a3bae47f97",
+  "test_file_sha256": "0fbb1b9a9a6f8d3c86b185a1effc3df6c38c96a866d9bf69e2b4bc0c3dca77bd",
+  "raw_archive_sha256": "b1134352d273cce6a326131d78a75d607c9e79b180e6dc2414437af70943b232",
+  "changes_from_8066": [
+    "test.test_context.ContextTest.test_context_new_1",
+    "test.test_context.ContextTest.test_context_var_new_1"
+  ],
+  "full_runs": {
+    "stock": {
+      "pid": 1544983,
+      "rawWait": 0,
+      "status": 0,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 56
+      },
+      "changedOutcomes": {}
+    },
+    "stock-qualified": {
+      "pid": 1548914,
+      "rawWait": 0,
+      "status": 0,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 56
+      },
+      "changedOutcomes": {}
+    },
+    "FILE-O0-live-suite": {
+      "pid": 1548044,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "FILE-O0-withdrawn-suite": {
+      "pid": 1550065,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "module-O0-ordinary": {
+      "pid": 1548534,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "module-O0-withdrawn": {
+      "pid": 1550389,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "named-O0-ordinary": {
+      "pid": 1548525,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    },
+    "named-O0-withdrawn": {
+      "pid": 1550311,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    },
+    "named-O0-saved-present": {
+      "pid": 1550261,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    },
+    "FILE-O3-live-suite": {
+      "pid": 1548045,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "FILE-O3-withdrawn-suite": {
+      "pid": 1552613,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "module-O3-ordinary": {
+      "pid": 1548531,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "module-O3-withdrawn": {
+      "pid": 1553067,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 56,
+      "counts": {
+        "pass": 29,
+        "failure": 2,
+        "error": 2,
+        "skip": 23
+      },
+      "changedOutcomes": {
+        "test.test_context.ContextTest.test_context_new_1": [
+          "failure",
+          "pass"
+        ],
+        "test.test_context.ContextTest.test_context_var_new_1": [
+          "failure",
+          "pass"
+        ]
+      }
+    },
+    "named-O3-ordinary": {
+      "pid": 1548536,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    },
+    "named-O3-withdrawn": {
+      "pid": 1552873,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    },
+    "named-O3-saved-present": {
+      "pid": 1552791,
+      "rawWait": 256,
+      "status": 1,
+      "distinctIDs": 0,
+      "counts": {},
+      "changedOutcomes": {}
+    }
+  }
+}
