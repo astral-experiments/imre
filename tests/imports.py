@@ -2130,6 +2130,18 @@ ACCEPTED = {
         "visitorlib.py": ('from parentlib import expose\nshared = expose()\n'
                           'shared.append("visited")\n'),
     },
+    "ordered_package_fromlist": {
+        "main.py": "import outer.pkg\nprint(outer.pkg.value)\n",
+        "outer/__init__.py": "",
+        "outer/pkg/__init__.py": (
+            "def prefix() -> int:\n    print('package prefix')\n    return 1\n"
+            "token = prefix()\nfrom .child import value\nprint('package suffix')\n"
+        ),
+        "outer/pkg/child.py": (
+            "def __getattr__(name: str) -> str:\n    print(name)\n    raise AttributeError(name)\n"
+            "print('child')\nvalue = 7\n"
+        ),
+    },
     "ordered_library_effects": {
         "main.py": "from pkg.parent import value\nprint(value)\n", "pkg/__init__.py": "",
         "pkg/parent.py": 'print("parent prefix")\nfrom . import child\nprint("parent suffix")\nvalue = child.value\n',

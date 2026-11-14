@@ -5451,7 +5451,8 @@ impl<'a> Loader<'a> {
                                     && module_value(stmt).is_some_and(literal_export))
                         });
                         let nested_source = module.name.contains('.') && !module.bundled;
-                        let ordered = !module.is_package
+                        let ordered = (!module.is_package
+                            || nested_source && module.is_program_source())
                             && module.archive.is_none()
                             && prefix.clone().all(|stmt| {
                                 module_name_guard(stmt)
@@ -5470,6 +5471,12 @@ impl<'a> Loader<'a> {
                                 statement,
                                 "imports must precede executable module statements",
                             ));
+                        }
+                        if module.is_package && !simple {
+                            // A live package can observe the fromlist and its partially populated namespace.
+                            self.modules[id]
+                                .registered_imports
+                                .insert(index, statement.range());
                         }
                         self.ordered_imports |= !simple;
                         self.initialization.push((id, segment..index));
