@@ -387,60 +387,55 @@ impl CallParameters {
         }
     }
 
+    fn argument_slots(&self) -> impl Iterator<Item = &str> {
+        self.positional
+            .iter()
+            .chain(&self.keyword_only)
+            .chain(&self.varargs)
+            .chain(&self.kwargs)
+            .map(String::as_str)
+    }
+
     /// Decode both compiled and runtime-created function metadata once per definition.
     fn from_metadata(metadata: &mut serde_json::Value) -> Result<Self> {
-        let names = |key: &str| -> Result<Vec<String>> {
+        fn take_names(metadata: &mut serde_json::Value, key: &str) -> Result<Vec<String>> {
             let mut result = Vec::new();
-            for name in metadata[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|v| v.as_str())
-            {
-                result
-                    .try_reserve(1)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                result.push(copy_label(name)?);
+            if let Some(serde_json::Value::Array(values)) = metadata.get_mut(key) {
+                for value in values {
+                    if let serde_json::Value::String(name) = value {
+                        result
+                            .try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        result.push(std::mem::take(name));
+                    }
+                }
             }
             Ok(result)
-        };
-        let mut positional = names("posonly")?;
+        }
+        let mut positional = take_names(metadata, "posonly")?;
         let positional_only = positional.len();
-        let rest = names("positional")?;
+        let rest = take_names(metadata, "positional")?;
         positional
             .try_reserve(rest.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         positional.extend(rest);
-        let local_names = names("scope_locals")?;
-        let mut locals = std::collections::HashSet::new();
-        locals
-            .try_reserve(local_names.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        locals.extend(local_names);
-        // Runtime-created functions can declare their parameters without a separate local list.
-        for arg in code_locals::argument_slots(metadata) {
-            if !locals.contains(arg) {
-                locals
-                    .try_reserve(1)
-                    .map_err(|_| Error::new("MemoryError", ""))?;
-                locals.insert(copy_label(arg)?);
-            }
-        }
-        Ok(Self {
+        let mut parameters = Self {
             argcount: metadata["co_argcount"].as_i64().unwrap_or_else(|| {
                 (metadata["posonly"].as_array().map_or(0, Vec::len)
                     + metadata["positional"].as_array().map_or(0, Vec::len)) as i64
             }),
             positional,
             positional_only,
-            keyword_only: names("kwonly")?,
-            locals: locals.into(),
+            keyword_only: take_names(metadata, "kwonly")?,
+            locals: Default::default(),
             cell_layout: match metadata.get("scope_cellvars") {
-                Some(serde_json::Value::Array(_)) => CellLayout::Complete(names("scope_cellvars")?),
+                Some(serde_json::Value::Array(_)) => {
+                    CellLayout::Complete(take_names(metadata, "scope_cellvars")?)
+                }
                 Some(serde_json::Value::Null) => CellLayout::Incomplete,
                 _ => CellLayout::Unspecified,
             },
-            nonlocals: names("scope_nonlocals")?,
+            nonlocals: take_names(metadata, "scope_nonlocals")?,
             locals_complete: metadata["scope_locals_complete"].as_bool().unwrap_or(false),
             class_cell: metadata["class_cell"] == true,
             varargs: metadata["varargs"].as_str().map(copy_label).transpose()?,
@@ -457,7 +452,28 @@ impl CallParameters {
                 .get_mut("integer_sign_parameters")
                 .map(serde_json::Value::take)
                 .unwrap_or_default(),
-        })
+        };
+        let lexical = metadata["scope_locals"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let mut locals = indexmap::IndexSet::new();
+        locals
+            .try_reserve_exact(lexical.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for name in parameters
+            .argument_slots()
+            .chain(lexical.iter().filter_map(serde_json::Value::as_str))
+        {
+            if !locals.contains(name) {
+                locals
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                locals.insert(copy_label(name)?);
+            }
+        }
+        parameters.locals = locals.into();
+        Ok(parameters)
     }
 }
 
@@ -2433,7 +2449,7 @@ impl Context {
             .str_value(targets)?
             .split_ascii_whitespace()
             .map(str::to_owned)
-            .collect::<std::collections::HashSet<_>>();
+            .collect::<indexmap::IndexSet<_>>();
         Ok(self.comprehension_scope_with_locals(parent, targets.into()))
     }
 

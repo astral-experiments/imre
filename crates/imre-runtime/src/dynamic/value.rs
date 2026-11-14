@@ -13,6 +13,8 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::{Arc, Weak};
 
+use indexmap::IndexSet;
+
 use super::Context;
 
 pub(super) type Id = u64;
@@ -1210,19 +1212,20 @@ impl Scope {
 
 /// Lexical names shared by calls to the same code object until a frame adds a name.
 #[derive(Clone, Debug, Default)]
-pub(super) struct DeclaredLocals(Option<std::rc::Rc<HashSet<String>>>);
+pub(super) struct DeclaredLocals(Option<std::rc::Rc<IndexSet<String>>>);
 
-impl From<HashSet<String>> for DeclaredLocals {
-    fn from(names: HashSet<String>) -> Self {
+impl From<IndexSet<String>> for DeclaredLocals {
+    fn from(names: IndexSet<String>) -> Self {
         Self((!names.is_empty()).then(|| std::rc::Rc::new(names)))
     }
 }
 
 impl std::ops::Deref for DeclaredLocals {
-    type Target = HashSet<String>;
+    type Target = IndexSet<String>;
 
     fn deref(&self) -> &Self::Target {
-        static EMPTY: std::sync::LazyLock<HashSet<String>> = std::sync::LazyLock::new(HashSet::new);
+        static EMPTY: std::sync::LazyLock<IndexSet<String>> =
+            std::sync::LazyLock::new(IndexSet::new);
         self.0.as_deref().unwrap_or_else(|| &EMPTY)
     }
 }

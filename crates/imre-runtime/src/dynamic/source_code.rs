@@ -3122,26 +3122,20 @@ impl Context {
         let mut names = indexmap::IndexSet::new();
         let frame = self.scope_data(scope);
         if frame.comprehension.is_none()
-            && let Value::Code(code) = self.heap.get(code)
-            && let Value::Str(parameters) = self.heap.get(code.parameters)
+            && let Value::Code(layout) = self.heap.get(code)
+            && matches!(self.heap.get(layout.parameters), Value::Str(_))
         {
-            let signature: serde_json::Value = serde_json::from_str(parameters)
-                .map_err(|error| Error::new("SystemError", error.to_string()))?;
+            let parameters = self.parsed_parameters(code)?;
             // Argument slots come first, including arguments held in closure cells.
-            for name in super::code_locals::argument_slots(&signature) {
+            for name in parameters.argument_slots() {
                 if frame.names.contains_key(name) || frame.closure.cells.contains_key(name) {
                     names.insert(name.to_owned());
                 }
             }
             // Slot order comes from the code layout even when a branch skipped the first store.
-            for name in signature["scope_locals"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(serde_json::Value::as_str)
-            {
-                if frame.names.contains_key(name) {
-                    names.insert(name.to_owned());
+            for name in parameters.locals.iter() {
+                if frame.names.contains_key(name.as_str()) {
+                    names.insert(name.clone());
                 }
             }
         }
