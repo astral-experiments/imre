@@ -431,6 +431,15 @@ pub(super) fn record_factories(
     Ok(factories)
 }
 
+pub(super) fn class_object(graph: &SourceGraph, definition: &crate::classes::Class) -> Expr {
+    let module = if definition.definition.module == graph.entry {
+        "__main__"
+    } else {
+        &graph.modules[definition.definition.module].name
+    };
+    annotations::class_value(&format!("{module}.{}", definition.name))
+}
+
 impl Checker<'_> {
     /// Lower the zero-argument call shared by fields that construct this dataclass.
     pub(super) fn record_factory_body(
