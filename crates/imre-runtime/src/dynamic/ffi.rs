@@ -1933,6 +1933,43 @@ pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, obj
     }
 }
 
+/// Compare against an integer whose tagged word the caller already has.
+///
+/// # Safety
+/// The frame supplies a live context, two rooted operands, a comparison opcode,
+/// and the original right operand's tagged word.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_compare_integer_rhs(
+    ctx: *mut Context,
+    opcode: *const c_char,
+    left: Id,
+    right: Id,
+    word: i64,
+) -> Id {
+    // SAFETY: the generated frame owns the context and supplies a static opcode.
+    let context = unsafe { &*ctx };
+    if context.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    if let Value::Int(x) = context.heap.get(left)
+        && let Some(x) = x.as_small()
+    {
+        let y = word >> 1;
+        // SAFETY: opcode names one of the six checked comparison operators.
+        return flag(match unsafe { cstr(opcode) } {
+            "==" => x == y,
+            "!=" => x != y,
+            "<" => x < y,
+            "<=" => x <= y,
+            ">" => x > y,
+            ">=" => x >= y,
+            _ => unreachable!("expected a checked comparison"),
+        });
+    }
+    // SAFETY: the original operands and operation remain live for Python dispatch.
+    unsafe { imre_dyn_op_at(ctx, opcode, left, right, NONE, std::ptr::null()) }
+}
+
 /// Apply checked remainder by a positive power of two to a Python operand.
 ///
 /// # Safety
