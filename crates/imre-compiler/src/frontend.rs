@@ -6312,7 +6312,6 @@ impl<'a> Checker<'a> {
                 // A later statement can inspect these instructions for narrowing.
                 let output = (emitting
                     || !statement.is_if_stmt()
-                    || !self.module_scope
                     || index + 1 < statements.len()
                     || self.fixed_sites.is_some())
                 .then_some(&mut *body);
