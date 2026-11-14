@@ -180,6 +180,13 @@ impl CompiledAlias {
 pub(crate) type CompiledTypeParameters =
     Result<Vec<RegisteredTypeParameter<CompiledDefinition>>, String>;
 
+/// The generic header evaluates its bases before it instantiates this namespace.
+pub(crate) struct CompiledClassNamespace {
+    pub(crate) definition: CompiledDefinition,
+    pub(crate) parameters: CompiledTypeParameters,
+    pub(crate) range: TextRange,
+}
+
 pub(crate) struct Declaration<'p> {
     pub(crate) definition: CompiledDefinition,
     pub(crate) decorator_offsets: &'p [TextSize],
@@ -196,8 +203,6 @@ pub(crate) struct CompiledExec {
 #[derive(Default)]
 pub(crate) struct CheckedSites<'p> {
     pub(crate) definitions: IndexMap<TextSize, Declaration<'p>>,
-    pub(crate) class_namespaces:
-        IndexMap<TextSize, (CompiledDefinition, CompiledTypeParameters, TextRange)>,
     pub(crate) aliases: IndexMap<TextSize, Result<CompiledAlias, String>>,
 }
 

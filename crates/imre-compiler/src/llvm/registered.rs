@@ -20,7 +20,7 @@ use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 pub(crate) use frame::{AnnotationScope, RegisteredFrame, SourcePositions};
 use ruff_python_ast::UnaryOp;
-use sites::{CallableSite, CheckedSites, CompiledDefinition};
+use sites::{CallableSite, CheckedSites, CompiledClassNamespace, CompiledDefinition};
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges, ValueUse};
 use context::Region;
@@ -416,7 +416,7 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
     fn place_definition(&mut self, site: TextSize) -> usize;
-    fn place_class_namespace(&mut self, site: TextSize) -> usize;
+    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace;
     fn place_type_alias(&mut self, site: TextSize) -> usize;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
@@ -1093,6 +1093,31 @@ impl<'f> Frame<'f, '_, '_> {
         self.code.release_integer_owners(owner..owner + 1, true);
     }
 
+    /// The generic class header evaluates the live bases before instantiating its namespace.
+    fn generic_class(
+        &mut self,
+        site: TextSize,
+        layout: &ir::PackedArguments,
+        operands: &[Expr],
+    ) -> String {
+        let namespace = self.code.class_namespace(site);
+        let range = namespace.range;
+        let code = &mut **self.code;
+        code.set_source_range(Some(range));
+        let enclosing = code.scope.clone();
+        let outer = code.op("annotation_scope", &[&enclosing]);
+        let Some(scope) = code.bind_type_parameters(&enclosing, &namespace.parameters, true) else {
+            return "0".into();
+        };
+        code.scope = code.op("class_base_scope", &[&scope, &outer]);
+        code.set_source_range(None);
+        let arguments = self.pack_arguments(layout, operands, None);
+        self.code.scope = scope;
+        namespace
+            .definition
+            .instantiate_class(self.code, arguments, Some(range))
+    }
+
     pub(super) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
             (Builtin::RegisteredAttribute { .. }, _) => self.mutate_attribute(op, operands.iter()),
@@ -1249,24 +1274,7 @@ impl<'f> Frame<'f, '_, '_> {
                 sites.definition(code, index, &decorators, &defaults, class_arguments)
             }
             (Builtin::RegisteredClassNamespace(site, layout), operands) => {
-                let index = self.code.place_class_namespace(*site);
-                let (code, sites) = self.code.frame_and_sites();
-                let (_, parameters, range) = &sites.class_namespaces[index];
-                let range = *range;
-                code.set_source_range(Some(range));
-                let enclosing = code.scope.clone();
-                let outer = code.op("annotation_scope", &[&enclosing]);
-                let Some(scope) = code.bind_type_parameters(&enclosing, parameters, true) else {
-                    return CheckedValue::handle("0".into());
-                };
-                code.scope = code.op("class_base_scope", &[&scope, &outer]);
-                code.set_source_range(None);
-                let arguments = self.pack_arguments(layout, operands, None);
-                let (code, sites) = self.code.frame_and_sites();
-                code.scope = scope;
-                sites.class_namespaces[index]
-                    .0
-                    .instantiate_class(code, arguments, Some(range))
+                self.generic_class(*site, layout, operands)
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
                 let index = self.code.place_type_alias(*site);
