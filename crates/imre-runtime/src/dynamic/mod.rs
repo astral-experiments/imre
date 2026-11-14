@@ -453,23 +453,31 @@ impl CallParameters {
                 .map(serde_json::Value::take)
                 .unwrap_or_default(),
         };
-        let lexical = metadata["scope_locals"]
-            .as_array()
-            .map(Vec::as_slice)
+        let lexical = metadata
+            .get_mut("scope_locals")
+            .and_then(serde_json::Value::as_array_mut)
+            .map(Vec::as_mut_slice)
             .unwrap_or_default();
         let mut locals = indexmap::IndexSet::new();
         locals
             .try_reserve_exact(lexical.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for name in parameters
-            .argument_slots()
-            .chain(lexical.iter().filter_map(serde_json::Value::as_str))
-        {
+        for name in parameters.argument_slots() {
             if !locals.contains(name) {
                 locals
                     .try_reserve(1)
                     .map_err(|_| Error::new("MemoryError", ""))?;
                 locals.insert(copy_label(name)?);
+            }
+        }
+        for value in lexical {
+            if let serde_json::Value::String(name) = value
+                && !locals.contains(name.as_str())
+            {
+                locals
+                    .try_reserve(1)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                locals.insert(std::mem::take(name));
             }
         }
         parameters.locals = locals.into();
