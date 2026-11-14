@@ -110,21 +110,22 @@ impl Checker<'_> {
                 .filter(|slot| slot.is_none())
                 .ok_or_else(|| error(self.source, node, "invalid wrapper argument binding"))?;
             let value = self.expr(node)?;
-            if index >= N - 2 && value.ty != self.types.tuple(Vec::new()) {
-                return Err(error(
-                    self.source,
-                    node,
-                    "native wrapper updates require empty assigned and updated tuples",
-                ));
-            }
             *slot = Some(scope.hold(self, value));
         }
-        if fields.iter().any(Option::is_none) {
+        if fields[..N - 2].iter().any(Option::is_none) {
             return Err(error(
                 self.source,
                 call,
                 "native wrapper updates require explicit assigned and updated tuples",
             ));
+        }
+        // Only two empty metadata tuples reduce to setting __wrapped__ alone.
+        let empty = self.types.tuple(Vec::new());
+        if fields[N - 2..]
+            .iter()
+            .any(|field| field.as_ref().is_none_or(|value| value.ty != empty))
+        {
+            return Err(self.scoped_builtin_error("copying wrapper metadata", call));
         }
         Ok((scope, fields.map(Option::unwrap)))
     }
