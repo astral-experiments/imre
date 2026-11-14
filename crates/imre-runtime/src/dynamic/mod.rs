@@ -2928,9 +2928,17 @@ impl Context {
     }
     /// Describe a missing binding in the scope that owns it.
     fn missing_binding(&mut self, origin: Id, scope: Id, name: &str) -> Error {
+        // Eager displays share their containing code's locals even when their
+        // iteration targets are stored in a separate namespace.
+        let mut local = origin;
+        while local != scope
+            && self.scope_data(local).comprehension == Some(ComprehensionKind::Ordinary)
+        {
+            local = self.scope_data(local).parent.expect("comprehension parent");
+        }
         let frame = self.scope_data(scope);
         let declared = !frame.in_class_body && frame.closure.declared.contains(name);
-        let mut error = if declared && origin == scope {
+        let mut error = if declared && local == scope {
             Error::unbound_local(name)
         } else if declared || frame.closure.cells.contains_key(name) {
             Error::new(

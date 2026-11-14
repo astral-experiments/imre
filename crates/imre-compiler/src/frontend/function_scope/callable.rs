@@ -51,6 +51,7 @@ pub(crate) struct NamedFunction<'p> {
     pub(crate) doc: Option<String>,
     pub(crate) metadata: CallableMetadata,
     pub(crate) globals: std::collections::BTreeSet<String>,
+    pub(super) annotation_reads: Option<Box<super::ParameterReads>>,
     pub(crate) annotations: Option<Box<crate::frontend::ParameterAnnotations>>,
     pub(crate) type_params:
         Vec<crate::ir::RegisteredTypeParameter<crate::frontend::ParameterEvaluator>>,
@@ -69,6 +70,7 @@ impl NamedFunction<'_> {
         names: &imre_ast::Names,
         lexical: &mut FunctionScope,
         suspension_flags: u32,
+        annotation_reads: Option<Box<super::ParameterReads>>,
     ) -> Self {
         Self {
             name: names.definition(&def.name).to_owned(),
@@ -82,6 +84,7 @@ impl NamedFunction<'_> {
             doc: crate::frontend::docstring(&def.body),
             metadata: CallableMetadata::new(Some(&def.parameters), lexical, suspension_flags),
             globals: std::mem::take(&mut lexical.names.globals),
+            annotation_reads,
             annotations: None,
             type_params: Vec::new(),
         }

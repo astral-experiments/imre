@@ -2,6 +2,10 @@
 use ruff_python_ast as ast;
 use ruff_python_codegen::{Generator, Mode};
 
+/// Annotation providers publish this positional-only argument as `format`.
+/// Type-parameter and alias evaluators publish their separate `.format` argument verbatim.
+pub const FORMAT_PARAMETER: &str = ".__annotate__.format";
+
 /// A postponed-annotation dictionary is initialized if the suite contains an
 /// annotated assignment, even on an unreachable or non-name target.
 pub fn has_variable_annotation(body: &[ast::Stmt]) -> bool {

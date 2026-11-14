@@ -561,6 +561,7 @@ impl<'a> PreparedBody<'a> {
         // Annotation providers use the completed lambda sites for this source unit.
         let (sites, annotation_children) = crate::frontend::registered_sites(
             (&body, children),
+            &mut scopes,
             &private_names,
             values,
             bundled,
@@ -1457,15 +1458,12 @@ impl<'p> Function<'_, 'p, '_> {
             .frame
             .class_locals
             .filter(|_| !source.private_names.string_annotations);
-        let reads = annotations.reads(class);
         let mut metadata = json!({
-            "posonly": ["format"],
+            "posonly": [imre_ast::annotations::FORMAT_PARAMETER],
             "code_flags": source.function_flags(self.in_function || !header.type_params.is_empty(), false),
-            "scope_reads": reads,
-            "scope_complete": true,
-            "scope_locals_complete": true,
             "annotation_class": class.is_some(),
         });
+        annotations.scope.write_signature(&mut metadata);
         if !source.python_annotations && header.type_params.is_empty() {
             for (slot, reference) in &annotations.references {
                 let root = reference.split('.').next().unwrap();
@@ -1503,7 +1501,7 @@ impl SourceMap<'_> {
             return;
         }
         let signature = json!({
-            "posonly": ["format"], "scope_locals_complete": true,
+            "posonly": [imre_ast::annotations::FORMAT_PARAMETER], "scope_locals_complete": true,
             "scope_complete": true, "scope_reads": plan.reads,
             "code_flags": self.function_flags(in_function, false),
         });
@@ -1564,7 +1562,7 @@ impl SourceMap<'_> {
             AnnotationScope::Plain,
             self.module_start,
             json!({
-                "posonly": ["format"], "scope_complete": true, "scope_locals_complete": true,
+                "posonly": [imre_ast::annotations::FORMAT_PARAMETER], "scope_complete": true, "scope_locals_complete": true,
                 "code_flags": self.function_flags(false, false),
             }),
             ("", "__annotate__".into()),
@@ -1828,7 +1826,7 @@ mod tests {
             ..prepared.source.registered_source()
         };
         let mut lexical = crate::frontend::LexicalOperands::default();
-        let (_, children) = crate::frontend::function_scope::ScopeFacts::prepare(
+        let (mut scopes, children) = crate::frontend::function_scope::ScopeFacts::prepare(
             body,
             &prepared.source.private_names,
             |_, _| {},
@@ -1852,6 +1850,7 @@ mod tests {
         };
         let class_sites: Vec<_> = crate::frontend::registered_sites(
             (body, children),
+            &mut scopes,
             &prepared.source.private_names,
             source,
             prepared.source.bundled,

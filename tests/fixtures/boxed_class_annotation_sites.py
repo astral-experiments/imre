@@ -4,6 +4,31 @@ import gc
 def current():
     effects = []
 
+    def declare_scopes(name):
+        class Example:
+            name = 99
+            value: (name, [name for _ in (0,)])
+
+        def method(arg: ([0 for name in ()], lambda: name, lambda: name)):
+            pass
+
+        return Example, method.__annotate__
+
+    example, provider = declare_scopes(7)
+    assert example.__annotations__["value"] == (99, [7])
+    first, second = provider(1)["arg"][1:]
+    later = provider(1)["arg"][1]
+    assert first.__closure__[0] is second.__closure__[0]
+    assert first.__closure__[0] is not later.__closure__[0]
+    first.__closure__[0].cell_contents = 119
+    assert second() == 119
+    try:
+        later()
+    except NameError as exc:
+        assert exc.name == "name"
+    else:
+        raise AssertionError("a new provider invocation must have its own empty cell")
+
     def mark(value):
         effects.append(value)
         return value

@@ -604,15 +604,6 @@ impl Context {
             }
             "class_parameter_frame" => super::typing::class_parameter_frame(self, a, b),
             "class_annotation_environment" => Ok(self.class_annotation_environment(a)),
-            "class_annotation_locals" => {
-                let parent = self.scope_data(a).parent.expect("annotation globals");
-                let local = self.scope("", Some(parent));
-                let Value::Scope(frame) = self.heap.get_mut(local) else {
-                    unreachable!()
-                };
-                frame.exec_locals = Some(b);
-                Ok(local)
-            }
             "class_base_scope" => {
                 if !self.scope_data(b).in_class_body {
                     return Ok(a);

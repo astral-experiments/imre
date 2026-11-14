@@ -3092,9 +3092,12 @@ impl Context {
             return Ok(self.active_class_namespace(scope));
         }
         let mut bindings = Vec::new();
-        for name in self.frame_binding_names(scope, code)? {
+        for name in self.frame_binding_names(scope, code, false)? {
             match self.lookup(scope, &name) {
-                Ok(value) => bindings.push((self.heap.code_name(&name), value)),
+                Ok(value) => {
+                    let key = self.heap.code_name(super::code_locals::visible_slot_name(&name));
+                    bindings.push((key, value));
+                }
                 Err(error) if self.is_builtin_error(&error, "NameError") => {}
                 Err(error) => return Err(error),
             }
@@ -3118,6 +3121,7 @@ impl Context {
         &self,
         scope: Id,
         code: Id,
+        include_unbound: bool,
     ) -> Result<indexmap::IndexSet<String>> {
         let mut names = indexmap::IndexSet::new();
         let frame = self.scope_data(scope);
@@ -3182,6 +3186,13 @@ impl Context {
                         .map(str::to_owned),
                 );
             }
+        }
+        if include_unbound {
+            names.extend(frame.closure.declared.iter().cloned());
+        }
+        // The implicit argument wins when a free variable has the same public spelling.
+        if names.contains(imre_ast::annotations::FORMAT_PARAMETER) {
+            names.shift_remove("format");
         }
         Ok(names)
     }

@@ -4,6 +4,14 @@ use std::collections::BTreeSet;
 
 use super::{CellLayout, Context, Error, Id, NONE, Result, Value};
 
+pub(super) fn visible_slot_name(slot: &str) -> &str {
+    if slot == imre_ast::annotations::FORMAT_PARAMETER {
+        "format"
+    } else {
+        slot
+    }
+}
+
 impl Context {
     /// Register the code attributes whose values the runtime can supply.
     pub(super) fn install_code_members(&mut self, class: Id) {
@@ -106,7 +114,7 @@ impl Context {
             .locals
             .iter()
             .filter(|name| !cells.contains(name.as_str()))
-            .map(|name| self.heap.code_name(name))
+            .map(|name| self.heap.code_name(visible_slot_name(name)))
             .collect();
         let varnames = self.alloc(Value::Tuple(local_names));
         let cellvars = self.alloc(Value::Tuple(cell_names));
