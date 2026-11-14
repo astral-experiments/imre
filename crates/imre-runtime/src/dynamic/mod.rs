@@ -477,19 +477,19 @@ impl CallParameters {
     }
 }
 
-impl value::CodeObject {
-    /// Keep one decoded binding layout for all calls in this heap.
+impl value::CodeDefinition {
+    /// Decode on demand so a failed call can retry.
     fn call_parameters(
         &self,
         decode: impl FnOnce() -> Result<CallParameters>,
-    ) -> Result<std::rc::Rc<CallParameters>> {
+    ) -> Result<Arc<CallParameters>> {
         if let Some(parameters) = self.parsed_parameters.get() {
-            return Ok(std::rc::Rc::clone(parameters));
+            return Ok(Arc::clone(parameters));
         }
         let parameters = decode()?;
-        Ok(std::rc::Rc::clone(
+        Ok(Arc::clone(
             self.parsed_parameters
-                .get_or_init(|| std::rc::Rc::new(parameters)),
+                .get_or_init(|| Arc::new(parameters)),
         ))
     }
 }
@@ -502,9 +502,9 @@ impl Context {
         code
     }
 
-    fn parsed_parameters(&self, code: Id) -> Result<std::rc::Rc<CallParameters>> {
+    fn parsed_parameters(&self, code: Id) -> Result<Arc<CallParameters>> {
         let code = self.code_object(code);
-        code.call_parameters(|| {
+        code.definition.call_parameters(|| {
             let mut metadata = serde_json::from_str(self.str_value(code.parameters)?)
                 .map_err(|error| Error::new("SystemError", error.to_string()))?;
             CallParameters::from_metadata(&mut metadata)

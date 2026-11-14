@@ -109,7 +109,9 @@ impl Callback {
             // This operation executes only the lock acquire. A receiver check that
             // would raise in the Python frame still requires the worker's exception path.
             if meta.get("types").is_some() {
-                let sig = code.call_parameters(|| CallParameters::from_metadata(&mut meta))?;
+                let sig = code
+                    .definition
+                    .call_parameters(|| CallParameters::from_metadata(&mut meta))?;
                 let name = ctx.str_value(fields.qualname)?;
                 let checked = ctx.check_supplied_types(function, &sig, name, |param| {
                     (sig.positional.first()?.as_str() == param).then_some(receiver)
@@ -235,7 +237,9 @@ impl Callback {
         if high_level && !lock_only {
             return Ok(None);
         }
-        let parameters = code.call_parameters(|| CallParameters::from_metadata(&mut meta))?;
+        let parameters = code
+            .definition
+            .call_parameters(|| CallParameters::from_metadata(&mut meta))?;
         let shape = parameters.shape();
         if shape.varargs || shape.kwargs {
             return Ok(None);

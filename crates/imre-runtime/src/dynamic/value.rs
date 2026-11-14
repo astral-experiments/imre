@@ -41,8 +41,6 @@ pub(super) struct CodeObject {
     pub cellvars: Id,
     /// Canonical Python tuple of free variable names, materialized on first access.
     pub freevar_names: Id,
-    /// Decoded argument metadata is shared by calls using this immutable code object.
-    pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<super::CallParameters>>,
     pub name: Id,
     pub qualname: Id,
     pub doc: Id,
@@ -57,6 +55,8 @@ pub(super) struct CodeObject {
 /// Heap-independent lexical layout resolved at the Python definition site.
 #[derive(Clone, Default)]
 pub(super) struct CodeDefinition {
+    /// Decoded on first use. Worker callbacks reuse the defining code's binding layout.
+    pub parsed_parameters: std::cell::OnceCell<Arc<super::CallParameters>>,
     pub module_definition: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
@@ -1208,11 +1208,11 @@ impl Scope {
 
 /// Lexical names shared by calls to the same code object until a frame adds a name.
 #[derive(Clone, Debug, Default)]
-pub(super) struct DeclaredLocals(Option<std::rc::Rc<IndexSet<String>>>);
+pub(super) struct DeclaredLocals(Option<Arc<IndexSet<String>>>);
 
 impl From<IndexSet<String>> for DeclaredLocals {
     fn from(names: IndexSet<String>) -> Self {
-        Self((!names.is_empty()).then(|| std::rc::Rc::new(names)))
+        Self((!names.is_empty()).then(|| Arc::new(names)))
     }
 }
 
@@ -1228,7 +1228,7 @@ impl std::ops::Deref for DeclaredLocals {
 
 impl std::ops::DerefMut for DeclaredLocals {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        std::rc::Rc::make_mut(self.0.get_or_insert_with(Default::default))
+        Arc::make_mut(self.0.get_or_insert_with(Default::default))
     }
 }
 

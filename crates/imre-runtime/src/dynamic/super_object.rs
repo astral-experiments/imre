@@ -330,6 +330,7 @@ impl Context {
                     return Err(Error::new("RuntimeError", "super(): no arguments"));
                 };
                 let first = code
+                    .definition
                     .parsed_parameters
                     .get()
                     .and_then(|params| params.positional.first())
