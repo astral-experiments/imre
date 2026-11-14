@@ -1111,6 +1111,7 @@ pub(crate) struct ParameterAnnotations {
     pub(crate) start: TextSize,
     pub(crate) scope: super::function_scope::FunctionScope,
     pub(crate) body: AnnotationProvider,
+    /// Scalar names used by the callable's checked argument and return boundary.
     pub(crate) references: HashMap<String, String>,
 }
 
@@ -1119,6 +1120,7 @@ impl ParameterAnnotations {
         def: &ast::StmtFunctionDef,
         source: values::RegisteredSource<'_>,
         operand: &mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
+        checked_annotations: bool,
         lexical: impl FnOnce() -> super::function_scope::FunctionScope,
     ) -> Option<Box<Self>> {
         let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
@@ -1136,7 +1138,7 @@ impl ParameterAnnotations {
             false,
         );
         for (name, expression) in annotations {
-            if let Some(reference) = scalar_reference(expression) {
+            if checked_annotations && let Some(reference) = scalar_reference(expression) {
                 references.insert(name.to_owned(), reference);
             }
             let value = operand(expression, false);
@@ -1334,23 +1336,31 @@ pub(crate) fn registered_sites<'a, R>(
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
     bundled: bool,
+    checked_annotations: bool,
     prepare_child: impl Fn(
         &str,
         &ruff_python_parser::Parsed<ast::ModExpression>,
     ) -> Option<AnnotationBody<R>>,
 ) -> (RegisteredSites<'a>, HashMap<String, AnnotationBody<R>>) {
     let mut children = HashMap::new();
-    let sites = collect_sites(body, scopes, names, source, |expr, module| {
-        super::annotation_operands::annotation_operand(
-            expr,
-            module,
-            source,
-            names.string_annotations,
-            bundled,
-            &mut children,
-            &prepare_child,
-        )
-    });
+    let sites = collect_sites(
+        body,
+        scopes,
+        names,
+        source,
+        checked_annotations,
+        |expr, module| {
+            super::annotation_operands::annotation_operand(
+                expr,
+                module,
+                source,
+                names.string_annotations,
+                bundled,
+                &mut children,
+                &prepare_child,
+            )
+        },
+    );
     (sites, children)
 }
 
@@ -1359,6 +1369,7 @@ pub(super) fn collect_sites<'a>(
     scopes: &mut super::function_scope::ScopeFacts<'_>,
     names: &imre_ast::Names,
     source: values::RegisteredSource<'_>,
+    checked_annotations: bool,
     mut operand: impl FnMut(&ast::Expr, bool) -> Option<Expr>,
 ) -> RegisteredSites<'a> {
     use ast::statement_visitor::{StatementVisitor, walk_body, walk_stmt};
@@ -1374,6 +1385,7 @@ pub(super) fn collect_sites<'a>(
         children: &'s [&'a ast::Stmt],
         names: &'s imre_ast::Names,
         source: values::RegisteredSource<'s>,
+        checked_annotations: bool,
         operand: &'s mut dyn FnMut(&ast::Expr, bool) -> Option<Expr>,
         annotations: SourceScope<'s>,
         class: ClassFields,
@@ -1430,6 +1442,7 @@ pub(super) fn collect_sites<'a>(
                         def,
                         self.source,
                         self.operand,
+                        self.checked_annotations,
                         || self.scopes.annotation_scope(def, &self.owners),
                     );
                     let parameters = def.type_params.as_deref().map_or_else(Vec::new, |params| {
@@ -1549,6 +1562,7 @@ pub(super) fn collect_sites<'a>(
         children: &children,
         names,
         source,
+        checked_annotations,
         operand: &mut operand,
         annotations: SourceScope::new(
             RegisteredScope::Function { is_async: false },
@@ -1973,7 +1987,6 @@ impl<'a> SuitePreparation<'a> {
         header: &mut super::function_scope::NamedFunction<'p>,
         site: FunctionSite<'_>,
         checked: Option<&'p RegisteredFunction>,
-        python_annotations: bool,
     ) {
         let def = site.def;
         header.type_params = site.parameters;
@@ -2035,7 +2048,7 @@ impl<'a> SuitePreparation<'a> {
             }
             _ => None,
         };
-        header.prepare_signature(def, site.thread_entry, python_annotations, fixed_parameters);
+        header.prepare_signature(def, site.thread_entry, fixed_parameters);
         header.body = Some(body);
         // A residual suite may stop at a return before reaching a refused lexical child.
         if let Some(refusal) = refusal.or(child_refusal) {
@@ -4160,6 +4173,7 @@ mod tests {
             names,
             source,
             bundled,
+            true,
             crate::frontend::annotation_operands::test_annotation_body,
         )
         .0
@@ -4394,6 +4408,7 @@ mod tests {
             &names,
             literals.context(source),
             false,
+            true,
             super::super::annotation_operands::test_annotation_body,
         )
         .0;

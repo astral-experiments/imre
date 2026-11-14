@@ -187,6 +187,7 @@ mod tests {
             &mut scopes,
             &names,
             source,
+            true,
             |expr, module| {
                 let value = annotation_operand(
                     expr,
