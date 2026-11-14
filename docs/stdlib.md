@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 154 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 155 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -26,6 +26,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `bisect` | Yes | No API example recorded. | — | — | — |
 | `builtins` | Yes | Read, assign and delete `builtins._`; escape supported representations with `ascii` and f-string `!a`. [Evidence](../benchmarks/cpython_stdlib/full/builtins/README.md) | [— / 147 (0 assessed)](../benchmarks/cpython_stdlib/full/builtins/) | — | — |
 | `calendar` | Yes | No API example recorded. | — | — | — |
+| `cmd` | Yes | After `import cmd`, `Cmd.parseline()` expands `?hello` to the `help` command with argument `hello`. [Evidence](../tests/fixtures/text/cmd_parseline.py) | — | — | — |
 | `code` | Yes | No API example recorded. | — | — | — |
 | `codecs` | Yes | `lookup`, codec names, stateless ASCII, Latin-1 and UTF-8 encoding and decoding, and byte-order marks. [Evidence](../benchmarks/cpython_stdlib/full/sys/BUILTINS.md) | — | — | — |
 | `codeop` | Yes | No API example recorded. | — | — | — |
@@ -154,7 +155,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `bz2` |
 | `cProfile` |
 | `cmath` |
-| `cmd` |
 | `compileall` |
 | `concurrent` |
 | `ctypes` |
