@@ -11,6 +11,8 @@ def read_late():
     return late_builtin
 
 
+assert vars(builtins)["__doc__"] is builtins.__doc__
+assert builtins.__doc__.startswith("Built-in functions, types, exceptions, and other objects.")
 assert type(builtins) is ModuleType
 assert __name__ == "__main__"
 assert globals()["__builtins__"] is __builtins__ is builtins
