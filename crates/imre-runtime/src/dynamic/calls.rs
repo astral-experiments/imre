@@ -4283,31 +4283,17 @@ impl Context {
                 return Ok(descriptor);
             }
             Value::Code(ref code) => match name {
-                "co_argcount" => {
-                    if code.parameters == NONE {
-                        return Ok(self.int(0));
-                    }
-                    let signature: serde_json::Value =
-                        serde_json::from_str(self.str_value(code.parameters)?)
-                            .map_err(|e| Error::new("SystemError", e.to_string()))?;
-                    if let Some(count) = signature["co_argcount"].as_i64() {
-                        return Ok(self.int(count));
-                    }
-                    let count = signature["posonly"].as_array().map_or(0, Vec::len)
-                        + signature["positional"].as_array().map_or(0, Vec::len);
-                    return Ok(self.int(count as i64));
-                }
-                "co_posonlyargcount" | "co_kwonlyargcount" => {
+                "co_argcount" | "co_posonlyargcount" | "co_kwonlyargcount" => {
                     if code.parameters == NONE {
                         return Ok(self.int(0));
                     }
                     let parameters = self.parsed_parameters(obj)?;
-                    let count = if name == "co_posonlyargcount" {
-                        parameters.positional_only
-                    } else {
-                        parameters.keyword_only.len()
+                    let count = match name {
+                        "co_argcount" => parameters.argcount,
+                        "co_posonlyargcount" => parameters.positional_only as i64,
+                        _ => parameters.keyword_only.len() as i64,
                     };
-                    return Ok(self.int(count as i64));
+                    return Ok(self.int(count));
                 }
                 "co_varnames" | "co_cellvars" | "co_nlocals" | "co_freevars" => {
                     return self.code_local_field(obj, name);
