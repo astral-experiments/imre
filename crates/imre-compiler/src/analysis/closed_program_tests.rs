@@ -362,6 +362,30 @@ handlers = {"first": first, "second": second}
 }
 
 #[test]
+fn a_module_dictionary_write_only_replaces_a_live_module_name() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("main.py");
+    let functions = "def target(n: int): return n\ndef replacement(): return 37\n";
+    fs::write(tmp.path().join("helper.py"), functions).unwrap();
+    let options = crate::CompileOptions {
+        script_startup: Some((crate::CommandFlags::default(), "imre".into())),
+        ..Default::default()
+    };
+    let compile = |source: String| {
+        fs::write(&path, source).unwrap();
+        crate::compile_file(&path, None, &options)
+    };
+    compile(format!("{functions}def enter(): return target()\nprint(set([1, 2]))\nglobals()['target'] = replacement\nprint(enter())\n")).unwrap();
+    for source in [
+        format!("{functions}print(set([1, 2]))\nprint(target())\nglobals()['target'] = replacement\n"),
+        "from helper import replacement\ndef enter():\n    from helper import target as local\n    return local()\nprint(set([1, 2]))\nglobals()['local'] = replacement\n".to_owned(),
+    ] {
+        let error = compile(source).err().expect("the original target still requires n");
+        assert!(error.contains("No argument provided"), "{error}");
+    }
+}
+
+#[test]
 fn a_source_function_can_gain_a_python_default() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("main.py");

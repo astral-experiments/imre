@@ -13,6 +13,27 @@ use ty_python_core::definition::{DefinitionKind, FunctionDefinitionKind};
 use ty_python_semantic::types::{Type, TypeDefinition};
 use ty_python_semantic::{Db, HasType, SemanticModel};
 
+/// Follow the sole assignments that reach this use of the operand.
+pub(super) fn assigned_value<'a>(
+    db: &dyn Db,
+    file: File,
+    parsed: &'a ParsedModuleRef,
+    mut value: &'a Expr,
+    follow: impl Fn(&Expr) -> bool,
+) -> Option<&'a Expr> {
+    let mut seen = std::collections::HashSet::new();
+    while follow(value)
+        && let Some(def) = super::shipped_exports::binding_at_use(db, file, value)
+        && let DefinitionKind::Assignment(assignment) = def.kind(db)
+    {
+        if !seen.insert(def) || assignment.unpack().is_some() {
+            return None;
+        }
+        value = assignment.value(parsed);
+    }
+    Some(value)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ExecutionIntrinsic {
     Exec,
@@ -156,8 +177,13 @@ impl<'ast, 'db> Escape<'ast, 'db> {
     // Follow simple aliases to the value that was actually assigned. A return or
     // parameter annotation alone cannot establish the native entry of a code object.
     fn assigned_value(&self, value: &'ast Expr) -> Option<&'ast Expr> {
-        self.session
-            .assigned_value(self.model.file(), self.parsed, value, |_| true)
+        assigned_value(
+            self.model.db(),
+            self.model.file(),
+            self.parsed,
+            value,
+            |_| true,
+        )
     }
 
     fn declared_function(&self, value: &Expr) -> Option<SourceFunction<'db>> {
@@ -951,26 +977,6 @@ impl Session {
         .then(|| kind.target_range(parsed))
     }
 
-    pub(super) fn assigned_value<'a>(
-        &self,
-        file: File,
-        parsed: &'a ParsedModuleRef,
-        mut value: &'a Expr,
-        follow: impl Fn(&Expr) -> bool,
-    ) -> Option<&'a Expr> {
-        let mut seen = std::collections::HashSet::new();
-        while follow(value)
-            && let Some(def) = self.file_binding(file, value)
-            && let DefinitionKind::Assignment(assignment) = def.kind(&self.db)
-        {
-            if !seen.insert(def) || assignment.unpack().is_some() {
-                return None;
-            }
-            value = assignment.value(parsed);
-        }
-        Some(value)
-    }
-
     fn selected_exec_literal<'a>(
         &self,
         file: File,
@@ -984,7 +990,7 @@ impl Session {
         {
             return None;
         }
-        self.assigned_value(file, parsed, operand, Expr::is_name_expr)?
+        assigned_value(&self.db, file, parsed, operand, Expr::is_name_expr)?
             .as_string_literal_expr()
     }
 

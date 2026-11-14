@@ -505,7 +505,8 @@ impl Session {
                 return None;
             }
             let value = argument.value();
-            if let Some(origin) = self.assigned_value(file, parsed, value, Expr::is_name_expr)
+            if let Some(origin) =
+                super::execution::assigned_value(&self.db, file, parsed, value, Expr::is_name_expr)
                 && (origin.is_literal_expr() || crate::modules::inert_literal(value))
             {
                 actuals.push(origin.inferred_type(model).unwrap_or_else(Type::unknown));
