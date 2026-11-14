@@ -430,16 +430,27 @@ impl Checker<'_> {
                 bind_assignment(self, &assignment.targets, value, output)?;
                 return Ok(true);
             }
-            let local = target.as_name_expr().filter(|_| {
-                !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
-            });
-            let previous = local.and_then(|name| {
-                let slot = *self.names.get(name.id.as_str())?;
-                self.inferred_containers
-                    .contains(&slot)
-                    .then_some((name.id.as_str(), slot))
-            });
-            let context = self.target_expectation(target, Some(&assignment.value));
+            let local = target
+                .as_name_expr()
+                .filter(|_| {
+                    !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
+                })
+                .and_then(|name| Some((name.id.as_str(), *self.names.get(name.id.as_str())?)));
+            let previous = local.filter(|(_, slot)| self.inferred_containers.contains(slot));
+            let mut context = self.target_expectation(target, Some(&assignment.value));
+            if matches!(context, Some((Type::Callable(_), None)))
+                && let Some((_, slot)) = local
+                && let Some(ValueSource::Function(prior)) = self.assigned.value_source(slot)
+                && let Some(Binding::Definition(owner)) = self.resolve(&assignment.value)
+                && self
+                    .functions
+                    .get(&owner)
+                    .is_some_and(|next| next.id != prior)
+            {
+                // A previous function in an unannotated slot does not declare
+                // the next function's parameter types.
+                context = None;
+            }
             let scalar_item = context
                 .filter(|(ty, _)| target.is_subscript_expr() && ty.builtin_scalar_name().is_some());
             let value = if let Some((_, old)) = previous {
