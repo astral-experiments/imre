@@ -662,6 +662,20 @@ impl Session {
             })
     }
 
+    /// A deferred read of this global can refer to the earlier physical definition.
+    pub(crate) fn function_reads_global(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+        name: &ruff_python_ast::name::Name,
+    ) -> bool {
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        index
+            .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))
+            .is_some_and(|scope| *deferred_global(&self.db, file, scope, name.clone()))
+    }
+
     /// This scope has only local values and the supplied fixed globals, with no member or import bindings.
     pub(crate) fn function_uses_fixed_names(
         &self,

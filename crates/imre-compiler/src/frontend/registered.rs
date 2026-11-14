@@ -497,6 +497,42 @@ pub(super) fn place_checked_definition(
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
 ) -> Result<Option<LoweredBody>, String> {
+    Ok(
+        prepare_checked_definition(original, definition, signature, inference, callable_inputs)?
+            .map(|(body, placement)| {
+                placement.place(original.graph, &inference.source_checks);
+                body
+            }),
+    )
+}
+
+pub(super) struct CheckedPlacement {
+    module: ModuleId,
+    range: TextRange,
+    frame: RegisteredFunction,
+    check_source: bool,
+}
+
+impl CheckedPlacement {
+    pub(super) fn place(self, graph: &SourceGraph, checks: &SourceChecks) {
+        if self.check_source
+            && let Some(solved) = &checks.solved
+        {
+            solved
+                .borrow_mut()
+                .push((self.module, self.range, SourceFrame::Registered));
+        }
+        graph.register_function(self.module, self.range.start(), self.frame);
+    }
+}
+
+pub(super) fn prepare_checked_definition(
+    original: &Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+    inference: &inference::Inference,
+    callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
+) -> Result<Option<(LoweredBody, CheckedPlacement)>, String> {
     let graph = original.graph;
     let module = original.module;
     let checks = &inference.source_checks;
@@ -545,15 +581,21 @@ pub(super) fn place_checked_definition(
     let Some((body, frame)) = placed else {
         return Ok(None);
     };
-    if let Some(solved) = deferred {
-        solved
-            .borrow_mut()
-            .push((module, definition.range(), SourceFrame::Registered));
-    } else if contract.is_none() && !checks.accepts(graph, module, definition.range()) {
+    if deferred.is_none()
+        && contract.is_none()
+        && !checks.accepts(graph, module, definition.range())
+    {
         return Ok(None);
     }
-    graph.register_function(module, definition.start(), frame);
-    Ok(Some(body))
+    Ok(Some((
+        body,
+        CheckedPlacement {
+            module,
+            range: definition.range(),
+            frame,
+            check_source: deferred.is_some(),
+        },
+    )))
 }
 
 fn checked_definition(
