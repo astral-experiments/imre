@@ -210,17 +210,26 @@ impl CheckedBody<'_, '_, '_, '_> {
         at: Option<ruff_text_size::TextRange>,
     ) -> String {
         if let Entry::Registered(frame) = &mut self.0
-            && let ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, ..), args) =
-                &expr.kind
+            && let Some((range, anchor, _)) = expr.source_position()
         {
-            return frame.at_expression(*range, *anchor, |frame| {
-                CheckedBody::registered(frame.reborrow()).operand_truth(
-                    &args[0],
-                    value,
-                    Some(*range),
-                )
+            return frame.at_expression(range, anchor, |frame| {
+                let mut code = CheckedBody::registered(frame.reborrow());
+                if let ExprKind::Builtin(Builtin::RegisteredLocation(..), args) = &expr.kind {
+                    code.operand_truth(&args[0], value, Some(range))
+                } else {
+                    code.result_truth(expr, value, Some(range))
+                }
             });
         }
+        self.result_truth(expr, value, at)
+    }
+
+    fn result_truth(
+        &mut self,
+        expr: &Expr,
+        value: &CheckedValue,
+        at: Option<ruff_text_size::TextRange>,
+    ) -> String {
         match (&mut self.0, value) {
             (Entry::Native(emitter), CheckedValue::Native(input, None)) => {
                 if input.value.ty == Type::Bool {

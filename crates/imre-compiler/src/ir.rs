@@ -680,8 +680,44 @@ pub(crate) struct Expr {
 
 impl Expr {
     pub(crate) fn written_range(&self) -> Option<ruff_text_size::TextRange> {
+        self.source_position().map(|(range, _, _)| range)
+    }
+
+    /// The source range and traceback anchor at this use, with its checked result type.
+    pub(crate) fn source_position(
+        &self,
+    ) -> Option<(
+        ruff_text_size::TextRange,
+        ruff_text_size::TextSize,
+        Option<Type>,
+    )> {
         match &self.kind {
-            ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(*range),
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, hint), _) => {
+                Some((*range, *anchor, *hint))
+            }
+            ExprKind::Invoke { args, .. } => {
+                let site = args.site.python()?;
+                let (anchor, hint) = site.call.position?;
+                Some((site.call.range, anchor, hint))
+            }
+            _ => None,
+        }
+    }
+
+    /// A source check can refine the value without changing its Python handle.
+    pub(crate) fn source_hint_mut(
+        &mut self,
+    ) -> Option<(ruff_text_size::TextRange, &mut Option<Type>)> {
+        match &mut self.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) => {
+                Some((*range, hint))
+            }
+            ExprKind::Invoke { args, .. } => {
+                let CallSite::Python(site) = &mut args.site else {
+                    return None;
+                };
+                Some((site.call.range, &mut site.call.position.as_mut()?.1))
+            }
             _ => None,
         }
     }
@@ -696,10 +732,9 @@ impl Expr {
 
     /// The checker's type at this use can refine a live Python handle.
     pub(crate) fn checked_operand_type(&self) -> Type {
-        match self.kind {
-            ExprKind::Builtin(Builtin::RegisteredLocation(_, _, Some(ty)), _) => ty,
-            _ => self.ty,
-        }
+        self.source_position()
+            .and_then(|(_, _, hint)| hint)
+            .unwrap_or(self.ty)
     }
 
     /// Written operands available to a direct named call. A module read has no call site.
@@ -1612,6 +1647,8 @@ pub(crate) fn generator_operands(
 pub(crate) struct RegisteredCall {
     /// The outer get position for an immediately indexed partition method call.
     pub(crate) partition_field: Option<(u32, ruff_text_size::TextRange)>,
+    /// Enter the written expression before resolving the target or evaluating an argument.
+    pub(crate) position: Option<(ruff_text_size::TextSize, Option<Type>)>,
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) target: RegisteredCallTarget,
     pub(crate) arguments: RegisteredArguments,
@@ -1628,6 +1665,7 @@ impl RegisteredCall {
             target,
             arguments,
             partition_field: None,
+            position: None,
         })
     }
 

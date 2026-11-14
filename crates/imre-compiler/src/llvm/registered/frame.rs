@@ -1459,8 +1459,8 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         expr: &ir::Expr,
         emit: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        if let ir::ExprKind::Builtin(ir::Builtin::RegisteredLocation(range, ..), _) = &expr.kind {
-            self.with_source_range(*range, emit)
+        if let Some(range) = expr.written_range() {
+            self.with_source_range(range, emit)
         } else {
             emit(self)
         }

@@ -339,15 +339,11 @@ impl SourceSites {
         let end = self.sites.len();
         ir::all_operand_nodes(callable, None, &mut |node, parent| {
             if node.has_fixed_site() {
-                let located = |expr: &Expr| match expr.kind {
-                    ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(range),
-                    _ => None,
-                };
                 let range = match node {
-                    ir::Node::Expression(expr) => located(expr),
+                    ir::Node::Expression(expr) => expr.written_range(),
                     ir::Node::Statement(_) => None,
                 }
-                .or_else(|| parent.and_then(located))
+                .or_else(|| parent.and_then(Expr::written_range))
                 .unwrap_or_else(|| call.func.range());
                 self.sites.push((range, FixedNode::checked(&node)));
             }

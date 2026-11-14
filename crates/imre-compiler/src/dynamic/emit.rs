@@ -1717,11 +1717,10 @@ mod tests {
                 let [operand] = &args[..] else {
                     panic!("displayhook needs its expression")
                 };
-                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) = &operand.kind
-                else {
-                    panic!("displayed operand lost its source position")
-                };
-                assert_eq!(&text[*range], text.trim_end());
+                let range = operand
+                    .written_range()
+                    .expect("displayed operand lost its source position");
+                assert_eq!(&text[range], text.trim_end());
                 true
             });
             assert_eq!(displays, display);
@@ -1749,11 +1748,10 @@ mod tests {
                 kind: ExprKind::Builtin(Builtin::RegisteredDisplayHook, args),
                 ..
             }) => {
-                let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) = &args[0].kind
-                else {
-                    panic!("displayed operand lost its source position")
-                };
-                displayed.push(&text[*range]);
+                let range = args[0]
+                    .written_range()
+                    .expect("displayed operand lost its source position");
+                displayed.push(&text[range]);
             }
             Node::Statement(Statement::Position(range, _)) => {
                 checkpoints.push(text[*range].lines().next().unwrap());
