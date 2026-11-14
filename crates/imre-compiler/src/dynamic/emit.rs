@@ -811,16 +811,6 @@ impl<'a> PreparedBody<'a> {
     }
 }
 
-enum DefinitionName<'a> {
-    Binding(&'a ast::Identifier),
-    Evaluator {
-        name: &'a str,
-        scope: &'a crate::frontend::function_scope::FunctionScope,
-        type_parameter_scope: bool,
-    },
-    ClassHeader(&'a str, &'a crate::frontend::RegisteredClass),
-}
-
 enum Body<'a> {
     Module(&'a PreparedBody<'a>),
     Namespace(
@@ -1095,9 +1085,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             source.class_bodies.get(&site)
         {
             let definition = if let Some(header) = &class.header {
-                let name = format!("<generic parameters of {}>", class.name);
-                let body = Body::CheckedProvider(&header.body, AnnotationScope::Plain);
-                self.compile_definition(site, DefinitionName::ClassHeader(&name, class), body)
+                self.compile_class_header(site, class, &header.body)
             } else {
                 self.compile_class_namespace(site, class)
             };
@@ -1348,101 +1336,61 @@ impl Function<'_, '_, '_> {
         site: TextSize,
         class: &crate::frontend::RegisteredClass,
     ) -> CompiledDefinition {
-        self.compile_definition(
-            site,
-            DefinitionName::Binding(&class.name),
-            Body::Namespace(class, &self.source.scopes.classes[&site]),
-        )
-    }
-
-    fn compile_definition(
-        &mut self,
-        start: TextSize,
-        name: DefinitionName<'_>,
-        body: Body<'_>,
-    ) -> CompiledDefinition {
-        let (evaluator_scope, type_parameter_scope) = match name {
-            DefinitionName::Evaluator {
-                scope,
-                type_parameter_scope,
-                ..
-            } => (Some(scope), type_parameter_scope),
-            _ => (None, false),
-        };
-        let class = match name {
-            DefinitionName::ClassHeader(_, class) => Some(class),
-            _ => None,
-        };
-        let (name, global) = match name {
-            DefinitionName::Binding(identifier) => (
-                self.source.private_names.definition(identifier),
-                self.declared_globals.contains(identifier.as_str()),
-            ),
-            DefinitionName::ClassHeader(name, _) | DefinitionName::Evaluator { name, .. } => {
-                (name, false)
-            }
-        };
-        let qualname = if global {
+        let scope = &self.source.scopes.classes[&site];
+        let name = self.source.private_names.definition(&class.name);
+        let qualname = if self.declared_globals.contains(class.name.as_str()) {
             name.to_owned()
         } else {
             format!("{}{name}", self.prefix)
         };
-        let class_header = class.map(|class| class.range);
-        let prefix = if let Some(class) = class {
-            if self.declared_globals.contains(class.name.as_str()) {
-                String::new()
-            } else {
-                self.prefix.to_owned()
-            }
-        } else if matches!(body, Body::Namespace(..)) {
-            format!("{qualname}.")
-        } else {
-            format!("{qualname}.<locals>.")
-        };
-        let flags = if matches!(body, Body::Namespace(..)) {
-            self.source.future_flags
-        } else {
-            self.source
-                .function_flags(self.in_function || type_parameter_scope, false)
-        };
-        let mut signature = json!({ "code_flags": flags });
-        if let Body::Namespace(class, scope) = &body {
-            signature["postponed_annotations"] = json!(class.annotations.postponed);
-            if class.annotations.conditional_count != 0 || scope.cells.conditional {
-                signature["conditional_annotations"] = json!(true);
-            }
-            scope.write_signature(&mut signature, self.is_method_scope());
-        } else if let Some(facts) = evaluator_scope {
-            facts.write_signature(&mut signature);
-        } else {
-            signature["scope_cellvars"] = serde_json::Value::Null;
-            signature["scope_complete"] = json!(false);
-            signature["scope_locals_complete"] = json!(true);
+        let mut signature = json!({
+            "code_flags": self.source.future_flags,
+            "postponed_annotations": class.annotations.postponed,
+        });
+        if class.annotations.conditional_count != 0 || scope.cells.conditional {
+            signature["conditional_annotations"] = json!(true);
         }
-        if evaluator_scope.is_some() {
-            signature["posonly"] = json!([".format"]);
-            if matches!(body, Body::Operand(_, _, Some(_))) {
-                signature["annotation_class"] = json!(true);
-            }
-        }
-        let in_function = self.in_function || !matches!(body, Body::Namespace(..));
+        scope.write_signature(&mut signature, self.is_method_scope());
         let code = self.source.code(
             self.frame.output,
-            &prefix,
-            body,
-            in_function,
-            Some((start, 0)),
+            &format!("{qualname}."),
+            Body::Namespace(class, scope),
+            self.in_function,
+            Some((site, 0)),
+        );
+        CompiledDefinition::new(code, signature.to_string(), name, qualname, false)
+    }
+
+    /// Compile the scope that evaluates a generic class's bases and keywords.
+    fn compile_class_header(
+        &mut self,
+        site: TextSize,
+        class: &crate::frontend::RegisteredClass,
+        header: &crate::frontend::CheckedProvider,
+    ) -> CompiledDefinition {
+        let name = format!("<generic parameters of {}>", class.name);
+        let qualname = format!("{}{name}", self.prefix);
+        let prefix = if self.declared_globals.contains(class.name.as_str()) {
+            ""
+        } else {
+            self.prefix
+        };
+        let signature = json!({
+            "code_flags": self.source.function_flags(self.in_function, false),
+            "scope_cellvars": null,
+            "scope_complete": false,
+            "scope_locals_complete": true,
+        });
+        let code = self.source.code(
+            self.frame.output,
+            prefix,
+            Body::CheckedProvider(header, AnnotationScope::Plain),
+            true,
+            Some((site, 0)),
         );
         CompiledDefinition {
-            class_header,
-            format_evaluator: evaluator_scope.is_some(),
-            ..CompiledDefinition::new(
-                code,
-                signature.to_string(),
-                name,
-                qualname,
-                class_header.is_some() || evaluator_scope.is_some(),
-            )
+            class_header: Some(class.range),
+            ..CompiledDefinition::new(code, signature.to_string(), &name, qualname, true)
         }
     }
 
@@ -1455,15 +1403,26 @@ impl Function<'_, '_, '_> {
         code: &crate::frontend::AnnotationCode,
         class: Option<&ClassBindings>,
     ) -> CompiledDefinition {
-        self.compile_definition(
-            site,
-            DefinitionName::Evaluator {
-                name,
-                scope,
-                type_parameter_scope,
-            },
+        let qualname = format!("{}{name}", self.prefix);
+        let mut signature = json!({
+            "code_flags": self.source.function_flags(self.in_function || type_parameter_scope, false),
+            "posonly": [".format"],
+        });
+        scope.write_signature(&mut signature);
+        if class.is_some() {
+            signature["annotation_class"] = json!(true);
+        }
+        let code = self.source.code(
+            self.frame.output,
+            &format!("{qualname}.<locals>."),
             Body::Operand(code.range, &code.operand, class),
-        )
+            true,
+            Some((site, 0)),
+        );
+        CompiledDefinition {
+            format_evaluator: true,
+            ..CompiledDefinition::new(code, signature.to_string(), name, qualname, true)
+        }
     }
 
     fn compile_scoped_type_parameters(
