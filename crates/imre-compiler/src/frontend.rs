@@ -4624,21 +4624,6 @@ impl<'a> Checker<'a> {
             } else {
                 self.expr(expression)?
             };
-            if value.ty == Type::PythonObject
-                && self.types.set_element(concrete).is_some()
-                && let ast::Expr::Call(call) = expression
-                && call.arguments.is_empty()
-                && self.graph.session.is_known_class(
-                    self.module,
-                    &call.func,
-                    ty_python_semantic::types::KnownClass::Set,
-                )
-            {
-                return Ok(Expr {
-                    ty: concrete,
-                    ..value
-                });
-            }
             return if alternative(self, value.ty) {
                 Ok(value)
             } else {
