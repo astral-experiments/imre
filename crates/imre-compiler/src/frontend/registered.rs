@@ -2269,8 +2269,7 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> RegisteredSuite {
         let mut region = self.region(kind);
-        let mut arms = Vec::new();
-        let mut otherwise = None;
+        let mut tail = &mut region.checked.function.body;
         let mut arm_continues = false;
         for (test, suite) in statements::if_clauses(branch) {
             // A dead literal arm in a suspended frame has no resume entry.
@@ -2290,11 +2289,15 @@ impl<'a> SuitePreparation<'a> {
             };
             let child = self.physical_suite(suite, kind, selection, suspended);
             arm_continues |= child.falls_through;
-            let child = region.child(child);
+            let child = child.into_child(&mut region.suites);
             if let Some(test) = test {
-                arms.push((region.operand(test, Type::Bool), child));
+                let condition = bind_operand(&mut region.operands, test, Type::Bool);
+                let (yes, no) = statements::push_if(tail, condition);
+                *yes = child;
+                tail = no;
             } else {
-                otherwise = Some(child);
+                *tail = child;
+                region.falls_through = arm_continues;
                 break;
             }
         }
@@ -2302,13 +2305,7 @@ impl<'a> SuitePreparation<'a> {
             .checked
             .function
             .body
-            .push(Statement::Position(branch.range(), None));
-        region.falls_through = otherwise.is_none() || arm_continues;
-        region
-            .checked
-            .function
-            .body
-            .extend(statements::if_arms(arms, otherwise.unwrap_or_default()));
+            .insert(0, Statement::Position(branch.range(), None));
         region
     }
 
