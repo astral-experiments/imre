@@ -1,4 +1,6 @@
+import gc
 import sys
+import weakref
 from sys import path
 from inspect import signature
 from types import FunctionType, GenericAlias
@@ -617,3 +619,22 @@ except AttributeError as error:
     assert str(error) == "readonly attribute"
 else:
     raise AssertionError("ParamSpecArgs origin was writable")
+
+def nested_owner():
+    def unused():
+        pass
+
+    __class__ = unused
+
+    class Owner[T]:
+        def reader(self):
+            return lambda: (T, __class__)
+
+    return Owner, weakref.ref(__class__)
+
+
+owner, unused = nested_owner()
+gc.collect()
+assert unused() is None
+parameter, defining_class = owner().reader()()
+assert parameter is owner.__type_params__[0] and defining_class is owner

@@ -26,16 +26,6 @@ pub(super) fn capture(
         .get_mut(&classes::site(class))
         .expect("class bindings on entry");
     let names = &mut scope.namespace.names;
-    if class.type_params.is_none()
-        && class
-            .body
-            .iter()
-            .all(|stmt| matches!(stmt, ast::Stmt::Pass(_) | ast::Stmt::FunctionDef(_)))
-    {
-        names.reads = uses.direct.union(&uses.nested).cloned().collect();
-    } else {
-        names.incomplete = true;
-    }
     for name in GENERATED {
         if (uses.direct.contains(name) || uses.nested.contains(name))
             && !scope.bindings.locals.contains(name)
@@ -49,8 +39,16 @@ pub(super) fn capture(
         !scope.bindings.locals.contains(name) && !scope.bindings.globals.contains(name)
     });
     uses.direct.append(&mut uses.nested);
+    for name in scope.cells.supplied_only() {
+        uses.direct.remove(name);
+    }
     uses.direct.extend(names.nonlocals.iter().cloned());
     scope.frame_reads = uses.direct;
+    names.reads.clone_from(&scope.frame_reads);
+    if class.type_params.is_some() {
+        // The class body publishes the tuple from its generic header as __type_params__.
+        names.reads.insert(".type_params".to_owned());
+    }
     names.finish_scope();
 }
 
