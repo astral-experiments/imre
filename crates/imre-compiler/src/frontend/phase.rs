@@ -244,6 +244,23 @@ impl<M> Diagnostic<M> {
             })
     }
 
+    pub(crate) fn declared_return(
+        &self,
+        module: ModuleId,
+        path: &Path,
+        annotation: TextRange,
+    ) -> Option<(TextRange, &Self)> {
+        std::iter::once(self)
+            .chain(&self.following)
+            .find_map(|report| {
+                let position = report.position.as_ref()?;
+                (report.kind == Kind::ReturnType
+                    && report.path.as_deref() == Some(path)
+                    && position.expected_from == Some(TypeDeclaration { module, annotation }))
+                .then_some((position.range, report))
+            })
+    }
+
     pub(super) fn in_module(self, graph: &SourceGraph, module: ModuleId) -> Self {
         self.with_path(&graph.modules[module].path)
     }

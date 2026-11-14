@@ -273,6 +273,17 @@ def check_installed_package_data(imre, root, run):
 
 
 def check_module_search_root(imre, root, run):
+    dormant = root / "dormant.py"
+    for operand in ("'bad'", "text"):
+        dormant.write_text(
+            "import argparse\ndef unused(text: str) -> int:\n    return 7\n"
+            f"    return {operand}\nprint('entered')\n"
+        )
+        for args in ((dormant,), ("-m", "dormant")):
+            result = run(imre, "-B", *args)
+            assert result.returncode and not result.stdout, result
+            assert os.fsencode(dormant) + b":4:12: Imre: expected int, got str" in result.stderr, result
+
     app = root / "application"
     app.mkdir()
     (app / "wheel_module.py").write_text(
