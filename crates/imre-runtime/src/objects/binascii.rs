@@ -102,6 +102,53 @@ fn unpack_digits([a, b, c, d]: [u8; 4]) -> [u8; 3] {
     [a << 2 | b >> 4, b << 4 | c >> 2, c << 6 | d]
 }
 
+/// Encode a single UU line; a partial triplet is padded with zero bits.
+pub(crate) fn encode_uu(data: &[u8], backtick: bool) -> Result<Bytes> {
+    let digit = |n| if n == 0 && backtick { b'`' } else { b' ' + n };
+    let mut line = allocate(data.len().div_ceil(3) * 4 + 2)?;
+    line.push(digit(data.len() as u8));
+    for chunk in data.chunks(3) {
+        let a = chunk[0];
+        let b = chunk.get(1).copied().unwrap_or(0);
+        let c = chunk.get(2).copied().unwrap_or(0);
+        let digits = [
+            a >> 2,
+            (a & 3) << 4 | b >> 4,
+            (b & 15) << 2 | c >> 6,
+            c & 63,
+        ];
+        line.extend(digits.map(digit));
+    }
+    line.push(b'\n');
+    Ok(line)
+}
+
+/// The length byte determines how many sextets are data and where padding starts.
+pub(crate) fn decode_uu(line: &[u8]) -> Result<Bytes> {
+    let Some((&length, tail)) = line.split_first() else {
+        return Err(Error::new(Kind::BinasciiError, "Missing length byte"));
+    };
+    let length = usize::from(length.wrapping_sub(b' ') & 63);
+    let mut output = allocate(length)?;
+    let mut input = tail.iter().copied();
+    while output.len() < length {
+        let count = (length - output.len()).min(3);
+        let mut digits = [0; 4];
+        for digit in &mut digits[..count + 1] {
+            *digit = match input.next() {
+                None | Some(b'\r' | b'\n') => 0,
+                Some(c @ b' '..=b'`') => (c - b' ') & 63,
+                _ => return Err(Error::new(Kind::BinasciiError, "Illegal char")),
+            };
+        }
+        output.extend_from_slice(&unpack_digits(digits)[..count]);
+    }
+    if input.any(|byte| !matches!(byte, b' ' | b'`' | b'\r' | b'\n')) {
+        return Err(Error::new(Kind::BinasciiError, "Trailing garbage"));
+    }
+    Ok(output)
+}
+
 fn decode(data: &[u8], strict: bool, urlsafe: bool) -> Result<Bytes> {
     const STANDARD_DIGITS: [u8; 256] = decode_digits(false);
     const URLSAFE_DIGITS: [u8; 256] = decode_digits(true);

@@ -1,6 +1,6 @@
 //! Binary-to-text codecs and zlib checksums for runtime-loaded callers.
 use super::{Context, Error, Id, Result, Value};
-use crate::dynamic::memoryview::Storage;
+use crate::dynamic::memoryview::{ReadBuffer, Storage};
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     if !decode {
@@ -154,6 +154,55 @@ fn b2a_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id>
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
+fn a2b_uu(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let data = crate::dynamic::builtins::one_positional_arg("binascii.a2b_uu", args, kwargs)?;
+    let bytes = if ctx.string_storage(data).is_some() {
+        crate::objects::decode_uu(input(ctx, data, true)?)?
+    } else {
+        // Only acquisition errors take the ASCII converter's TypeError.
+        let decode = |ctx: &Context, buffer: ReadBuffer| -> Result<_> {
+            let storage = buffer.storage(ctx)?;
+            let bytes = storage.read(0..storage.len())?;
+            Ok(crate::objects::decode_uu(&bytes)?)
+        };
+        ctx.with_read_buffer(data, |ctx, buffer| Ok(decode(ctx, buffer)))
+        .map_err(|_| ascii_buffer_error(ctx, data))??
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+fn b2a_uu(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if args.len() + kwargs.len() <= 2 && args.len() != 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "b2a_uu() takes exactly 1 positional argument ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let [Some(data), backtick] = crate::dynamic::builtins::bind_builtin_arguments(
+        "b2a_uu",
+        args,
+        kwargs,
+        ["", "backtick"],
+        0,
+    )?
+    else {
+        unreachable!()
+    };
+    let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
+        let backtick = ctx.optional_truth(backtick, false)?;
+        let storage = buffer.storage(ctx)?;
+        if storage.len() > 45 {
+            return Err(Error::new("binascii.Error", "At most 45 bytes at once"));
+        }
+        let bytes = storage.read(0..storage.len())?;
+        Ok(crate::objects::encode_uu(&bytes, backtick)?)
+    })?;
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
 /// Leave subclass operations, unfamiliar alphabets and custom truth tests to the Python helper.
 pub(super) fn base32(
     ctx: &mut Context,
@@ -251,6 +300,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "a2b_uu" {
+        return a2b_uu(ctx, args, kwargs);
+    }
+    if name == "b2a_uu" {
+        return b2a_uu(ctx, args, kwargs);
+    }
     if name == "crc_hqx" {
         return crc_hqx(ctx, args, kwargs);
     }
