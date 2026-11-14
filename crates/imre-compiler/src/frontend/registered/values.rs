@@ -486,6 +486,27 @@ impl Checker<'_> {
         source.located(expr, value)
     }
 
+    pub(in crate::frontend) fn call_object_method(
+        &mut self,
+        call: &ast::ExprCall,
+        field: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<Expr, String> {
+        // A refused fixed initializer still checks its operands and observes
+        // arbitrary Python effects. Its registered frame owns the live call.
+        if self.module_scope && self.inference.is_none() && self.unrepresented.borrow().is_some() {
+            for argument in imre_ast::argument_values(&call.arguments) {
+                self.expr(argument)?;
+            }
+            return Ok(super::operation(
+                Builtin::UnrepresentedCall,
+                Type::PythonObject,
+                vec![],
+            ));
+        }
+        self.call_with_target(call, loaded_attribute(field, receiver))
+    }
+
     pub(in crate::frontend) fn call_with_target(
         &mut self,
         call: &ast::ExprCall,

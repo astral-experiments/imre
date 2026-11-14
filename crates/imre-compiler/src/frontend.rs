@@ -11851,8 +11851,7 @@ impl<'a> Checker<'a> {
                     None => self.expr(&method.value)?,
                 };
                 if object.ty == Type::PythonObject {
-                    let method = registered::values::loaded_attribute(method, object);
-                    return self.call_with_target(call, method);
+                    return self.call_object_method(call, method, object);
                 }
                 if let Type::Class(class)
                 | Type::IntEnum(class)
@@ -13148,8 +13147,7 @@ impl<'a> Checker<'a> {
                 ));
             }
             if receiver.ty == Type::PythonObject {
-                let method = registered::values::loaded_attribute(attribute, receiver);
-                return self.call_with_target(call, method);
+                return self.call_object_method(call, attribute, receiver);
             }
             self.check_namedtuple_asdict(attribute, Some(receiver.ty))?;
             if let Some(result) =
