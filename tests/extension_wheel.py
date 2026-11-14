@@ -7,6 +7,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import zipfile
 from pathlib import Path
 
 import packaging
@@ -145,15 +146,46 @@ def main() -> None:
         )
         installed = venv / "lib/imre3.14/site-packages"
         installed.mkdir(parents=True)
-        (installed / "retainer.py").write_text(
-            "def buffer_bytes(data: bytes, mode: int, /) -> bytes: return b'source'\n"
-        )
         caller = app / "installed.py"
         caller.write_text("import retainer\nprint(retainer.buffer_bytes(b'wheel', 0))\n")
         flags = ["--runtime", str(runtime), "--clang", args.clang, "--opt-level", "0"]
         if args.sanitize:
             flags.append("--sanitize")
         startup = {"IMRE_ENCODED_FLAGS": "\x1f".join(flags), "PYTHONPATH": ""}
+        if sys.platform == "linux" and sys.version_info[:2] == (3, 14):
+            binary = installed / cp_module.name
+            shutil.copyfile(cp_module, binary)
+            error = run(launcher, "-B", caller, extra_env=startup, success=False)
+            assert os.fsencode(binary) in error and b"CPython shared-extension ABI" in error
+
+            package = installed / "retainer"
+            package.mkdir()
+            initializer = package / ("__init__" + sysconfig.get_config_var("EXT_SUFFIX"))
+            shutil.copyfile(cp_module, initializer)
+            error = run(launcher, "-B", caller, extra_env=startup, success=False)
+            assert os.fsencode(initializer) in error and b"CPython shared-extension ABI" in error
+
+            archive = root / "namespace.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("retainer/", b"")
+            error = run(
+                launcher, "-B", caller,
+                extra_env=startup | {"PYTHONPATH": str(archive)}, success=False,
+            )
+            assert os.fsencode(initializer) in error and b"CPython shared-extension ABI" in error
+
+            # The suffix describes the filename, even when the file is empty.
+            initializer.write_bytes(b"")
+            error = run(launcher, "-B", caller, extra_env=startup, success=False)
+            assert os.fsencode(initializer) in error and b"CPython shared-extension ABI tag" in error
+            bare = initializer.with_name("__init__.so")
+            initializer.rename(bare)
+            error = run(launcher, "-B", caller, extra_env=startup, success=False)
+            assert os.fsencode(bare) in error and b"untagged shared-library filename" in error
+            assert b"CPython" not in error
+        (installed / "retainer.py").write_text(
+            "def buffer_bytes(data: bytes, mode: int, /) -> bytes: return b'source'\n"
+        )
         shutil.copyfile(site / "retainer.pyi", installed / "retainer.pyi")
         assert run(launcher, "-B", caller, extra_env=startup) == b"b'source'\n"
         shutil.copyfile(site / "retainer.imre.a", installed / "retainer.imre.a")
