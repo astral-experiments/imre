@@ -496,6 +496,7 @@ pub(super) fn place_checked_definition(
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
     inference: &inference::Inference,
+    callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
 ) -> Result<Option<LoweredBody>, String> {
     let graph = original.graph;
     let module = original.module;
@@ -519,6 +520,7 @@ pub(super) fn place_checked_definition(
     );
     checker.nonreturning_functions = original.nonreturning_functions;
     checker.checked_call_contracts = true;
+    checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;
     if deferred.is_some() {
         checker.frame_arguments = FrameArguments::Pending;

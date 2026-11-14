@@ -1445,6 +1445,13 @@ fn lower_graph(
         }
         let named_function =
             named && cache.is_none() && signature.physical_frame && signature.method.is_none();
+        let mut callable_inputs = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
+            if named_function && matches!(prepared.get(&signature.id), Some(Err(_))) {
+                prepared.remove(&signature.id)?.err()
+            } else {
+                None
+            }
+        });
         let result = if let Some(body) = inferred {
             Ok(body)
         } else if named_function
@@ -1458,16 +1465,26 @@ fn lower_graph(
                 && signature.parameter_declarations.len() == signature.params.len()
                 && signature.parameter_declarations.iter().all(Option::is_some))
                 || (definition.returns.is_none()
-                    && inference.has_inferred_protocol_argument(signature, &types)
-                    && (unavailable.is_none()
-                        || registered::SourceChecks::cached(graph, *module_id, definition.range())
-                            == Some(true))))
+                    && (callable_inputs.is_some()
+                        || inference.has_inferred_protocol_argument(signature, &types)
+                            && (unavailable.is_none()
+                                || registered::SourceChecks::cached(
+                                    graph,
+                                    *module_id,
+                                    definition.range(),
+                                ) == Some(true)))))
         {
-            registered::place_checked_definition(&checker, definition, signature, &inference)
-                .ok()
-                .flatten()
-                .map(|body| (body, Default::default()))
-                .map_or_else(|| lower_body(checker, definition, signature), Ok)
+            registered::place_checked_definition(
+                &checker,
+                definition,
+                signature,
+                &inference,
+                callable_inputs.as_mut(),
+            )
+            .ok()
+            .flatten()
+            .map(|body| (body, Default::default()))
+            .map_or_else(|| lower_body(checker, definition, signature), Ok)
         } else if named_function
             && unavailable.is_none()
             && definition.returns.is_some()
@@ -2099,10 +2116,11 @@ fn lower_function(
                     if cx.helpers.len() != helpers || cx.unrepresented.borrow().is_some() {
                         return false;
                     }
-                    placed =
-                        registered::place_checked_definition(cx, definition, signature, inference)
-                            .ok()
-                            .flatten();
+                    placed = registered::place_checked_definition(
+                        cx, definition, signature, inference, None,
+                    )
+                    .ok()
+                    .flatten();
                     placed.is_some()
                 }),
             )
@@ -4548,7 +4566,21 @@ impl<'a> Checker<'a> {
                 && let Some(signature) = self.functions.get(&definition).cloned()
             {
                 let value = self.callable_value(&signature, None, Some(concrete), expression)?;
-                return coerce(self, value, expected, expression);
+                let value = coerce(self, value, expected, expression)?;
+                if let Some(sites) = self
+                    .fixed_sites
+                    .as_mut()
+                    .map(|sites| &mut sites.attributes)
+                    .or(self.settled_attributes.as_deref_mut())
+                    && let Some(name) = expression.as_name_expr()
+                    && self.namespace.is_none()
+                    && !self.names.contains_key(name.id.as_str())
+                {
+                    // The native callable carries a definition ID. The Python frame
+                    // loads the written name after evaluating the preceding arguments.
+                    sites.insert(name.range(), FixedAttribute::ModuleName(name.id.clone()));
+                }
+                return Ok(value);
             }
             if let ast::Expr::Attribute(attribute) = expression
                 && self.resolve(expression).is_none()
