@@ -1820,7 +1820,7 @@ pub(super) enum Value {
         context: Id,
         variable: Id,
         old: Option<Id>,
-        used: bool,
+        used: Cell<bool>,
     },
     TokenMissing,
 }

@@ -2523,7 +2523,7 @@ impl Context {
                         Value::ContextToken { variable, used, .. } => {
                             append_rendered_text(
                                 &mut output,
-                                if *used {
+                                if used.get() {
                                     "<Token used var="
                                 } else {
                                     "<Token var="
@@ -2896,7 +2896,7 @@ impl Context {
                 repr
             }
             Value::ContextToken { variable, used, .. } => {
-                let state = if *used { " used" } else { "" };
+                let state = if used.get() { " used" } else { "" };
                 format!(
                     "<Token{state} var={} at {id:#x}>",
                     self.format_value(*variable, true, active)

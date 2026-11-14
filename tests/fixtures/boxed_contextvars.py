@@ -62,6 +62,23 @@ def current():
     except ValueError:
         print("different context")
     var.reset(token)
+
+    class BadRepr:
+        def __repr__(self):
+            raise LookupError("token repr")
+
+    default = BadRepr()
+    key = ContextVar("request", default=default)
+    token = key.set(req)
+    for invalid in (token, default):
+        try:
+            var.reset(invalid)
+        except LookupError as error:
+            assert error.args == ("token repr",)
+        else:
+            raise AssertionError("reset skipped __repr__")
+    key.reset(token)
+
     missing = ContextVar("absent")
     try:
         missing.get()

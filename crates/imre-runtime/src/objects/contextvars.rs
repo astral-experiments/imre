@@ -338,6 +338,24 @@ pub unsafe extern "C" fn imre_contextvars_set(
     })))
 }
 
+/// Claim the token before restoring its old binding, which can release Python values.
+pub(crate) fn consume_context_token(
+    used: &Cell<bool>,
+    same_variable: bool,
+    same_context: impl FnOnce() -> bool,
+) -> Result<(), (Kind, &'static str)> {
+    if used.get() {
+        Err((Kind::RuntimeError, "has already been used once"))
+    } else if !same_variable {
+        Err((Kind::ValueError, "was created by a different ContextVar"))
+    } else if !same_context() {
+        Err((Kind::ValueError, "was created in a different Context"))
+    } else {
+        used.set(true);
+        Ok(())
+    }
+}
+
 /// # Safety
 /// The token and optional receiver remain rooted. A null receiver selects the
 /// token's own variable for its context-manager exit.
@@ -346,24 +364,16 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
     // SAFETY: the compiler checks the token layout at the call site.
     let owner = unsafe { object(tok) };
     let result = token(owner, |t| {
-        let context = current();
-        let error = if t.used.get() {
-            Some((Kind::RuntimeError, "has already been used once"))
-        } else if !key.is_null() && !std::ptr::eq(key, crate::ObjectOwner::as_ptr(&t.key)) {
-            Some((Kind::ValueError, "was created by a different ContextVar"))
-        } else if !Rc::ptr_eq(&context, &t.context) {
-            Some((Kind::ValueError, "was created in a different Context"))
-        } else {
-            None
-        };
-        if let Some((kind, reason)) = error {
+        let same_variable = key.is_null() || std::ptr::eq(key, crate::ObjectOwner::as_ptr(&t.key));
+        if let Err((kind, reason)) = consume_context_token(&t.used, same_variable, || {
+            Rc::ptr_eq(&current(), &t.context)
+        }) {
             return Err(Error::new(
                 kind,
                 format!("{} {reason}", description(owner)?),
             ));
         }
-        t.used.set(true);
-        context.replace(t.key.clone(), t.old.clone());
+        t.context.replace(t.key.clone(), t.old.clone());
         Ok(())
     });
     // Formatting an invalid token can raise while rendering its variable's default.
