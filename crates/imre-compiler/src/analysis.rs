@@ -1746,6 +1746,48 @@ impl Session {
         self.indexed_generator(self.files[module], function) == Some(true)
     }
 
+    /// Suspension in an eager child belongs to its physical coroutine. The semantic
+    /// index already distinguishes that child from a separately resumed generator.
+    pub(crate) fn coroutine_uses_async_iteration(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
+
+        fn has_pull(
+            db: &Database,
+            index: &ty_python_core::SemanticIndex,
+            scope: FileScopeId,
+        ) -> bool {
+            index
+                .use_def_map(scope)
+                .definitions_with_usage()
+                .any(|(_, definition, _)| match definition.kind(db) {
+                    DefinitionKind::For(binding) => binding.is_async(),
+                    DefinitionKind::Comprehension(binding) => binding.is_async(),
+                    _ => false,
+                })
+                || index.child_scopes(scope).any(|(child, declaration)| {
+                    child.is_async_comprehension(index)
+                        && !matches!(
+                            declaration.node(),
+                            NodeWithScopeKind::GeneratorExpression(_)
+                        )
+                        && has_pull(db, index, child)
+                })
+        }
+
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index
+            .try_node_scope(NodeWithScopeRef::Function(function))
+            .is_some_and(|scope| {
+                !scope.is_generator_function(index) && has_pull(&self.db, index, scope)
+            })
+    }
+
     fn indexed_generator(
         &self,
         file: File,
