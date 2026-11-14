@@ -903,7 +903,7 @@ fn collect_class<'syntax>(
                             "a private abstract method requires name mangling",
                         ));
                     }
-                    if crate::modules::definition_effect(graph, definition.module, method) {
+                    if !crate::modules::inert_defaults(&method.parameters) {
                         return Err(module.diagnostic(
                             method,
                             "an abstract method default requires executable initialization",
