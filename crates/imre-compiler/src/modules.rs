@@ -3290,6 +3290,7 @@ pub(crate) struct SourceGraph {
     initialization: Vec<(ModuleId, Range<usize>)>,
     pub(crate) errno_names: Vec<String>,
     pub(crate) doctest_imports: Vec<String>,
+    pub(crate) bundled_doctest_prompts: HashMap<String, Vec<doctest::Prompt>>,
 }
 
 pub(crate) const MEMORY_SOURCE_PATH: &str = "/input.py";
@@ -5159,7 +5160,8 @@ impl<'a> Loader<'a> {
                 }
             }
         }
-        let doctest_imports = self.doctest_program()?;
+        let mut bundled_doctest_prompts = HashMap::new();
+        let doctest_imports = self.doctest_program(&mut bundled_doctest_prompts)?;
         let guard_search = self.inputs.missing.len();
         for name in declarations {
             if !self.by_name.contains_key(&name) {
@@ -5178,6 +5180,7 @@ impl<'a> Loader<'a> {
                 .chain(self.search_roots)
                 .collect(),
             doctest_imports,
+            bundled_doctest_prompts,
             command_startup: None,
             virtual_command: false,
             traceback_objects: false,

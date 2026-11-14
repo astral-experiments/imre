@@ -105,7 +105,13 @@ pub(super) fn units<'a>(
                 .unwrap_or_else(|| {
                     ModuleOrigin::Program(module_id.and_then(|id| registrations.functions.get(&id)))
                 });
-            let standalone = unit != 0
+            // Only the selected bundled initializer can own its documented inputs.
+            let bundled_prompts = path
+                .starts_with(bundled_root)
+                .then(|| registrations.bundled_doctest_prompts.get(name))
+                .flatten();
+            let standalone = bundled_prompts.is_none()
+                && unit != 0
                 && matches!(origin, ModuleOrigin::Bundled)
                 && physical.is_none()
                 && zip.is_none()
@@ -205,10 +211,10 @@ pub(super) fn units<'a>(
                     literals.unwrap_or_default(),
                     (types, checked_source, initializer),
                 )?;
-                if python_optimization < 2
-                    && let Some(module) = module_id
-                {
-                    body.prompts = &registrations.modules[module].doctest_prompts;
+                if python_optimization < 2 {
+                    body.prompts = bundled_prompts
+                        .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
+                        .map_or(&[], Vec::as_slice);
                 }
                 Ok(Initializer::Checked(Box::new(body)))
             };
