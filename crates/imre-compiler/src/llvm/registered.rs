@@ -19,7 +19,7 @@ use crate::llvm::LoopTarget;
 use crate::llvm::body::FunctionBody;
 pub(crate) use abi::{ABI, CallArguments, Output, permanent};
 pub(crate) use frame::{AnnotationScope, RegisteredFrame, SourcePositions};
-use ruff_python_ast::UnaryOp;
+use ruff_python_ast::{CmpOp, UnaryOp};
 use sites::{CallableSite, CheckedSites, CompiledClassNamespace, CompiledDefinition};
 
 use crate::llvm::operations::{CheckedBody, CheckedValue, LoopEdges, ValueUse};
@@ -766,8 +766,16 @@ impl<'f> Frame<'f, '_, '_> {
         self.finish_operand_scope(mark, edge);
     }
 
-    pub(crate) fn comparison_truth(&mut self, value: &str, mark: Option<&str>) -> String {
-        if let Some(mark) = mark {
+    pub(crate) fn comparison_truth(
+        &mut self,
+        op: CmpOp,
+        value: &str,
+        mark: Option<&str>,
+    ) -> String {
+        if matches!(op, CmpOp::In | CmpOp::NotIn) {
+            // The containment protocol has already converted its answer to a Python bool.
+            self.value(&format!("icmp eq i64 {value}, {}", permanent::TRUE))
+        } else if let Some(mark) = mark {
             self.unwind_operands(mark, |f| f.truth(value))
         } else {
             self.truth(value)
