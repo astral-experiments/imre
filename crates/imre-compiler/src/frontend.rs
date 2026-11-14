@@ -9636,13 +9636,25 @@ impl<'a> Checker<'a> {
                     && ir::Compare::from_operator(*op).is_some()
                     && let [left, right] = values.as_slice()
                 {
+                    let operand_types = self.graph.session.operand_types(self.module);
                     let python_comparison = match op {
                         ast::CmpOp::Eq | ast::CmpOp::NotEq => {
                             left.ty == Type::PythonObject
                                 || right.ty == Type::PythonObject
                                 || self.types.sets_with_object_keys(left.ty, right.ty)
                         }
-                        _ => left.ty == Type::PythonObject && right.ty == Type::PythonObject,
+                        // A Python handle can still have a checked scalar type at this
+                        // source operand. Keep the original objects for rich comparison.
+                        _ => match (left.ty, right.ty) {
+                            (Type::PythonObject, Type::PythonObject) => true,
+                            (Type::PythonObject, ty) => {
+                                operand_types.scalar_type(&compare.operands[0]) == Some(ty)
+                            }
+                            (ty, Type::PythonObject) => {
+                                operand_types.scalar_type(&compare.operands[1]) == Some(ty)
+                            }
+                            _ => false,
+                        },
                     };
                     if python_comparison {
                         return Ok(Expr {
