@@ -4,6 +4,7 @@ mod dispatch;
 mod keywords;
 
 use super::*;
+use ruff_python_ast::token::TokenKind;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::visitor::{
     Visitor, walk_except_handler, walk_expr, walk_keyword, walk_pattern, walk_stmt,
@@ -139,9 +140,40 @@ pub(super) fn prepare(
     function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     let dispatch = dispatch::specialize(function, graph, module);
-    (dispatch, keywords::scalarize(function, graph, module))
+    if matches!(function, Cow::Owned(_)) {
+        return (
+            dispatch,
+            keywords::scalarize(function, graph, module),
+            false,
+        );
+    }
+    let mut keywords = false;
+    let mut display = false;
+    let mut brackets = 0;
+    // Both a keyword expansion and a comprehension have an unambiguous written token.
+    for token in graph.modules[module]
+        .parsed
+        .tokens()
+        .in_range(function.range())
+    {
+        match token.kind() {
+            TokenKind::DoubleStar => keywords = true,
+            TokenKind::Lsqb | TokenKind::Lbrace => brackets += 1,
+            TokenKind::Rsqb | TokenKind::Rbrace => brackets -= 1,
+            TokenKind::For if brackets > 0 => display = true,
+            _ => continue,
+        }
+        if keywords && display {
+            break;
+        }
+    }
+    (
+        dispatch,
+        keywords && keywords::scalarize(function, graph, module),
+        display,
+    )
 }
 
 #[derive(Default)]

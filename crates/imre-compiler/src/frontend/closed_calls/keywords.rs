@@ -192,15 +192,6 @@ pub(super) fn scalarize(
     graph: &SourceGraph,
     module: ModuleId,
 ) -> bool {
-    // Only a real **name expansion can consume a scalarized dictionary.
-    if matches!(function, Cow::Borrowed(_))
-        && graph.modules[module]
-            .source
-            .get(function.range().to_std_range())
-            .is_some_and(|text| !text.contains("**"))
-    {
-        return false;
-    }
     let mut scan = KeywordUses {
         excluded: graph.entry_profile.ranges(module).collect(),
         ..Default::default()

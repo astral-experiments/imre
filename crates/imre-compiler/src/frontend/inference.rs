@@ -865,11 +865,6 @@ impl Inference {
         let mut suspended_bodies = HashSet::new();
         let mut method_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
-        let unshadowed_builtin = |module: ModuleId, name: &str| {
-            !graph.modules[module].bindings.contains_key(name)
-                && (reserved_builtin_function(name)
-                    || imre_ast::providers::BUILTIN_TYPES.contains(&name))
-        };
         // Without input or layout inference, resolved return slots stay resolved.
         let mut first_open_return = (!self.widened.get()
             && self
@@ -1016,7 +1011,8 @@ impl Inference {
                     && graph
                         .session
                         .function_uses_fixed_names(*module, function, false, |name| {
-                            function.returns.is_none() && unshadowed_builtin(*module, name)
+                            function.returns.is_none()
+                                && module_builtin_name(&graph.modules[*module], name)
                         })
                 {
                     continue;
@@ -1491,7 +1487,7 @@ impl Inference {
                                 *module,
                                 function,
                                 true,
-                                |name| unshadowed_builtin(*module, name),
+                                |name| module_builtin_name(&graph.modules[*module], name),
                             )
                     });
                     // Revisit actual calls now that registered initializers can supply their operands.
