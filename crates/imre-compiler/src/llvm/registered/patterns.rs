@@ -1,10 +1,64 @@
 //! Native structural matching on semantic operands in the live registered namespace.
+use std::ops::Range;
+
 use super::{Frame, RegisteredFrame};
 use crate::ir::{Expr, MatchCase, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
 use imre_ast::{SequencePatternItems, SequencePatternPlan};
 
+/// Temporary Python captures in the order the current alternative obtained them.
+struct PatternCaptures {
+    slots: Range<usize>,
+    names: Vec<usize>,
+}
+
+impl PatternCaptures {
+    fn slot(&self, ordinal: usize) -> usize {
+        self.slots.end - 1 - ordinal
+    }
+
+    fn bind(&mut self, frame: &mut RegisteredFrame<'_, '_>, name: usize, value: &str) {
+        frame.store_frame_slot(self.slot(self.names.len()), value);
+        self.names.push(name);
+    }
+
+    /// Successful alternatives share their names even if they read them in different orders.
+    fn reorder(&mut self, frame: &mut RegisteredFrame<'_, '_>, start: usize, target: &[usize]) {
+        let current = &self.names[start..];
+        if current == target {
+            return;
+        }
+        let moves: Vec<_> = target
+            .iter()
+            .enumerate()
+            .filter_map(|(to, name)| {
+                let from = current
+                    .iter()
+                    .position(|other| other == name)
+                    .expect("checked alternatives bind the same names");
+                (from != to).then(|| {
+                    (
+                        self.slot(start + to),
+                        frame.load_frame_slot(self.slot(start + from)),
+                    )
+                })
+            })
+            .collect();
+        for (slot, value) in moves {
+            frame.store_frame_slot(slot, &value);
+        }
+        self.names[start..].copy_from_slice(target);
+    }
+}
+
 impl RegisteredFrame<'_, '_> {
+    /// Publish the native operand or capture array before any released owner can reenter.
+    fn replace_temporaries(&mut self, mark: &str, values: &str, count: usize) {
+        self.line(&format!(
+            "call void @imre_dyn_replace_temporaries(ptr %ctx, i64 {mark}, ptr {values}, i64 {count})"
+        ));
+    }
+
     fn pattern_check(&mut self, condition: &str, failed: &str) {
         let matched = self.name("b");
         self.branch(condition, &matched, failed);
@@ -50,16 +104,22 @@ impl CheckedBody<'_, '_, '_, '_> {
                     frame.store_frame_slot(slot, "0");
                 }
                 frame.live_slots.extend(slots.clone());
+                let mut bindings = PatternCaptures {
+                    slots: slots.clone(),
+                    names: Vec::with_capacity(slots.len()),
+                };
                 frame.test_pattern(
                     &pattern.test,
                     &subject,
                     &next,
-                    captures,
+                    &mut bindings,
                     (!again).then_some(mark.as_str()),
                 );
-                for (capture, &target) in slots.zip(&case.captures) {
+                // Captures are stacked in reverse binding order. A failed alternative
+                // drops its first captured value first. A successful one binds in source order.
+                for (capture, name) in slots.rev().zip(bindings.names) {
                     let value = frame.load_frame_slot(capture);
-                    frame.assign(target, CheckedValue::handle(value));
+                    frame.assign(case.captures[name], CheckedValue::handle(value));
                 }
                 frame.live_slots.truncate(enclosing);
                 if !again {
@@ -78,12 +138,12 @@ impl CheckedBody<'_, '_, '_, '_> {
                 frame.live.pop();
                 frame.discard_truth(&mark);
             }
-            frame.finish_operand_scope(&mark, scope);
+            frame.finish_unwind(scope, |frame| frame.release_owned_operands(&mark));
             frame.flush_check();
             self.emit_block(&case.body);
             self.python().jump(&done);
             self.python().label(&next);
-            self.python().discard_truth(&case_mark);
+            self.python().release_owned_operands(&case_mark);
         }
         self.python().jump(&done);
         self.python().label(&done);
@@ -109,22 +169,55 @@ impl Frame<'_, '_, '_> {
         f.pattern_check(&bit, failed);
     }
 
-    /// The matcher already collected the children into a private tuple or unpacking list.
-    /// Each required read has an exact, nonnegative index and wildcards need no read.
+    /// Publish the collected operands in stack order. Each completed child can die while
+    /// later children and already-captured values remain visible to a Python finalizer.
     fn test_collected_items<'t>(
         &mut self,
+        mark: &str,
         values: &str,
-        children: impl Iterator<Item = &'t MatchTest>,
+        children: impl Iterator<Item = &'t MatchTest> + Clone,
         failed: &str,
-        captures: usize,
+        captures: &mut PatternCaptures,
     ) {
-        for (i, child) in children.enumerate() {
-            if !matches!(child, MatchTest::Always) {
-                let index = crate::llvm::small(i as i64);
-                self.take_matching_check();
-                let item = self.read_index_word(values, &index.operand, "0", None);
-                self.test_pattern(child, &item, failed, captures, None);
+        let mut operands = Vec::with_capacity(children.size_hint().0);
+        for (i, _) in children.clone().enumerate() {
+            let index = crate::llvm::small(i as i64);
+            self.take_matching_check();
+            operands.push(self.read_index_word(values, &index.operand, "0", None));
+        }
+        operands.reverse();
+        let (ptr, count) = self.handle_array(&operands);
+        self.replace_temporaries(mark, ptr, count);
+        for (i, (child, item)) in children.zip(operands.iter().rev()).enumerate() {
+            let remaining = count - i - 1;
+            let boundary = if remaining == 0 {
+                mark.to_owned()
+            } else {
+                self.value(&format!("add i64 {mark}, {remaining}"))
+            };
+            let mismatch = self.name("b");
+            let release = self.name("b");
+            self.test_pattern(child, item, &mismatch, captures, None);
+            let accepted = self.current_block().to_owned();
+            self.jump(&release);
+            self.label(&mismatch);
+            self.jump(&release);
+            self.label(&release);
+            let matched = self.value(&format!(
+                "phi i1 [ true, %{accepted} ], [ false, %{mismatch} ]"
+            ));
+            if captures.slots.is_empty() {
+                self.discard_truth(&boundary);
+            } else {
+                // Older operands precede the mark. Only the staged bindings can have
+                // acquired an additional live reference while testing this child.
+                self.replace_temporaries(
+                    &boundary,
+                    &format!("%ir_slot{}", captures.slots.start),
+                    captures.slots.len(),
+                );
             }
+            self.pattern_check(&matched, failed);
         }
     }
 
@@ -133,14 +226,14 @@ impl Frame<'_, '_, '_> {
         test: &MatchTest,
         value: &str,
         failed: &str,
-        captures: usize,
+        captures: &mut PatternCaptures,
         last_use: Option<&str>,
     ) {
         match test {
             MatchTest::Always => {}
             MatchTest::Capture(inner, index) => {
                 self.test_pattern(inner, value, failed, captures, None);
-                self.store_frame_slot(captures + index, value);
+                captures.bind(self.code, *index, value);
             }
             MatchTest::Equal(expr) => self.pattern_equal(value, expr, failed, last_use),
             MatchTest::Singleton(s) => {
@@ -154,6 +247,9 @@ impl Frame<'_, '_, '_> {
                 f.pattern_check(&ok, failed);
             }
             MatchTest::Or(tests) => {
+                let mark = self.temporary_mark();
+                let first = captures.names.len();
+                let mut matched_names = Vec::new();
                 let done = self.name("b");
                 for (i, child) in tests.iter().enumerate() {
                     let last = i + 1 == tests.len();
@@ -164,9 +260,19 @@ impl Frame<'_, '_, '_> {
                     };
                     self.test_pattern(child, value, &next, captures, None);
                     let f = &mut *self.code;
+                    if i == 0 {
+                        matched_names.extend_from_slice(&captures.names[first..]);
+                    } else {
+                        captures.reorder(f, first, &matched_names);
+                    }
                     f.jump(&done);
                     if !last {
                         f.label(&next);
+                        for ordinal in first..captures.names.len() {
+                            f.store_frame_slot(captures.slot(ordinal), "0");
+                        }
+                        f.release_owned_operands(&mark);
+                        captures.names.truncate(first);
                     }
                 }
                 self.label(&done);
@@ -193,10 +299,12 @@ impl Frame<'_, '_, '_> {
                     matched.push(key);
                 }
                 let f = &mut *self.code;
+                let mark = f.temporary_mark();
                 let values = f.op("match_mapping_keys", &[value, &keys]);
                 let ok = f.value(&format!("icmp ne i64 {values}, 0"));
                 f.pattern_check(&ok, failed);
                 self.test_collected_items(
+                    &mark,
                     &values,
                     items.iter().map(|(_, child)| child),
                     failed,
@@ -209,7 +317,7 @@ impl Frame<'_, '_, '_> {
                     for key in matched {
                         f.op("delitem", &[&rest, &key]);
                     }
-                    f.store_frame_slot(captures + index, &rest);
+                    captures.bind(f, *index, &rest);
                 }
             }
             MatchTest::Class {
@@ -224,6 +332,7 @@ impl Frame<'_, '_, '_> {
                     .map(|(key, _)| self.code_name(key))
                     .collect();
                 let positional_count = positional.len();
+                let mark = self.temporary_mark();
                 let fields = self.with_source_range(*range, |frame| {
                     frame.take_matching_check();
                     let (keys, count) = frame.handle_array(&keys);
@@ -237,7 +346,7 @@ impl Frame<'_, '_, '_> {
                 let children = positional
                     .iter()
                     .chain(keywords.iter().map(|(_, child)| child));
-                self.test_collected_items(&fields, children, failed, captures);
+                self.test_collected_items(&mark, &fields, children, failed, captures);
             }
         }
     }
@@ -248,7 +357,7 @@ impl Frame<'_, '_, '_> {
         items: &[MatchTest],
         value: &str,
         failed: &str,
-        captures: usize,
+        captures: &mut PatternCaptures,
     ) {
         let f = &mut *self.code;
         let sequence = f.op("match_sequence", &[value]);
@@ -284,8 +393,9 @@ impl Frame<'_, '_, '_> {
             SequencePatternItems::Unpack(star) => {
                 let count = f.integer(items.len());
                 let star = star.map_or_else(|| "0".into(), |i| f.integer(i));
+                let mark = f.temporary_mark();
                 let values = f.op("unpack", &[value, &count, &star]);
-                self.test_collected_items(&values, items.iter(), failed, captures);
+                self.test_collected_items(&mark, &values, items.iter(), failed, captures);
             }
         }
     }

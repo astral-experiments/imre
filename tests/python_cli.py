@@ -5186,6 +5186,7 @@ for name in ("md4", "ripemd160"):
             "boxed_short_circuit.py",
             "boxed_while_truth.py",
             "boxed_positional_class_match.py",
+            "boxed_pattern_field_lifetime.py",
             "boxed_doctest_suite.py",
             "boxed_doctest_hooks.py",
             "boxed_doctest_files.py",

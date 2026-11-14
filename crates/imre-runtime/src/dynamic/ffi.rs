@@ -3467,6 +3467,22 @@ pub(super) unsafe extern "C" fn imre_dyn_format_parts(
     result
 }
 
+/// Replace the active operand stack above a mark, publishing survivors before collection.
+///
+/// # Safety
+/// The active frame owns the mark and supplies `count` initialized handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_replace_temporaries(
+    ctx: *mut Context,
+    mark: usize,
+    values: *const Id,
+    count: usize,
+) {
+    // SAFETY: the generated caller retains the context and the complete native root array.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    ctx.discard_temporaries(mark, values.iter().copied());
+}
+
 /// Publish surviving operands before collecting, returning the boundary above the first one.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_keep_operands(
