@@ -415,9 +415,8 @@ pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
     fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
-    fn place_definition(&mut self, site: TextSize) -> usize;
+    fn place_declaration(&mut self, site: TextSize) -> usize;
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace;
-    fn place_type_alias(&mut self, site: TextSize) -> usize;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
@@ -1241,7 +1240,7 @@ impl<'f> Frame<'f, '_, '_> {
                     RequiredSite::definition(site, header),
                     RequiredSite::Definition(_)
                 )
-                .then(|| self.code.place_definition(site.start()));
+                .then(|| self.code.place_declaration(site.start()));
                 let (decorators, defaults, arguments) = match site {
                     ir::DefinitionSite::Class {
                         arguments: Some(layout),
@@ -1256,7 +1255,7 @@ impl<'f> Frame<'f, '_, '_> {
                     } => (header, &[][..], None),
                     ir::DefinitionSite::Function(_) => {
                         let index = early.expect("a function precedes its defaults");
-                        let definition = &self.code.frame_and_sites().1.definitions[index];
+                        let definition = self.code.frame_and_sites().1.declaration(index);
                         let (decorators, defaults) =
                             header.split_at(definition.decorator_offsets.len());
                         (decorators, defaults, None)
@@ -1269,7 +1268,7 @@ impl<'f> Frame<'f, '_, '_> {
                     .collect::<Vec<_>>();
                 let class_arguments =
                     arguments.map(|(layout, operands)| self.pack_arguments(layout, operands, None));
-                let index = early.unwrap_or_else(|| self.code.place_definition(site.start()));
+                let index = early.unwrap_or_else(|| self.code.place_declaration(site.start()));
                 let (code, sites) = self.code.frame_and_sites();
                 sites.definition(code, index, &decorators, &defaults, class_arguments)
             }
@@ -1277,15 +1276,9 @@ impl<'f> Frame<'f, '_, '_> {
                 self.generic_class(*site, layout, operands)
             }
             (Builtin::RegisteredTypeAlias(site), []) => {
-                let index = self.code.place_type_alias(*site);
-                let (code, sites) = self.code.frame_and_sites();
-                match &sites.aliases[index] {
-                    Ok(alias) => alias.instantiate(code),
-                    Err(error) => {
-                        code.output.diagnostic.get_or_insert_with(|| error.clone());
-                        "0".to_owned()
-                    }
-                }
+                let index = self.code.place_declaration(*site);
+                let (frame, sites) = self.code.frame_and_sites();
+                sites.bind_type_alias(frame, index)
             }
             (Builtin::RegisteredImport(import), []) => {
                 self.code.namespace_import(import);

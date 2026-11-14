@@ -16,8 +16,8 @@ use crate::frontend::{
 };
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::registered::sites::{
-    CallableSite, CheckedSites, CompiledAlias, CompiledClassNamespace, CompiledDefinition,
-    CompiledTypeParameters, Declaration,
+    CallableSite, CheckedSites, CompiledClassNamespace, CompiledDefinition, CompiledTypeParameters,
+    Declaration,
 };
 use crate::llvm::registered::{AnnotationScope, Output, RegisteredFrame, SourcePositions, sites};
 use crate::llvm::{ModuleLauncher, ProviderBody};
@@ -1072,35 +1072,12 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         (&mut self.frame, &self.sites)
     }
 
-    fn place_definition(&mut self, site: TextSize) -> usize {
-        if let Some(index) = self.sites.definitions.get_index_of(&site) {
+    fn place_declaration(&mut self, site: TextSize) -> usize {
+        if let Some(index) = self.sites.declarations.get_index_of(&site) {
             return index;
         }
-        let source = self.source;
-        let (definition, decorator_offsets, type_params) = if let Some(scope) =
-            source.scopes.classes.get(&site)
-        {
-            let class = scope.prepared();
-            let definition = if let Some(header) = &class.header {
-                self.compile_class_header(site, class, &header.body)
-            } else {
-                self.compile_class_namespace(site, scope)
-            };
-            (definition, &class.decorator_offsets, None)
-        } else {
-            let header = &source.scopes.functions[&site];
-            let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
-            let parameters = (!header.type_params.is_empty()).then(|| {
-                self.compile_type_parameters(&header.type_params, self.frame.class_locals)
-            });
-            (definition, &header.decorator_offsets, parameters)
-        };
-        let declaration = Declaration {
-            definition,
-            decorator_offsets,
-            type_params,
-        };
-        self.sites.definitions.insert_full(site, declaration).0
+        let declaration = self.compile_declaration(site);
+        self.sites.declarations.insert_full(site, declaration).0
     }
 
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace {
@@ -1113,44 +1090,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             parameters: self.compile_scoped_type_parameters(&header.parameters),
             range: class.range,
         }
-    }
-
-    fn place_type_alias(&mut self, site: TextSize) -> usize {
-        if let Some(index) = self.sites.aliases.get_index_of(&site) {
-            return index;
-        }
-        let alias = &self.source.type_aliases[&site];
-        // Placement can visit children of a suite that exits before the alias binds.
-        let outer_diagnostic = self.frame.output.diagnostic.take();
-        let compiled = match &alias.body {
-            Ok(code) => Some(CompiledAlias {
-                definition: self.compile_evaluator(
-                    site,
-                    &alias.name,
-                    &alias.scope,
-                    alias.parameters.is_some(),
-                    code,
-                    self.frame.class_locals,
-                ),
-                parameters: alias
-                    .parameters
-                    .as_ref()
-                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
-            }),
-            Err(range) => {
-                self.frame.output.diagnostic.get_or_insert_with(|| {
-                    self.source
-                        .positions
-                        .diagnostic_at(*range, "type alias value has no checked expression operand")
-                });
-                None
-            }
-        };
-        let result = match std::mem::replace(&mut self.frame.output.diagnostic, outer_diagnostic) {
-            Some(error) => Err(error),
-            None => Ok(compiled.expect("prepared alias evaluator")),
-        };
-        self.sites.aliases.insert_full(site, result).0
     }
 
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition {
@@ -1237,7 +1176,35 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 }
 
-impl Function<'_, '_, '_> {
+impl<'p> Function<'_, 'p, '_> {
+    fn compile_declaration(&mut self, site: TextSize) -> Result<Declaration<'p>, String> {
+        let source = self.source;
+        let (definition, decorator_offsets, type_params) = if let Some(scope) =
+            source.scopes.classes.get(&site)
+        {
+            let class = scope.prepared();
+            let definition = if let Some(header) = &class.header {
+                self.compile_class_header(site, class, &header.body)
+            } else {
+                self.compile_class_namespace(site, scope)
+            };
+            (definition, &class.decorator_offsets, None)
+        } else if let Some(header) = source.scopes.functions.get(&site) {
+            let definition = self.compile_callable(TextRange::empty(site), Callable::Named(header));
+            let parameters = (!header.type_params.is_empty()).then(|| {
+                self.compile_type_parameters(&header.type_params, self.frame.class_locals)
+            });
+            (definition, &header.decorator_offsets, parameters)
+        } else {
+            return self.compile_type_alias(site);
+        };
+        Ok(Declaration {
+            definition,
+            decorator_offsets,
+            type_params,
+        })
+    }
+
     fn is_method_scope(&self) -> bool {
         self.frame.class_locals.is_some() && self.frame.annotation_values.is_none()
     }
@@ -1371,6 +1338,41 @@ impl Function<'_, '_, '_> {
         CompiledDefinition {
             class_header: Some(class.range),
             ..CompiledDefinition::new(code, signature.to_string(), &name, qualname, true)
+        }
+    }
+
+    fn compile_type_alias(&mut self, site: TextSize) -> Result<Declaration<'static>, String> {
+        let alias = &self.source.type_aliases[&site];
+        // Placement can visit children of a suite that exits before the alias binds.
+        let outer_diagnostic = self.frame.output.diagnostic.take();
+        let compiled = match &alias.body {
+            Ok(code) => Some(Declaration {
+                decorator_offsets: &[],
+                definition: self.compile_evaluator(
+                    site,
+                    &alias.name,
+                    &alias.scope,
+                    alias.parameters.is_some(),
+                    code,
+                    self.frame.class_locals,
+                ),
+                type_params: alias
+                    .parameters
+                    .as_ref()
+                    .map(|parameters| self.compile_scoped_type_parameters(parameters)),
+            }),
+            Err(range) => {
+                self.frame.output.diagnostic.get_or_insert_with(|| {
+                    self.source
+                        .positions
+                        .diagnostic_at(*range, "type alias value has no checked expression operand")
+                });
+                None
+            }
+        };
+        match std::mem::replace(&mut self.frame.output.diagnostic, outer_diagnostic) {
+            Some(error) => Err(error),
+            None => Ok(compiled.expect("prepared alias evaluator")),
         }
     }
 

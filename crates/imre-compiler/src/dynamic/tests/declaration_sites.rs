@@ -56,10 +56,20 @@ fn checked_module_places_class_generator_and_following_lambda() {
     };
     RegisteredBody::Suite(module.initializer()).emit(&mut function);
     let sites = &function.sites;
-    assert_eq!(sites.definitions.len(), 2);
+    assert_eq!(sites.declarations.len(), 2);
     assert_eq!(location.callable_code.borrow().len(), 3);
-    assert_eq!(sites.definitions[class].definition.qualname, "C");
-    assert_eq!(sites.definitions[read].definition.name, "read");
+    assert_eq!(
+        sites.declarations[class]
+            .as_ref()
+            .unwrap()
+            .definition
+            .qualname,
+        "C"
+    );
+    assert_eq!(
+        sites.declarations[read].as_ref().unwrap().definition.name,
+        "read"
+    );
     for site in [
         RequiredSite::Lambda(*first),
         RequiredSite::Generator(*generator),
@@ -125,9 +135,12 @@ fn checked_module_places_both_plain_and_generic_aliases_before_their_following_l
         let symbol = |index: u32| format!("@code_site{}", first + index);
         RegisteredBody::Suite(module.initializer()).emit(&mut function);
         let sites = &function.sites;
-        assert_eq!(sites.definitions[class].definition.code, symbol(0));
         assert_eq!(
-            sites.aliases[alias].as_ref().unwrap().definition.code,
+            sites.declarations[class].as_ref().unwrap().definition.code,
+            symbol(0)
+        );
+        assert_eq!(
+            sites.declarations[alias].as_ref().unwrap().definition.code,
             symbol(1)
         );
         let last = RequiredSite::Lambda(*last);
