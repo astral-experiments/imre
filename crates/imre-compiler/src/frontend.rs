@@ -1448,9 +1448,6 @@ fn lower_graph(
         let result = if let Some(body) = inferred {
             Ok(body)
         } else if named_function
-            && (unavailable.is_none()
-                || registered::SourceChecks::cached(graph, *module_id, definition.range())
-                    == Some(true))
             && signature
                 .params
                 .iter()
@@ -1461,7 +1458,10 @@ fn lower_graph(
                 && signature.parameter_declarations.len() == signature.params.len()
                 && signature.parameter_declarations.iter().all(Option::is_some))
                 || (definition.returns.is_none()
-                    && inference.has_inferred_protocol_argument(signature, &types)))
+                    && inference.has_inferred_protocol_argument(signature, &types)
+                    && (unavailable.is_none()
+                        || registered::SourceChecks::cached(graph, *module_id, definition.range())
+                            == Some(true))))
         {
             registered::place_checked_definition(&checker, definition, signature, &inference)
                 .ok()
