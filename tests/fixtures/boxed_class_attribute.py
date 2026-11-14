@@ -254,6 +254,14 @@ def class_reassignment():
     slotted.__class__ = 42
     assert type(slotted) is ClassSlot and slotted.__class__ == 42
     assert object.__getattribute__(slotted, "__class__") == 42
+    member = ClassSlot.__dict__["__class__"]
+    assert ClassSlot.__class__ is type and member.__objclass__ is ClassSlot
+    assert member.__get__(None, ClassSlot) is member
+    assert member.__get__(slotted, ClassSlot) == 42
+    member.__set__(slotted, 43)
+    assert object.__getattribute__(slotted, "__class__") == 43
+    member.__delete__(slotted)
+    assert not hasattr(slotted, "__class__")
 
     class CollidingKey:
         def __hash__(self):

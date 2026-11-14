@@ -3218,8 +3218,8 @@ impl Context {
         } else {
             mro.extend_from_slice(&ancestors);
         }
-        // Calls already resolve __call__ through descriptor binding. Other dunder
-        // names can replace special methods or class metadata with their own layout.
+        // Calls already bind their descriptor. An ordinary instance slot can also
+        // shadow a layout descriptor inherited from the same allocator.
         let module_layout = slot_names.as_deref().is_some_and(|slots| !slots.is_empty())
             && ancestors.iter().any(
                 |&base| matches!(self.heap.get(base), Value::Native(name) if name == "module"),
@@ -3230,6 +3230,10 @@ impl Context {
                     !name.starts_with("__")
                         || !name.ends_with("__")
                         || matches!(name.as_str(), "__call__" | "__dict__" | "__weakref__")
+                        || self.raw_object_member(name).is_some_and(|member| {
+                            matches!(self.heap.get(member), Value::LayoutDescriptor(owner, _)
+                                if bases.iter().all(|&base| self.allocation_base(base) == Some(*owner)))
+                        })
                 })
             });
         if layout == ClassLayout::TypeNamespace && slot_names.is_some() && !ordinary_slots {
