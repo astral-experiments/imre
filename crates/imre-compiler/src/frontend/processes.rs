@@ -1208,6 +1208,35 @@ impl Checker<'_> {
                 ),
             ),
         };
+        if self.placement_only
+            && self.registered.is_none()
+            && self.namespace.is_none()
+            && let Some(sites) = &mut self.fixed_sites
+            && sites.has_written_arguments(call, &args.values)
+            && let Some(attribute) = call.func.as_attribute_expr()
+            && let Some(name) = attribute.value.as_name_expr()
+            && !self.names.contains_key(name.id.as_str())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
+        {
+            let source = self.graph.modules[self.module]
+                .registered_values()
+                .operands(self.source, self.graph.python_optimization());
+            if let Some(target) =
+                source.imported_callable(name, call, self.graph.session.operand_types(self.module))
+            {
+                let mut values = args.values;
+                values.truncate(call.arguments.len());
+                let mut value = registered::values::bound_call(
+                    call,
+                    registered::values::callable_target(call),
+                    target,
+                    values,
+                );
+                value.ty = ty;
+                sites.invoked(call, &value);
+                return Ok(value);
+            }
+        }
         Ok(self.ordered_builtin(Builtin::Process(op), ty, args))
     }
 
