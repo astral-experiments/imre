@@ -1532,7 +1532,15 @@ impl Checker<'_> {
             frame_identity = matches!(frame_op, Some(ast::CmpOp::Is | ast::CmpOp::IsNot));
             let opaque = |operand: &ast::Expr| {
                 let receiver = match operand {
-                    ast::Expr::Call(call) => source.call_target(call).1,
+                    ast::Expr::Call(call) => match call.func.as_ref() {
+                        ast::Expr::Attribute(field)
+                            if field.value.is_name_expr()
+                                && source.direct_method(call).is_some() =>
+                        {
+                            field.value.as_ref()
+                        }
+                        callee => callee,
+                    },
                     ast::Expr::Attribute(field) => field.value.as_ref(),
                     _ => operand,
                 };
