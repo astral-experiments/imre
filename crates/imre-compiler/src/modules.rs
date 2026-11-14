@@ -2836,6 +2836,8 @@ pub(crate) struct SourceModule {
     pub(crate) bundled: bool,
     /// The registered source initializer publishes this module's live attributes.
     pub(crate) registered_namespace: bool,
+    /// The fixed interface can use one declaration from a complete shipped module.
+    checked_declaration: Option<usize>,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) bindings: HashMap<String, Binding>,
     type_bindings: HashMap<String, Binding>,
@@ -2866,6 +2868,11 @@ pub(crate) struct SourceModule {
 }
 
 impl SourceModule {
+    fn checked_statements(&self) -> Range<usize> {
+        self.checked_declaration
+            .map_or(0..self.parsed.suite().len(), |index| index..index + 1)
+    }
+
     /// Share the module's import names, string escapes, and template tokens across its function bodies.
     pub(crate) fn registered_values(&self) -> &crate::frontend::RegisteredModuleSource {
         self.registered_values
@@ -3692,6 +3699,9 @@ impl SourceGraph {
 
     pub(crate) fn includes(&self, definition: DefinitionId) -> bool {
         !self.modules[definition.module].registered_namespace
+            && self.modules[definition.module]
+                .checked_declaration
+                .is_none_or(|selected| selected == definition.statement)
             && self
                 .required_definitions(definition.module)
                 .is_none_or(|r| r.definitions.contains(&definition))
@@ -3901,6 +3911,11 @@ impl SourceGraph {
     pub(crate) fn diagnostic_scopes(
         &self,
     ) -> (Option<Vec<Vec<TextRange>>>, Vec<Vec<CheckedDiagnostic>>) {
+        let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
+        if let Some((library, roots)) = &self.required_library {
+            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
+                .extend_from_slice(&roots.skipped[*library]);
+        }
         let mut overloads = self.checked_diagnostics.borrow().clone();
         for &(id, range) in &self.checked_builtin_imports {
             overloads[id].push(CheckedDiagnostic::BuiltinImport(range));
@@ -3908,7 +3923,18 @@ impl SourceGraph {
         for (id, diagnostics) in overloads.iter_mut().enumerate() {
             diagnostics.sort_unstable_by_key(|note| note.sort_key());
             diagnostics.dedup();
-            let decorators = self.modules[id]
+            let module = &self.modules[id];
+            if let Some(selected) = module.checked_declaration {
+                let suite = module.parsed.suite();
+                let ranges =
+                    &mut skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[id];
+                for side in [&suite[..selected], &suite[selected + 1..]] {
+                    if let (Some(first), Some(last)) = (side.first(), side.last()) {
+                        ranges.push(TextRange::new(first.start(), last.end()));
+                    }
+                }
+            }
+            let decorators = module
                 .parsed
                 .syntax()
                 .body
@@ -3933,11 +3959,6 @@ impl SourceGraph {
                     .then_some(CheckedDiagnostic::Decorator(decorator.range()))
                 });
             diagnostics.splice(..0, decorators);
-        }
-        let mut skipped = self.reachable.as_ref().map(|r| r.skipped.clone());
-        if let Some((library, roots)) = &self.required_library {
-            skipped.get_or_insert_with(|| vec![Vec::new(); self.modules.len()])[*library]
-                .extend_from_slice(&roots.skipped[*library]);
         }
         // The bundled _simple_enum factories are lowered to immutable member tables.
         // Keep the actual category property bodies and every caller in ty's check.
@@ -4805,6 +4826,7 @@ impl SiteProbes {
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
 
 enum ModuleText<'a> {
+    ShippedFunction(&'a str, ruff_db::files::FileRange),
     Text(std::borrow::Cow<'a, str>, crate::SourceKind),
     Disk(crate::DiskSource, String),
 }
@@ -4972,18 +4994,20 @@ impl<'a> Loader<'a> {
         is_package: bool,
         input: ModuleText<'_>,
     ) -> Result<ModuleId, String> {
-        let (text, kind, hash, raw_digest) = match input {
-            ModuleText::Text(text, kind) => {
-                let hash = blake3::hash(text.as_bytes()).to_hex().to_string();
-                (text, kind, hash, None)
+        let (text, kind, disk_hash, raw_digest, site) = match input {
+            ModuleText::Text(text, kind) => (text, kind, None, None, None),
+            ModuleText::ShippedFunction(text, site) => {
+                (text.into(), crate::SourceKind::File, None, None, Some(site))
             }
             ModuleText::Disk(source, hash) => (
                 source.text.into(),
                 crate::SourceKind::DiskFile,
-                hash,
+                Some(hash),
                 source.raw_digest,
+                None,
             ),
         };
+        let hash = disk_hash.unwrap_or_else(|| blake3::hash(text.as_bytes()).to_hex().to_string());
         self.inputs
             .files
             .push((path.clone(), identity.clone(), hash));
@@ -4995,7 +5019,12 @@ impl<'a> Loader<'a> {
                 (normalized, Some(text.into_owned().into_boxed_str()))
             }
         };
-        let parsed = self.session.add(&path, &source, kind)?;
+        let (parsed, checked_declaration) = if let Some(site) = site {
+            let (parsed, index) = self.session.add_shipped_function(site, &path, &source)?;
+            (parsed, Some(index))
+        } else {
+            (self.session.add(&path, &source, kind)?, None)
+        };
         let id = self.modules.len();
         self.by_name.insert(name.clone(), id);
         self.by_path.insert(identity, id);
@@ -5011,6 +5040,7 @@ impl<'a> Loader<'a> {
             doctest_prompts: Vec::new(),
             bundled: false,
             registered_namespace: false,
+            checked_declaration,
             parsed,
             is_package,
             search_roots: SearchRoots::Single(0),
@@ -5223,6 +5253,8 @@ impl<'a> Loader<'a> {
     fn scan(&mut self, id: ModuleId) -> Result<(), String> {
         let is_entry = self.is_entry(id);
         let parsed = self.modules[id].parsed.clone();
+        let selected = self.modules[id].checked_statements();
+        let suite = &parsed.suite()[selected.clone()];
         let global_writes = self.session.nested_global_writes(id, parsed.tokens());
         let mut imports = Vec::new();
         let first_party = self.modules[id].is_program_source();
@@ -5231,7 +5263,7 @@ impl<'a> Loader<'a> {
                 self.local_declarations.insert(name.to_owned());
             }
         };
-        for stmt in &parsed.syntax().body {
+        for stmt in suite {
             match stmt {
                 ast::Stmt::FunctionDef(f) => function_imports(f, &mut imports, &mut declaration),
                 ast::Stmt::ClassDef(c) => {
@@ -5262,18 +5294,18 @@ impl<'a> Loader<'a> {
             );
             self.modules[id].local_static_imports = imports;
         }
-        let last_definition = parsed.syntax().body.iter().rposition(|statement| {
+        let last_definition = selected.clone().rfind(|&index| {
             matches!(
-                statement,
+                parsed.suite()[index],
                 ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
             )
         });
         let mut executable = false;
-        let mut segment = 0;
+        let mut segment = selected.start;
         let mut definition_prefix = false;
         let mut field_separators = Vec::new();
         let mut runtime_classes = Vec::new();
-        for (index, statement) in parsed.syntax().body.iter().enumerate() {
+        for (index, statement) in selected.clone().zip(suite) {
             if self.modules[id].archive.is_some() && !native_declaration(statement) {
                 return Err(self.modules[id].error(statement,
                     "native stubs allow type-only imports and fully annotated, required positional-only methods with an ellipsis body"));
@@ -5612,8 +5644,7 @@ impl<'a> Loader<'a> {
             module.parsed = self.session.replace_source(id, source)?;
         }
         self.loading.remove(&id);
-        self.initialization
-            .push((id, segment..parsed.syntax().body.len()));
+        self.initialization.push((id, segment..selected.end));
         Ok(())
     }
 
@@ -6503,6 +6534,7 @@ impl<'a> Loader<'a> {
             }
             return Ok(id);
         }
+        let mut checked_function = None;
         let mut registered_namespace = false;
         let bundled = match name {
             _ if self.project_shadows_native_package(name) => None,
@@ -6523,11 +6555,11 @@ impl<'a> Loader<'a> {
             // Keep these checked definitions behind the complete public typeshed interfaces.
             "inspect" => {
                 // Preserve the typed function's filename and its reserved-name diagnostic.
-                self.private_implementation_path(INSPECT_FUNCTIONS)?;
-                Some((
-                    "__imre_inspect_functions__.py",
-                    self.session.checked_shipped_prefix(name, "cleandoc")?,
-                ))
+                let path = self.private_implementation_path(INSPECT_FUNCTIONS)?;
+                let export = "cleandoc";
+                let (source, site) = self.session.checked_shipped_function(name, export, &path)?;
+                checked_function = Some((export, site));
+                Some(("__imre_inspect_functions__.py", source))
             }
             "dataclasses" => Some((
                 "<imre stdlib>/dataclasses.py",
@@ -6639,12 +6671,16 @@ impl<'a> Loader<'a> {
             // ty resolves this immutable source at its Python import path in the
             // in-memory project. It is part of the compiler, not a disk input.
             let path = self.root.join(filename);
-            let id = self.add(
+            let input = match checked_function {
+                Some((_, site)) => ModuleText::ShippedFunction(source, site),
+                None => ModuleText::Text(source.into(), crate::SourceKind::File),
+            };
+            let id = self.add_source(
                 path.clone(),
                 path,
                 name.into(),
                 filename.ends_with("/__init__.py"),
-                source,
+                input,
             )?;
             self.modules[id].bundled = true;
             // codeop sets compiler flags on Python instances.
@@ -6663,6 +6699,18 @@ impl<'a> Loader<'a> {
                 );
             } else {
                 self.scan(id)?;
+                if let Some((export, _)) = checked_function
+                    && let Some(statement) = self.modules[id].checked_declaration
+                {
+                    let module = &mut self.modules[id];
+                    let function = module.parsed.suite()[statement]
+                        .as_function_def_stmt()
+                        .expect("checked function declaration");
+                    if function.name.as_str() != export {
+                        let binding = module.bindings[function.name.as_str()];
+                        module.bindings.insert(export.to_owned(), binding);
+                    }
+                }
             }
             self.bind_child(name, id, parent)?;
             return Ok(id);

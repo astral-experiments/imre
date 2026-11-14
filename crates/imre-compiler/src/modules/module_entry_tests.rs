@@ -367,12 +367,39 @@ fn checked_cleandoc_keeps_the_complete_shipped_inspect_namespace() {
         true,
     )
     .unwrap();
+    let path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("inspect.py");
+    let (_, parsed, _) = graph.session.selected_file(&path).unwrap();
+    let Some(super::Binding::Definition(id)) = graph.modules[graph.entry].export("cleandoc") else {
+        panic!("expected the fixed declaration");
+    };
+    let module = &graph.modules[id.module];
+    assert!(std::ptr::eq(parsed.syntax(), module.parsed.syntax()));
+    assert_eq!(module.checked_statements(), id.statement..id.statement + 1);
+    let selected = parsed.suite()[id.statement].as_function_def_stmt().unwrap();
+    assert_eq!(selected.name.as_str(), "cleandoc");
     assert!(
         graph
             .session
             .shipped_declaration("inspect", "isclass")
             .is_some()
     );
+}
+
+#[test]
+fn checked_function_preserves_a_user_file_at_the_sdk_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = crate::analysis::Session::new(dir.path(), &[]).unwrap();
+    let sdk_path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join("inspect.py");
+    let private_path = dir.path().join("__imre_inspect_functions__.py");
+    let user = "cleandoc = 42\n";
+    session.seed(&sdk_path, user).unwrap();
+    let (source, site) = session
+        .checked_shipped_function("inspect", "cleandoc", &private_path)
+        .unwrap();
+    session.add_shipped_function(site, &private_path, source).unwrap();
+    let copy = session.copy_for_diagnostics(None, None).unwrap();
+    assert_eq!(session.selected_file(&sdk_path).unwrap().2.as_str(), user);
+    assert_eq!(copy.selected_file(&private_path).unwrap().2.as_str(), source);
 }
 
 #[test]
