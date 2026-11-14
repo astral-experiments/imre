@@ -888,7 +888,7 @@ impl Context {
     pub(super) fn location_list(&mut self, locations: &[PathBuf]) -> Result<Id> {
         let values = locations
             .iter()
-            .map(|p| self.import_path_text(p))
+            .map(|p| self.package_path_text(p))
             .collect::<Result<_>>()?;
         Ok(self.alloc(Value::List(values)))
     }

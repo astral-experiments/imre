@@ -290,11 +290,12 @@ impl Context {
             } else {
                 source.parent()
             };
-            if !self
-                .items(path)?
-                .iter()
-                .any(|id| self.str_value(*id).ok().map(Path::new) == directory)
-            {
+            if !self.items(path)?.iter().any(|id| {
+                self.str_value(*id)
+                    .ok()
+                    .map(|p| self.registry_root(Path::new(p)))
+                    == directory
+            }) {
                 return Ok(NONE);
             }
         }
@@ -303,11 +304,7 @@ impl Context {
         let paths = if locations.is_empty() {
             NONE
         } else {
-            let items = locations
-                .iter()
-                .map(|p| self.text(p.to_string_lossy()))
-                .collect();
-            self.alloc(Value::List(items))
+            self.location_list(&locations)?
         };
         let origin = if let Some(path) = source {
             self.text(path.to_string_lossy())

@@ -2779,7 +2779,7 @@ pub(crate) fn compile(
     let bundle_entry = startup
         .filter(|_| installed_layout)
         .map(|(_, executable)| Path::new(executable).join(bundled_root));
-    initial.extend(bundle_entry.iter().cloned());
+    initial.extend(bundle_entry);
     let mut after_user_site = Vec::new();
     let first_pth_site = options
         .venv_site_pth
@@ -2825,7 +2825,6 @@ pub(crate) fn compile(
         "venv_site_pth":options.venv_site_pth.as_ref().map(|(dir, _)| dir),
         "stdlib_members":crate::zip_entry::PACKAGED_MEMBERS,
         "sitecustomize":options.sitecustomize || options.stdlib_sitecustomize,"user_site_pth":options.user_site_pth,"after_user_site":after_user_site,"path0":path0_len != 0,
-        "bundle_entry":bundle_entry,
         "python_version":crate::PYTHON_VERSION.to_string(),
         "python_hexversion":crate::version::hex(crate::version::components(false)),
         "implementation_version":env!("CARGO_PKG_VERSION"),
