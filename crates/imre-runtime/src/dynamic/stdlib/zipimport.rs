@@ -2,9 +2,20 @@
 
 use std::collections::hash_map::Entry;
 
-use super::super::builtins::boolean;
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::super::builtins::{boolean, exception_subclass};
+use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 use crate::objects::ZipArchive;
+
+fn directory(entry: Entry<'_, String, ZipArchive>) -> Result<Option<&ZipArchive>> {
+    match entry {
+        Entry::Occupied(slot) => Ok(Some(slot.into_mut())),
+        Entry::Vacant(slot) => match ZipArchive::index_import(slot.key()).map_err(Error::from) {
+            Ok(archive) => Ok(Some(slot.insert(archive))),
+            Err(error) if error.kind == "BadZipFile" => Ok(None),
+            Err(error) => Err(error),
+        },
+    }
+}
 
 /// Use the same cached directory and member reader as the typed loader.
 pub(super) fn call(
@@ -23,16 +34,8 @@ pub(super) fn call(
         }
         ("index", [path], []) => {
             let path = ctx.str_value(*path)?.to_owned();
-            if let Entry::Vacant(slot) = ctx.zip_directories.entry(path) {
-                match ZipArchive::index_import(slot.key()).map_err(Error::from) {
-                    Ok(index) => {
-                        slot.insert(index);
-                    }
-                    Err(error) if error.kind == "BadZipFile" => return Ok(FALSE),
-                    Err(error) => return Err(error),
-                }
-            }
-            Ok(TRUE)
+            let archive = directory(ctx.zip_directories.entry(path))?;
+            Ok(boolean(archive.is_some()))
         }
         ("names", [path], []) => {
             let Some(archive) = ctx.zip_directories.get(ctx.str_value(*path)?) else {
@@ -43,19 +46,19 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::List(names)))
         }
         ("read" | "contains", [path, key], []) => {
-            let path = ctx.str_value(*path)?;
-            let key = ctx.str_value(*key)?;
-            let archive = ctx
-                .zip_directories
-                .get(path)
-                .ok_or_else(|| Error::new("ValueError", "archive has not been indexed"))?;
-            let key = key.into();
+            let path = ctx.str_value(*path)?.to_owned();
+            // The directory lookup takes precedence over conversion of the member name.
+            let key = ctx.copy_name(*key);
+            let archive = match directory(ctx.zip_directories.entry(path)) {
+                Err(error) if exception_subclass(&error.kind, "OSError") == Some(true) => None,
+                result => result?,
+            };
+            let Some(archive) = archive else {
+                return Ok(if name == "contains" { FALSE } else { NONE });
+            };
+            let key = key?;
             if name == "contains" {
-                return Ok(if archive.contains_import(&key) {
-                    TRUE
-                } else {
-                    FALSE
-                });
+                return Ok(boolean(archive.contains_import(&key)));
             }
             let bytes = archive.import_data(&key)?;
             Ok(ctx.alloc(Value::Bytes(bytes)))
