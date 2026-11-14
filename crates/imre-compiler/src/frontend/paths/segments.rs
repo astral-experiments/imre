@@ -89,17 +89,15 @@ impl Checker<'_> {
                 .map(|part| scope.hold(self, part))
                 .collect();
         }
-        let mut parts = Vec::with_capacity(inputs.len());
-        for (value, at) in inputs.into_iter().zip(&call.arguments.args) {
-            let value = self.constructor_part(value, at, ty)?;
-            let value = if check {
+        for (input, at) in inputs.iter_mut().zip(&call.arguments.args) {
+            let value = self.constructor_part(std::mem::replace(input, Expr::none()), at, ty)?;
+            *input = if check {
                 scope.hold(self, value)
             } else {
                 value
             };
-            parts.push((value, at));
         }
-        let mut parts = parts.into_iter();
+        let mut parts = inputs.into_iter().zip(&call.arguments.args);
         let mut path = if let Some(base) = base {
             if parts.len() == 0 {
                 // joinpath() still returns a fresh path.
