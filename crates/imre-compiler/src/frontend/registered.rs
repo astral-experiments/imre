@@ -1818,20 +1818,6 @@ impl<'a> SuitePreparation<'a> {
         )
     }
 
-    #[cfg(test)]
-    pub(crate) fn class_suites(
-        &mut self,
-        classes: Vec<ClassSite<'_>>,
-        names: &imre_ast::Names,
-        scopes: &super::function_scope::ScopeFacts<'_>,
-    ) -> HashMap<TextSize, RegisteredClass> {
-        classes
-            .into_iter()
-            .rev()
-            .map(|class| self.class_suite(class, names, scopes))
-            .collect()
-    }
-
     pub(crate) fn class_suite(
         &mut self,
         ClassSite {
@@ -1839,16 +1825,13 @@ impl<'a> SuitePreparation<'a> {
             annotations,
         }: ClassSite<'_>,
         names: &imre_ast::Names,
-        scopes: &super::function_scope::ScopeFacts<'_>,
-    ) -> (TextSize, RegisteredClass) {
+        classes: &mut HashMap<TextSize, super::function_scope::classes::ClassScope>,
+    ) {
         let start = class.start();
+        let scope = classes.get_mut(&start).expect("class scope");
         let header = class.type_params.as_deref().map(|params| {
-            let parameters = TypeParameterValues::prepare(
-                params,
-                names,
-                self.source,
-                scopes.classes[&start].enclosing_class,
-            );
+            let parameters =
+                TypeParameterValues::prepare(params, names, self.source, scope.enclosing_class);
             let mut scope = SourceScope::new(
                 RegisteredScope::Function { is_async: false },
                 self.source,
@@ -1902,8 +1885,8 @@ impl<'a> SuitePreparation<'a> {
         {
             self.declaration_refusals.insert(start, refusal);
         }
-        let annotations = annotations.resolve(&scopes.classes[&start].bindings);
-        let class = RegisteredClass {
+        let annotations = annotations.resolve(&scope.bindings);
+        scope.body = Some(RegisteredClass {
             annotations,
             name: class.name.clone(),
             range,
@@ -1915,8 +1898,7 @@ impl<'a> SuitePreparation<'a> {
                 .collect(),
             body,
             header,
-        };
-        (start, class)
+        });
     }
 
     pub(crate) fn suite(&mut self, stmts: &[ast::Stmt], kind: RegisteredScope) -> RegisteredSuite {

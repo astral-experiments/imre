@@ -601,14 +601,12 @@ impl<'a> PreparedBody<'a> {
         // Preparing inner declarations first lets their binding sites consume
         // the selected body's decision in the enclosing suite.
         use crate::frontend::DeclarationSite;
-        let mut class_bodies = HashMap::new();
         let python_annotations = origin.python_annotations(name);
         for declaration in sites.declarations.into_iter().rev() {
             let site = match declaration {
                 DeclarationSite::Function(site) => site,
                 DeclarationSite::Class(site) => {
-                    let (start, class) = prepare.class_suite(site, &private_names, &scopes);
-                    class_bodies.insert(start, class);
+                    prepare.class_suite(site, &private_names, &mut scopes.classes);
                     continue;
                 }
             };
@@ -649,7 +647,6 @@ impl<'a> PreparedBody<'a> {
             namespace_operations: operations,
             type_aliases,
             module_annotations: sites.module_annotations.into_body(),
-            class_bodies,
             bundled,
             path,
             python_annotations,
@@ -813,10 +810,7 @@ impl<'a> PreparedBody<'a> {
 
 enum Body<'a> {
     Module(&'a PreparedBody<'a>),
-    Namespace(
-        &'a crate::frontend::RegisteredClass,
-        &'a crate::frontend::function_scope::classes::ClassScope,
-    ),
+    Namespace(&'a crate::frontend::function_scope::classes::ClassScope),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
     Registered(&'a Callable<'a>),
     Operand(
@@ -881,7 +875,6 @@ struct SourceInfo<'a> {
     #[cfg(test)]
     namespace_operations: HashMap<ruff_text_size::TextRange, crate::ir::Expr>,
     module_annotations: Option<crate::frontend::AnnotationProvider>,
-    class_bodies: HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredClass>,
     bundled: bool,
     path: Cow<'a, Path>,
     python_annotations: bool,
@@ -1013,7 +1006,8 @@ impl SourceMap<'_> {
                 };
                 body.emit(&mut function);
             }
-            Body::Namespace(prepared, class) => {
+            Body::Namespace(class) => {
+                let prepared = class.prepared();
                 let frame = &mut function.frame;
                 frame.class_locals = Some(&class.bindings);
                 if frame.output.keep_docstrings
@@ -1083,13 +1077,14 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             return index;
         }
         let source = self.source;
-        let (definition, decorator_offsets, type_params) = if let Some(class) =
-            source.class_bodies.get(&site)
+        let (definition, decorator_offsets, type_params) = if let Some(scope) =
+            source.scopes.classes.get(&site)
         {
+            let class = scope.prepared();
             let definition = if let Some(header) = &class.header {
                 self.compile_class_header(site, class, &header.body)
             } else {
-                self.compile_class_namespace(site, class)
+                self.compile_class_namespace(site, scope)
             };
             (definition, &class.decorator_offsets, None)
         } else {
@@ -1112,8 +1107,9 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         if let Some(index) = self.sites.class_namespaces.get_index_of(&site) {
             return index;
         }
-        let class = &self.source.class_bodies[&site];
-        let namespace = self.compile_class_namespace(site, class);
+        let scope = &self.source.scopes.classes[&site];
+        let namespace = self.compile_class_namespace(site, scope);
+        let class = scope.prepared();
         let header = class.header.as_ref().expect("generic class");
         let parameters = self.compile_scoped_type_parameters(&header.parameters);
         self.sites
@@ -1321,9 +1317,9 @@ impl Function<'_, '_, '_> {
     fn compile_class_namespace(
         &mut self,
         site: TextSize,
-        class: &crate::frontend::RegisteredClass,
+        scope: &crate::frontend::function_scope::classes::ClassScope,
     ) -> CompiledDefinition {
-        let scope = &self.source.scopes.classes[&site];
+        let class = scope.prepared();
         let name = self.source.private_names.definition(&class.name);
         let qualname = if self.declared_globals.contains(class.name.as_str()) {
             name.to_owned()
@@ -1341,7 +1337,7 @@ impl Function<'_, '_, '_> {
         let code = self.source.code(
             self.frame.output,
             &format!("{qualname}."),
-            Body::Namespace(class, scope),
+            Body::Namespace(scope),
             self.in_function,
             Some((site, 0)),
         );
@@ -1820,6 +1816,7 @@ mod tests {
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
+        let mut classes = std::mem::take(&mut prepared.source.scopes.classes);
         let logicals = prepared.source.statement_sites.expressions.take_lexical();
         if prepared.syntax.is_none() {
             let parsed = ruff_python_parser::parse_module(&prepared.source.text).unwrap();
@@ -1854,7 +1851,7 @@ mod tests {
             generators: Some(&generators),
             ..source
         };
-        let classes = crate::frontend::registered_sites(
+        let class_sites: Vec<_> = crate::frontend::registered_sites(
             (body, children),
             &prepared.source.private_names,
             source,
@@ -1874,18 +1871,30 @@ mod tests {
         let mut suites = SuitePreparation::new(&prepared.source.namespace_operations, source, true);
         suites.sites.expressions = logicals;
         let initializer = suites.suite(body, RegisteredScope::Module);
-        let class_bodies = suites.class_suites(
-            classes,
-            &prepared.source.private_names,
-            &prepared.source.scopes,
-        );
+        for class in class_sites.into_iter().rev() {
+            suites.class_suite(class, &prepared.source.private_names, &mut classes);
+        }
         let sites = suites.sites;
         prepared.initializer = initializer;
-        prepared.source.class_bodies = class_bodies;
+        prepared.source.scopes.classes = classes;
         prepared.source.statement_sites = sites;
     }
 
     impl SourceInfo<'_> {
+        fn class_body(&self, site: TextSize) -> &crate::frontend::RegisteredClass {
+            self.scopes.classes[&site].prepared()
+        }
+
+        fn class_body_mut(&mut self, site: TextSize) -> &mut crate::frontend::RegisteredClass {
+            self.scopes
+                .classes
+                .get_mut(&site)
+                .unwrap()
+                .body
+                .as_mut()
+                .unwrap()
+        }
+
         fn definition_body(&self, site: TextSize) -> RegisteredBody<'_> {
             self.scopes.functions[&site].body()
         }
@@ -2122,9 +2131,7 @@ mod tests {
 
         let provider = prepared
             .source
-            .class_bodies
-            .get_mut(&owner)
-            .unwrap()
+            .class_body_mut(owner)
             .annotations
             .body
             .as_mut()
@@ -3253,7 +3260,8 @@ mod tests {
                 deferred.push(at);
             }
         });
-        assert_eq!(deferred, [*start]);
+        let class_start = *start;
+        assert_eq!(deferred, [class_start]);
         assert_eq!(layout.starred, [true]);
         assert_eq!(slots.len(), 3);
         let [
@@ -3271,7 +3279,7 @@ mod tests {
         base.selected = std::rc::Rc::new(ExpressionSelection::Checked(Expr::none()));
         assert_ne!(module.standalone().unwrap(), before);
 
-        let class = module.source.class_bodies.values_mut().next().unwrap();
+        let class = module.source.class_body_mut(class_start);
         let body = residual_occurrence(&mut class.body);
         body.selected = std::rc::Rc::new(ExpressionSelection::Refused(body.range, "body refused"));
         assert!(module.standalone().unwrap_err().contains("body refused"));
@@ -3301,7 +3309,7 @@ mod tests {
                     if matches!(class.name.as_str(), "SupportsAbs" | "SupportsRound") {
                         let start = class.start();
                         protocols.push((class.name.to_string(), start));
-                        assert!(typing.source.class_bodies[&start].body.fully_checked());
+                        assert!(typing.source.class_body(start).body.fully_checked());
                         *stmt = ast::StmtPass {
                             node_index: Default::default(),
                             range: class.range(),
@@ -3357,7 +3365,7 @@ mod tests {
         let class = source.find("class _IdentityCallable(Protocol):").unwrap();
         let method = class + source[class..].find("def __call__[T]").unwrap();
         let start = |offset: usize| ruff_text_size::TextSize::try_from(offset).unwrap();
-        let body = &module.source.class_bodies[&start(class)].body;
+        let body = &module.source.class_body(start(class)).body;
         assert!(body.fully_checked());
         let mut bindings = Vec::new();
         crate::ir::walk_expressions(&body.checked.function.body, &mut |value| {
@@ -3398,7 +3406,7 @@ mod tests {
                 .filter_map(ast::Stmt::as_class_def_stmt)
                 .find(|class| class.name.as_str() == name)
                 .unwrap();
-            let owner = &typing.source.class_bodies[&class.decorator_list[0].start()];
+            let owner = typing.source.class_body(class.decorator_list[0].start());
             let header = owner.header.as_ref().unwrap();
             assert_eq!(header.parameters.declarations[0].name, "T");
             let header = header.body.as_ref().unwrap();
@@ -3437,7 +3445,7 @@ mod tests {
             ModuleOrigin::Program(None),
         )
         .unwrap();
-        let header = &program.source.class_bodies[&ruff_text_size::TextSize::new(0)].header;
+        let header = &program.source.class_body(TextSize::new(0)).header;
         assert!(program.initializer().fully_checked());
         let mut decorators = Vec::new();
         crate::ir::walk_expressions(&program.initializer().checked.function.body, &mut |expr| {
@@ -3472,7 +3480,7 @@ mod tests {
         module.standalone().unwrap();
 
         inject_residual_child_module(&mut module);
-        let header = &module.source.class_bodies.values().next().unwrap().header;
+        let header = &module.source.class_body(TextSize::new(0)).header;
         assert!(header.as_ref().unwrap().body.is_err());
         assert!(module.syntax.take().is_some());
         assert_eq!(
@@ -7161,8 +7169,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
                 .definition_body(TextSize::new(0))
                 .fully_checked()
         );
-        let class = prepared.source.class_bodies.values().next().unwrap();
-        assert!(class.body.fully_checked());
+        let class_start = TextSize::try_from(source.find("class Example:").unwrap()).unwrap();
+        assert!(prepared.source.class_body(class_start).body.fully_checked());
         prepared.standalone().unwrap();
 
         inject_residual_child_module(&mut prepared);
@@ -7170,8 +7178,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             .as_function_def_stmt()
             .unwrap();
         let class = outer.body[0].as_class_def_stmt().unwrap();
-        let class_start = class.start();
-        let suite = &prepared.source.class_bodies[&class_start].body;
+        assert_eq!(class.start(), class_start);
+        let suite = &prepared.source.class_body(class_start).body;
         crate::verify::registered(suite.checked.region()).unwrap();
         assert!(!suite.checked.region().private_slots().is_empty());
         assert!(suite.refusal.is_none());
@@ -7212,7 +7220,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         class.body[5].as_assign_stmt_mut().unwrap().targets.clear();
         assert_eq!(emit(&prepared), before);
 
-        let class = prepared.source.class_bodies.get_mut(&class_start).unwrap();
+        let class = prepared.source.class_body_mut(class_start);
         let crate::frontend::PhysicalOperand::Residual(value) = &mut class.body.operands[0] else {
             panic!("expected the residual lambda call");
         };

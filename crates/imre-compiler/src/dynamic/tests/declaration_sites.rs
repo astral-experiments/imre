@@ -153,7 +153,9 @@ fn checked_class_site_uses_registered_metadata_after_module_erasure() {
     assert!(module.syntax.take().is_some());
     assert_eq!(module.standalone().unwrap(), original);
 
-    let class = module.source.class_bodies.values_mut().next().unwrap();
+    let class = module
+        .source
+        .class_body_mut(ruff_text_size::TextSize::new(0));
     assert_eq!(class.doc.take().as_deref(), Some("class doc"));
     assert_ne!(module.standalone().unwrap(), original);
 }
