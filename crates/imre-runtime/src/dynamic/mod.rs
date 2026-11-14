@@ -3148,9 +3148,10 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         } else if name == "type" {
-            let descriptor = self.alloc(Value::LayoutDescriptor(value, "__text_signature__"));
-            self.builtins
-                .insert("type.__text_signature__".into(), descriptor);
+            for field in ["__mro__", "__dict__", "__text_signature__"] {
+                let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
+                self.builtins.insert(format!("type.{field}"), descriptor);
+            }
         }
         if name == "code" {
             self.install_code_members(value);
@@ -3443,6 +3444,8 @@ impl Context {
                 "__subclasses__",
                 "__prepare__",
                 "__setattr__",
+                "__mro__",
+                "__dict__",
                 "__text_signature__",
             ][..],
             "object" => &[
