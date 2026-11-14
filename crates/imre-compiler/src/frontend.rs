@@ -7355,7 +7355,15 @@ impl<'a> Checker<'a> {
         contexts::with_items(
             self,
             items.iter().enumerate(),
-            |scope, (index, item), out| scope.acquire_with(out, item, &items[index + 1..], body),
+            |scope, (index, item), out| {
+                scope.acquire_with(
+                    out,
+                    item,
+                    &items[index + 1..],
+                    body,
+                    keep_body || items.len() > 1,
+                )
+            },
             |scope, protected| scope.lower_block(body, keep_body.then_some(protected)),
         )
     }
@@ -7366,6 +7374,7 @@ impl<'a> Checker<'a> {
         item: &ast::WithItem,
         remaining: &[ast::WithItem],
         body: &[ast::Stmt],
+        keep_region: bool,
     ) -> Result<contexts::Protected<'s>, String> {
         use std::ops::ControlFlow::{Break, Continue};
         if let ast::Expr::Call(call) = &item.context_expr
@@ -7456,6 +7465,10 @@ impl<'a> Checker<'a> {
         } else {
             None
         };
+        let file = matches!(
+            manager.ty,
+            Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
+        );
         if temporary.is_none()
             && stored.is_none()
             && !archive
@@ -7464,10 +7477,7 @@ impl<'a> Checker<'a> {
             && server.is_none()
             && !popen
             && context_methods.is_none()
-            && !matches!(
-                manager.ty,
-                Type::TextIO | Type::StringIO | Type::BinaryIO | Type::BytesIO
-            )
+            && !file
         {
             let failure = error(
                 self.source,
@@ -7489,7 +7499,7 @@ impl<'a> Checker<'a> {
             return Err(failure);
         }
         let captured = self.hidden(manager.ty);
-        let mut protected = Vec::new();
+        let mut protected = (keep_region || !file).then(Vec::new);
         if let Some(target) = &item.optional_vars {
             if !matches!(&**target, ast::Expr::Name(_)) {
                 return Err(error(
@@ -7507,8 +7517,12 @@ impl<'a> Checker<'a> {
             } else {
                 self.local(captured)
             };
-            self.assign(target, value, Some(&mut protected))?;
+            self.assign(target, value, protected.as_mut())?;
         }
+        // The binding is checked even when the sealed file's cleanup region is discarded.
+        let Some(protected) = protected else {
+            return Ok(Continue(out));
+        };
         // The server cleanup is a checked virtual call. Preserve the protected
         // suite's first failure before checking its possible close methods.
         let server_body = if server.is_some() {
@@ -7524,14 +7538,7 @@ impl<'a> Checker<'a> {
                 ty: receiver.ty,
                 kind: ExprKind::Call(enter, ir::CallArgs::positional(vec![receiver])),
             }));
-        } else if temporary.is_none()
-            && stored.is_none()
-            && !archive
-            && !token
-            && !socket
-            && server.is_none()
-            && !popen
-        {
+        } else if file {
             statements.push(Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::TextEnter, vec![self.local(captured)]),
