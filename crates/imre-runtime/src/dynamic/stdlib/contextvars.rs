@@ -100,26 +100,46 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match (name, args, kwargs) {
-        ("ContextVar", [var_name], [] | [(_, _)]) => {
-            if !matches!(ctx.heap.get(*var_name), Value::Str(_)) {
+        ("ContextVar", _, _) => {
+            let count = args.len() + kwargs.len();
+            if count > 2 {
+                let kind = if args.is_empty() { "keyword " } else { "" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!("ContextVar() takes at most 2 {kind}arguments ({count} given)"),
+                ));
+            }
+            let &[var_name] = args else {
+                let limit = if args.is_empty() {
+                    "exactly"
+                } else {
+                    "at most"
+                };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "ContextVar() takes {limit} 1 positional argument ({} given)",
+                        args.len()
+                    ),
+                ));
+            };
+            let default = match kwargs.first() {
+                None => None,
+                Some((key, value)) if key == "default" => Some(*value),
+                Some((key, _)) => {
+                    return Err(crate::dynamic::calls::unexpected_keyword_error(
+                        "ContextVar", key, &["default"],
+                    ));
+                }
+            };
+            if !matches!(ctx.heap.get(var_name), Value::Str(_)) {
                 return Err(Error::new(
                     "TypeError",
                     "context variable name must be a str",
                 ));
             }
-            let default = match kwargs {
-                [] => None,
-                [(key, value)] if key == "default" => Some(*value),
-                [(key, _)] => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("ContextVar() got an unexpected keyword argument '{key}'"),
-                    ));
-                }
-                _ => unreachable!(),
-            };
             Ok(ctx.alloc(Value::ContextVar {
-                name: *var_name,
+                name: var_name,
                 default,
                 repr_active: Default::default(),
             }))
@@ -154,6 +174,10 @@ pub(super) fn call(
         )),
         ("Token.__exit__", [token, _, _, _], []) => ctx.reset_binding(None, *token),
         ("Context", [], []) => Ok(ctx.alloc(Value::Context(Default::default()))),
+        ("Context", _, _) => Err(Error::new(
+            "TypeError",
+            "Context() does not accept any arguments",
+        )),
         ("copy_context", [], []) | ("Context.copy", [_], []) => {
             let source = args
                 .first()
