@@ -1646,18 +1646,18 @@ impl RegisteredCall {
         range: ruff_text_size::TextRange,
         target: RegisteredCallTarget,
         arguments: RegisteredArguments,
-    ) -> Self {
-        Self {
+    ) -> Box<Self> {
+        Box::new(Self {
             range,
             target,
             arguments,
             partition_field: None,
-        }
+        })
     }
 
-    pub(crate) fn invoke_site(self) -> InvokeSite {
+    pub(crate) fn invoke_site(self: Box<Self>) -> InvokeSite {
         InvokeSite {
-            call: Box::new(self),
+            call: self,
             scope: None,
         }
     }

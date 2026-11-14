@@ -5551,8 +5551,8 @@ print(clean(CompletedProcess([], 0, " data ")))
             FixedAttribute::Operation { operation, .. }
             if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "stdout"))));
         assert!(attributes.values().any(|field| matches!(field,
-            FixedAttribute::Call(saved) if saved.0.is_none()
-                && matches!(&saved.1.call.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip"))));
+            FixedAttribute::Call(None, site)
+                if matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip"))));
     }
 
     #[test]

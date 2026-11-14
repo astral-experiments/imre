@@ -77,7 +77,7 @@ pub(crate) enum FixedAttribute {
         position: TextSize,
     },
     /// The fixed builtin already carries its method receiver. A standalone callee is saved here.
-    Call(Box<(Option<Expr>, ir::InvokeSite)>),
+    Call(Option<Box<Expr>>, Box<ir::RegisteredCall>),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -304,11 +304,10 @@ impl SourceSites {
                 call.range(),
                 registered::values::callable_target(call),
                 ir::RegisteredArguments::Positional,
-            )
-            .invoke_site();
+            );
             self.attributes.insert(
                 site.range,
-                FixedAttribute::Call(Box::new((Some(target), invoke))),
+                FixedAttribute::Call(Some(Box::new(target)), invoke),
             );
             self.commit(site, node);
         }
@@ -355,10 +354,9 @@ impl SourceSites {
                 call.range(),
                 registered::values::method_target(field),
                 ir::RegisteredArguments::Positional,
-            )
-            .invoke_site();
+            );
             self.attributes
-                .insert(site.range, FixedAttribute::Call(Box::new((None, invoke))));
+                .insert(site.range, FixedAttribute::Call(None, invoke));
             self.commit(site, node);
         }
     }
