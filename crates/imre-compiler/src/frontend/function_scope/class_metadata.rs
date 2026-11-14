@@ -170,19 +170,20 @@ impl Uses {
         }
     }
 
-    /// A generic declaration supplies its own parameters to its body.
-    fn read_child_body<'a>(
-        &mut self,
-        reads: impl Iterator<Item = &'a str>,
-        params: Option<&ast::TypeParams>,
-    ) {
-        self.nested.extend(
-            reads
-                .filter(|&name| {
-                    params.is_none_or(|params| params.iter().all(|p| p.name().as_str() != name))
-                })
-                .map(str::to_owned),
-        );
+    /// A generic declaration supplies its own parameters to its header and body.
+    fn declaration(&mut self, params: Option<&ast::TypeParams>, read: impl FnOnce(&mut Self)) {
+        let Some(params) = params else {
+            return read(self);
+        };
+        let mut child = self.child_scope();
+        child.visit_type_params(params);
+        read(&mut child);
+        for param in params.iter() {
+            child.direct.remove(param.name().as_str());
+            child.nested.remove(param.name().as_str());
+        }
+        self.direct.append(&mut child.direct);
+        self.nested.append(&mut child.nested);
     }
 
     /// A function hides its own bindings from its enclosing scope.
@@ -249,15 +250,8 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
             ast::Stmt::FunctionDef(f) => {
-                for decorator in &f.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if let Some(params) = &f.type_params {
-                    self.visit_type_params(params);
-                }
-                self.visit_parameters(&f.parameters);
-                if let Some(result) = &f.returns {
-                    self.visit_annotation(result);
+                for expr in imre_ast::function_definition_expressions(f) {
+                    self.visit_expr(expr);
                 }
                 let method = self.scopes.function(f);
                 let mut child = self.uses.child_scope();
@@ -280,23 +274,29 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     .metadata
                     .reads()
                     .chain(child.direct.iter().map(String::as_str));
-                self.uses.read_child_body(reads, f.type_params.as_deref());
+                self.uses.declaration(f.type_params.as_deref(), |scope| {
+                    if !scope.string_annotations {
+                        for (_, expr) in crate::frontend::parameter_annotations(
+                            &f.parameters,
+                            f.returns.as_deref(),
+                        ) {
+                            scope.visit_expr(expr);
+                        }
+                    }
+                    scope.nested.extend(reads.map(str::to_owned));
+                });
             }
             ast::Stmt::ClassDef(c) => {
                 for decorator in &c.decorator_list {
                     self.visit_decorator(decorator);
                 }
-                if let Some(params) = &c.type_params {
-                    self.visit_type_params(params);
-                }
-                if let Some(args) = &c.arguments {
-                    self.visit_arguments(args);
-                }
                 let child = &self.scopes.classes[&classes::site(c)];
-                self.uses.read_child_body(
-                    child.frame_reads.iter().map(String::as_str),
-                    c.type_params.as_deref(),
-                );
+                self.uses.declaration(c.type_params.as_deref(), |scope| {
+                    if let Some(args) = &c.arguments {
+                        scope.visit_arguments(args);
+                    }
+                    scope.nested.extend(child.frame_reads.iter().cloned());
+                });
             }
             _ => visitor::walk_stmt(self, stmt),
         }

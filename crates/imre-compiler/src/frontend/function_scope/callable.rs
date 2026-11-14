@@ -273,12 +273,12 @@ mod tests {
     fn class_reads_use_the_completed_method_scope() {
         let mut body = ruff_python_parser::parse_module(concat!(
             "class Owner:\n",
-            "    def read[T](self, value=default):\n",
+            "    def read[T, V: T = T](self, value: T = default) -> lambda: T:\n",
             "        local: ignored\n",
             "        return T, outside\n",
             "    def indirect(self):\n",
-            "        @decorate\n",
-            "        class Child[U](base):\n",
+            "        @decorate(D)\n",
+            "        class Child[U, D](base[U]):\n",
             "            value = U, through_class\n",
             "        return Child\n",
         ))
@@ -290,7 +290,14 @@ mod tests {
         let reads = &facts.classes[&body[0].start()].frame_reads;
         assert_eq!(
             reads.iter().map(String::as_str).collect::<Vec<_>>(),
-            ["base", "decorate", "default", "outside", "through_class"]
+            [
+                "D",
+                "base",
+                "decorate",
+                "default",
+                "outside",
+                "through_class"
+            ]
         );
     }
 
