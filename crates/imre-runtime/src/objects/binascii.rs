@@ -207,7 +207,22 @@ fn decode_groups<const STRICT: bool>(data: &[u8], digits: &[u8; 256]) -> Result<
 pub(crate) fn decode_quoted_printable(mut input: &[u8], header: bool) -> Result<Bytes> {
     use super::text::hexadecimal;
 
+    const HEX: [u8; 256] = {
+        let mut digits = [u8::MAX; 256];
+        let mut at = 0;
+        while at < 256 {
+            if let Some(v) = hexadecimal(at as u8) {
+                digits[at] = v;
+            }
+            at += 1;
+        }
+        digits
+    };
     let mut output = allocate(input.len())?;
+    let spare = &mut output.spare_capacity_mut()[..input.len()];
+    let mut written = 0;
+    // Three successive sub-word literals cost more to search than to copy directly.
+    let mut short_runs = 0;
     loop {
         match input {
             [] | [b'='] => break,
@@ -220,21 +235,55 @@ pub(crate) fn decode_quoted_printable(mut input: &[u8], header: bool) -> Result<
                 input = &tail[end + 1..];
             }
             [b'=', b'=', tail @ ..] => {
-                output.push(b'=');
+                spare[written].write(b'=');
+                written += 1;
                 input = tail;
             }
             [b'=', high, low, tail @ ..]
-                if let (Some(high), Some(low)) = (hexadecimal(*high), hexadecimal(*low)) =>
+                if HEX[usize::from(*high)] | HEX[usize::from(*low)] != u8::MAX =>
             {
-                output.push(high << 4 | low);
+                spare[written].write(HEX[usize::from(*high)] << 4 | HEX[usize::from(*low)]);
+                written += 1;
                 input = tail;
+                while let [b'=', high, low, tail @ ..] = input {
+                    let high = HEX[usize::from(*high)];
+                    let low = HEX[usize::from(*low)];
+                    if high | low == u8::MAX {
+                        break;
+                    }
+                    spare[written].write(high << 4 | low);
+                    written += 1;
+                    input = tail;
+                }
             }
             [byte, tail @ ..] => {
-                output.push(if header && *byte == b'_' { b' ' } else { *byte });
+                if short_runs < 3 && (!header || *byte != b'_') {
+                    let count = 1
+                        + (if header {
+                            memchr::memchr2(b'=', b'_', tail)
+                        } else {
+                            memchr::memchr(b'=', tail)
+                        })
+                        .unwrap_or(tail.len());
+                    if count < 8 {
+                        short_runs += 1;
+                    } else {
+                        short_runs = 0;
+                    }
+                    spare[written..written + count].write_copy_of_slice(&input[..count]);
+                    written += count;
+                    input = &input[count..];
+                    continue;
+                }
+                spare[written].write(if header && *byte == b'_' { b' ' } else { *byte });
+                written += 1;
                 input = tail;
             }
         }
     }
+    // SAFETY: each arm initializes this prefix and consumes at least as many
+    // input bytes as it emits. The allocation covers the entire input length.
+    unsafe { output.set_len(written) };
     Ok(output)
 }
 
