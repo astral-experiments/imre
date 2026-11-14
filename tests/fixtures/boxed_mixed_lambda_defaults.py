@@ -28,3 +28,11 @@ try:
 except IndexError as exc:
     frame = traceback.extract_tb(exc.__traceback__)[-1]
     print("failure", failed, frame.name, (frame.lineno, frame.end_lineno, frame.colno, frame.end_colno))
+
+
+def naïve():
+    pass
+
+
+for fn in (factory, naïve, lambda: None):
+    print("module name", fn.__name__, fn.__name__ is fn.__qualname__)
