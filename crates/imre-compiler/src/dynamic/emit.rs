@@ -16,8 +16,8 @@ use crate::frontend::{
 };
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::registered::sites::{
-    CallableSite, CheckedSites, CompiledAlias, CompiledDefinition, CompiledTypeParameters,
-    Declaration,
+    CallableSite, CheckedSites, CompiledAlias, CompiledClassNamespace, CompiledDefinition,
+    CompiledTypeParameters, Declaration,
 };
 use crate::llvm::registered::{AnnotationScope, Output, RegisteredFrame, SourcePositions, sites};
 use crate::llvm::{ModuleLauncher, ProviderBody};
@@ -1103,19 +1103,16 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         self.sites.definitions.insert_full(site, declaration).0
     }
 
-    fn place_class_namespace(&mut self, site: TextSize) -> usize {
-        if let Some(index) = self.sites.class_namespaces.get_index_of(&site) {
-            return index;
-        }
+    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace {
         let scope = &self.source.scopes.classes[&site];
-        let namespace = self.compile_class_namespace(site, scope);
+        let definition = self.compile_class_namespace(site, scope);
         let class = scope.prepared();
         let header = class.header.as_ref().expect("generic class");
-        let parameters = self.compile_scoped_type_parameters(&header.parameters);
-        self.sites
-            .class_namespaces
-            .insert_full(site, (namespace, parameters, class.range))
-            .0
+        CompiledClassNamespace {
+            definition,
+            parameters: self.compile_scoped_type_parameters(&header.parameters),
+            range: class.range,
+        }
     }
 
     fn place_type_alias(&mut self, site: TextSize) -> usize {

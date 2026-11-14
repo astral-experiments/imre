@@ -1,5 +1,5 @@
 use super::CheckedSites;
-use super::sites::{CallableSite, CompiledDefinition};
+use super::sites::{CallableSite, CompiledClassNamespace, CompiledDefinition};
 use super::{Output, PreparedSuiteEmitter, RegisteredBody, RegisteredFrame, SourcePositions};
 use crate::modules::SourceGraph;
 use ruff_text_size::{TextRange, TextSize};
@@ -31,8 +31,8 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
     fn place_definition(&mut self, site: TextSize) -> usize {
         self.1.definitions.get_index_of(&site).unwrap()
     }
-    fn place_class_namespace(&mut self, site: TextSize) -> usize {
-        self.1.class_namespaces.get_index_of(&site).unwrap()
+    fn class_namespace(&mut self, _: TextSize) -> CompiledClassNamespace {
+        unreachable!("isolated writer tests have no generic class headers")
     }
     fn place_type_alias(&mut self, site: TextSize) -> usize {
         self.1.aliases.get_index_of(&site).unwrap()
