@@ -421,8 +421,7 @@ impl Context {
         last: bool,
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
-        let nodes = entries.ordered_nodes();
-        let Some(&(endpoint, _)) = (if last { nodes.last() } else { nodes.first() }) else {
+        let Some((_, endpoint, _)) = entries.order_entry(entries.order_start(last), last) else {
             return Err(self.missing_move_key(key));
         };
         if endpoint == key {
@@ -431,10 +430,10 @@ impl Context {
         let hash = self.dictionary_hash(key)?;
         let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
         let entries = self.stored_entries(dict);
-        let rank = dense
-            .and_then(|i| entries.ordered_rank(i))
+        let node = dense
+            .and_then(|i| entries.order_node(i))
             .ok_or_else(|| self.missing_move_key(key))?;
-        self.stored_entries_mut(dict).move_to_end(rank, last);
+        self.stored_entries_mut(dict).move_to_end(node, last);
         Ok(())
     }
 
@@ -457,10 +456,10 @@ impl Context {
     }
 
     /// Detach the node before the backing lookup can run an equality callback.
-    pub(in super::super) fn unlink_ordered_node(&mut self, dict: Id, dense: usize, rank: usize) {
+    pub(in super::super) fn unlink_ordered_node(&mut self, dict: Id, dense: usize, node: usize) {
         let key = self
             .stored_entries_mut(dict)
-            .unlink_ordered_node(dense, rank);
+            .unlink_ordered_node(dense, node);
         self.heap.weak_edge_removed(key);
     }
 
@@ -470,15 +469,18 @@ impl Context {
             .order
             .as_mut()
             .map(|order| {
-                order.revision = order.revision.wrapping_add(1);
-                std::mem::take(&mut order.keys)
+                let mut removed = std::mem::take(&mut **order);
+                order.by_dense = std::mem::take(&mut removed.by_dense);
+                order.by_dense.fill(super::NO_NODE);
+                order.revision = removed.revision.wrapping_add(1);
+                removed
             })
             .unwrap_or_default();
         let finalize = self.heap.has_unbound_finalizer(super::super::NONE)
             && removed
-                .iter()
-                .any(|&(key, _)| self.heap.could_own_finalizer(key, true));
-        for (key, _) in removed {
+                .keys()
+                .any(|key| self.heap.could_own_finalizer(key, true));
+        for key in removed.keys() {
             self.heap.weak_edge_removed(key);
         }
         super::super::builtins::clear_container(self, dict);
@@ -1257,7 +1259,7 @@ impl Context {
         let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
         let dense = dense.ok_or_else(|| self.lookup_error("KeyError", key))?;
         let entries = self.stored_entries_mut(dict);
-        if entries.ordered_rank(dense).is_none() {
+        if entries.order_node(dense).is_none() {
             entries.reserve_ordered_node()?;
             entries.link_ordered_key(dense, key, hash);
         }

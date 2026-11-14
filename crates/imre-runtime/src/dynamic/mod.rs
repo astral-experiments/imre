@@ -1432,14 +1432,15 @@ impl Context {
             dict,
             kind,
             entries.len(),
-            ordered.then(|| (entries.order_state(), entries.ordered_nodes().len())),
-            reverse.then(|| {
-                if ordered {
-                    entries.ordered_nodes().len()
-                } else {
-                    entries.insertion_end()
-                }
-            }),
+            ordered.then(|| (entries.order_state(), entries.order_len())),
+            reverse,
+            if ordered {
+                entries.order_start(reverse)
+            } else if reverse {
+                entries.insertion_end()
+            } else {
+                0
+            },
         );
         self.alloc(Value::DictIterator(iter))
     }

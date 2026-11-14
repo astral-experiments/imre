@@ -2335,7 +2335,7 @@ impl Value {
                 visit.extend(extras.iter().map(|&(_, id)| id));
             }
             Self::Dict(entries) => {
-                visit.extend(entries.ordered_nodes().iter().map(|&(key, _)| key));
+                visit.extend(entries.ordered_keys());
                 for (key, value) in entries {
                     visit.push(*value);
                     visit.push(*key);
@@ -2944,14 +2944,15 @@ impl DictIterator {
         kind: DictViewKind,
         size: usize,
         ordered: Option<(usize, usize)>,
-        reverse_end: Option<usize>,
+        reverse: bool,
+        position: usize,
     ) -> Self {
         Self {
             dict: Some(dict),
             kind,
             expected_len: Some(size),
-            position: reverse_end.unwrap_or(0),
-            reverse: reverse_end.is_some(),
+            position,
+            reverse,
             remaining: ordered.map_or(size, |(_, count)| count),
             order_state: ordered.map(|(revision, _)| revision),
         }
@@ -3013,30 +3014,25 @@ impl DictIterator {
     fn ordered_index(ctx: &mut Context, storage: Id, key: Id) -> Result<usize> {
         let (_, index) = ctx.find_dictionary_key(storage, key, None)?;
         index
-            .filter(|&i| ctx.stored_entries(storage).ordered_rank(i).is_some())
+            .filter(|&i| ctx.stored_entries(storage).order_node(i).is_some())
             .ok_or_else(|| ctx.lookup_error("KeyError", key))
     }
 
-    /// Read a logical order rank or a plain dictionary slot, in the cursor's direction.
+    /// Read the current entry and the position that follows it in this cursor's direction.
     fn entry_at(
         &self,
         entries: &super::dictionary::Entries,
         position: usize,
     ) -> Option<(usize, Id, Id)> {
         if self.order_state.is_some() {
-            let rank = if self.reverse {
-                position.checked_sub(1)
-            } else {
-                Some(position)
-            };
-            let rank = rank?;
-            let &(key, _) = entries.ordered_nodes().get(rank)?;
-            // Ordered cursors resolve the retained key against the live dictionary.
-            Some((rank, key, NONE))
+            let (next, key, _) = entries.order_entry(position, self.reverse)?;
+            Some((next, key, NONE))
         } else if self.reverse {
             entries.before(position)
         } else {
-            entries.at(position)
+            entries
+                .at(position)
+                .map(|(current, key, value)| (current + 1, key, value))
         }
     }
 
@@ -3106,7 +3102,7 @@ impl DictIterator {
                 key = current_key;
             }
         }
-        self.position = if self.reverse { position } else { position + 1 };
+        self.position = position;
         self.remaining -= 1;
         Ok(Some((storage, key, value)))
     }
