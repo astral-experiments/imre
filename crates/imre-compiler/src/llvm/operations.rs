@@ -356,8 +356,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     }
                 } else if let Some((index, range)) = call.partition_field {
                     let span = frame.expression_range_span(range, call.range.end(), b'[');
-                    let get_position =
-                        span.map_or_else(|| "null".into(), |span| frame.output.position(span));
+                    let get_position = frame.output.position(span);
                     debug_assert!(receiver_slot && count == 2);
                     CallArguments::PartitionField {
                         array,

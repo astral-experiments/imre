@@ -246,7 +246,7 @@ fn nested_additions_keep_their_own_protocol_positions() {
     let plus = output.data(b"+");
     let fallback = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {plus},");
     for position in [[2, 10, 12, 15], [2, 9, 17, 20]] {
-        let pointer = output.position(position);
+        let pointer = output.position(Some(position));
         assert!(
             output.functions.lines().any(|line| {
                 line.contains(&fallback) && line.ends_with(&format!("ptr {pointer})"))

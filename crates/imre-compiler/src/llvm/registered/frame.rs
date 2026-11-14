@@ -1,5 +1,6 @@
 //! Object-frame ABI operations used by registered LLVM code.
 
+use super::abi::PositionOperand;
 use super::sequences::permanent_handle;
 use super::suspension::Suspension;
 use super::{CallArguments, Output, permanent, suspension};
@@ -590,7 +591,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         }
         let op = self.output.data(name.as_bytes());
         let arg = |index| *args.get(index).unwrap_or(&"0");
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let position = self.output.position(span);
         self.checked(&format!(
             "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {}, i64 {}, i64 {}, ptr {position})",
             arg(0),
@@ -721,7 +722,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             .filter(|_| span.is_none() || matches!(self.position, SourcePosition::Expression(_)))
             .map(|range| self.replace_position(SourcePosition::Expression(range)));
         self.take_matching_check();
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let position = self.output.position(span);
         let condition = self.checked(&format!(
             "call i1 @imre_dyn_truth_at(ptr %ctx, i64 {value}, ptr {position})"
         ));
@@ -875,10 +876,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.check_error();
     }
 
-    pub(super) fn position_constant(&mut self, range: TextRange) -> String {
+    pub(super) fn position_constant(&mut self, range: TextRange) -> PositionOperand {
         let (line, start) = self.positions.line_and_column(range.start());
         let (end_line, end) = self.positions.line_and_column(range.end());
-        self.output.position([line, end_line, start, end])
+        self.output.position(Some([line, end_line, start, end]))
     }
 
     /// A live caller retains the full range even when traceback highlighting is suppressed.
@@ -916,7 +917,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         span: Option<[usize; 4]>,
         scope: Option<&str>,
     ) -> String {
-        let position = span.map_or_else(|| "null".into(), |span| self.output.position(span));
+        let position = self.output.position(span);
         let (function, args) = match operands {
             CallArguments::PartitionField {
                 array,
