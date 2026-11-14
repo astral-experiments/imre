@@ -910,6 +910,7 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
+            let mut checked_callers = Vec::new();
             let mut completed_calls = classes.nonreturning_functions.clone();
             let initial_nonreturning = completed_calls.len();
             let mut checked_revision = before;
@@ -1060,6 +1061,44 @@ impl Inference {
                 let mut implicit_none = false;
                 let mut superseded_returns = false;
                 let mut checked_call_cannot_return = false;
+                // A reachable call to a definition that already declined fixed lowering
+                // can use its live Python binding. Keep the frame only in its settled round.
+                if physical
+                    && signatures_settled
+                    && self.revision.get() == before
+                    && fixed_dependencies.is_none()
+                    && signature.method.is_none()
+                    && !function.is_async
+                    && graph.needs_object_runtime.get()
+                    && graph.modules[*module].is_program_source()
+                    && errors.iter().any(|(id, owner, failure)| {
+                        *id == *module
+                            && failure.is_representation()
+                            && owner.is_some_and(|owner| {
+                                let slot = signatures[&owner].id;
+                                graph.session.function_reads_global(
+                                    *module,
+                                    function,
+                                    &definitions[slot].1.name.id,
+                                )
+                            })
+                    })
+                    && !graph.session.is_generator_definition(*module, function)
+                    && let Ok(Some((body, placement))) = registered::prepare_checked_definition(
+                        &checker, function, signature, self, None,
+                    )
+                    && !body.cannot_return
+                    && self.revision.get() == before
+                    && errors.iter().any(|(id, owner, failure)| {
+                        *id == *module
+                            && failure.is_representation()
+                            && owner
+                                .is_some_and(|owner| body.calls.contains(&signatures[&owner].id))
+                    })
+                {
+                    checked_callers.push((signature.id, placement));
+                    continue;
+                }
                 // A binding in the semantic index already selects this coroutine's Python
                 // iterator protocol. Keep its checked placement across diagnostic discovery.
                 let mut placement = (physical
@@ -1343,6 +1382,14 @@ impl Inference {
                     continue;
                 }
                 if conflicting_returns.is_none() && !self.unresolved() {
+                    if completed_calls.len() == initial_nonreturning
+                        && classes.nonreturning_functions.len() == initial_nonreturning
+                    {
+                        for (id, placement) in checked_callers {
+                            checked_bodies.insert(id);
+                            placement.place(graph, &self.source_checks);
+                        }
+                    }
                     break fixed_dependencies;
                 }
                 let mut reports = errors
