@@ -246,8 +246,12 @@ impl crate::ProgramOutput {
 pub(crate) struct Prompt(PreparedBody<'static>);
 
 impl Prompt {
-    pub(crate) fn new(filename: PathBuf, source: String, python_optimization: i32) -> Option<Self> {
-        PreparedBody::interactive(filename, source, python_optimization, 0).map(Self)
+    pub(crate) fn from_parsed(
+        filename: PathBuf,
+        module: ParsedModule<'static, '_>,
+        python_optimization: i32,
+    ) -> Option<Self> {
+        PreparedBody::interactive(filename, module, python_optimization, 0).map(Self)
     }
 }
 
@@ -366,12 +370,11 @@ impl<'a> PreparedBody<'a> {
     /// Prepare a finite `single` input in the same lexical scope as module code.
     fn interactive(
         path: impl Into<Cow<'a, Path>>,
-        text: impl Into<Cow<'a, str>>,
+        module: ParsedModule<'a, '_>,
         python_optimization: i32,
         inherited_flags: u32,
     ) -> Option<Self> {
         let path = path.into();
-        let module = ParsedModule::parse(&path, text.into()).ok()?;
         imre_ast::check_single_input(&module.parsed.syntax().body, module.parsed.tokens()).ok()?;
         Self::from_parsed(
             "<module>",
@@ -1682,6 +1685,11 @@ mod tests {
         }
     }
 
+    fn interactive<'a>(path: &'a Path, text: &'a str) -> Option<PreparedBody<'a>> {
+        let module = ParsedModule::parse(path, text.into()).ok()?;
+        PreparedBody::interactive(path, module, 0, 0)
+    }
+
     #[test]
     fn interactive_prompts_use_checked_operands_and_display_only_expressions() {
         use crate::ir::{Builtin, ExprKind, Statement};
@@ -1701,7 +1709,7 @@ mod tests {
             ("class C:\n    x = 3\n", false),
             ("type T = int\n", false),
         ] {
-            let prepared = PreparedBody::interactive(path, text, 0, 0).unwrap();
+            let prepared = interactive(path, text).unwrap();
             assert!(prepared.syntax.is_none());
             assert!(prepared.docstring.is_none());
             let suite = prepared.initializer();
@@ -1726,9 +1734,9 @@ mod tests {
             assert_eq!(displays, display);
             prepared.standalone().unwrap();
         }
-        assert!(PreparedBody::interactive(path, "1\n2\n", 0, 0).is_none());
-        assert!(PreparedBody::interactive(path, "return 1\n", 0, 0).is_none());
-        assert!(PreparedBody::interactive(path, "def f():\n    '\\ud800'\n", 0, 0).is_none());
+        assert!(interactive(path, "1\n2\n").is_none());
+        assert!(interactive(path, "return 1\n").is_none());
+        assert!(interactive(path, "def f():\n    '\\ud800'\n").is_none());
     }
 
     #[test]
@@ -1737,7 +1745,7 @@ mod tests {
 
         let path = Path::new("<doctest sample[4]>");
         let text = "try:\n    for item in (\n        source\n    ):\n        saved = item; print(saved); None\n        def quiet():\n            record(item)\n        class C:\n            record(item)\n    else:\n        exhausted()\nexcept Error:\n    'handled'\nelse:\n    del item\nfinally:\n    done()\n";
-        let prepared = PreparedBody::interactive(path, text, 0, 0).unwrap();
+        let prepared = interactive(path, text).unwrap();
         let suite = prepared.initializer();
         assert!(suite.fully_checked());
         crate::verify::registered(suite.checked.region()).unwrap();
