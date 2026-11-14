@@ -946,22 +946,23 @@ pub(crate) struct RegisteredSource<'a> {
 }
 
 impl<'a> RegisteredSource<'a> {
-    /// Native initialization supplies typing's special forms and abc.ABCMeta.
-    /// Use their typeshed declarations for calls into the unchanged SDK modules.
+    /// Use typeshed for SDK modules whose core classes are supplied by native initialization.
     pub(crate) fn uses_typeshed_interface(&self) -> bool {
-        matches!(self.name, "typing" | "abc") && self.is_original_bundled_source()
+        matches!(self.name, "typing" | "abc" | "enum")
+            && self.is_original_bundled_source(bundled_module_source(self.name, false))
     }
 
     /// Pair a checked declaration only with its own selected SDK file.
     pub(crate) fn matches_bundled_source(&self, path: &Path) -> bool {
-        self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(path) && self.is_original_bundled_source()
+        self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(path)
+            && self.is_original_bundled_source(crate::modules::bundled_runtime_source(self.name))
     }
 
-    fn is_original_bundled_source(&self) -> bool {
+    fn is_original_bundled_source(&self, original: Option<(&str, &str)>) -> bool {
         !self.main_body
             && !self.declares_signatures
             && !self.check_execution
-            && crate::modules::bundled_runtime_source(self.name).is_some_and(|(filename, body)| {
+            && original.is_some_and(|(filename, body)| {
                 self.path.strip_prefix(BUNDLED_SOURCE_ROOT) == Ok(Path::new(filename))
                     && self.source == body
             })
