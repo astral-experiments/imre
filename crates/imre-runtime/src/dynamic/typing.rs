@@ -9,6 +9,7 @@ pub(super) use parameter_value::{
 
 use crate::dynamic::value::SlotStorage;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use super::source_code::CONDITIONAL;
 use super::value::EMPTY_TUPLE;
@@ -3037,7 +3038,7 @@ impl Context {
         bases: &mut [Id],
         scope: Id,
         namespace: Option<Id>,
-    ) -> Result<Option<std::rc::Rc<[String]>>> {
+    ) -> Result<Option<Arc<[String]>>> {
         if let Some(marker) = self.namedtuple_base(bases) {
             let generic = self.classes.get("typing.Generic").copied();
             if bases
@@ -3171,7 +3172,7 @@ impl Context {
         &mut self,
         slots: Option<Id>,
         base: Id,
-    ) -> Result<Option<std::rc::Rc<[String]>>> {
+    ) -> Result<Option<Arc<[String]>>> {
         let Some(slots) = slots else {
             return Ok(None);
         };
@@ -3363,7 +3364,7 @@ impl Context {
         bases: Vec<Id>,
         ancestors: Vec<Id>,
         layout: ClassLayout,
-        slot_names: Option<std::rc::Rc<[String]>>,
+        slot_names: Option<Arc<[String]>>,
     ) -> Result<Id> {
         let mut mro = Vec::with_capacity(ancestors.len() + 1);
         mro.push(NONE);
@@ -3407,12 +3408,8 @@ impl Context {
         };
         let namedtuple_fields = ancestors
             .iter()
-            .find_map(|&base| match self.heap.get(base) {
-                Value::Class {
-                    namedtuple_fields, ..
-                } => namedtuple_fields.clone(),
-                _ => None,
-            });
+            .find_map(|&base| self.namedtuple_fields(base))
+            .cloned();
         // type.__new__ wraps plain functions only, before the class becomes observable.
         for name in ["__init_subclass__", "__class_getitem__"] {
             if let Some(function) = self.namespace_binding(self.scope_data(scope), name)

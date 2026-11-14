@@ -1878,11 +1878,11 @@ impl Context {
             _ => false,
         }
     }
-    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<std::rc::Rc<[String]>> {
+    pub(super) fn namedtuple_fields(&self, class: Id) -> Option<&Arc<[String]>> {
         match self.heap.get(class) {
             Value::Class {
                 namedtuple_fields, ..
-            } => namedtuple_fields.clone(),
+            } => namedtuple_fields.as_ref(),
             _ => None,
         }
     }

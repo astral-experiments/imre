@@ -1131,7 +1131,7 @@ pub(super) struct ClassNamespace {
     /// Run pending instance finalizers after user exit callbacks, while the heap is live.
     pub finalize_at_shutdown: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
-    pub slot_names: Option<std::rc::Rc<[String]>>,
+    pub slot_names: Option<Arc<[String]>>,
     /// Dynamic classes install real descriptors instead of using inline fields by spelling.
     pub member_slots: bool,
 }
@@ -1591,7 +1591,7 @@ pub(super) enum Value {
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
-        namedtuple_fields: Option<std::rc::Rc<[String]>>,
+        namedtuple_fields: Option<Arc<[String]>>,
     },
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
