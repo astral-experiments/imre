@@ -1,6 +1,6 @@
 //! Link checked module registrations to their native initializers.
 
-use super::body::write_main;
+use super::body::{begin_main, end_main};
 use super::registered::{ABI, Output};
 use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
 use std::collections::HashSet;
@@ -25,9 +25,13 @@ impl ModuleLauncher {
             ..Output::default()
         };
         let config = output.data(config.as_bytes());
-        let main = format!(
-            "entry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})\n"
-        );
+        let mut main = String::from("\n");
+        begin_main(&mut main, true, "");
+        writeln!(
+            main,
+            "entry:\n  %ctx = call ptr @imre_dyn_new(i32 %argc, ptr %argv, ptr {config})"
+        )
+        .unwrap();
         Self {
             output,
             main,
@@ -125,15 +129,8 @@ impl ModuleLauncher {
 
     pub(crate) fn finish(mut self) -> String {
         self.output.integer_prelude();
-        let mut entry = String::from("\n");
-        write_main(
-            &mut entry,
-            &self.main,
-            true,
-            "",
-            "@imre_dyn_finish(ptr %ctx)",
-        );
-        module_parts(&self.output.constants, &self.output.functions, &entry).concat()
+        end_main(&mut self.main, "@imre_dyn_finish(ptr %ctx)");
+        module_parts(&self.output.constants, &self.output.functions, &self.main).concat()
     }
 }
 
