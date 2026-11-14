@@ -191,7 +191,10 @@ impl Emitter<'_, '_> {
                 self.call("imre_union_path_text", Type::Str, &[&args[0].value])
             }
             PathOperation::Resolve => {
-                let strict = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let strict = args.get(1).map_or_else(
+                    || "0".to_owned(),
+                    |strict| self.instruction(format!("zext i1 {} to i32", strict.value.operand)),
+                );
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_path_resolve(ptr {}, i32 {strict})",
                     args[0].value.operand,
