@@ -1,7 +1,23 @@
 """Global enum helpers from CPython 3.14.5 Lib/enum.py. See stdlib/docstrings/LICENSE."""
 
 import sys as _sys
-from enum import Flag as _Flag, IntEnum as _IntEnum, IntFlag as _IntFlag, StrEnum as _StrEnum
+from enum import Enum, Flag as _Flag, IntEnum as _IntEnum, IntFlag as _IntFlag, StrEnum as _StrEnum
+
+
+def _iter_bits_lsb(num):
+    # num must be a positive integer
+    original = num
+    if isinstance(num, Enum):
+        num = num.value
+    if num < 0:
+        raise ValueError('%r is not a positive integer' % original)
+    while num:
+        b = num & (~num + 1)
+        yield b
+        num ^= b
+
+def show_flag_values(value):
+    return list(_iter_bits_lsb(value))
 
 
 def _install_flag_methods(methods):
@@ -26,13 +42,9 @@ class Flag:
 
     def __iter__(self):
         bits = self._value_ & self._flag_mask_
-        if bits < 0:
-            raise ValueError(f"{bits!r} is not a positive integer")
         members = []
-        while bits:
-            bit = bits & -bits
+        for bit in _iter_bits_lsb(bits):
             members.append(self._value2member_map_.get(bit))
-            bits ^= bit
         if self._flag_definition_order:
             members.sort(key=lambda member: member._sort_order_)
         yield from members
