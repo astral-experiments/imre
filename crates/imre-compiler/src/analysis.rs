@@ -251,7 +251,7 @@ pub(crate) struct IndexedFileInput {
     source: ruff_db::source::SourceText,
 }
 
-impl OperandTypes<'_> {
+impl<'session> OperandTypes<'session> {
     pub(crate) fn indexed_input(self, parsed: &ParsedModuleRef) -> IndexedFileInput {
         let db = &self.session.db;
         let file = parsed.module().file();
@@ -290,11 +290,13 @@ impl OperandTypes<'_> {
     ) -> bool {
         let session = self.session;
         let parsed = self.parsed();
-        let Some((original, _)) = self.original_operand(&parsed, operand.into()) else {
+        let Some((original, _, owner)) = self.original_operand(&parsed, operand.into()) else {
             return false;
         };
-        let file = session.files[callee.module];
-        let target = session.parsed(file);
+        let file = owner
+            .program(&session.db)
+            .program_file(&session.db, session.files[callee.module]);
+        let target = session.parsed_program_file(file);
         let Some(parameter) = target
             .suite()
             .get(callee.statement)
@@ -307,9 +309,9 @@ impl OperandTypes<'_> {
         else {
             return false;
         };
-        let model = SemanticModel::new(&session.db, session.db.program_file(file));
+        let model = SemanticModel::new(&session.db, file);
         session
-            .inferred_operand_type(self.module, original)
+            .inferred_operand_type(owner, original)
             .zip(parameter.inferred_type(&model))
             .is_some_and(|(value, expected)| Self::accepts_type(&model, value, expected))
     }
@@ -337,11 +339,11 @@ impl OperandTypes<'_> {
         };
 
         let parsed = self.parsed();
-        let Some((Expr::Call(call), _)) = self.original_operand(&parsed, call.into()) else {
+        let Some((Expr::Call(call), _, file)) = self.original_operand(&parsed, call.into()) else {
             return false;
         };
         let db = &self.session.db;
-        let model = SemanticModel::new(db, db.program_file(self.session.files[self.module]));
+        let model = SemanticModel::new(db, file);
         let Some(Type::Union(union)) = call.func.inferred_type(&model) else {
             return false;
         };
@@ -397,7 +399,7 @@ impl OperandTypes<'_> {
 
     fn checked_scalar(self, operand: ExprRef<'_>, rule: ScalarMatch) -> Option<crate::ir::Type> {
         let parsed = self.parsed();
-        let (original, _) = self.original_operand(&parsed, operand)?;
+        let (original, _, _) = self.original_operand(&parsed, operand)?;
         self.session
             .inferred_scalar_layout(self.module, original, rule)
     }
@@ -405,7 +407,7 @@ impl OperandTypes<'_> {
     /// Resolve a deferred physical name read to the binding in its module frame.
     pub(crate) fn reads_deferred_global(self, expression: &Expr) -> bool {
         let parsed = self.parsed();
-        let Some((Expr::Name(name), scope)) = self.original_operand(&parsed, expression.into())
+        let Some((Expr::Name(name), scope, _)) = self.original_operand(&parsed, expression.into())
         else {
             return false;
         };
@@ -416,11 +418,10 @@ impl OperandTypes<'_> {
 
     pub(crate) fn is_bound_method(self, method: &Expr) -> bool {
         let parsed = self.parsed();
-        let Some((original, _)) = self.original_operand(&parsed, method.into()) else {
+        let Some((original, _, file)) = self.original_operand(&parsed, method.into()) else {
             return false;
         };
         let session = self.session;
-        let file = session.db.program_file(session.files[self.module]);
         let model = SemanticModel::new(&session.db, file);
         use ty_python_semantic::types::Type;
         let bound = |ty| matches!(ty, Type::BoundMethod(_));
@@ -435,13 +436,11 @@ impl OperandTypes<'_> {
         self,
         parsed: &'p ParsedModuleRef,
         operand: ExprRef<'_>,
-    ) -> Option<(&'p Expr, FileScopeId)> {
+    ) -> Option<(&'p Expr, FileScopeId, ProgramFile<'session>)> {
         use ruff_python_ast::{AnyRootNodeRef, ExprContext, HasNodeIndex};
         let session = self.session;
-        let index = ty_python_core::semantic_index(
-            &session.db,
-            session.db.program_file(session.files[self.module]),
-        );
+        let file = session.db.program_file(session.files[self.module]);
+        let index = ty_python_core::semantic_index(&session.db, file);
         // Forwarding may preserve a node index while changing the expression it evaluates.
         let scope = index.try_expression_scope_id(&operand)?;
         let AnyRootNodeRef::Expr(original) = parsed.get_by_index(operand.node_index().load())
@@ -455,7 +454,7 @@ impl OperandTypes<'_> {
         {
             return None;
         }
-        Some((original, scope))
+        Some((original, scope, file))
     }
 }
 
@@ -1770,8 +1769,11 @@ impl Session {
     }
 
     fn parsed(&self, file: File) -> ParsedModuleRef {
-        ruff_db::parsed::parsed_module(&self.db, self.db.program_file(file).python_file(&self.db))
-            .load(&self.db)
+        self.parsed_program_file(self.db.program_file(file))
+    }
+
+    fn parsed_program_file(&self, file: ProgramFile<'_>) -> ParsedModuleRef {
+        ruff_db::parsed::parsed_module(&self.db, file.python_file(&self.db)).load(&self.db)
     }
 
     /// Resolve a source offset with the cached line index for the defining module.
@@ -2551,16 +2553,15 @@ impl Session {
         ) {
             return None;
         }
-        self.inferred_operand_type(module, value)
+        self.inferred_operand_type(self.db.program_file(self.files[module]), value)
     }
 
-    fn inferred_operand_type(
-        &self,
-        module: usize,
+    fn inferred_operand_type<'db>(
+        &'db self,
+        file: ProgramFile<'db>,
         value: &Expr,
-    ) -> Option<ty_python_semantic::types::Type<'_>> {
+    ) -> Option<ty_python_semantic::types::Type<'db>> {
         self.hint_reads.set(self.hint_reads.get() + 1);
-        let file = self.db.program_file(self.files[module]);
         // Inferring one expression visits its scope. An unrelated loop can grow a
         // nested tuple type at every iteration, even for a simple scalar operand.
         let previous = READING_LAYOUT_HINT.replace(true);
