@@ -986,11 +986,11 @@ pub(crate) struct RegisteredSources<'a> {
 }
 
 pub(crate) fn compile(
-    (operand, packaged_file_module, mut filesystem, wheel_records): (
+    (operand, packaged_file_module, mut filesystem, mut wheel_records): (
         crate::ProgramEntry<'_>,
         Option<&str>,
         crate::watch::FileSystem<'_>,
-        &mut crate::installed_wheels::WheelRecords,
+        crate::installed_wheels::WheelRecords,
     ),
     options: &CompileOptions,
     object_imports: bool,
@@ -2416,12 +2416,13 @@ pub(crate) fn compile(
             root,
             &sources[id].1,
             initial[..path0_len].contains(root),
-            wheel_records,
+            &mut wheel_records,
             options,
             &mut inputs,
             &mut filesystem,
         )
     });
+    drop(installed_wheels);
     // A runtime path change can select any linked file. Bind its functions using the
     // file's own search root and wheel membership, including for shadowed sources.
     for (id, root) in file_origins {
@@ -2434,6 +2435,7 @@ pub(crate) fn compile(
             registrations.python_providers.insert(id);
         }
     }
+    drop(wheel_records);
     // A nested literal belongs to the same source slot as its outermost caller.
     let literal_sites = syntax.as_ref().map_or_else(Default::default, |session| {
         literals
