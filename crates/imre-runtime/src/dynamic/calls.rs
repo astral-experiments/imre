@@ -5,6 +5,12 @@ use super::stdlib::functools::LRU_CACHE_CLASS;
 use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
+/// Written operands still need Python argument binding. Selected slots are in formal order.
+pub(super) enum FunctionArguments {
+    Written(Vec<Id>, Vec<(String, Id)>, Option<Id>),
+    Bound(Vec<Id>),
+}
+
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
 
 /// These native result types inherit object.__new__ but reject direct allocation.
@@ -8264,7 +8270,10 @@ impl Context {
         loop {
             match *self.heap.get(callable) {
                 Value::Function { .. } => {
-                    return self.prepare_function_call(callable, args, kwargs, None);
+                    return self.prepare_function_call(
+                        callable,
+                        FunctionArguments::Written(args, kwargs, None),
+                    );
                 }
                 Value::Method {
                     callable: target,
@@ -8354,7 +8363,10 @@ impl Context {
             let sig = self.parsed_parameters(code)?;
             if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
                 self.validate_keyword_keys(mapping)?;
-                return self.prepare_function_call(callable, args, Vec::new(), Some(mapping));
+                return self.prepare_function_call(
+                    callable,
+                    FunctionArguments::Written(args, Vec::new(), Some(mapping)),
+                );
             }
         }
         let kwargs = self.keyword_args(mapping)?;
@@ -9252,12 +9264,10 @@ impl Context {
         }
     }
 
-    fn prepare_function_call(
+    pub(super) fn prepare_function_call(
         &mut self,
         callable: Id,
-        args: Vec<Id>,
-        kwargs: Vec<(String, Id)>,
-        variadic: Option<Id>,
+        arguments: FunctionArguments,
     ) -> Result<RegisteredCall> {
         let Value::Function {
             ref fields,
@@ -9271,6 +9281,12 @@ impl Context {
         else {
             unreachable!("registered Python function");
         };
+        let (argc, kwargs) = match &arguments {
+            FunctionArguments::Written(positional, keywords, _) => {
+                (positional.len(), keywords.as_slice())
+            }
+            FunctionArguments::Bound(slots) => (slots.len(), &[][..]),
+        };
         let parameters = self.code_object(code).parameters;
         let name = self.copy_name(fields.qualname)?;
         if parameters == NONE {
@@ -9280,14 +9296,11 @@ impl Context {
                     format!("{name}() got an unexpected keyword argument '{key}'"),
                 ));
             }
-            if !args.is_empty() {
-                let verb = if args.len() == 1 { "was" } else { "were" };
+            if argc != 0 {
+                let verb = if argc == 1 { "was" } else { "were" };
                 return Err(Error::new(
                     "TypeError",
-                    format!(
-                        "{name}() takes 0 positional arguments but {} {verb} given",
-                        args.len()
-                    ),
+                    format!("{name}() takes 0 positional arguments but {argc} {verb} given"),
                 ));
             }
             let globals = self.module_globals(scope)?;
@@ -9316,41 +9329,53 @@ impl Context {
         }
 
         let shape = sig.shape();
-        let pos = &sig.positional;
-        let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
-        let keys = kwargs.iter().map(|(key, _)| key.as_str());
-        let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
-            self.dict_named_item(kwdefaults, n).is_some()
-        })?;
-        for (n, &v) in pos.iter().zip(&args) {
-            self.bind_argument(local, n, v)?;
-        }
-        if let Some(n) = sig.varargs.as_deref() {
-            let extra = if pos.is_empty() {
-                args
-            } else {
-                copy_ids(args.get(pos.len()..).unwrap_or_default())?
-            };
-            let extra = self.alloc(Value::Tuple(extra));
-            self.bind_argument(local, n, extra)?;
-        }
-        let mut extra = Vec::new();
-        for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
-            if let Some(slot) = slot {
-                self.bind_argument(local, shape.parameter(slot), value)?;
-            } else {
-                let k = self.text(key);
-                extra.push((k, value));
+        let omitted = match arguments {
+            FunctionArguments::Written(args, kwargs, variadic) => {
+                let pos = &sig.positional;
+                let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
+                let keys = kwargs.iter().map(|(key, _)| key.as_str());
+                let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
+                    self.dict_named_item(kwdefaults, n).is_some()
+                })?;
+                for (n, &v) in pos.iter().zip(&args) {
+                    self.bind_argument(local, n, v)?;
+                }
+                if let Some(n) = sig.varargs.as_deref() {
+                    let extra = if pos.is_empty() {
+                        args
+                    } else {
+                        copy_ids(args.get(pos.len()..).unwrap_or_default())?
+                    };
+                    let extra = self.alloc(Value::Tuple(extra));
+                    self.bind_argument(local, n, extra)?;
+                }
+                let mut extra = Vec::new();
+                for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
+                    if let Some(slot) = slot {
+                        self.bind_argument(local, shape.parameter(slot), value)?;
+                    } else {
+                        let k = self.text(key);
+                        extra.push((k, value));
+                    }
+                }
+                if let Some(n) = sig.kwargs.as_deref() {
+                    let v = variadic.unwrap_or_else(|| self.dict(extra));
+                    self.bind_argument(local, n, v)?;
+                }
+                binding.defaults
             }
-        }
-        if let Some(n) = sig.kwargs.as_deref() {
-            let v = variadic.unwrap_or_else(|| self.dict(extra));
-            self.bind_argument(local, n, v)?;
-        }
+            FunctionArguments::Bound(slots) => {
+                debug_assert_eq!(slots.len(), sig.positional.len() + sig.keyword_only.len());
+                for (name, value) in sig.positional.iter().chain(&sig.keyword_only).zip(slots) {
+                    self.bind_argument(local, name, value)?;
+                }
+                smallvec::SmallVec::new()
+            }
+        };
         let supplied_types = self.check_supplied_types(callable, &sig, &name, |param| {
             self.scope_data(local).names.get(param).copied()
         });
-        for slot in binding.defaults {
+        for slot in omitted {
             let value = self.bound_default(&shape, slot, defaults, kwdefaults);
             self.bind_argument(local, shape.parameter(slot), value)?;
         }
