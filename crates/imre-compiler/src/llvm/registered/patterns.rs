@@ -207,7 +207,7 @@ impl Frame<'_, '_, '_> {
                 "phi i1 [ true, %{accepted} ], [ false, %{mismatch} ]"
             ));
             if captures.slots.is_empty() {
-                self.discard_truth(&boundary);
+                self.release_owned_operands(&boundary);
             } else {
                 // Older operands precede the mark. Only the staged bindings can have
                 // acquired an additional live reference while testing this child.
