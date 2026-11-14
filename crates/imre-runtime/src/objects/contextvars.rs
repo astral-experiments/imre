@@ -1,5 +1,4 @@
-//! Contexts own shallow bindings. Copying a context shares its map root; the first
-//! write detaches it without copying any Python value.
+//! Contexts own shallow bindings. A copy shares its map until a binding changes.
 use super::exceptions::{Error, Kind};
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, finish, object, values};
@@ -7,7 +6,29 @@ use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::hash::Hash;
 use std::rc::Rc;
+
+/// Update a binding and return its previous owner for the token. A snapshot
+/// can keep its map when the replacement denotes the very same stored value.
+pub(crate) fn replace_context_binding<K: Eq + Hash + Clone, V: Clone>(
+    root: &mut Rc<HashMap<K, V>>,
+    key: K,
+    value: Option<V>,
+    same: impl FnOnce(&V, &V) -> bool,
+) -> Option<V> {
+    if Rc::strong_count(root) > 1
+        && let Some(new) = &value
+        && root.get(&key).is_some_and(|old| same(old, new))
+    {
+        return value;
+    }
+    let bindings = Rc::make_mut(root);
+    match value {
+        Some(value) => bindings.insert(key, value),
+        None => bindings.remove(&key),
+    }
+}
 
 #[derive(Clone)]
 struct Binding {
@@ -34,16 +55,15 @@ impl State {
             .get(&(key as usize))
             .map(|b| b.value.clone())
     }
-    fn replace(&self, key: crate::ObjectOwner, value: Option<OwnedWord>) -> Option<OwnedWord> {
-        let id = crate::ObjectOwner::as_ptr(&key) as usize;
-        let old = {
-            let mut root = self.bindings.borrow_mut();
-            let bindings = Rc::make_mut(&mut root);
-            match value {
-                Some(value) => bindings.insert(id, Binding { _key: key, value }),
-                None => bindings.remove(&id),
-            }
-        };
+    fn replace(&self, key: &crate::ObjectOwner, value: Option<OwnedWord>) -> Option<OwnedWord> {
+        let id = crate::ObjectOwner::as_ptr(key) as usize;
+        let binding = value.map(|value| Binding {
+            _key: key.clone(),
+            value,
+        });
+        let old = replace_context_binding(&mut self.bindings.borrow_mut(), id, binding, |a, b| {
+            a.value.kind == b.value.kind && a.value.word == b.value.word
+        });
         old.map(|b| b.value)
     }
 }
@@ -329,7 +349,7 @@ pub unsafe extern "C" fn imre_contextvars_set(
         )
     };
     let context = current();
-    let old = context.replace(crate::ObjectOwner::clone(&key), Some(value));
+    let old = context.replace(&key, Some(value));
     wrap(Storage::ContextToken(Rc::new(Token {
         key,
         context,
@@ -373,7 +393,7 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
                 format!("{} {reason}", description(owner)?),
             ));
         }
-        t.context.replace(t.key.clone(), t.old.clone());
+        t.context.replace(&t.key, t.old.clone());
         Ok(())
     });
     // Formatting an invalid token can raise while rendering its variable's default.

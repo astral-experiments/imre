@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use super::{Context, Error, Id, NONE, Result, Value};
-use crate::objects::consume_context_token;
+use crate::objects::{consume_context_token, replace_context_binding};
 
 impl Context {
     /// Use the entered context, creating the implicit one on its first copy or set.
@@ -62,11 +62,7 @@ impl Context {
         let Value::Context(bindings) = self.heap.get_mut(context) else {
             unreachable!("contextvars receiver is an exact Context");
         };
-        let bindings = Rc::make_mut(bindings);
-        match value {
-            Some(value) => bindings.insert(variable, value),
-            None => bindings.remove(&variable),
-        }
+        replace_context_binding(bindings, variable, value, Id::eq)
     }
 
     fn reset_binding(&mut self, variable: Option<Id>, token: Id) -> Result<Id> {
@@ -204,6 +200,27 @@ pub(super) fn call(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_snapshot_detaches_only_for_a_different_value() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("key");
+        let key = call(&mut ctx, "ContextVar", &[name], &[]).unwrap();
+        let first = ctx.alloc(Value::List(Vec::new()));
+        let second = ctx.alloc(Value::List(Vec::new()));
+        let current = ctx.current_context();
+        assert_eq!(ctx.replace_binding(current, key, Some(first)), None);
+        let copy = call(&mut ctx, "copy_context", &[], &[]).unwrap();
+        for value in [first, second] {
+            assert_eq!(ctx.replace_binding(current, key, Some(value)), Some(first));
+            assert_eq!(
+                Rc::ptr_eq(ctx.bindings(copy), ctx.bindings(current)),
+                value == first
+            );
+            assert_eq!(ctx.bindings(copy)[&key], first);
+            assert_eq!(ctx.bindings(current)[&key], value);
+        }
+    }
 
     #[test]
     fn foreign_reset_leaves_the_ambient_context_for_the_first_copy() {
