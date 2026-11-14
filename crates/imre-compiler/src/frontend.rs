@@ -1139,6 +1139,17 @@ fn lower_graph(
         if packed {
             inference.discover_packed_arguments();
         }
+        // Initializers check calls before the ordinary body pass. A raise in the
+        // function's outer suite prevents a normal exit unless a return bypasses it.
+        if let Cow::Borrowed(source) = function
+            && graph.modules[*module].is_program_source()
+            && source.decorator_list.is_empty()
+            && source.body.iter().any(ast::Stmt::is_raise_stmt)
+            && !graph.session.call_may_return_implicitly(*module, source)
+            && crate::analysis::explicit_returns(source).is_empty()
+        {
+            classes.nonreturning_functions.insert(signature.id);
+        }
     }
     let entry_statements = graph.modules[graph.entry].executable_statements();
     let inference::Solution {

@@ -904,6 +904,35 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_trailing_declaration_preserves_a_raising_call_operand() {
+        let project = tempfile::tempdir().unwrap();
+        let main = project.path().join("raising_operand.py");
+        let source = include_str!("../../../../tests/fixtures/callables/raising_operand.py");
+        std::fs::write(
+            &main,
+            format!("{source}\n\ndef unrelated() -> int:\n    return 19\n"),
+        )
+        .unwrap();
+        crate::check_file(&main, None).unwrap();
+    }
+
+    #[test]
+    fn a_type_checking_only_raise_preserves_the_physical_argument_error() {
+        let project = tempfile::tempdir().unwrap();
+        let main = project.path().join("main.py");
+        std::fs::write(
+            &main,
+            "from typing import TYPE_CHECKING\ndef stop() -> None:\n    if TYPE_CHECKING:\n        raise ValueError()\ndef take(x: int) -> int:\n    return x\ntake(stop())\ndef unrelated() -> int:\n    return 19\n",
+        )
+        .unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            error.contains("main.py:7:6: Imre: expected int, got None"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn stored_provider_callable_selects_its_own_unsolved_signature() {
         use crate::frontend::{lower_with_caller_cache, phase::Kind};
         use crate::modules::SourceGraph;
