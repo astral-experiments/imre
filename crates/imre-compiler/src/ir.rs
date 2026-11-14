@@ -3664,9 +3664,9 @@ pub(crate) enum MatchTest {
     Singleton(Option<bool>),
     Equal(Expr),
     Or(Vec<MatchTest>),
-    Capture(Box<MatchTest>, String),
+    Capture(Box<MatchTest>, usize),
     Sequence(imre_ast::SequencePatternPlan, Vec<MatchTest>),
-    Mapping(Vec<(Expr, MatchTest)>, Option<String>),
+    Mapping(Vec<(Expr, MatchTest)>, Option<usize>),
     Class {
         range: ruff_text_size::TextRange,
         class: Expr,

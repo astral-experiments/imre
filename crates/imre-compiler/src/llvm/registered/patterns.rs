@@ -10,11 +10,6 @@ impl RegisteredFrame<'_, '_> {
         self.branch(condition, &matched, failed);
         self.label(&matched);
     }
-
-    fn capture(&mut self, name: &str, value: &str, captures: &str) {
-        let key = self.code_name(name);
-        self.op("put", &[captures, &key, value]);
-    }
 }
 
 impl CheckedBody<'_, '_, '_, '_> {
@@ -25,6 +20,14 @@ impl CheckedBody<'_, '_, '_, '_> {
         let mark = frame.temporary_mark();
         let subject = frame.pattern_value(expr);
         let done = frame.name("b");
+        // Cases are tested one at a time. Their temporary captures share these
+        // frame slots until the pattern succeeds and installs its lexical bindings.
+        let captures = frame.private_slot_count;
+        frame.private_slot_count += cases
+            .iter()
+            .map(|case| case.captures.len())
+            .max()
+            .unwrap_or(0);
         let count = cases.len();
         let default = count > 1 && matches!(cases[count - 1].pattern.test, MatchTest::Always);
         let tested = count - usize::from(default);
@@ -41,23 +44,24 @@ impl CheckedBody<'_, '_, '_, '_> {
             let scope = frame.begin_operand_scope();
             if index < tested {
                 frame.live.push(subject.clone());
-                let captures = if pattern.names.is_empty() {
-                    "0".to_owned()
-                } else {
-                    frame.op("dict", &[])
-                };
+                let slots = captures..captures + case.captures.len();
+                let enclosing = frame.live_slots.len();
+                for slot in slots.clone() {
+                    frame.store_frame_slot(slot, "0");
+                }
+                frame.live_slots.extend(slots.clone());
                 frame.test_pattern(
                     &pattern.test,
                     &subject,
                     &next,
-                    &captures,
+                    captures,
                     (!again).then_some(mark.as_str()),
                 );
-                for (i, name) in pattern.names.iter().enumerate() {
-                    let key = frame.code_name(name);
-                    let value = frame.op("get", &[&captures, &key]);
-                    frame.assign(case.captures[i], CheckedValue::handle(value));
+                for (capture, &target) in slots.zip(&case.captures) {
+                    let value = frame.load_frame_slot(capture);
+                    frame.assign(target, CheckedValue::handle(value));
                 }
+                frame.live_slots.truncate(enclosing);
                 if !again {
                     frame.live.pop();
                 }
@@ -110,14 +114,14 @@ impl Frame<'_, '_, '_> {
         test: &MatchTest,
         value: &str,
         failed: &str,
-        captures: &str,
+        captures: usize,
         last_use: Option<&str>,
     ) {
         match test {
             MatchTest::Always => {}
-            MatchTest::Capture(inner, name) => {
+            MatchTest::Capture(inner, index) => {
                 self.test_pattern(inner, value, failed, captures, None);
-                self.capture(name, value, captures);
+                self.store_frame_slot(captures + index, value);
             }
             MatchTest::Equal(expr) => self.pattern_equal(value, expr, failed, last_use),
             MatchTest::Singleton(s) => {
@@ -179,14 +183,14 @@ impl Frame<'_, '_, '_> {
                     let item = f.op("get", &[&values, &i]);
                     self.test_pattern(child, &item, failed, captures, None);
                 }
-                if let Some(name) = rest {
+                if let Some(index) = rest {
                     let f = &mut *self.code;
                     let rest = f.op("dict", &[]);
                     f.op("update", &[&rest, value]);
                     for key in matched {
                         f.op("delitem", &[&rest, &key]);
                     }
-                    f.capture(name, &rest, captures);
+                    f.store_frame_slot(captures + index, &rest);
                 }
             }
             MatchTest::Class {
@@ -231,7 +235,7 @@ impl Frame<'_, '_, '_> {
         items: &[MatchTest],
         value: &str,
         failed: &str,
-        captures: &str,
+        captures: usize,
     ) {
         let f = &mut *self.code;
         let sequence = f.op("match_sequence", &[value]);
