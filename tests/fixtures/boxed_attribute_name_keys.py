@@ -19,6 +19,8 @@ def current():
         def payload(self):
             del self.saved
 
+    assert Fields.__static_attributes__ == ("saved",)
+
     class Failure(Fields, Exception):
         pass
 
