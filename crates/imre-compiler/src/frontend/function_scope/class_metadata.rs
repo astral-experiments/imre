@@ -101,11 +101,13 @@ pub(in crate::frontend) fn expression_reads(expression: &ast::Expr) -> BTreeSet<
 pub(super) fn comprehension_scope(
     expression: &ast::Expr,
     string_annotations: bool,
+    implicit_class: bool,
 ) -> (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>) {
     // Eager comprehensions use the enclosing frame's fast slots. An escaping
     // genexpr or function nested inside the display still captures its reads.
     let mut uses = Uses {
         scope: ExpressionScope::Function,
+        implicit_class,
         ..Uses::new(string_annotations)
     };
     uses.visit_expr(expression);

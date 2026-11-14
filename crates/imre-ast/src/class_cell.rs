@@ -83,17 +83,6 @@ pub fn function_needed(
     scope.free() & CLASS != 0
 }
 
-/// Apply the same lexical rules to the body of a lambda.
-pub fn expression_needed(
-    body: &ast::Expr,
-    parameters: Option<&ast::Parameters>,
-    string_annotations: bool,
-) -> bool {
-    let mut scope = function_scope(parameters, string_annotations);
-    scope.visit_expr(body);
-    scope.free() & CLASS != 0
-}
-
 fn function_scope(parameters: Option<&ast::Parameters>, string_annotations: bool) -> Scope {
     Scope {
         string_annotations,
