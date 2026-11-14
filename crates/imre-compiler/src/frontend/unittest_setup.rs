@@ -291,7 +291,7 @@ pub(super) fn slots(
                 for (method, origin) in c.methods.iter_mut().zip(&c.method_origins) {
                     crate::classes::mangle_fields(
                         &owners[classes.ids[origin]],
-                        std::sync::Arc::make_mut(&mut method.function),
+                        method.function.make_mut(),
                         |key| private.contains(key),
                     );
                 }

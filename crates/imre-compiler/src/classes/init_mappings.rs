@@ -188,6 +188,6 @@ pub(super) fn infer(
         });
     }
     for (index, annotation) in inferred_returns {
-        Arc::make_mut(&mut methods[index].function).returns = Some(Box::new(annotation));
+        methods[index].function.make_mut().returns = Some(Box::new(annotation));
     }
 }
