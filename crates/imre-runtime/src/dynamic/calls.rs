@@ -2597,11 +2597,14 @@ impl Context {
         hook: Id,
         obj: Id,
         class: Id,
-        name: &str,
+        attr: AttributeName<'_>,
         original: Option<Id>,
     ) -> Result<Id> {
         let callable = self.bind_attribute(hook, obj, class)?;
-        let key = original.unwrap_or_else(|| self.text(name));
+        let key = original.unwrap_or_else(|| match attr {
+            AttributeName::Linked(name) => self.heap.code_name(name),
+            _ => attr.key(self),
+        });
         self.call(callable, vec![key], Vec::new())
     }
 
@@ -2682,9 +2685,19 @@ impl Context {
         attr: AttributeName<'_>,
         report_missing: bool,
     ) -> Result<Id> {
+        self.lookup_attribute_operand(obj, attr, report_missing, attr.original())
+    }
+
+    /// Preserve a linked operand for user hooks while an exact static name takes the text path.
+    pub(super) fn lookup_attribute_operand(
+        &mut self,
+        obj: Id,
+        attr: AttributeName<'_>,
+        report_missing: bool,
+        original: Option<Id>,
+    ) -> Result<Id> {
         let spelling = attr.text(self)?;
         let name = spelling.as_ref();
-        let original = attr.original();
         let obj = self.weak_proxy_target(obj)?;
         let obj = super::typing::generic_attr_target(self, obj, name, false)?;
         if matches!(self.heap.get(obj), Value::ThreadLocal(_)) {
@@ -2714,7 +2727,7 @@ impl Context {
             _ => return self.default_object_attribute(obj, attr, ObjectAttribute::Get),
         };
         let attribute = if let Some(hook) = self.class_attr(class, "__getattribute__") {
-            self.attribute_hook(hook, obj, class, name, original)
+            self.attribute_hook(hook, obj, class, attr, original)
         } else if name == "__class__"
             && attr.nonexact_key(self).is_none()
             && matches!(self.heap.get(obj), Value::Instance { .. })
@@ -2732,7 +2745,7 @@ impl Context {
                 let Some(hook) = self.class_attr(class, "__getattr__") else {
                     return Err(error);
                 };
-                self.attribute_hook(hook, obj, class, name, original)
+                self.attribute_hook(hook, obj, class, attr, original)
             }
             result => result,
         }
@@ -2917,7 +2930,7 @@ impl Context {
         {
             self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Method(receiver))
         } else {
-            self.lookup_attr(obj, name)
+            self.lookup_attribute(obj, AttributeName::Linked(name), true)
         }
     }
 

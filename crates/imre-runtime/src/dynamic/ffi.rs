@@ -474,7 +474,12 @@ impl Context {
                 if op == "method" {
                     self.lookup_method(a, &name)
                 } else {
-                    self.lookup_attr(a, &name)
+                    self.lookup_attribute_operand(
+                        a,
+                        super::attribute_name::AttributeName::Text(&name),
+                        true,
+                        Some(b),
+                    )
                 }
             }
             "setattr" => self.set_attr(a, &self.copy_name(b)?, c),

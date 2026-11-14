@@ -28,7 +28,7 @@ pub(super) fn is_method(name: &str) -> bool {
 impl Name<'_> {
     fn is_dict(self, ctx: &mut Context) -> Result<bool> {
         match self {
-            Self::Text(name) => Ok(name == "__dict__"),
+            Self::Text(name) | Self::Linked(name) => Ok(name == "__dict__"),
             Self::Python { key, .. } => match ctx.heap.get(key) {
                 Value::Str(name) => Ok(name == "__dict__"),
                 _ => {
