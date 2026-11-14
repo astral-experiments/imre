@@ -23,3 +23,11 @@ def current():
             del Target("first")[Target("left"), Target("right")], following(fail)[Target("last")]
         except LookupError:
             print("caught")
+
+    remaining = Target("remaining local")
+    first = Target("previous first")
+    second = Target("previous second")
+    first = Target("first local")
+    second = Target("second local")
+    print("bound", first.name, second.name)
+    del second, first

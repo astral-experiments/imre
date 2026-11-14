@@ -464,7 +464,7 @@ impl Context {
                 };
                 if removed {
                     if released {
-                        self.heap.release_unbound_finalizers();
+                        self.collect_after_release();
                     }
                 } else if op == "delname" {
                     return Err(self.missing_binding(a, scope, &name));
