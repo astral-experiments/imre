@@ -379,15 +379,13 @@ impl SourceSites {
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
             && let Some(target) = target()
         {
-            let invoke = ir::RegisteredCall::new(
-                call.range(),
-                registered::values::callable_target(call),
-                ir::RegisteredArguments::Positional,
+            let (invoke, target) = registered::values::callable_target(call).bind(
+                call,
+                target,
+                Some(ir::RegisteredArguments::Positional),
             );
-            self.attributes.insert(
-                site.range,
-                FixedAttribute::Call(Some(Box::new(target)), invoke),
-            );
+            self.attributes
+                .insert(site.range, FixedAttribute::Call(Some(target), invoke));
             self.commit(site, node);
         }
     }
