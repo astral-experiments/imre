@@ -14894,9 +14894,13 @@ impl<'a> Checker<'a> {
         if name == "int"
             && args.len() == 1
             && matches!(args[0].ty, Type::Union(_))
-            && let Some(value) = self.int_enum_union_value(args[0].clone())
         {
-            return Ok(value);
+            if self.types.is_bool_or_int(args[0].ty) {
+                return self.int_method_receiver(args[0].clone(), call);
+            }
+            if let Some(value) = self.int_enum_union_value(args[0].clone()) {
+                return Ok(value);
+            }
         }
         if args.len() == 1 && matches!(args[0].ty, Type::IntEnum(_)) && name == "int" {
             return Ok(Self::enum_integer(args.into_iter().next().unwrap()));
