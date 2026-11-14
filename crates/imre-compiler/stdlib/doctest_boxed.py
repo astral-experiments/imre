@@ -127,6 +127,12 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
                 lines = linecache.getlines(filename, module.__dict__)
             test.lineno = _docstring_lineno(obj, lines, filename)
         tests.append(test)
+    if not tests and sys.flags.optimize >= 2:
+        # Skip doctests when running with -O2
+        suite = _DocTestSuite()
+        suite.addTest(SkipDocTestCase(module))
+        return suite
+
     return _suite_from_tests(tests, lambda test: DocTestCase(test, optionflags, setUp, tearDown, checker))
 
 
@@ -139,6 +145,24 @@ class DocTestCase(_DocTestCase):
         super().__init__(test, optionflags, checker=checker)
         self._dt_setUp = setUp
         self._dt_tearDown = tearDown
+
+
+class SkipDocTestCase(DocTestCase):
+    def __init__(self, module):
+        self.module = module
+        DocTestCase.__init__(self, None)
+
+    def setUp(self):
+        self.skipTest("DocTestSuite will not work with -O2 and above")
+
+    def test_skip(self):
+        pass
+
+    def shortDescription(self):
+        return "Skipping tests from %s" % self.module.__name__
+
+    __str__ = shortDescription
+
 
 
 class DocFileCase(DocTestCase):
