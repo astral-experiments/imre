@@ -478,17 +478,27 @@ pub(in crate::frontend) fn bound_call(
     target: Expr,
     arguments: Vec<Expr>,
 ) -> Expr {
-    // Direct method lookup excludes expansion and large calls. The checked list
-    // methods also arrive with at most one bound positional argument.
-    let layout = match selection {
-        ir::RegisteredCallTarget::Method { .. } => fixed_argument_layout(&call.arguments),
-        ir::RegisteredCallTarget::Callable { .. } => registered_argument_layout(call),
-    };
-    invoke_value(
-        ir::RegisteredCall::new(call.range(), selection, layout),
-        Box::new(target),
-        arguments,
-    )
+    let (site, target) = selection.bind(call, target, None);
+    invoke_value(site, target, arguments)
+}
+
+impl ir::RegisteredCallTarget {
+    /// Bind the evaluated operand to its source call, reusing a layout established by the checker.
+    pub(in crate::frontend) fn bind(
+        self,
+        call: &ast::ExprCall,
+        target: Expr,
+        layout: Option<ir::RegisteredArguments>,
+    ) -> (Box<ir::RegisteredCall>, Box<Expr>) {
+        let arguments = layout.unwrap_or_else(|| match self {
+            Self::Method { .. } => fixed_argument_layout(&call.arguments),
+            Self::Callable { .. } => registered_argument_layout(call),
+        });
+        (
+            ir::RegisteredCall::new(call.range(), self, arguments),
+            Box::new(target),
+        )
+    }
 }
 
 fn invoke_value(site: Box<ir::RegisteredCall>, target: Box<Expr>, arguments: Vec<Expr>) -> Expr {
