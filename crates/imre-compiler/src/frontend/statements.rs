@@ -62,16 +62,6 @@ pub(super) fn if_clauses(
     )
 }
 
-pub(super) fn if_arms(
-    arms: Vec<(Expr, Vec<Statement>)>,
-    mut otherwise: Vec<Statement>,
-) -> Vec<Statement> {
-    for (test, body) in arms.into_iter().rev() {
-        otherwise = vec![Statement::If(test, body, otherwise)];
-    }
-    otherwise
-}
-
 pub(super) fn push_if(
     output: &mut Vec<Statement>,
     condition: Expr,
