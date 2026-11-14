@@ -34,21 +34,22 @@ pub(super) fn raised<E>(
 
 /// A normal exit from the protected region reaches its successor only if cleanup falls through.
 pub(super) fn finish_try(
+    output: Option<&mut Vec<Statement>>,
     body: Vec<Statement>,
     handlers: Vec<ir::ExceptHandler>,
     orelse: Vec<Statement>,
     normal_exit: bool,
     (finalbody, final_falls): Block,
-) -> (Statement, bool) {
-    (
-        Statement::Try {
+) -> bool {
+    if let Some(output) = output {
+        output.push(Statement::Try {
             body,
             handlers,
             orelse,
             finalbody,
-        },
-        normal_exit && final_falls,
-    )
+        });
+    }
+    normal_exit && final_falls
 }
 
 pub(super) fn if_clauses(
@@ -410,11 +411,9 @@ impl StatementLowering for Checker<'_> {
                 if outer == FinallyScope::Outside && !try_.finalbody.is_empty() {
                     self.finally_scope = FinallyScope::Protected;
                 }
-                let result = self.try_statement(try_);
+                let result = self.try_statement(try_, output);
                 self.finally_scope = outer;
-                let (statement, continues) = result?;
-                output.push(statement);
-                Ok(continues)
+                result
             }
             _ => {
                 let (statements, continues) = self.specialized_statement(stmt)?;
