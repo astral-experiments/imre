@@ -723,7 +723,12 @@ impl Checker<'_> {
     /// Static receiver attributes must not accidentally resolve through an
     /// identically named module import or global binding.
     pub(super) fn resolve(&self, expression: &ast::Expr) -> Option<Binding> {
-        if self.unbound_assert_root(expression).is_some() {
+        let mut root = expression;
+        while let ast::Expr::Attribute(attribute) = root {
+            root = &attribute.value;
+        }
+        let name = root.as_name_expr()?.id.as_str();
+        if self.unbound_assert_root(root).is_some() {
             return None;
         }
         if let ast::Expr::Attribute(attr) = expression
@@ -731,17 +736,12 @@ impl Checker<'_> {
         {
             return Some(binding);
         }
-        let mut root = expression;
-        while let ast::Expr::Attribute(attribute) = root {
-            root = &attribute.value;
-        }
         if self.is_class_receiver(root)
-            || root.as_name_expr().is_some_and(|n| {
-                self.class_lexical.contains(n.id.as_str())
-                    || self.names.get(n.id.as_str()).is_some_and(|&slot| {
-                        self.parameter_shadows_binding(n.id.as_str(), self.locals[slot], true)
-                    })
-            })
+            || self.class_lexical.contains(name)
+            || self
+                .names
+                .get(name)
+                .is_some_and(|&slot| self.parameter_shadows_binding(name, self.locals[slot], true))
         {
             None
         } else {
@@ -759,10 +759,7 @@ impl Checker<'_> {
                 }
                 let namedtuple = self.types.namedtuple(definition).is_some();
                 if namedtuple
-                    && root.as_name_expr().is_some_and(|name| {
-                        self.names.contains_key(name.id.as_str())
-                            || self.comprehension_targets.contains(name.id.as_str())
-                    })
+                    && (self.names.contains_key(name) || self.comprehension_targets.contains(name))
                 {
                     return None;
                 }

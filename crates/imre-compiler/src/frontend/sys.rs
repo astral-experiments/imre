@@ -83,9 +83,6 @@ impl Checker<'_> {
 
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
-            return Ok(None);
-        }
         if attr.attr.as_str() == "optimize" {
             return Ok(Some(Expr::integer(i64::from(
                 self.graph.python_optimization(),

@@ -8740,9 +8740,11 @@ impl<'a> Checker<'a> {
         {
             return Ok(annotations::class_value(name));
         }
+        let base_binding = expression
+            .as_attribute_expr()
+            .and_then(|attr| self.resolve(&attr.value));
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) =
-                self.resolve(&attr.value)
+            && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) = base_binding
         {
             match attr.attr.as_str() {
                 "value" => return Ok(Expr::integer(number)),
@@ -8789,7 +8791,7 @@ impl<'a> Checker<'a> {
             ));
         }
         if let ast::Expr::Attribute(attr) = expression
-            && let Some(value) = self.calendar_class_attribute(attr, self.resolve(&attr.value))?
+            && let Some(value) = self.calendar_class_attribute(attr, base_binding)?
         {
             return Ok(value);
         }
@@ -8917,7 +8919,7 @@ impl<'a> Checker<'a> {
         }
         if let ast::Expr::Attribute(attr) = expression
             && attr.attr.as_str() == "avoids_symlink_attacks"
-            && self.resolve(&attr.value) == Some(Binding::Intrinsic(Intrinsic::RmTree))
+            && base_binding == Some(Binding::Intrinsic(Intrinsic::RmTree))
         {
             return Ok(Expr::boolean(true));
         }
@@ -10496,8 +10498,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if attribute.attr.as_str() == "MISSING"
-                    && self.resolve(&attribute.value)
-                        == Some(Binding::Intrinsic(Intrinsic::ContextToken))
+                    && base_binding == Some(Binding::Intrinsic(Intrinsic::ContextToken))
                 {
                     return Ok(contextvars::op(
                         ir::ContextOperation::Missing,
@@ -10506,11 +10507,11 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if matches!(attribute.attr.as_str(), "machinery" | "metadata" | "util")
-                    && self.resolve(&attribute.value)
+                    && base_binding
                         == Some(Binding::IntrinsicModule(
                             crate::modules::IntrinsicModule::Importlib,
                         ))
-                    && self.resolve(expression).is_none()
+                    && binding.is_none()
                 {
                     return Err(error(
                         self.source,
@@ -10536,7 +10537,9 @@ impl<'a> Checker<'a> {
                     };
                     return Ok(unpacking::string(value));
                 }
-                if let Some(flag) = self.command_flag(attribute)? {
+                if base_binding == Some(Binding::Intrinsic(Intrinsic::SysFlags))
+                    && let Some(flag) = self.command_flag(attribute)?
+                {
                     return Ok(flag);
                 }
                 if let Some(text) = self.testcase_class_text(attribute)? {
