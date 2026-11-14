@@ -60,7 +60,7 @@ impl ClassScope {
                 captures_class: false,
             },
             cells: imre_ast::class_cell::ClassCells::of(body, string_annotations),
-            static_attributes: imre_ast::class_attributes::static_attributes(body, names),
+            static_attributes: BTreeSet::new(),
         }
     }
 }
