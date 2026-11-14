@@ -417,7 +417,7 @@ fn local_declaration(
 fn selected_declaration(db: &dyn Db, file: File, owner: Name, name: Name) -> Option<Binding> {
     let parsed = ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
     let (last, mut selected) = local_declaration(db, file, &parsed, name.as_str());
-    if file.path(db).as_str().ends_with("/__init__.py") {
+    if Path::new(file.path(db).as_str()).ends_with("__init__.py") {
         // A subsequent star can replace a local binding. Walk in reverse source
         // order and stop at the last provider that actually exports this name.
         for (_, child) in star_imports(db, file, owner)

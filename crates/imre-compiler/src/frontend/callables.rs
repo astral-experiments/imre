@@ -1114,7 +1114,7 @@ mod tests {
             if expr.is_registered_invoke()
                 && let ir::ExprKind::Invoke { args, .. } = &expr.kind
             {
-                calls.push(&source[args.site.python().unwrap().call.range]);
+                calls.push(&subject.source[args.site.python().unwrap().call.range]);
             }
         });
         assert_eq!(

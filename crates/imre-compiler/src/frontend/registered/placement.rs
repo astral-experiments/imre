@@ -303,16 +303,17 @@ mod tests {
 
     #[test]
     fn named_list_method_uses_the_checked_receiver_and_argument() {
-        let text = include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");
+        let fixture = include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
-        std::fs::write(&path, text).unwrap();
+        std::fs::write(&path, fixture).unwrap();
         let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
         graph.registered_startup = true;
         let (_, lowered) =
             caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
         assert_eq!(lowered.iter().filter(|name| *name == "right").count(), 1);
 
+        let text = &graph.modules[graph.entry].source;
         let start = TextSize::try_from(text.find("def right").unwrap()).unwrap();
         let functions = graph.registered_functions();
         let placed = &functions[&graph.entry][&start];
