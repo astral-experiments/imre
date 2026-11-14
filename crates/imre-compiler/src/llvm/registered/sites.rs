@@ -162,9 +162,8 @@ pub(crate) struct CompiledClassNamespace {
     pub(crate) range: TextRange,
 }
 
-pub(crate) struct Declaration<'p> {
+pub(crate) struct Declaration {
     pub(crate) definition: CompiledDefinition,
-    pub(crate) decorator_offsets: &'p [TextSize],
     pub(crate) type_params: Option<CompiledTypeParameters>,
 }
 
@@ -176,11 +175,11 @@ pub(crate) struct CompiledExec {
 }
 
 #[derive(Default)]
-pub(crate) struct CheckedSites<'p> {
-    pub(crate) declarations: Vec<(TextSize, Result<Declaration<'p>, String>)>,
+pub(crate) struct CheckedSites {
+    pub(crate) declarations: Vec<(TextSize, Result<Declaration, String>)>,
 }
 
-impl CheckedSites<'_> {
+impl CheckedSites {
     /// Most declarations follow the last written site. An exception handler or a
     /// replayed suite can revisit an earlier position in the same frame.
     pub(crate) fn position(&self, site: TextSize) -> Result<usize, usize> {
@@ -193,11 +192,11 @@ impl CheckedSites<'_> {
         }
     }
 
-    fn placed(&self, site: TextSize) -> &Result<Declaration<'_>, String> {
+    fn placed(&self, site: TextSize) -> &Result<Declaration, String> {
         &self.declarations[self.position(site).expect("a placed declaration")].1
     }
 
-    pub(crate) fn declaration(&self, site: TextSize) -> &Declaration<'_> {
+    pub(crate) fn declaration(&self, site: TextSize) -> &Declaration {
         self.placed(site)
             .as_ref()
             .expect("a function or class declaration")
@@ -235,13 +234,12 @@ impl CheckedSites<'_> {
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
         site: TextSize,
-        decorators: &[(String, String)],
+        decorators: &[(String, String, TextSize)],
         defaults: &[String],
         class_arguments: Option<(String, String)>,
     ) -> String {
         let Declaration {
             definition,
-            decorator_offsets,
             type_params,
         } = self.declaration(site);
         let scope = frame.scope.clone();
@@ -268,8 +266,8 @@ impl CheckedSites<'_> {
             }
             function
         };
-        for ((mark, decorator), &offset) in decorators.iter().zip(*decorator_offsets).rev() {
-            frame.set_statement_line(frame.positions.line(offset));
+        for (mark, decorator, offset) in decorators.iter().rev() {
+            frame.set_statement_line(frame.positions.line(*offset));
             value = frame.invoke_from_mark(decorator, &[&value], mark, None);
         }
         value

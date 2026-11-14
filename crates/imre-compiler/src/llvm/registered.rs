@@ -267,7 +267,7 @@ pub(crate) fn frame_inputs(
                 expr.ty == Type::None && args.len() <= 1
             }
             ExprKind::Builtin(
-                Builtin::RegisteredDefinition(ir::DefinitionSite::Function(_)),
+                Builtin::RegisteredDefinition(ir::DefinitionSite::Function { .. }),
                 _,
             ) => {
                 uses_python_protocol = true;
@@ -414,7 +414,7 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
     fn place_declaration(&mut self, site: TextSize);
     fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace;
     fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
@@ -1255,10 +1255,8 @@ impl<'f> Frame<'f, '_, '_> {
                     ir::DefinitionSite::Class {
                         arguments: None, ..
                     } => (header, &[][..], None),
-                    ir::DefinitionSite::Function(_) => {
-                        let definition = self.code.frame_and_sites().1.declaration(site.start());
-                        let (decorators, defaults) =
-                            header.split_at(definition.decorator_offsets.len());
+                    ir::DefinitionSite::Function { decorators, .. } => {
+                        let (decorators, defaults) = header.split_at(*decorators);
                         (decorators, defaults, None)
                     }
                 };

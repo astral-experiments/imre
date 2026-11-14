@@ -679,6 +679,13 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    pub(crate) fn written_range(&self) -> Option<ruff_text_size::TextRange> {
+        match &self.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), _) => Some(*range),
+            _ => None,
+        }
+    }
+
     /// A starred display or insertion evaluates the iterable inside its spread marker.
     pub(crate) fn spread_operand(&self) -> Option<&Self> {
         match &self.kind {
@@ -1700,7 +1707,10 @@ pub(crate) struct PackedArguments {
 /// A physical declaration and the layout of its evaluated header operands.
 #[derive(Clone)]
 pub(crate) enum DefinitionSite {
-    Function(ruff_text_size::TextSize),
+    Function {
+        start: ruff_text_size::TextSize,
+        decorators: usize,
+    },
     Class {
         start: ruff_text_size::TextSize,
         /// The generic parameter frame owns its own base operands.
@@ -1711,7 +1721,7 @@ pub(crate) enum DefinitionSite {
 impl DefinitionSite {
     pub(crate) fn start(&self) -> ruff_text_size::TextSize {
         match self {
-            Self::Function(start) | Self::Class { start, .. } => *start,
+            Self::Function { start, .. } | Self::Class { start, .. } => *start,
         }
     }
 }

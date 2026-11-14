@@ -1259,7 +1259,6 @@ pub(crate) struct RegisteredClass {
     pub(crate) name: ast::Identifier,
     pub(crate) range: TextRange,
     pub(crate) doc: Option<String>,
-    pub(crate) decorator_offsets: Vec<TextSize>,
     pub(crate) body: RegisteredSuite,
     pub(crate) header: Option<ClassHeader>,
 }
@@ -1895,11 +1894,6 @@ impl<'a> SuitePreparation<'a> {
             name: class.name.clone(),
             range,
             doc: docstring(&class.body),
-            decorator_offsets: class
-                .decorator_list
-                .iter()
-                .map(|d| d.expression.start())
-                .collect(),
             body,
             header,
         });
@@ -2572,7 +2566,7 @@ impl<'a> SuitePreparation<'a> {
                 let slot = scope.hidden(Type::PythonObject);
                 body.mixed(
                     self,
-                    Statement::Assign(slot, definition_value(class_site(class), header)),
+                    Statement::Assign(slot, class_definition(class, header)),
                     self.operand_refusals(&operands[start..]),
                 );
                 body.statements.push(scope.store(
@@ -2595,11 +2589,8 @@ impl<'a> SuitePreparation<'a> {
                         )
                     })
                     .collect();
-                body.statements.push(scope.bind_definition(
-                    def.name.as_str(),
-                    ir::DefinitionSite::Function(def.start()),
-                    header,
-                ));
+                body.statements
+                    .push(scope.store(def.name.as_str(), function_definition(def, header)));
                 continue;
             }
             let mut operand = |expr: &ast::Expr| keep(frame_value(expr));
@@ -3056,10 +3047,9 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .collect::<Option<Vec<_>>>()
             })
             .ok_or(())?;
-        Ok(Some(self.bind_definition(
+        Ok(Some(self.store(
             def.name.as_str(),
-            ir::DefinitionSite::Function(def.start()),
-            header,
+            function_definition(def, header),
         )))
     }
 
@@ -3163,8 +3153,7 @@ impl statements::StatementLowering for SourceScope<'_> {
                             .collect::<Option<_>>()
                     })
                     .ok_or(())?;
-                let binding =
-                    self.bind_definition(class.name.as_str(), class_site(class), operands);
+                let binding = self.store(class.name.as_str(), class_definition(class, operands));
                 Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
@@ -3549,17 +3538,41 @@ fn class_argument_layout(class: &ast::StmtClassDef) -> ir::PackedArguments {
         .unwrap_or_default()
 }
 
-fn class_site(class: &ast::StmtClassDef) -> ir::DefinitionSite {
-    ir::DefinitionSite::Class {
+pub(super) fn function_definition(function: &ast::StmtFunctionDef, header: Vec<Expr>) -> Expr {
+    let site = ir::DefinitionSite::Function {
+        start: function.start(),
+        decorators: function.decorator_list.len(),
+    };
+    definition_value(site, &function.decorator_list, header)
+}
+
+fn class_definition(class: &ast::StmtClassDef, header: Vec<Expr>) -> Expr {
+    let site = ir::DefinitionSite::Class {
         start: class.start(),
         arguments: class
             .type_params
             .is_none()
             .then(|| class_argument_layout(class)),
-    }
+    };
+    definition_value(site, &class.decorator_list, header)
 }
 
-pub(super) fn definition_value(site: ir::DefinitionSite, header: Vec<Expr>) -> Expr {
+fn definition_value(
+    site: ir::DefinitionSite,
+    decorators: &[ast::Decorator],
+    mut header: Vec<Expr>,
+) -> Expr {
+    for (decorator, value) in decorators.iter().zip(&mut header) {
+        let range = decorator.expression.range();
+        if value
+            .written_range()
+            .is_none_or(|written| written.start() != range.start())
+        {
+            // A suspended or extracted operand can reach the binding as a temporary.
+            let operand = std::mem::replace(value, Expr::none());
+            *value = values::located(range, range.start(), operand);
+        }
+    }
     operation(
         Builtin::RegisteredDefinition(site),
         Type::PythonObject,
@@ -3568,15 +3581,6 @@ pub(super) fn definition_value(site: ir::DefinitionSite, header: Vec<Expr>) -> E
 }
 
 impl SourceScope<'_> {
-    fn bind_definition(
-        &mut self,
-        name: &str,
-        site: ir::DefinitionSite,
-        header: Vec<Expr>,
-    ) -> Statement {
-        self.store(name, definition_value(site, header))
-    }
-
     fn assignment_targets(
         &mut self,
         targets: &[ast::Expr],
@@ -4466,6 +4470,31 @@ mod tests {
             }
         });
         assert_eq!(fields, 1);
+    }
+
+    #[test]
+    fn a_decorator_held_in_a_temporary_keeps_its_application_position() {
+        let graph = SourceGraph::single("@decorate\ndef f(value=1): pass\n").unwrap();
+        let module = &graph.modules[graph.entry];
+        let function = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let body = function_definition(
+            function,
+            vec![Expr::local(0, Type::PythonObject), Expr::none()],
+        );
+        let ExprKind::Builtin(Builtin::RegisteredDefinition(_), header) = body.kind else {
+            panic!("expected the checked definition");
+        };
+        assert_eq!(
+            header[0].written_range(),
+            Some(function.decorator_list[0].expression.range())
+        );
+        assert!(matches!(
+            header[0].without_location().kind,
+            ExprKind::Local(0)
+        ));
+        assert_eq!(header[1].written_range(), None);
     }
 
     #[test]

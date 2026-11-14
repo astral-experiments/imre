@@ -176,7 +176,7 @@ fn typing_initializer_binds_the_checked_reveal_type_definition() {
             let mut bindings = 0;
             crate::ir::walk_expressions(&initializer.checked.function.body, &mut |value| {
                 if let ExprKind::Builtin(
-                    Builtin::RegisteredDefinition(DefinitionSite::Function(site)),
+                    Builtin::RegisteredDefinition(DefinitionSite::Function { start: site, .. }),
                     operands,
                 ) = &value.kind
                     && *site == start
