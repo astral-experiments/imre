@@ -496,7 +496,14 @@ impl Checker<'_> {
         // arbitrary Python effects. Its registered frame owns the live call.
         if self.module_scope && self.inference.is_none() && self.unrepresented.borrow().is_some() {
             for argument in imre_ast::argument_values(&call.arguments) {
-                self.expr(argument)?;
+                if self.registered.is_none()
+                    && let ast::Expr::StringLiteral(literal) = argument
+                {
+                    // Validate each written part here; only the executing frame needs the string.
+                    check_string(literal, self.source)?;
+                } else {
+                    self.expr(argument)?;
+                }
             }
             return Ok(super::operation(
                 Builtin::UnrepresentedCall,
