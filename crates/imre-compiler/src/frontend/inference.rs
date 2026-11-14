@@ -864,6 +864,8 @@ impl Inference {
         let mut checked_bodies = HashSet::new();
         let mut suspended_bodies = HashSet::new();
         let mut method_returns = HashMap::new();
+        // Completed scalar returns that use only bound locals survive unrelated revisions.
+        let mut local_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
         // Without input or layout inference, resolved return slots stay resolved.
         let mut first_open_return = (!self.widened.get()
@@ -884,6 +886,7 @@ impl Inference {
             let previous_checks = std::mem::take(&mut checked_before_registration);
             checked_bodies.clear();
             if widened {
+                local_returns.clear();
                 first_open_return = None;
                 self.revisit_checked_returns();
             }
@@ -985,6 +988,7 @@ impl Inference {
                     continue;
                 }
                 if (before == self.revision.get() && previous_checks.contains(&signature.id))
+                    || (!self.widened.get() && local_returns.contains_key(&signature.id))
                     || suspended_bodies.contains(&signature.id)
                 {
                     checked_bodies.insert(signature.id);
@@ -1353,7 +1357,12 @@ impl Inference {
                             FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
                         })
                     {
-                        method_returns.insert(signature.id, Ok(checker.completed_body(params, body, Some(source), false)));
+                        let returns = if signature.method.is_none() {
+                            &mut local_returns
+                        } else {
+                            &mut method_returns
+                        };
+                        returns.insert(signature.id, Ok(checker.completed_body(params, body, Some(source), false)));
                     }
                     if superseded_returns
                         && !graph.session.call_may_return_implicitly(*module, function)
@@ -1602,8 +1611,9 @@ impl Inference {
                 checked_bodies.clear();
             }
         }
+        local_returns.extend(method_returns);
         Ok(Solution {
-            method_returns,
+            method_returns: local_returns,
             registered_parameters: registered,
             checked_bodies,
             suspended_bodies,
