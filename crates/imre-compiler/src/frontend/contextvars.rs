@@ -122,14 +122,19 @@ impl Checker<'_> {
         Ok(op(Op::Var, self.types.context_var(ty), args))
     }
 
+    /// The layout of a present token payload, including one stored in a nullable slot.
+    fn present_payload(&self, token: Type) -> Option<Type> {
+        let value = self.types.context_value(token)?;
+        Some(self.types.payload(value).unwrap_or(value))
+    }
+
     pub(super) fn context_attribute(&self, receiver: &Expr, name: &str) -> Option<Expr> {
         let (kind, ty) = match (receiver.ty, name) {
             (Type::ContextVar(_), "name") => (Op::Name, Type::Str),
             (Type::ContextToken(id), "var") => (Op::TokenVar, Type::ContextVar(id)),
             (Type::ContextToken(_), "old_value")
                 if self
-                    .types
-                    .context_value(receiver.ty)
+                    .present_payload(receiver.ty)
                     .is_some_and(|ty| ty == Type::ObjectValue || self.boxable_value(ty)) =>
             {
                 (Op::Old, Type::ObjectValue)
@@ -176,8 +181,18 @@ impl Checker<'_> {
             if !matches!(receiver.ty, Type::ContextToken(_)) {
                 continue;
             }
-            let a = op(Op::WasMissing, Type::Bool, vec![receiver]);
             let sentinel = self.expr(sentinel)?;
+            // A present object can be the singleton. Read it just as an assigned local would.
+            if self.present_payload(receiver.ty) == Some(Type::ObjectValue) {
+                let previous = op(Op::Old, Type::ObjectValue, vec![receiver]);
+                let operands = if first {
+                    vec![previous, sentinel]
+                } else {
+                    vec![sentinel, previous]
+                };
+                return Ok(Some(Self::identity_result(operands, negate)));
+            }
+            let a = op(Op::WasMissing, Type::Bool, vec![receiver]);
             let mut body = Vec::new();
             let mut clear = Vec::new();
             let value = if first {
