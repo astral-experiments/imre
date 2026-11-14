@@ -3441,7 +3441,7 @@ impl Context {
         {
             return self.heap.string_literal(member);
         }
-        if matches!(name, "__get__" | "__reduce__" | "__reduce_ex__") {
+        if matches!(name, "__call__" | "__get__" | "__reduce__" | "__reduce_ex__") {
             let class = match self.heap.get(obj) {
                 Value::Native(kind)
                     if matches!(
@@ -8584,22 +8584,25 @@ impl Context {
                 }
                 Ok(result)
             }
-            Value::Native(name) if name == "function.__call__" => {
+            Value::Native(ref name)
+                if let Some(owner @ ("function" | "builtin_function_or_method")) =
+                    name.strip_suffix(".__call__") =>
+            {
                 let mut arguments = args.into_iter();
                 let function = arguments.next().ok_or_else(|| {
                     Error::new(
                         "TypeError",
-                        "descriptor '__call__' of 'function' object needs an argument",
+                        format!("descriptor '__call__' of '{owner}' object needs an argument"),
                     )
                 })?;
-                if !matches!(self.heap.get(function), Value::Function { .. }) {
+                if self.builtin_type_name(function) != Some(owner) {
                     let actual = self
                         .builtin_type_name(function)
                         .unwrap_or_else(|| self.type_name(function));
                     return Err(Error::new(
                         "TypeError",
                         format!(
-                            "descriptor '__call__' requires a 'function' object but received a '{actual}'"
+                            "descriptor '__call__' requires a '{owner}' object but received a '{actual}'"
                         ),
                     ));
                 }

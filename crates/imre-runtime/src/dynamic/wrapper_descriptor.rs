@@ -414,6 +414,7 @@ impl BuiltinDescriptor {
             "object.__repr__" => ("object", "__repr__"),
             "object.__str__" => ("object", "__str__"),
             "function.__call__" => ("function", "__call__"),
+            "builtin_function_or_method.__call__" => ("builtin_function_or_method", "__call__"),
             "function.__get__" => ("function", "__get__"),
             "method.__get__" => ("method", "__get__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
