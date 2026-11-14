@@ -644,19 +644,24 @@ impl Checker<'_> {
         let element = self.types.element(receiver.ty).unwrap();
         let mut input = self.expansion_input(source, Some(element))?;
         if let Iteration::Container {
-            iterable,
+            mut iterable,
             items: false,
             start: None,
-        } = &mut input
+        } = input
         {
             if matches!(append, Builtin::Append)
                 && matches!(iterable.ty, Type::ListInt | Type::List(_))
             {
-                return self.extend_exact_list(receiver, iterable.clone(), node);
+                return self.extend_exact_list(receiver, iterable, node);
             }
             if iterable.ty == receiver.ty {
-                *iterable = self.list_snapshot(iterable.clone());
+                iterable = self.list_snapshot(iterable);
             }
+            input = Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            };
         }
         let destination = self.hidden(receiver.ty);
         let mut body = vec![Statement::Assign(destination, receiver)];
