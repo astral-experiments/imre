@@ -791,9 +791,6 @@ impl<'a> PreparedBody<'a> {
             _ => file.to_owned(),
         };
         let positions = SourcePositions::new(&self.source.path, &self.source.text, &code_file);
-        let mut frame =
-            RegisteredFrame::new(output, &positions, false, unit, self.source.module_start);
-        let initializer = self.initializer();
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
@@ -801,23 +798,7 @@ impl<'a> PreparedBody<'a> {
             unit,
             positions: &positions,
         };
-        if let Some(body) = &self.source.module_annotations {
-            location.define_module_annotations(&mut frame, body);
-        }
-        frame.begin_module(
-            self.source.scopes.module_annotations,
-            self.source.private_names.string_annotations,
-            self.docstring.as_deref(),
-        );
-        if !self.prompts.is_empty() {
-            let name = frame.code_name(self.name);
-            frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
-        }
-        let globals = &self.source.scopes.module_globals;
-        frame.declare_globals(globals);
-        let mut function = location.function(frame, globals, "", false);
-        RegisteredBody::Suite(initializer).emit(&mut function);
-        let code = function.frame.finish_module();
+        let code = location.code(output, String::new(), Body::Module(self), false, None);
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -894,6 +875,7 @@ enum DefinitionName<'a> {
 }
 
 enum Body<'a> {
+    Module(&'a PreparedBody<'a>),
     Namespace(
         &'a crate::frontend::RegisteredClass,
         &'a crate::frontend::function_scope::classes::ClassScope,
@@ -1067,11 +1049,30 @@ impl SourceMap<'_> {
                 frame.function_locals = generator.metadata.local_names();
                 &empty
             }
+            Body::Module(_) => &self.scopes.module_globals,
             Body::Namespace(_, class) => &class.bindings.globals,
             _ => &empty,
         };
         let mut function = self.function(frame, declared_globals, &prefix, in_function);
         match body {
+            Body::Module(module) => {
+                let frame = &mut function.frame;
+                if let Some(annotations) = &self.module_annotations {
+                    self.define_module_annotations(frame, annotations);
+                }
+                frame.begin_module(
+                    self.scopes.module_annotations,
+                    self.private_names.string_annotations,
+                    module.docstring.as_deref(),
+                );
+                if !module.prompts.is_empty() {
+                    let name = frame.code_name(module.name);
+                    frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
+                }
+                frame.declare_globals(declared_globals);
+                RegisteredBody::Suite(module.initializer()).emit(&mut function);
+                return function.frame.finish_module();
+            }
             Body::Registered(body, _) => {
                 function.frame.declare_globals(function.declared_globals);
                 body.emit(&mut function);
