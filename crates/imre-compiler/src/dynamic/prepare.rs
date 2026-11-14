@@ -212,12 +212,10 @@ pub(super) fn units<'a>(
                     literals.unwrap_or_default(),
                     (types, checked_source, initializer),
                 )?;
-                if python_optimization < 2 {
-                    body.prompts = bundled_prompts
-                        .or_else(|| checked_source.map(|source| &source.doctest_prompts))
-                        .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
-                        .map_or(&[], Vec::as_slice);
-                }
+                body.prompts = bundled_prompts
+                    .or_else(|| checked_source.map(|source| &source.doctest_prompts))
+                    .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
+                    .map_or(&[], Vec::as_slice);
                 Ok(Initializer::Checked(Box::new(body)))
             };
             // Release each checker database after its last selected first-party file.
