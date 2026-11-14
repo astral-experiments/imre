@@ -1,0 +1,75 @@
+{
+  "commit": "e5b876b73fb2e0df46561c387c20d552c088eeea",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_file_sha256": "0fbb1b9a9a6f8d3c86b185a1effc3df6c38c96a866d9bf69e2b4bc0c3dca77bd",
+  "test_file_bytes": 38429,
+  "compiler_sha256": "0e19a2d1f58b4606432bdb1ab6022e36bd57f610864210c4fcd571536ba882d2",
+  "stdlib_sha256": "8b26d7ab3be29c1d577f411324d84aa3552a6a340a73cd0235ffc0d84d0bc74d",
+  "runtime_sha256": "df473de001db11607d7ee52cdb7599e88d74e5a531df5acf3a2a372fcd613829",
+  "suite_manifest_sha256": "75942f8e167eff4cee35355a12e19e05e7c9f7122185187e266ef8909da43338",
+  "routes": {
+    "file-stock": {
+      "pid": 1088746,
+      "argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "cwd": "/home/dev-user/code/public-8050-context56/runs/file-stock",
+      "raw_wait": 0,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 4450,
+        "sha256": "8a2d45dbfddd347db0dc592274f103af8441c740c34a0380a2e84cf2c48aca5e"
+      }
+    },
+    "file-O0": {
+      "pid": 1088751,
+      "argv": [
+        "/home/dev-user/imre-campaign-products/e5b876b73fb2e0df46561c387c20d552c088eeea/imre",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "cwd": "/home/dev-user/code/public-8050-context56/runs/file-O0",
+      "raw_wait": 256,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 10448,
+        "sha256": "afeee4ce2f0ee5b8ad39c25afd7e9ab3f6c2abc718d79a7cf5846f9d43d7ba5e"
+      }
+    },
+    "file-O3": {
+      "pid": 1088752,
+      "argv": [
+        "/home/dev-user/imre-campaign-products/e5b876b73fb2e0df46561c387c20d552c088eeea/imre",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "cwd": "/home/dev-user/code/public-8050-context56/runs/file-O3",
+      "raw_wait": 256,
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 10448,
+        "sha256": "ec71cf10ad4808a39f0dbb81ca31ef3b1b993731654bf541c7535d521125e3a4"
+      }
+    }
+  }
+}
