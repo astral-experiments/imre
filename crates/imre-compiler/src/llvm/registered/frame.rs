@@ -1,6 +1,5 @@
 //! Object-frame ABI operations used by registered LLVM code.
 
-use super::abi::PositionOperand;
 use super::sequences::permanent_handle;
 use super::suspension::Suspension;
 use super::{CallArguments, Output, permanent, suspension};
@@ -763,8 +762,8 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(in crate::llvm) fn op_at_current_range(&mut self, op: &str, args: &[&str]) -> String {
-        self.call_position(self.current_range);
-        self.op(op, args)
+        let span = self.call_position_span(self.current_range);
+        self.op_at(op, args, Some(span))
     }
 
     /// Save the caller's earlier operands before an expression can release a writer.
@@ -876,19 +875,24 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.check_error();
     }
 
-    pub(super) fn position_constant(&mut self, range: TextRange) -> PositionOperand {
+    pub(super) fn source_span(&self, range: TextRange) -> [usize; 4] {
         let (line, start) = self.positions.line_and_column(range.start());
         let (end_line, end) = self.positions.line_and_column(range.end());
-        self.output.position(Some([line, end_line, start, end]))
+        [line, end_line, start, end]
     }
 
-    /// A live caller retains the full range even when traceback highlighting is suppressed.
-    pub(crate) fn call_position(&mut self, range: TextRange) {
+    fn call_position_span(&self, range: TextRange) -> [usize; 4] {
         let range = match self.position {
             SourcePosition::Expression(active) if self.current_range == range => active,
             _ => range,
         };
-        let position = self.position_constant(range);
+        self.source_span(range)
+    }
+
+    /// A live caller retains the full range even when traceback highlighting is suppressed.
+    pub(crate) fn call_position(&mut self, range: TextRange) {
+        let span = self.call_position_span(range);
+        let position = self.output.position(Some(span));
         self.line(&format!(
             "call void @imre_dyn_call_position(ptr %ctx, ptr {position})"
         ));

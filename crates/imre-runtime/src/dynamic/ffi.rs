@@ -2367,12 +2367,17 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
     if ctx.heap.execution.pending.is_some() && op != "take_error" {
         return NONE;
     }
-    let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
-    let mut result = ctx.op(op, a, b, c);
     let uniform_operand = matches!(
         op,
         "pos" | "neg" | "~" | "not" | "format" | "format_conversion"
     );
+    // SAFETY: generated instructions supply null or a native [4 x i32] constant.
+    let mut span = unsafe { span.as_ref() };
+    if uniform_operand && let Some(position) = span.take() {
+        ctx.heap.set_call_position(Some(*position));
+    }
+    let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
+    let mut result = ctx.op(op, a, b, c);
     if matches!(
         op,
         "attr"
@@ -2397,8 +2402,6 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         ctx.heap.execution.pending = Some(error);
         return NONE;
     }
-    // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
-    let span = unsafe { span.as_ref() };
     if let Err(error) = &mut result
         && let Some(&[line, start, operator, end]) = span
         && let Some(width) = match op {
