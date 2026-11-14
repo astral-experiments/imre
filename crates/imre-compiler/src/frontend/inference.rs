@@ -1097,6 +1097,12 @@ impl Inference {
                 }
                 // A binding in the semantic index already selects this coroutine's Python
                 // iterator protocol. Keep its checked placement across diagnostic discovery.
+                let place_suspended = |checker: &Checker<'_>| -> Result<_, String> {
+                    Ok(registered::prepare_checked_definition(
+                        checker, function, signature, self, None,
+                    )?
+                    .map(|(_, placement)| placement.place(graph, &self.source_checks)))
+                };
                 let mut placement = (physical
                     && function.is_async
                     && signature.method.is_none()
@@ -1104,7 +1110,7 @@ impl Inference {
                     && graph
                         .session
                         .coroutine_uses_async_iteration(*module, function))
-                .then(|| registered::place_checked_definition(&checker, function, signature, self, None));
+                .then(|| place_suspended(&checker));
                 let mut retained = matches!(placement, Some(Ok(Some(_))));
                 let result = (|| {
                     if retained {
@@ -1217,12 +1223,11 @@ impl Inference {
                             && function.is_async
                             && graph.modules[*module].is_program_source()
                         {
-                            match placement.take().unwrap_or_else(|| {
-                                registered::place_checked_definition(
-                                    &checker, function, signature, self, None,
-                                )
-                            }) {
-                                Ok(body) => body.is_some(),
+                            match placement
+                                .take()
+                                .unwrap_or_else(|| place_suspended(&checker))
+                            {
+                                Ok(placement) => placement.is_some(),
                                 Err(reason) => {
                                     *diagnostic = reason;
                                     false
