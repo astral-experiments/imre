@@ -287,7 +287,7 @@ mod tests {
         .body;
         let names = imre_ast::lower(&mut body);
         let (facts, _) = ScopeFacts::prepare(&body, &names, |_, _| {}, |_| {});
-        let reads = &facts.classes[&body[0].start()].frame_reads;
+        let reads = &facts.classes[&body[0].start()].namespace.names.reads;
         assert_eq!(
             reads.iter().map(String::as_str).collect::<Vec<_>>(),
             [

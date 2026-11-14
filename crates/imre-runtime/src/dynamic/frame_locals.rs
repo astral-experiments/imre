@@ -105,7 +105,7 @@ pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> 
     #[derive(serde::Deserialize)]
     struct Bindings {
         #[serde(default)]
-        class_frame_reads: Vec<String>,
+        scope_reads: Vec<String>,
         #[serde(default)]
         needs_class_cell: bool,
         #[serde(default)]
@@ -130,7 +130,7 @@ pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> 
         names.push("__classdict__".to_owned());
         cells.push(ctx.class_annotation_dict_cell(scope));
     }
-    for name in bindings.class_frame_reads {
+    for name in bindings.scope_reads {
         if ctx.is_enclosing_freevar(parent, &name) == Some(true) && !names.contains(&name) {
             cells.push(ctx.capture_free_cell(parent, &name));
             names.push(name);
