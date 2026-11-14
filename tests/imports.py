@@ -910,6 +910,10 @@ ACCEPTED = {
             "print(result == (3 if '_bisect' in sys.builtin_module_names else 1234))\n"
         ),
     },
+    "ssl_import_in_an_imported_initializer": {
+        "helper.py": "import ssl\n",
+        "main.py": "import helper\ndef twice(n: int) -> int: return n * 2\nprint(twice(21))\n",
+    },
     "bisect_from_its_module_initializer": {
         "main.py": (
             "import bisect\nfrom bisect import bisect_left\n"

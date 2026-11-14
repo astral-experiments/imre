@@ -137,6 +137,7 @@ fn sealed_package_child(name: &str) -> bool {
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
         "bisect" => bundled_source!("bisect.py"),
+        "ssl" => bundled_source!("ssl.py"),
         "unittest.main" => bundled_source!("unittest/main.py"),
         "unittest.result" => bundled_source!("unittest/result.py"),
         "unittest.runner" => bundled_source!("unittest/runner.py"),
@@ -5766,6 +5767,19 @@ impl<'a> Loader<'a> {
         }
     }
 
+    /// A regular import of a Python-owned namespace must execute even when unused.
+    fn register_namespace_import(
+        &mut self,
+        importer: ModuleId,
+        index: usize,
+        site: TextRange,
+        target: ModuleId,
+    ) {
+        if self.modules[target].registered_namespace {
+            self.modules[importer].registered_imports.entry(index).or_insert(site);
+        }
+    }
+
     fn package_child(
         &mut self,
         parent: ModuleId,
@@ -5814,7 +5828,8 @@ impl<'a> Loader<'a> {
                         self.bind(id, local.as_str(), Binding::IntrinsicModule(module), alias)?;
                         continue;
                     }
-                    self.load_module(name)?;
+                    let target = self.load_module(name)?;
+                    self.register_namespace_import(id, index, alias.range(), target);
                     let (local, binding) = if let Some(local) = &alias.asname {
                         (local.as_str(), self.aliased_import(name)?)
                     } else {
@@ -6086,6 +6101,7 @@ impl<'a> Loader<'a> {
                     }
                     _ => self.load_module(&name)?,
                 };
+                self.register_namespace_import(id, index, statement.range(), target);
                 for (member, alias) in import.names.iter().enumerate() {
                     let binding = if let Some(binding) =
                         self.modules[target].export(alias.name.as_str())
@@ -6670,8 +6686,8 @@ impl<'a> Loader<'a> {
                     .checked_shipped_prefix(name, "BaseHTTPRequestHandler")?,
             )),
             _ => {
-                // bisect selects its optional accelerator in its module initializer.
-                registered_namespace = source_exports || name == "bisect";
+                // Both modules populate their public namespace using a native provider.
+                registered_namespace = source_exports || matches!(name, "bisect" | "ssl");
                 bundled_runtime_source(name)
             }
         };
