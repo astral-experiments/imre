@@ -1,5 +1,9 @@
 """Read package resources from indexed ZIP archives on POSIX."""
 
+class ZipImportError(ImportError):
+    pass
+
+
 def _archive_path(path: str) -> tuple[str, str]:
     if not path:
         raise ZipImportError('archive path is empty', path=path)

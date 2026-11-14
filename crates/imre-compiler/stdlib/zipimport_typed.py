@@ -3,10 +3,6 @@ from pathlib import Path as _Path
 from posixpath import exists as _exists
 from zipfile import BadZipFile as _BadZipFile, ZipFile as _ZipFile
 
-class ZipImportError(ImportError):
-    pass
-
-
 _indexes: dict[str, _ZipFile] = {}
 
 
