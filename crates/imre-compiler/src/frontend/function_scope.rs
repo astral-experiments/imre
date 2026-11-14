@@ -622,11 +622,12 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     };
                 let names = std::mem::replace(&mut self.function_names, parent_names);
                 let mut lexical = FunctionScope::function(def, names, may_capture_class);
-                let annotations =
-                    crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref());
-                let reads = (!strings && !annotations.is_empty()).then(|| {
+                let mut annotations =
+                    crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref())
+                        .peekable();
+                let reads = (!strings && annotations.peek().is_some()).then(|| {
                     Box::new(class_metadata::declaration_reads(
-                        &annotations,
+                        annotations,
                         false,
                         !matches!(self.scope, Scope::Class(_)),
                     ))

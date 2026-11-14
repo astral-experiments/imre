@@ -1126,12 +1126,6 @@ impl ParameterAnnotations {
         checked_annotations: bool,
         lexical: impl FnOnce() -> super::function_scope::FunctionScope,
     ) -> Option<Box<Self>> {
-        let annotations = parameter_annotations(&def.parameters, def.returns.as_deref());
-        if annotations.is_empty() {
-            return None;
-        }
-
-        let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
         // Each annotation is evaluated in the same provider activation.
         let mut scope = SourceScope::new(
@@ -1140,17 +1134,23 @@ impl ParameterAnnotations {
             None,
             false,
         );
-        for (name, expression) in annotations {
-            if checked_annotations && let Some(reference) = scalar_reference(expression) {
-                references.insert(name.to_owned(), reference);
-            }
-            let value = operand(expression, false);
-            entries.push((
-                DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
-                None,
-            ));
-        }
-        let body = DeferredAnnotation::prepare_body(entries, scope.bindings());
+        let mut fields = parameter_annotations(&def.parameters, def.returns.as_deref()).map(
+            |(name, expression)| {
+                if checked_annotations && let Some(reference) = scalar_reference(expression) {
+                    references.insert(name.to_owned(), reference);
+                }
+                let value = operand(expression, false);
+                (
+                    DeferredAnnotation::new(name.to_owned(), expression, value, &mut scope),
+                    None,
+                )
+            },
+        );
+        let first = fields.next()?;
+        let body = DeferredAnnotation::return_body(std::iter::once(first).chain(&mut fields));
+        // A refused provider still prepares its later annotation operands and lexical children.
+        fields.for_each(drop);
+        let body = body.map(|body| scope.finish(body));
         Some(Box::new(Self {
             start: def.parameters.start(),
             scope: lexical(),
@@ -1217,6 +1217,12 @@ impl DeferredAnnotation {
         declarations: impl IntoIterator<Item = (Self, Option<usize>)>,
         bindings: RegisteredBindings,
     ) -> AnnotationProvider {
+        Self::return_body(declarations).map(|body| bindings.finish(body))
+    }
+
+    fn return_body(
+        declarations: impl IntoIterator<Item = (Self, Option<usize>)>,
+    ) -> StdResult<Vec<Statement>, OperandRefusal> {
         let mut fields = Vec::new();
         let mut values = Vec::new();
         for (field, index) in declarations {
@@ -1227,26 +1233,13 @@ impl DeferredAnnotation {
             });
             values.push(field.value?);
         }
-        let body = vec![Statement::Return(operation(
+        Ok(vec![Statement::Return(operation(
             Builtin::RegisteredAnnotations {
                 fields: fields.into(),
             },
             Type::PythonObject,
             values,
-        ))];
-        Ok(RegisteredFunction {
-            inputs: FrameInputs::default(),
-            frame_slots: bindings.slots,
-            fixed_sites: Box::default(),
-            fixed_attributes: None,
-            function: ir::Function {
-                params: vec![],
-                returns: Type::PythonObject,
-                locals: bindings.locals,
-                body,
-            },
-            local_names: bindings.names,
-        })
+        ))])
     }
 }
 
@@ -3486,19 +3479,24 @@ impl<'a> SourceScope<'a> {
     }
 
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
-        let bindings = self.bindings();
+        self.bindings().finish(body)
+    }
+}
+
+impl RegisteredBindings {
+    fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         RegisteredFunction {
             inputs: FrameInputs::default(),
-            frame_slots: bindings.slots,
+            frame_slots: self.slots,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {
                 params: Vec::new(),
                 returns: Type::PythonObject,
-                locals: bindings.locals,
+                locals: self.locals,
                 body,
             },
-            local_names: bindings.names,
+            local_names: self.names,
         }
     }
 }

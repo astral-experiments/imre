@@ -61,11 +61,11 @@ pub(in crate::frontend) fn parameter_reads(
     entries: &[(&str, &ast::Expr)],
     string_annotations: bool,
 ) -> ParameterReads {
-    declaration_reads(entries, string_annotations, false)
+    declaration_reads(entries.iter().copied(), string_annotations, false)
 }
 
-pub(super) fn declaration_reads(
-    entries: &[(&str, &ast::Expr)],
+pub(super) fn declaration_reads<'a>(
+    entries: impl Iterator<Item = (&'a str, &'a ast::Expr)>,
     string_annotations: bool,
     inline: bool,
 ) -> ParameterReads {
