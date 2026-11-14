@@ -82,7 +82,7 @@ pub(crate) struct RegisteredFrame<'a, 'p> {
     pub(super) regions: Vec<super::context::Region>,
     pub(crate) async_generator: bool,
     /// Borrow the callable signature's local names while emitting its body.
-    pub(crate) function_locals: &'p [serde_json::Value],
+    pub(crate) function_locals: Option<&'p indexmap::IndexSet<String>>,
     pub(crate) class_locals: Option<&'p ClassBindings>,
     pub(crate) annotation_values: Option<String>,
     pub(crate) annotation_scope: AnnotationScope<'p>,
@@ -134,7 +134,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
             current_range: TextRange::empty(start),
             regions: Vec::new(),
             async_generator: false,
-            function_locals: &[],
+            function_locals: None,
             class_locals: None,
             annotation_values: None,
             annotation_scope: AnnotationScope::Plain,
@@ -1017,8 +1017,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
         } else if self.scope == ENTRY_SCOPE
             && self
                 .function_locals
-                .iter()
-                .any(|local| local.as_str() == Some(name))
+                .is_some_and(|locals| locals.contains(name))
         {
             "lookup_local"
         } else {

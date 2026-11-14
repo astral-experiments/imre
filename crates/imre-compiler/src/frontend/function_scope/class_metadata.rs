@@ -333,11 +333,7 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     }
                     .visit_body(&f.body);
                     extra = child.reads.enclosing(None);
-                    for local in method.metadata.local_names() {
-                        if let Some(name) = local.as_str() {
-                            extra.remove(name);
-                        }
-                    }
+                    extra.retain(|name| !method.metadata.locals.contains(name));
                     extra.retain(|name| !method.globals.contains(name));
                 }
                 let reads = method

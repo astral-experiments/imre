@@ -1,8 +1,9 @@
 //! Parameter binding and code-object metadata for Python callables.
 
+use indexmap::IndexSet;
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use super::FunctionScope;
+use super::{FunctionScope, LocalNames};
 use crate::frontend::{NamedBody, RegisteredBody};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
@@ -144,6 +145,7 @@ impl NamedFunction<'_> {
 /// Serializes a placed callable without copying its lexical scope or parameter names.
 struct PlacedSignature<'a> {
     layout: &'a serde_json::Map<String, Value>,
+    locals: &'a IndexSet<String>,
     flags: u32,
     class_cell: Option<bool>,
 }
@@ -166,6 +168,14 @@ impl Serialize for PlacedSignature<'_> {
             fields.next_if(|(name, _)| name.as_str() == key);
             object.serialize_entry(key, value)?;
         }
+        if !self.locals.is_empty() {
+            while let Some((name, field)) =
+                fields.next_if(|(name, _)| name.as_str() < "scope_locals")
+            {
+                object.serialize_entry(name, field)?;
+            }
+            object.serialize_entry("scope_locals", &LocalNames(self.locals))?;
+        }
         for (name, field) in fields {
             object.serialize_entry(name, field)?;
         }
@@ -176,6 +186,7 @@ impl Serialize for PlacedSignature<'_> {
 /// Parameter and closure metadata independent of the activation that binds the function.
 pub(crate) struct CallableMetadata {
     layout: serde_json::Value,
+    pub(crate) locals: IndexSet<String>,
     flags: u32,
     captures_class: bool,
     /// Keys for the default values evaluated in order by the enclosing expression.
@@ -185,7 +196,7 @@ pub(crate) struct CallableMetadata {
 impl CallableMetadata {
     pub(crate) fn new(
         parameters: Option<&ast::Parameters>,
-        scope: &FunctionScope,
+        scope: &mut FunctionScope,
         suspension_flags: u32,
     ) -> Self {
         let mut layout = json!({});
@@ -203,7 +214,7 @@ impl CallableMetadata {
     }
 
     /// Generator expressions receive the iterator acquired by their enclosing frame.
-    pub(crate) fn generator(scope: &FunctionScope, is_async: bool) -> Self {
+    pub(crate) fn generator(scope: &mut FunctionScope, is_async: bool) -> Self {
         let flags = if is_async {
             code_flags::ASYNC_GENERATOR
         } else {
@@ -215,12 +226,15 @@ impl CallableMetadata {
     fn from_scope(
         mut layout: Value,
         defaults: Vec<String>,
-        scope: &FunctionScope,
+        scope: &mut FunctionScope,
         flags: u32,
     ) -> Self {
+        // Callable placement borrows the same ordered names for lookup and serialization.
+        let locals = std::mem::take(&mut scope.names.locals);
         scope.write_signature(&mut layout);
         Self {
             layout,
+            locals,
             flags,
             captures_class: scope.captures_class,
             defaults: if defaults.is_empty() {
@@ -233,7 +247,7 @@ impl CallableMetadata {
 
     pub(crate) fn lambda(
         parameters: Option<&ast::Parameters>,
-        scope: &FunctionScope,
+        scope: &mut FunctionScope,
         generator: bool,
     ) -> Self {
         let flags = if generator { code_flags::GENERATOR } else { 0 };
@@ -246,13 +260,6 @@ impl CallableMetadata {
 
     pub(crate) fn suspension_flags(&self) -> u32 {
         self.flags & (code_flags::GENERATOR | code_flags::COROUTINE | code_flags::ASYNC_GENERATOR)
-    }
-
-    pub(crate) fn local_names(&self) -> &[Value] {
-        self.layout["scope_locals"]
-            .as_array()
-            .map(Vec::as_slice)
-            .unwrap_or_default()
     }
 
     pub(super) fn reads_complete(&self) -> bool {
@@ -292,6 +299,7 @@ impl CallableMetadata {
                 .layout
                 .as_object()
                 .expect("callable signature is an object"),
+            locals: &self.locals,
             flags: self.flags | placement_flags,
             class_cell: method_class_cell.then_some(self.captures_class),
         };
@@ -322,6 +330,7 @@ mod tests {
         ] {
             let metadata = super::CallableMetadata {
                 layout: layout.clone(),
+                locals: Default::default(),
                 flags: 2,
                 captures_class: false,
                 defaults: Default::default(),
