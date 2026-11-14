@@ -1307,17 +1307,6 @@ impl Context {
         if target != id {
             return self.with_weak_target(target, |ctx| ctx.iterator(target));
         }
-        if self.is_native_iterator(id) {
-            let closed = match self.heap.get(id) {
-                Value::BufferedRandom(file, _) => file.borrow().closed(),
-                Value::File(file) => file.closed(),
-                _ => false,
-            };
-            if closed {
-                return Err(Error::new("ValueError", "I/O operation on closed file."));
-            }
-            return Ok(id);
-        }
         let (sequence, kind) = match *self.heap.get(id) {
             Value::Template {
                 strings,
@@ -1368,6 +1357,17 @@ impl Context {
                 kind,
                 ordered,
             } => return Ok(self.dict_iterator(dict, kind, ordered, false)),
+            ref value if self.is_native_iterator(id) => {
+                let closed = match value {
+                    Value::BufferedRandom(file, _) => file.borrow().closed(),
+                    Value::File(file) => file.closed(),
+                    _ => false,
+                };
+                if closed {
+                    return Err(Error::new("ValueError", "I/O operation on closed file."));
+                }
+                return Ok(id);
+            }
             ref value
                 if let Some(class) = value.instance_class()
                     && let Some(slot) = self.class_attr(class, "__iter__") =>
