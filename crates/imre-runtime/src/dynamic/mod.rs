@@ -3263,7 +3263,11 @@ impl Context {
         if matches!(name, "_contextvars.ContextVar" | "_contextvars.Token") {
             let key = self.heap.code_name("__class_getitem__");
             let method = self.builtin(&format!("{name}.__class_getitem__"));
-            let dictionary = self.dict(vec![(key, method)]);
+            let mut entries = vec![(key, method)];
+            if name == "_contextvars.Token" {
+                entries.push((self.heap.code_name("MISSING"), self.token_missing));
+            }
+            let dictionary = self.dict(entries);
             self.native_type_dicts.insert(value, dictionary);
         }
         if name == stdlib::functools::PARTIAL_CLASS {
