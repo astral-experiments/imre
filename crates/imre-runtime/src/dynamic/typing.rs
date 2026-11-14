@@ -1972,6 +1972,8 @@ fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -
         ctx.bind(scope, &binding, param);
         params.push(param);
     }
+    let declared = ctx.alloc(Value::Tuple(params));
+    ctx.bind(scope, ".type_params", declared);
     let Value::Scope(frame) = ctx.heap.get_mut(scope) else {
         unreachable!()
     };
@@ -1981,8 +1983,6 @@ fn initialize_parameters(ctx: &mut Context, scope: Id, names: Id, class: bool) -
         .declared
         .extend(frame.names.keys().map(|name| name.as_str().to_owned()));
     frame.closure.declared_complete = true;
-    let declared = ctx.alloc(Value::Tuple(params));
-    ctx.bind(scope, ".type_params", declared);
     if class {
         // __type_params__ retains the pack itself; the implicit base is Generic[*Ts].
         let params = unpacked_parameters(ctx, declared)?;

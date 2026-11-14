@@ -523,7 +523,7 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                 let may_capture_class = def.type_params.is_some()
                     || match self.scope {
                         Scope::Module => false,
-                        Scope::Class(site) => self.scopes.classes[&site].needs_class_cell,
+                        Scope::Class(site) => self.scopes.classes[&site].cells.class,
                         Scope::Function { .. } | Scope::Lambda => true,
                     };
                 let names = std::mem::replace(&mut self.function_names, parent_names);

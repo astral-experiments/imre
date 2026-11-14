@@ -1433,10 +1433,14 @@ impl LexicalDefinitions<'_, '_> {
         }
         if let Body::Namespace(class, scope) = &body {
             signature["postponed_annotations"] = json!(class.annotations.postponed);
-            if class.annotations.conditional_count != 0 || scope.needs_conditional_cell {
+            if class.annotations.conditional_count != 0 || scope.cells.conditional {
                 signature["conditional_annotations"] = json!(true);
             }
             scope.write_signature(&mut signature);
+            if self.method_scope {
+                // A nested class body closes over its defining class's cells just like a method.
+                signature["method_class_cell"] = json!(scope.frame_reads.contains("__class__"));
+            }
         } else if let Some(facts) = evaluator_scope {
             facts.write_signature(&mut signature);
         } else {

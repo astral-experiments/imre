@@ -22,8 +22,8 @@ fn cells<'a>(names: impl Iterator<Item = &'a str>) -> u8 {
 
 /// Return the class and namespace cells required by the class body, in that order.
 pub fn required(body: &[ast::Stmt], string_annotations: bool) -> (bool, bool) {
-    let (class, dict, _) = required_with_conditional(body, string_annotations);
-    (class, dict)
+    let cells = ClassCells::of(body, string_annotations);
+    (cells.class, cells.dict)
 }
 
 /// Return the class, namespace and conditional annotation cells needed by lexical reads.
@@ -31,18 +31,45 @@ pub fn required_with_conditional(
     body: &[ast::Stmt],
     string_annotations: bool,
 ) -> (bool, bool, bool) {
-    let mut scope = Scope {
-        class: true,
-        string_annotations,
-        ..Scope::default()
-    };
-    scope.visit_body(body);
-    let needed = scope.nested | (scope.annotation & (!scope.shadows | scope.nonlocal));
-    (
-        needed & CLASS != 0,
-        needed & DICT != 0,
-        needed & CONDITIONAL != 0,
-    )
+    let cells = ClassCells::of(body, string_annotations);
+    (cells.class, cells.dict, cells.conditional)
+}
+
+/// The implicit cells supplied by a class and the ones its own code reads from an outer scope.
+pub struct ClassCells {
+    pub class: bool,
+    pub dict: bool,
+    pub conditional: bool,
+    enclosing: u8,
+}
+
+impl ClassCells {
+    pub fn of(body: &[ast::Stmt], string_annotations: bool) -> Self {
+        let mut scope = Scope {
+            class: true,
+            string_annotations,
+            ..Scope::default()
+        };
+        scope.visit_body(body);
+        let needed = scope.nested | (scope.annotation & (!scope.shadows | scope.nonlocal));
+        Self {
+            class: needed & CLASS != 0,
+            dict: needed & DICT != 0,
+            conditional: needed & CONDITIONAL != 0,
+            enclosing: scope.free(),
+        }
+    }
+
+    /// A class can supply a method's cell and also read an outer cell with the same name.
+    pub fn supplied_only(&self) -> impl Iterator<Item = &'static str> {
+        [
+            ("__class__", self.class, CLASS),
+            ("__classdict__", self.dict, DICT),
+            ("__conditional_annotations__", self.conditional, CONDITIONAL),
+        ]
+        .into_iter()
+        .filter_map(|(name, supplied, bit)| (supplied && self.enclosing & bit == 0).then_some(name))
+    }
 }
 
 /// Whether the function body reads a free __class__, including through zero-argument super.

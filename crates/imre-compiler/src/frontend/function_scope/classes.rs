@@ -12,9 +12,7 @@ pub(crate) struct ClassScope {
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
     pub(crate) frame_reads: BTreeSet<String>,
-    pub(crate) needs_class_cell: bool,
-    pub(crate) needs_dict_cell: bool,
-    pub(crate) needs_conditional_cell: bool,
+    pub(crate) cells: imre_ast::class_cell::ClassCells,
     pub(crate) static_attributes: BTreeSet<String>,
 }
 
@@ -27,8 +25,8 @@ pub(super) fn site(class: &ast::StmtClassDef) -> TextSize {
 
 impl ClassScope {
     pub(crate) fn write_signature(&self, signature: &mut Value) {
-        signature["needs_class_cell"] = json!(self.needs_class_cell);
-        signature["needs_dict_cell"] = json!(self.needs_dict_cell);
+        signature["needs_class_cell"] = json!(self.cells.class);
+        signature["needs_dict_cell"] = json!(self.cells.dict);
         signature["static_attributes"] = json!(self.static_attributes);
         signature["class_frame_reads"] = json!(self.frame_reads);
         if !self.bindings.globals.is_empty() {
@@ -45,8 +43,6 @@ impl ClassScope {
         let body = &class.body;
         let string_annotations = names.string_annotations;
         let declarations = ClosureNames::class_declarations(body);
-        let (needs_class_cell, needs_dict_cell, needs_conditional_cell) =
-            imre_ast::class_cell::required_with_conditional(body, string_annotations);
         Self {
             enclosing_class,
             bindings: ClassBindings {
@@ -61,9 +57,7 @@ impl ClassScope {
                 captures_class: false,
             },
             frame_reads: BTreeSet::new(),
-            needs_class_cell,
-            needs_dict_cell,
-            needs_conditional_cell,
+            cells: imre_ast::class_cell::ClassCells::of(body, string_annotations),
             static_attributes: imre_ast::class_attributes::static_attributes(body, names),
         }
     }
