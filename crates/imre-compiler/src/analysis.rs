@@ -2247,12 +2247,18 @@ impl Session {
         matches!(ty.definition(&self.db, &model.program_environment()),
             Some(TypeDefinition::StaticClass(class))
                 if class.name(&self.db).as_deref() == Some(name)
-                    && class.file(&self.db).path(&self.db).is_vendored_path()
-                    && model.resolve_module(Some(owner), 0).and_then(|m| m.file(&self.db))
-                        == Some(class.file(&self.db)))
+                    && self.is_vendored_module_file(&model, class.file(&self.db), owner))
     }
 
-    /// Identify exact OrderedDict and deque class objects even when imported under another name.
+    fn is_vendored_module_file(&self, model: &SemanticModel<'_>, file: File, owner: &str) -> bool {
+        file.path(&self.db).is_vendored_path()
+            && model
+                .resolve_module(Some(owner), 0)
+                .and_then(|m| m.file(&self.db))
+                == Some(file)
+    }
+
+    /// Resolve a storage-owning base at the class header, including imported aliases.
     pub(crate) fn is_collections_storage_base(&self, module: usize, base: &Expr) -> bool {
         use ty_python_semantic::types::{KnownClass, ProgramEnvironment, Type as Ty};
         self.hint_reads.set(self.hint_reads.get() + 1);
@@ -2263,6 +2269,14 @@ impl Session {
         };
         let env = ProgramEnvironment::from_file(file);
         owner.definition(&self.db, &env).is_some_and(|definition| {
+            if let ty_python_semantic::types::TypeDefinition::StaticClass(class) = &definition
+                && class.name(&self.db).is_some_and(|name| {
+                    imre_ast::class_attributes::COLLECTION_STORAGE_BASES.contains(&name.as_str())
+                })
+                && self.is_vendored_module_file(&model, class.file(&self.db), "builtins")
+            {
+                return true;
+            }
             [KnownClass::OrderedDict, KnownClass::Deque]
                 .into_iter()
                 .any(|class| {
