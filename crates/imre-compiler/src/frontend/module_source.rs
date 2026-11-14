@@ -134,13 +134,13 @@ fn validate_syntax(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
-    checked: Option<&crate::modules::SourceModule>,
+    checked: Option<&Parsed<ast::ModModule>>,
 ) -> Result<(), String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
     }
-    if checked.is_none_or(|module| !std::ptr::eq(&*module.parsed, parsed)) {
+    if checked.is_none_or(|previous| !std::ptr::eq(previous, parsed)) {
         crate::analysis::check_scope_syntax(source, parsed.syntax())
             .map_err(|error| format!("{}:{error}", path.display()))?;
     }
@@ -171,9 +171,11 @@ pub(crate) fn validate<'a>(
     source: &str,
     parsed: &Parsed<ast::ModModule>,
     checked: Option<&'a crate::modules::SourceModule>,
+    checked_literal: Option<&Parsed<ast::ModModule>>,
     keep_docstrings: bool,
 ) -> Result<(Cow<'a, HashMap<TextRange, Vec<u32>>>, bool), String> {
-    validate_syntax(path, source, parsed, checked)?;
+    let checked_scope = checked_literal.or_else(|| checked.map(|module| &*module.parsed));
+    validate_syntax(path, source, parsed, checked_scope)?;
     let (replacements, has_templates) = if let Some(module) = checked
         && let Some(values) = module.cached_registered_values()
     {
@@ -226,8 +228,16 @@ mod tests {
     fn checked_literals_borrow_the_existing_map_and_still_validate_docstrings() {
         let graph = SourceGraph::single("def f():\r\n    '\\ud800'\r\n").unwrap();
         let module = &graph.modules[graph.entry];
-        let validate =
-            |checked, keep| validate(&module.path, &module.source, &module.parsed, checked, keep);
+        let validate = |checked, keep| {
+            validate(
+                &module.path,
+                &module.source,
+                &module.parsed,
+                checked,
+                None,
+                keep,
+            )
+        };
         let (independent, has_templates) = validate(None, false).unwrap();
         assert!(!has_templates);
         assert!(matches!(independent, Cow::Owned(_)));
@@ -249,10 +259,32 @@ mod tests {
             &layout.text,
             &layout.parsed,
             Some(module),
+            None,
             false,
         )
         .unwrap();
         assert!(matches!(borrowed, (Cow::Borrowed(borrowed), true) if std::ptr::eq(borrowed, map)));
+    }
+
+    #[test]
+    fn a_separately_parsed_child_still_checks_its_own_scope() {
+        let path = Path::new("<string>");
+        let checked = ParsedModule::parse(path, "pass\n".into()).unwrap();
+        let text = "def bad():\n    from math import *\n";
+        let child = ParsedModule::parse(path, text.into()).unwrap();
+        let error = validate(
+            path,
+            text,
+            &child.parsed,
+            None,
+            Some(&checked.parsed),
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "<string>:2:22: Imre: SyntaxError: import * only allowed at module level"
+        );
     }
 
     #[test]

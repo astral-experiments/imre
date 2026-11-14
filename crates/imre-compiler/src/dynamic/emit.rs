@@ -56,7 +56,7 @@ pub(super) struct RegisteredBodies<'a> {
 }
 
 impl RegisteredBodies<'_> {
-    pub(super) fn provider_origin(&self, unit: usize, bundled: bool) -> Option<ModuleOrigin<'_>> {
+    pub(super) fn provider_origin(&self, unit: usize, bundled: bool) -> Option<ModuleOrigin<'_, '_>> {
         if bundled {
             Some(ModuleOrigin::Bundled)
         } else {
@@ -68,9 +68,10 @@ impl RegisteredBodies<'_> {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum ModuleOrigin<'a> {
+pub(super) enum ModuleOrigin<'a, 'syntax> {
     Program(Option<&'a super::CheckedFunctions>),
     ExecLiteral {
+        checked: &'syntax ruff_python_parser::Parsed<ast::ModModule>,
         inherited_flags: u32,
         python_annotations: bool,
     },
@@ -79,7 +80,7 @@ pub(super) enum ModuleOrigin<'a> {
     Bundled,
 }
 
-impl ModuleOrigin<'_> {
+impl ModuleOrigin<'_, '_> {
     pub(super) fn python_annotations(self, name: &str) -> bool {
         match self {
             Self::Provider => true,
@@ -305,7 +306,7 @@ impl<'a> PreparedBody<'a> {
         path: &'a Path,
         source: &'a str,
         python_optimization: i32,
-        origin: ModuleOrigin<'a>,
+        origin: ModuleOrigin<'a, '_>,
     ) -> Result<PreparedBody<'a>, String> {
         Self::with_module(name, path, source, python_optimization, origin, Ok)
     }
@@ -316,7 +317,7 @@ impl<'a> PreparedBody<'a> {
         path: &'a Path,
         text: &'a str,
         python_optimization: i32,
-        origin: ModuleOrigin<'a>,
+        origin: ModuleOrigin<'a, '_>,
     ) -> Result<PreparedBody<'a>, String> {
         let mut module = Self::module(name, path, text, python_optimization, origin)?;
         // These fixtures edit the original suite or force a physical operand after checking.
@@ -340,7 +341,7 @@ impl<'a> PreparedBody<'a> {
         path: &'a Path,
         source: &'a str,
         python_optimization: i32,
-        origin: ModuleOrigin<'a>,
+        origin: ModuleOrigin<'a, '_>,
         use_module: impl FnOnce(PreparedBody<'a>) -> Result<R, String>,
     ) -> Result<R, String> {
         let module = Self::prepare(
@@ -382,7 +383,7 @@ impl<'a> PreparedBody<'a> {
         path: impl Into<Cow<'a, Path>>,
         module: impl Into<ParsedInput<'a, 'p>>,
         python_optimization: i32,
-        origin: ModuleOrigin<'a>,
+        origin: ModuleOrigin<'a, '_>,
         literal_sites: LiteralSites,
         (operand_types, checked_source): (
             Option<crate::analysis::OperandTypes<'_>>,
@@ -426,7 +427,7 @@ impl<'a> PreparedBody<'a> {
         path: Cow<'a, Path>,
         (module, normalized): ParsedInput<'a, '_>,
         python_optimization: i32,
-        origin: ModuleOrigin<'a>,
+        origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
         (operand_types, checked_source): (
             Option<crate::analysis::OperandTypes<'_>>,
@@ -462,6 +463,10 @@ impl<'a> PreparedBody<'a> {
             source,
             &parsed,
             checked_source,
+            match origin {
+                ModuleOrigin::ExecLiteral { checked, .. } => Some(checked),
+                _ => None,
+            },
             keep_docstrings
                 && !(interactive && syntax.body.first().is_some_and(ast::Stmt::is_expr_stmt)),
         )?;
