@@ -626,7 +626,6 @@ impl Context {
                     unreachable!()
                 };
                 frame.exec_locals = Some(namespace);
-                frame.closure.declared_complete = true;
                 Ok(scope)
             }
             "class" | "parameterized_class" => {
@@ -2924,11 +2923,8 @@ impl Context {
             let Some(parent) = frame.parent else {
                 return Some(false);
             };
-            // A separate exec/eval locals mapping supplies names to the module, never closure cells.
-            if frame.exec_locals.is_some() {
-                return Some(false);
-            }
-            if !frame.in_class_body {
+            // Class and mapping locals serve direct reads. A nested function closes over their parent.
+            if !frame.in_class_body && frame.exec_locals.is_none() {
                 if frame.globals.contains(name) {
                     return Some(false);
                 }

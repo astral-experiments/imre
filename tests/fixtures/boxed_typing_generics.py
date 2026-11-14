@@ -584,6 +584,19 @@ assert t.get_origin(unpacked) is t.Unpack and t.get_args(unpacked) == (pack,)
 assert t.TypeVarTuple("Manual").evaluate_default(1) is t.NoDefault
 
 
+class HeaderOwner[T]:
+    T = "class"
+
+    class Inner[U](list[(T for _ in (0,)), T]):
+        pass
+
+
+iterator, direct = HeaderOwner.Inner.__orig_bases__[0].__args__
+assert iterator.gi_code.co_freevars == ("T",)
+assert next(iterator) is HeaderOwner.__type_params__[0]
+assert direct == "class"
+
+
 class Hidden[__P]:
     value = __P
 
