@@ -312,22 +312,27 @@ pub(super) fn tb_position(ctx: &mut Context, tb: Id) -> Id {
     let Value::Traceback { lineno, span, .. } = *ctx.heap.get(tb) else {
         return NONE;
     };
+    position_tuple(
+        ctx,
+        lineno,
+        span.map(|span| [span.end_line, span.start, span.end]),
+    )
+}
+
+/// Return the Python position for a live instruction or a recorded traceback.
+pub(super) fn position_tuple(ctx: &mut Context, lineno: i64, span: Option<[u32; 3]>) -> Id {
     let line = ctx.int(lineno);
-    let positions = match span {
-        Some(TracebackSpan {
-            end_line,
-            start,
-            end,
-            ..
-        }) => vec![
+    let fields = match span {
+        Some([end_line, u32::MAX, u32::MAX]) => [line, ctx.int(i64::from(end_line)), NONE, NONE],
+        Some([end_line, start, end]) => [
             line,
             ctx.int(i64::from(end_line)),
             ctx.int(i64::from(start)),
             ctx.int(i64::from(end)),
         ],
-        None => vec![line, NONE, NONE, NONE],
+        None => [line, NONE, NONE, NONE],
     };
-    ctx.alloc(Value::Tuple(positions))
+    ctx.alloc(Value::Tuple(fields.to_vec()))
 }
 
 /// Find the exception that precedes this one in its displayed traceback.

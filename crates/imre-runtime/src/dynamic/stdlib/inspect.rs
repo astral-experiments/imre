@@ -54,16 +54,16 @@ pub(super) fn call(
         "_frame_position" => match *ctx.heap.get(obj) {
             Value::Traceback { .. } => Ok(super::traceback::tb_position(ctx, obj)),
             Value::PythonFrame { lineno, .. } => {
-                let fields = match ctx.frame_position(obj) {
-                    Some(range) => range.map(|v| ctx.int(i64::from(v))),
-                    None => [
-                        ctx.int(i64::from(lineno)),
-                        super::NONE,
-                        super::NONE,
-                        super::NONE,
-                    ],
-                };
-                Ok(ctx.alloc(Value::Tuple(fields.to_vec())))
+                let (line, columns) = ctx
+                    .frame_position(obj)
+                    .map_or((lineno, None), |[line, end_line, start, end]| {
+                        (line, Some([end_line, start, end]))
+                    });
+                Ok(super::traceback::position_tuple(
+                    ctx,
+                    i64::from(line),
+                    columns,
+                ))
             }
             _ => Err(super::Error::new(
                 "TypeError",

@@ -3582,6 +3582,9 @@ impl Context {
                 return Ok(code);
             }
             Value::PythonFrame { lineno, .. } if name == "f_lineno" => {
+                let lineno = self
+                    .frame_position(obj)
+                    .map_or(lineno, |position| position[0]);
                 return Ok(self.int(i64::from(lineno)));
             }
             Value::Native(ref class)
