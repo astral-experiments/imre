@@ -428,10 +428,11 @@ impl Session {
         }
         // Importing the launcher by its file name creates a new namespace.
         let source = selected_module(name).filter(|source| source.module != entry)?;
-        let owner = model.resolve_module(Some(name), 0)?.file(&self.db)?;
-        (self.files[source.module] == owner
+        let owner = model.resolve_module(Some(name), 0)?;
+        (self.files[source.module] == owner.file(&self.db)?
             && source.path.extension().is_some_and(|ext| ext == "py")
-            && source.path.file_stem().is_some_and(|s| s == name))
+            && (source.path.file_stem().is_some_and(|s| s == name)
+                || owner.kind(&self.db).is_package()))
         .then_some(source)
     }
 
@@ -496,7 +497,7 @@ impl Session {
             }
             let value = argument.value();
             if let Some(origin) = self.assigned_value(file, parsed, value, Expr::is_name_expr)
-                && origin.is_literal_expr()
+                && (origin.is_literal_expr() || crate::modules::inert_literal(value))
             {
                 actuals.push(origin.inferred_type(model).unwrap_or_else(Type::unknown));
             } else {
