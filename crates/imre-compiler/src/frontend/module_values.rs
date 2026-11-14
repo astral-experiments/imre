@@ -990,7 +990,7 @@ impl ModuleValues {
         functions: &[ir::Function],
         binding_reads: &[HashSet<DefinitionId>],
         callables: &[DefinitionId],
-        targets: &HashMap<Type, HashSet<usize>>,
+        targets: &crate::callables::SourceTargets,
     ) -> std::result::Result<(), String> {
         for (initializer, order) in initializers {
             let module = &graph.modules[order.module];
@@ -1103,7 +1103,7 @@ fn collect(
     reads: &mut HashSet<usize>,
     calls: &mut Vec<usize>,
     references: &mut Vec<usize>,
-    targets: &HashMap<Type, HashSet<usize>>,
+    targets: &crate::callables::SourceTargets,
     current: &impl Fn(&Expr) -> Option<usize>,
 ) {
     ir::walk_expressions(body, &mut |value| match &value.kind {
@@ -1132,7 +1132,7 @@ fn collect(
             } else if let Some(targets) =
                 callables::invoked_signature(value).and_then(|ty| targets.get(&ty))
             {
-                calls.extend(targets);
+                calls.extend(targets.iter().map(|target| target.function));
             }
         }
         _ => {}

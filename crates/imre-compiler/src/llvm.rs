@@ -377,7 +377,8 @@ pub(crate) fn emit(
     ranges: &RangeFacts<'_>,
     sanitize: bool,
 ) -> Result<String, crate::LoweringDiagnostic> {
-    let program = crate::callables::layouts(module)?;
+    let program =
+        crate::callables::layouts(module, crate::callables::TargetCollector::analyze(module))?;
     let mut unit = crate::CodegenUnit::new("__main__", String::new());
     Output::new([], std::slice::from_mut(&mut unit), 0, false)
         .emit(module, ranges, sanitize, program);

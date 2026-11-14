@@ -1732,6 +1732,7 @@ fn lower_graph(
     }
     let mut entry = entry.expect("source graph has an entry module");
     let mut entry_operations = EntryOperations::default();
+    let mut callable_targets = crate::callables::TargetCollector::default();
     let mut names = false;
     let mut uses_builtin_module_names = false;
     let mut generator_sites = 0;
@@ -1758,12 +1759,11 @@ fn lower_graph(
     };
     let mut validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
         typing::validate_functions(functions, &entry, &types, graph, &callable_definitions)?;
-        let mut callable_targets = HashMap::new();
         let mut indirect = Vec::new();
         let mut storage = Ok(());
         for (slot, function) in functions.iter().chain([&entry]).enumerate() {
             let checked = callables::validate_storage(function, &types, |value| {
-                callables::record_target(value, &types, &mut callable_targets);
+                callable_targets.inspect(slot, &types, value);
                 record_builtin(value);
                 entry_operations.record(value);
                 if let Some(calls) = call_graph.get_mut(slot) {
@@ -1777,11 +1777,12 @@ fn lower_graph(
             storage = storage.and(checked);
         }
         // An invalid coroutine adapter precedes a storage error anywhere in the program.
-        callables::validate_targets(functions, &types, &callable_targets)?;
+        callable_targets.deduplicate();
+        callables::validate_targets(functions, &types, &callable_targets.constructed)?;
         storage?;
         for (slot, signature) in indirect {
-            if let Some(targets) = callable_targets.get(&signature) {
-                call_graph[slot].extend(targets);
+            if let Some(targets) = callable_targets.constructed.get(&signature) {
+                call_graph[slot].extend(targets.iter().map(|target| target.function));
             }
         }
         if let Some(id) = recursive_call_root(&call_graph) {
@@ -1793,7 +1794,7 @@ fn lower_graph(
             functions,
             &class_reads,
             &callable_definitions,
-            &callable_targets,
+            &callable_targets.constructed,
         )?;
         Ok(())
     };
@@ -1843,8 +1844,12 @@ fn lower_graph(
         }
         // Fusion can replace checked operands. Frame markers carry no operands.
         entry_operations = EntryOperations::default();
-        for function in functions.iter().chain([&entry]) {
-            ir::walk_expressions(&function.body, &mut |expr| entry_operations.record(expr));
+        callable_targets = crate::callables::TargetCollector::default();
+        for (id, function) in functions.iter().chain([&entry]).enumerate() {
+            ir::walk_expressions(&function.body, &mut |expr| {
+                entry_operations.record(expr);
+                callable_targets.inspect(id, &types, expr);
+            });
         }
     }
     if let Some(cache) = cache {
@@ -1936,7 +1941,7 @@ fn lower_graph(
         .borrow_mut()
         .extend_layouts(&mut classes.fields);
     let mut globals = globals.into_types();
-    types.reserve_constructor_globals(&mut globals, &functions, &entry);
+    types.reserve_constructor_globals(&mut globals, &callable_targets.constructors);
     let lowered = (
         ir::Module {
             builtin_module_sources: None,
@@ -1959,6 +1964,7 @@ fn lower_graph(
     Ok(Some(crate::CheckedProgram::Native(Box::new(
         crate::FixedProgram {
             ir: lowered,
+            callables: callable_targets,
             frame_sources: completed.frames,
             uses_builtin_module_names,
         },
