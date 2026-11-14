@@ -2881,6 +2881,7 @@ impl Context {
                 name,
                 default,
                 repr_active,
+                ..
             } => {
                 if repr_active.replace(true) {
                     return "...".to_owned();
