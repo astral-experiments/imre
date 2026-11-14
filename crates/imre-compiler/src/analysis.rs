@@ -3314,7 +3314,12 @@ pub(crate) enum FallbackCalls {
 
 /// The earliest initializer assignment through the module's actual globals dictionary.
 #[salsa::tracked]
-fn first_global_item_write(db: &dyn Db, file: File, key: String) -> Option<TextSize> {
+fn first_global_item_write(
+    db: &dyn Db,
+    file: File,
+    key: String,
+    bound: TextSize,
+) -> Option<TextSize> {
     let source = db.program_file(file);
     let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
     let model = SemanticModel::new(db, source);
@@ -3324,6 +3329,7 @@ fn first_global_item_write(db: &dyn Db, file: File, key: String) -> Option<TextS
         .iter()
         .filter_map(Stmt::as_assign_stmt)
         .flat_map(|assignment| &assignment.targets)
+        .filter(|target| target.start() >= bound)
         .find_map(|target| {
             let item = target.as_subscript_expr()?;
             if item.slice.as_string_literal_expr()?.value.to_str() != key {
@@ -3338,7 +3344,22 @@ fn first_global_item_write(db: &dyn Db, file: File, key: String) -> Option<TextS
         })
 }
 
-/// A function-local import retains its original object when a module global changes.
+/// Return the single global binding of a name read by a deferred function.
+fn sole_global_name<'db>(
+    model: &SemanticModel<'db>,
+    name: &ruff_python_ast::ExprName,
+) -> Option<ty_python_core::definition::Definition<'db>> {
+    let index = ty_python_core::semantic_index(model.db(), model.program_file());
+    let scope = FileScopeId::global();
+    let symbol = index.place_table(scope).symbol_id(name.id.as_str())?;
+    let mut definitions = index
+        .use_def_map(scope)
+        .end_of_scope_symbol_bindings(symbol);
+    let binding = definitions.next()?.binding.definition()?;
+    definitions.next().is_none().then_some(binding)
+}
+
+/// A namespace store changes the call shape only while its binding is current.
 fn changed_module_binding<'db>(
     model: &SemanticModel<'db>,
     call: &ExprCall,
@@ -3346,25 +3367,34 @@ fn changed_module_binding<'db>(
     definition: ty_python_core::definition::Definition<'db>,
 ) -> bool {
     let db = model.db();
-    if !definition.file_scope(db).is_global() {
-        return false;
-    }
     let caller = model.file();
-    let written = |file, key| {
-        first_global_item_write(db, file, key).is_some_and(|site| {
-            file != caller
-                || site < call.start()
-                || !ty_python_core::semantic_index(db, db.program_file(file))
-                    .try_expression_scope_id(call.func.as_ref())
-                    .is_some_and(|scope| scope.is_global())
+    let index = ty_python_core::semantic_index(db, model.program_file());
+    let scope = index.try_expression_scope_id(call.func.as_ref());
+    let written = |binding: ty_python_core::definition::Definition<'db>, key: String| {
+        let file = binding.file(db);
+        let parsed =
+            ruff_db::parsed::parsed_module(db, db.program_file(file).python_file(db)).load(db);
+        let bound = binding.focus_range(db, &parsed).end();
+        first_global_item_write(db, file, key, bound).is_some_and(|site| {
+            file != caller || site < call.start() || scope.is_some_and(|scope| !scope.is_global())
         })
     };
-    definition
-        .name(db)
-        .is_some_and(|name| written(definition.file(db), name))
-        || (written(caller, name.id.to_string())
-            && resolved_name_definition(model, name, ImportAliasResolution::PreserveAliases)
-                .is_some_and(|binding| binding.file_scope(db).is_global()))
+    if definition.file(db) != caller
+        && definition.file_scope(db).is_global()
+        && definition
+            .name(db)
+            .is_some_and(|key| written(definition, key))
+    {
+        return true;
+    }
+    let Some(scope) = scope else { return false };
+    let Some(symbol) = index.place_table(scope).symbol_id(name.id.as_str()) else {
+        return false;
+    };
+    index.symbol_resolves_to_global_scope(symbol, scope)
+        && shipped_exports::binding_at_use(db, caller, &call.func)
+            .or_else(|| sole_global_name(model, name))
+            .is_some_and(|binding| written(binding, name.id.to_string()))
 }
 
 /// Replacing the code or defaults of the selected function can change the

@@ -260,17 +260,7 @@ impl<'ast, 'db> Escape<'ast, 'db> {
         let binding = self
             .session
             .file_binding(self.model.file(), callee)
-            .or_else(|| {
-                // Free names in a helper use its module's global binding.
-                let index = ty_python_core::semantic_index(db, self.model.program_file());
-                let scope = ty_python_core::FileScopeId::global();
-                let symbol = index.place_table(scope).symbol_id(name.id.as_str())?;
-                let mut definitions = index
-                    .use_def_map(scope)
-                    .end_of_scope_symbol_bindings(symbol);
-                let binding = definitions.next()?.binding.definition()?;
-                definitions.next().is_none().then_some(binding)
-            })?;
+            .or_else(|| super::sole_global_name(&self.model, name))?;
         if binding.file(db) != self.model.file() {
             return None;
         }
