@@ -1551,7 +1551,15 @@ fn lower_graph(
             .flatten()
             .map(|body| (body, Default::default()))
             .map_or_else(|| lower_body(checker, definition, signature), Ok)
-        } else if named_scalar && signature.physical_frame && unavailable.is_none() {
+        } else if physical_function
+            && (named_scalar && unavailable.is_none()
+                || named
+                    && place_procedures
+                    && unavailable.is_some()
+                    && signature.params.is_empty()
+                    && definition.returns.is_some()
+                    && signature.returns == Type::None)
+        {
             lower_function(checker, definition, signature, None, Some(&inference))
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
@@ -2246,7 +2254,14 @@ fn lower_function(
                 statements,
                 Some(&mut body),
                 Some(&mut |cx| {
-                    if cx.helpers.len() != helpers || cx.unrepresented.borrow().is_some() {
+                    if cx.helpers.len() != helpers
+                        || cx.unrepresented.borrow().is_some()
+                        || signature.returns == Type::None
+                            && cx
+                                .settled_attributes
+                                .as_ref()
+                                .is_some_and(|inputs| !inputs.is_empty())
+                    {
                         return false;
                     }
                     placed = registered::place_checked_definition(

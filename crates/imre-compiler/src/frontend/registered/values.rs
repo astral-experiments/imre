@@ -1419,23 +1419,19 @@ impl Checker<'_> {
         {
             let refused = || self.scoped_builtin_error("declared Python call", call);
             let signature = self.functions.get(&id).ok_or_else(refused)?;
-            let (written, omitted) = signature
-                .params
-                .split_at_checked(call.arguments.len())
-                .ok_or_else(refused)?;
-            if !call.func.is_name_expr()
-                || !fixed_positional_arguments(call)
-                || written.iter().any(|p| !p.kind.accepts_positional())
-                || omitted.iter().any(|p| p.default.is_none())
-            {
+            if !call.func.is_name_expr() {
                 return Err(refused());
             }
+            let indices =
+                calls::checked_parameter_indices(call, &signature.params).ok_or_else(refused)?;
             let target = self.expr(&call.func)?;
             // A live Python argument can satisfy an inferred layout only at dispatch.
             // Forward it unchanged and leave the result untyped on that edge.
             let mut fixed_result = true;
             let mut args = Vec::with_capacity(call.arguments.len());
-            for (index, (arg, parameter)) in call.arguments.args.iter().zip(written).enumerate() {
+            for (position, arg) in imre_ast::argument_values(&call.arguments).enumerate() {
+                let index = indices.get(position).copied().unwrap_or(position);
+                let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
                 let expected = if let Some(inference) = self.inference {
                     inference.learn_parameter(signature.id, index, value.checked_operand_type())

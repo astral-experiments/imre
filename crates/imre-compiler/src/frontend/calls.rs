@@ -166,28 +166,68 @@ pub(crate) fn fixed_call_arguments<'a>(
         .enumerate()
         .map(|(i, p)| (p, ParameterKind::fixed(parameters, i)))
         .collect();
-    let mut bound = Vec::with_capacity(call.arguments.len());
-    let order = bind_fixed(
+    supplied_fixed_parameters(
         call,
         &fixed,
         |(p, k)| (p.name().as_str(), *k),
+        |(p, _)| p.default.is_some(),
+        |i, arg| (fixed[i].0, arg),
+    )
+}
+
+/// Return the supplied values in evaluation order after verifying every required parameter.
+fn supplied_fixed_parameters<'a, P, T>(
+    call: &'a ast::ExprCall,
+    parameters: &[P],
+    shape: impl Fn(&P) -> (&str, ParameterKind),
+    has_default: impl Fn(&P) -> bool,
+    mut value: impl FnMut(usize, &'a ast::Expr) -> T,
+) -> Option<Vec<T>> {
+    let mut supplied = Vec::with_capacity(call.arguments.len());
+    let order = bind_fixed(
+        call,
+        parameters,
+        shape,
         0,
-        |index, value| {
-            bound.push((fixed[index].0, value));
+        |index, arg| {
+            supplied.push(value(index, arg));
             Ok(ControlFlow::<()>::Continue(()))
         },
         |_, _| (),
     )
     .ok()?
     .continue_value()?;
-    if fixed
+    if parameters
         .iter()
         .zip(order)
-        .any(|((p, _), slot)| slot == usize::MAX && p.default.is_none())
+        .any(|(p, slot)| slot == usize::MAX && !has_default(p))
     {
         return None;
     }
-    Some(bound)
+    Some(supplied)
+}
+
+/// Map written keyword operands to their checked parameters. Positional calls use their source indices.
+pub(super) fn checked_parameter_indices(
+    call: &ast::ExprCall,
+    parameters: &[Parameter],
+) -> Option<Vec<usize>> {
+    if has_unpacking(call) {
+        return None;
+    }
+    if call.arguments.keywords.is_empty() {
+        let (written, omitted) = parameters.split_at_checked(call.arguments.len())?;
+        return (written.iter().all(|p| p.kind.accepts_positional())
+            && omitted.iter().all(|p| p.default.is_some()))
+        .then(Vec::new);
+    }
+    supplied_fixed_parameters(
+        call,
+        parameters,
+        |p| (p.name.as_str(), p.kind),
+        |p| p.default.is_some(),
+        |index, _| index,
+    )
 }
 
 /// A builtin parameter that accepts either a positional or a keyword argument.
