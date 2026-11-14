@@ -28,6 +28,9 @@ impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
         (self.0, &self.1)
     }
     fn place_site(&mut self, _: crate::frontend::RequiredSite) {}
+    fn exec_literal_at(&mut self, _: TextRange) -> Option<super::sites::CompiledExec> {
+        None
+    }
 }
 
 #[test]
