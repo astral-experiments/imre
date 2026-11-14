@@ -3136,8 +3136,13 @@ impl Context {
                     })?;
                 self.bind_local(scope, "__class_getitem__", getitem);
             }
-            let fields =
-                super::namedtuple::bind_field_metadata(self, scope, &named_fields, &defaults);
+            let (fields, signature) = super::namedtuple::bind_field_metadata(
+                self,
+                scope,
+                name,
+                &named_fields,
+                &defaults,
+            )?;
             let defaults = self.alloc(Value::Tuple(defaults));
             let new = super::namedtuple::bind_new(
                 self,
@@ -3146,6 +3151,7 @@ impl Context {
                 &named_fields,
                 fields,
                 Some(defaults),
+                signature,
             )?;
             self.bind_local(scope, "__annotate_func__", annotate);
             self.set_attr(new, "__annotate__", annotate)?;

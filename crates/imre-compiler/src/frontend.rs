@@ -8381,17 +8381,33 @@ impl<'a> Checker<'a> {
         // Scalar arithmetic keeps both operands in the checked operation. The
         // registered emitter guards their actual handles, including subclasses.
         // Power has a distinct fixed operation selected from the exponent.
-        let scalar = binary.op != ast::Operator::Pow
+        if binary.op != ast::Operator::Pow
             && matches!(left.ty, Type::Int | Type::Float)
-            && matches!(right.ty, Type::Int | Type::Float);
-        if self.registered.is_none() || scalar {
+            && matches!(right.ty, Type::Int | Type::Float)
+        {
             return self.binary_operands(binary, left, right);
         }
-        // Other fixed layouts can convert operands or select a builtin. Check the
-        // contract and keep the original handles for the Python operation.
-        let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
+        let type_union = binary.op == ast::Operator::BitOr
+            && matches!(
+                (left.ty, right.ty),
+                (Type::BuiltinClass, Type::BuiltinClass | Type::None)
+                    | (Type::None, Type::BuiltinClass)
+            );
+        let ty = if left.ty == Type::PythonObject || right.ty == Type::PythonObject || type_union {
+            if self.registered.is_none() {
+                return Err(self.classified_error(
+                    Kind::ScopedObject,
+                    binary,
+                    "binary operation requires Python object dispatch",
+                ));
+            }
             Type::PythonObject
         } else {
+            if self.registered.is_none() {
+                return self.binary_operands(binary, left, right);
+            }
+            // Other fixed layouts can convert operands or select a builtin. Check the
+            // contract and keep the original handles for the Python operation.
             self.binary_operands(binary, left.clone(), right.clone())?
                 .ty
         };
@@ -8410,13 +8426,6 @@ impl<'a> Checker<'a> {
         mut left: Expr,
         mut right: Expr,
     ) -> Result<Expr, String> {
-        if left.ty == Type::PythonObject || right.ty == Type::PythonObject {
-            return Err(self.classified_error(
-                Kind::ScopedObject,
-                binary,
-                "binary operation requires Python object dispatch",
-            ));
-        }
         if binary.op == ast::Operator::Mod
             && left.ty == Type::Str
             && self.types.element(right.ty) == Some(Type::ObjectValue)

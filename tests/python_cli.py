@@ -2947,6 +2947,10 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         for source in (
             "print(dir((1, 2)))",
             "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)))",
+            "from typing import NamedTuple\n"
+            "class Row(NamedTuple):\n    value: int | None\n"
+            "assert Row.__annotations__ == {'value': int | None}\n"
+            "print(Row.__slots__, Row.__doc__, hasattr(Row(1), '__dict__'))",
         ):
             tuple_dir.write_text(source + "\n")
             compare("-B", tuple_dir, native_args=("run", tuple_dir, "--quiet"))

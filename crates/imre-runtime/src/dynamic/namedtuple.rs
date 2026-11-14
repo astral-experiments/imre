@@ -419,17 +419,13 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let name = ctx.text(&typename);
     ctx.bind(scope, "__qualname__", name);
     ctx.bind(scope, "__module__", module);
-    let fields = bind_field_metadata(ctx, scope, &names, &defaults);
+    let (fields, signature) = bind_field_metadata(ctx, scope, &typename, &names, &defaults)?;
     bind_fields(ctx, scope, &names);
     bind_repr(ctx, scope, name, fields)?;
     bind_replace(ctx, scope, name, fields)?;
-    let slots = ctx.alloc(Value::Tuple(Vec::new()));
-    ctx.bind(scope, "__slots__", slots);
-    let doc = ctx.text(format!("{typename}({})", names.join(", ")));
-    ctx.bind(scope, "__doc__", doc);
     bind_make(ctx, scope, name, fields)?;
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
-    bind_new(ctx, scope, &typename, &names, fields, defaults)?;
+    bind_new(ctx, scope, &typename, &names, fields, defaults, signature)?;
     let tuple = ctx.builtin("tuple");
     ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
@@ -443,13 +439,28 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     Ok(class)
 }
 
-/// Publish the field order and trailing defaults used by the generated constructor.
+/// Publish the metadata shared by functional and class-based named tuples.
 pub(super) fn bind_field_metadata(
     ctx: &mut Context,
     scope: Id,
+    typename: &str,
     names: &[String],
     defaults: &[Id],
-) -> Id {
+) -> Result<(Id, Id)> {
+    let mut fields = String::new();
+    for name in names {
+        if !fields.is_empty() {
+            super::operators::append_rendered_text(&mut fields, ", ")?;
+        }
+        super::operators::append_rendered_text(&mut fields, name)?;
+    }
+    if names.len() == 1 {
+        super::operators::append_rendered_text(&mut fields, ",")?;
+    }
+    let doc = ctx.text(text_parts(&[typename, "(", &fields, ")"])?);
+    ctx.bind(scope, "__doc__", doc);
+    let slots = ctx.alloc(Value::Tuple(Vec::new()));
+    ctx.bind(scope, "__slots__", slots);
     let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
     let offset = field_ids.len() - defaults.len();
     let field_defaults = ctx.dict(
@@ -465,7 +476,7 @@ pub(super) fn bind_field_metadata(
     if ctx.scope_name(scope, "__match_args__").is_none() {
         ctx.bind(scope, "__match_args__", fields);
     }
-    fields
+    Ok((fields, doc))
 }
 
 /// Format the actual tuple payload against the declared field names.
@@ -602,17 +613,8 @@ pub(super) fn bind_new(
     names: &[String],
     field_ids: Id,
     defaults: Option<Id>,
+    signature: Id,
 ) -> Result<Id> {
-    let mut fields = String::new();
-    for name in names {
-        if !fields.is_empty() {
-            super::operators::append_rendered_text(&mut fields, ", ")?;
-        }
-        super::operators::append_rendered_text(&mut fields, name)?;
-    }
-    if names.len() == 1 {
-        super::operators::append_rendered_text(&mut fields, ",")?;
-    }
     let new = ctx.builtin("tuple.__new__");
     let allocate = ctx.text("_tuple_new");
     let module = ctx.text("__name__");
@@ -646,10 +648,7 @@ pub(super) fn bind_new(
     let qualname = ctx.text(text_parts(&[typename, ".__new__"])?);
     let doc = ctx.text(text_parts(&[
         "Create new instance of ",
-        typename,
-        "(",
-        &fields,
-        ")",
+        ctx.str_value(signature)?,
     ])?);
     ctx.set_attr(new, "__qualname__", qualname)?;
     ctx.set_attr(new, "__doc__", doc)?;
