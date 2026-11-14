@@ -714,7 +714,7 @@ fn scan_imports(
     getter: Option<&mut Imports>,
     file_alternative: Option<(&Path, bool)>,
     shipped: bool,
-) -> Result<(Imports, Option<imre_ast::Names>), String> {
+) -> Result<(Imports, Option<ScannedModule>), String> {
     let module = match read_import_source(source, kind, None)? {
         ImportSource::Module(module) => module,
         ImportSource::Invalid(error) => {
@@ -730,19 +730,32 @@ fn scan_imports(
     if let Some((path, keep_docstrings)) = file_alternative {
         module_source::validate_file(path, &module.text, &module.parsed, keep_docstrings)?;
     }
+    let original = std::ptr::eq(module.text.as_ref(), source);
+    let (mut body, parsed) = if original && file_alternative.is_some() {
+        let parser = module.parsed.into_owned();
+        (
+            parser.syntax().body.clone(),
+            Some(ScannedParser::Owned(parser)),
+        )
+    } else {
+        (module_source::into_body(module.parsed), None)
+    };
     let mut imports = imports_from_body(
         &module.text,
-        &mut module_source::into_body(module.parsed),
+        &mut body,
         getter,
         file_alternative.map(|(path, _)| path),
     )?;
-    // The standalone parser reads the registered bytes in their original coordinates.
-    let names = (shipped
-        && std::ptr::eq(module.text.as_ref(), source)
+    // A parser can supply its original statements only if discovery left their names intact.
+    let scanned = (original
+        && (shipped || parsed.is_some())
         && imports.invalid_executable.is_none()
         && !imports.private_names.rewritten)
-        .then(|| std::mem::take(&mut imports.private_names));
-    Ok((imports, names))
+        .then(|| ScannedModule {
+            parsed,
+            lowered: LoweredRoot::Unchanged(std::mem::take(&mut imports.private_names)),
+        });
+    Ok((imports, scanned))
 }
 
 pub(super) enum LoweredRoot {
@@ -765,7 +778,15 @@ pub(super) struct ScannedModule {
 
 impl ScannedModule {
     fn from_input((module, lowered): emit::ParsedInput<'_, '_>) -> Option<Self> {
-        let lowered = lowered?;
+        // An owned parser already contains the entire original suite.
+        let lowered = match lowered? {
+            LoweredRoot::Complete(_, names)
+                if matches!(module.parsed, Cow::Owned(_)) && !names.rewritten =>
+            {
+                LoweredRoot::Unchanged(names)
+            }
+            root => root,
+        };
         Some(Self {
             parsed: match module.parsed {
                 Cow::Owned(parser) => Some(ScannedParser::Owned(parser)),
@@ -1385,15 +1406,9 @@ pub(crate) fn compile(
                                kind: SourceKind,
                                getter: Option<&mut Imports>| {
         if output.is_some() {
-            let (imports, names) = scan_imports(source, kind, getter, None, true)?;
-            if let Some(names) = names {
-                scanned_modules.insert(
-                    unit,
-                    ScannedModule {
-                        parsed: None,
-                        lowered: LoweredRoot::Unchanged(names),
-                    },
-                );
+            let (imports, scanned) = scan_imports(source, kind, getter, None, true)?;
+            if let Some(module) = scanned {
+                scanned_modules.insert(unit, module);
             }
             return Ok(imports);
         }
@@ -2140,13 +2155,18 @@ pub(crate) fn compile(
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let mut declaration = None;
                     let imports = if let Some(file) = parsed {
-                        retained_imports(file.parsed(modules), None, None)
+                        retained_imports(file.parsed(modules), None, None).map(|(imports, input)| {
+                            (imports, input.and_then(ScannedModule::from_input))
+                        })
                     } else if winner && alternative.is_none() && !file_alternate {
                         if checked.is_none() && kind == SourceKind::DiskFile {
                             declaration = checked_graph
                                 .and_then(|graph| graph.session.declaration_parser(&path, &src));
                         }
                         scan_imports_for_preparation(&src, kind, declaration.as_deref(), None, None)
+                            .map(|(imports, input)| {
+                                (imports, input.and_then(ScannedModule::from_input))
+                            })
                     } else {
                         let parser_kind = if file_alternate {
                             SourceKind::DecodedFile
@@ -2154,7 +2174,6 @@ pub(crate) fn compile(
                             kind
                         };
                         scan_imports(&src, parser_kind, None, alternative, false)
-                            .map(|(imports, _)| (imports, None))
                     };
                     let (mut imports, scanned) = match imports {
                         Ok(imports) => imports,
@@ -2215,7 +2234,7 @@ pub(crate) fn compile(
                             } else {
                                 &mut work
                             };
-                            if let Some(mut module) = scanned.and_then(ScannedModule::from_input) {
+                            if let Some(mut module) = scanned {
                                 if let Some(parser) = declaration {
                                     module.parsed = Some(ScannedParser::Declaration(parser));
                                 }
