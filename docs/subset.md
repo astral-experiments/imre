@@ -180,9 +180,11 @@ print(apply(lambda value: value * value, 12))
 print(sum(map(lambda value: value + 1, filter(None, [0, 2, 3]))))
 ```
 
-Indirect calls evaluate and retain the callable before evaluating arguments from left to right. They accept positional arguments at full arity: parameter names and default omission are available only on direct calls. Parameter and result types must match exactly; callable variance and implicit numeric conversions are not supported. Functions with keyword-only parameters cannot become callable values.
+Indirect calls evaluate and retain the callable before evaluating arguments from left to right. A call through a fixed-layout callable takes all its arguments positionally. An annotation such as `Callable[[int, str], bool]` records their types and order. Parameter and result types must match exactly; callable variance and implicit numeric conversions are not supported. Functions with keyword-only parameters cannot become callable values.
 
-Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. Callable values cannot be stored in imported module globals, class fields, containers, or tuples, including through optional or nested storage. These restrictions keep the supported heap graph acyclic; callable values do not add a cycle collector.
+A dictionary can hold compiled module functions. In `handlers[key](n=value)`, the selected function binds the keyword against its own parameter list. If evaluating the argument replaces the dictionary entry, the current call still invokes the function it already selected.
+
+Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. The fixed-layout type system rejects `Callable` storage in imported module globals, class fields, containers, and tuples, including optional or nested storage. For example, `def use(values: dict[str, Callable[[int], int]]) -> None` still receives a build diagnostic.
 
 An annotated `def` directly inside another function can read enclosing typed
 locals. Each direct call reads their current bindings after evaluating its
