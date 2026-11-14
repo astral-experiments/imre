@@ -109,9 +109,8 @@ fn call_anchor(source: &str, range: TextRange) -> Option<(TextSize, bool)> {
     (call.range() == range).then(|| (call.arguments.start(), false))
 }
 
-/// Format a failed call from its recorded byte range. Only inspect the available
-/// source excerpt; delimiters inside a nested receiver do not belong to this call.
-fn multiline_call(
+/// Format the recorded multiline instruction. Only a call has a delimiter anchor.
+fn multiline_instruction(
     out: &mut String,
     source: &str,
     lines: &[&str],
@@ -121,26 +120,35 @@ fn multiline_call(
     let last = *lines.last()?;
     let start = span.start as usize;
     let end = span.end as usize;
-    first.get(..start)?;
-    last.get(..end)?;
-    let source = &source[source.substr_range(first)?.start..source.substr_range(last)?.end];
-    let range = TextRange::new(
-        TextSize::try_from(start).ok()?,
-        TextSize::try_from(source.len() - last.len() + end).ok()?,
-    );
-    let (opener, hidden) = call_anchor(source, range)?;
-    let before = &source[..opener.to_usize()];
-    let opener_line = before.bytes().filter(|&b| b == b'\n').count();
-    let opener = before.rsplit('\n').next()?.len();
-
+    let prefix = first.get(..start)?;
+    let suffix = last.get(end..)?;
     let margin =
         imre_ast::strings::common_indent(lines.iter().copied().filter(|s| !s.trim().is_empty()));
     let column = |line: &str, byte| Some(display_width(line.get(margin..byte)?));
+    let (opener, hidden) = match span.anchor {
+        TracebackAnchor::Call => {
+            let source = &source[source.substr_range(first)?.start..source.substr_range(last)?.end];
+            let range = TextRange::new(
+                TextSize::try_from(start).ok()?,
+                TextSize::try_from(source.len() - last.len() + end).ok()?,
+            );
+            let (offset, hidden) = call_anchor(source, range)?;
+            let before = &source[..offset.to_usize()];
+            let line = before.bytes().filter(|&b| b == b'\n').count();
+            let byte = before.rsplit('\n').next()?.len();
+            (Some((line, column(lines.get(line)?, byte)?)), hidden)
+        }
+        TracebackAnchor::Uniform => (None, prefix.trim().is_empty() && suffix.trim().is_empty()),
+        _ => return None,
+    };
     let start = column(first, start)?;
-    let opener = column(lines.get(opener_line)?, opener)?;
     let end = column(last, end)?;
     let last_index = lines.len() - 1;
-    let visible = |i: usize| i == 0 || i.abs_diff(opener_line) <= 1 || last_index - i <= 1;
+    let visible = |i: usize| {
+        i == 0
+            || i == last_index
+            || opener.is_some_and(|(line, _)| i.abs_diff(line) <= 1 || last_index - i <= 1)
+    };
     let mut previous = None;
     for (i, raw) in lines.iter().enumerate() {
         if !(visible(i) || (i > 0 && i < last_index && visible(i - 1) && visible(i + 1))) {
@@ -164,10 +172,10 @@ fn multiline_call(
         };
         let indent = text.chars().take_while(|c| c.is_whitespace()).count();
         let left = indent.max(if i == 0 { start } else { 0 }).min(right);
-        let split = match i.cmp(&opener_line) {
-            std::cmp::Ordering::Less => right,
-            std::cmp::Ordering::Equal => opener.clamp(left, right),
-            std::cmp::Ordering::Greater => left,
+        let split = match opener {
+            Some((line, _)) if i < line => right,
+            Some((line, column)) if i == line => column.clamp(left, right),
+            _ => left,
         };
         let _ = writeln!(
             out,
@@ -228,14 +236,19 @@ impl<'a> FrameLine<'a> {
         }
         out.push('\n');
         if let Some(span) = self.span
-            && span.anchor == TracebackAnchor::Call
+            && matches!(
+                span.anchor,
+                TracebackAnchor::Call | TracebackAnchor::Uniform
+            )
             && i128::from(span.end_line) > self.line
             && let Some(source) = source
             && let Ok(first) = usize::try_from(self.line - 1)
         {
             let count = span.end_line as usize - first;
             let lines: Vec<_> = source.lines().skip(first).take(count).collect();
-            if lines.len() == count && multiline_call(&mut out, source, &lines, span).is_some() {
+            if lines.len() == count
+                && multiline_instruction(&mut out, source, &lines, span).is_some()
+            {
                 return out;
             }
         }
