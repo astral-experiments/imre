@@ -56,16 +56,16 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     if uses.targets.is_empty() && uses.layouts.is_empty() && !uses.context {
         return;
     }
-    // A plain Python function owns its wrapper link immediately after the shared prefix.
+    // Bound adapters consume the receiver word. An unbound adapter ignores it.
     output
         .common()
         .push_str("%callable = type { ptr, ptr, [0 x ptr] }\n");
     if uses.layouts.contains("python_function") || uses.layouts.contains("cache_callable") {
-        // The optional link at word two owns its referent and can participate in a cycle.
+        // A function link owns its referent and can participate in a cycle.
         output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n");
     }
     for (name, kinds, length) in [
-        ("python_function", "i32 0, i32 6, i32 6", 3),
+        ("python_function", "i32 0, i32 6", 2),
         ("callable", "i32 0, i32 6", 2),
         ("class_factory", "i32 0, i32 11", 2),
         ("callable_enum", "i32 0, i32 10", 2),

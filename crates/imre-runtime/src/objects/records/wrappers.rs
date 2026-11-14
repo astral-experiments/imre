@@ -10,10 +10,18 @@ pub(super) fn is_function(layout: &RecordDescriptor) -> bool {
 }
 
 /// # Safety
-/// The caller roots a function whose third field is its optional owned link.
+/// The caller roots a function with an owned link. A plain function has no
+/// receiver, while a cache retains its invocation context separately.
 unsafe fn link(function: *const usize) -> *mut *const usize {
     // SAFETY: only generated Python function layouts reach this accessor.
-    unsafe { function.add(2).cast::<*const usize>().cast_mut() }
+    unsafe {
+        let index = if descriptor(function).length == 2 {
+            1
+        } else {
+            2
+        };
+        function.add(index).cast::<*const usize>().cast_mut()
+    }
 }
 
 /// # Safety
@@ -107,11 +115,15 @@ mod tests {
             qualified_name_len: 0,
             fields: std::ptr::null(),
         };
-        let function_kinds = [0, 6, 6];
+        let kinds = [0, 6, 6, 0, 0];
         let function = RecordDescriptor {
-            length: 3,
-            kinds: function_kinds.as_ptr(),
+            length: 2,
+            kinds: kinds.as_ptr(),
             semantics: &info,
+        };
+        let cache = RecordDescriptor {
+            length: 5,
+            ..function
         };
         let module_spec = RecordSemantics { kind: 2, ..info };
         assert!(!is_function(&RecordDescriptor {
@@ -129,7 +141,9 @@ mod tests {
             // SAFETY: the fixture owns every descriptor and initializes the
             // witness in the strong context slot before publishing a link.
             unsafe {
-                let records: Vec<_> = (0..size).map(|_| imre_record_new(&function)).collect();
+                let records: Vec<_> = (0..size)
+                    .map(|i| imre_record_new(if i == 0 { &cache } else { &function }))
+                    .collect();
                 let observer = crate::objects::records::weak::WeakRecord::new(records[0]);
                 let witness = imre_record_new(&leaf);
                 witness
@@ -175,7 +189,7 @@ mod tests {
             semantics: &info,
         };
         let function_layout = RecordDescriptor {
-            length: 3,
+            length: 2,
             ..cache_layout
         };
         // SAFETY: the descriptors outlive all records. Each stored field owns one reference.
