@@ -177,6 +177,27 @@ def prepared_class_statements():
     value, read = Product.__annotations__["field"]
     assert value == 9 and read() is marker
 
+    observed = []
+    class Namespace(dict):
+        def __missing__(self, name):
+            if name == "supplied":
+                return 42
+            raise KeyError(name)
+        def __setitem__(self, key, value):
+            if key == "answer":
+                observed.append(value)
+            super().__setitem__(key, value)
+
+    class Prepared(type):
+        @classmethod
+        def __prepare__(meta, name, bases):
+            return Namespace()
+
+    class FromMapping(metaclass=Prepared):
+        answer = supplied
+        answer += 1
+    assert FromMapping.answer == 43 and observed == [42, 43]
+
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"
     class ScopeMeta(type):

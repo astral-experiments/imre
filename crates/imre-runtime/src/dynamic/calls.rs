@@ -10128,7 +10128,7 @@ impl Context {
             Err(error) => return Err(error),
         };
         let namespace = self.call(hook, vec![name, bases], keywords.to_vec())?;
-        if matches!(self.heap.get(namespace), Value::Dict(_)) {
+        if self.dict_storage(namespace).is_some() {
             return Ok(namespace);
         }
         if self.has_mapping_subscription(namespace)
@@ -10142,7 +10142,7 @@ impl Context {
         {
             return Err(Error::new(
                 "NotImplementedError",
-                "class bodies with a prepared mapping other than an exact dict are unsupported",
+                "class bodies with a prepared mapping other than a dict are unsupported",
             ));
         }
         let owner = if self.is_type_object(meta) {

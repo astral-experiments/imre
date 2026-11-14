@@ -2766,15 +2766,8 @@ impl Context {
 
     pub(super) fn source_global(&mut self, globals: ExecGlobals, name: &str) -> Result<Id> {
         for mapping in [globals.dict, globals.builtins] {
-            if matches!(self.heap.get(mapping), Value::Dict(_)) {
-                if let Some(value) = self.lookup_dict_name(mapping, name)? {
-                    return Ok(value);
-                }
-            } else {
-                match self.load_exec_name(mapping, name) {
-                    Err(error) if self.is_builtin_error(&error, "KeyError") => {}
-                    value => return value,
-                }
+            if let Some(value) = self.lookup_mapping_name(mapping, name)? {
+                return Ok(value);
             }
         }
         Err(Self::undefined_source_name(name, self.text(name)))
