@@ -36,6 +36,7 @@ use ty_python_core::scope::FileScopeId;
 use ty_python_core::{Program, ProgramFile};
 use ty_python_semantic::dependency::DependencyMetadata;
 use ty_python_semantic::lint::{LintRegistry, RuleSelection};
+use ty_python_semantic::types::ide_support::ImportAliasResolution;
 use ty_python_semantic::{
     AnalysisSettings, Db, HasType, SemanticModel, check_file_unwrap, default_lint_registry,
 };
@@ -2990,7 +2991,8 @@ impl Session {
             {
                 return None;
             }
-            let definition = resolved_name_definition(&model, name)?;
+            let definition =
+                resolved_name_definition(&model, name, ImportAliasResolution::ResolveAliases)?;
             let ty_python_core::definition::DefinitionKind::Function(function) =
                 definition.kind(db)
             else {
@@ -3303,6 +3305,61 @@ pub(crate) enum FallbackCalls {
     DecoratorFactories,
 }
 
+/// The earliest initializer assignment through the module's actual globals dictionary.
+#[salsa::tracked]
+fn first_global_item_write(db: &dyn Db, file: File, key: String) -> Option<TextSize> {
+    let source = db.program_file(file);
+    let parsed = ruff_db::parsed::parsed_module(db, source.python_file(db)).load(db);
+    let model = SemanticModel::new(db, source);
+    parsed
+        .syntax()
+        .body
+        .iter()
+        .filter_map(Stmt::as_assign_stmt)
+        .flat_map(|assignment| &assignment.targets)
+        .find_map(|target| {
+            let item = target.as_subscript_expr()?;
+            if item.slice.as_string_literal_expr()?.value.to_str() != key {
+                return None;
+            }
+            let receiver =
+                execution::assigned_value(db, file, &parsed, &item.value, Expr::is_name_expr)?;
+            let call = receiver.as_call_expr()?;
+            (call.arguments.is_empty()
+                && resolves_to_stdlib_function(&model, &call.func, "builtins", "globals"))
+            .then_some(item.start())
+        })
+}
+
+/// A function-local import retains its original object when a module global changes.
+fn changed_module_binding<'db>(
+    model: &SemanticModel<'db>,
+    call: &ExprCall,
+    name: &ruff_python_ast::ExprName,
+    definition: ty_python_core::definition::Definition<'db>,
+) -> bool {
+    let db = model.db();
+    if !definition.file_scope(db).is_global() {
+        return false;
+    }
+    let caller = model.file();
+    let written = |file, key| {
+        first_global_item_write(db, file, key).is_some_and(|site| {
+            file != caller
+                || site < call.start()
+                || !ty_python_core::semantic_index(db, db.program_file(file))
+                    .try_expression_scope_id(call.func.as_ref())
+                    .is_some_and(|scope| scope.is_global())
+        })
+    };
+    definition
+        .name(db)
+        .is_some_and(|name| written(definition.file(db), name))
+        || (written(caller, name.id.to_string())
+            && resolved_name_definition(model, name, ImportAliasResolution::PreserveAliases)
+                .is_some_and(|binding| binding.file_scope(db).is_global()))
+}
+
 /// Replacing the code or defaults of the selected function can change the
 /// arguments Python accepts without changing the binding at the call.
 #[salsa::tracked(returns(ref))]
@@ -3347,16 +3404,10 @@ fn function_layout_writes<'db>(
 fn resolved_name_definition<'db>(
     model: &SemanticModel<'db>,
     name: &ruff_python_ast::ExprName,
+    aliases: ImportAliasResolution,
 ) -> Option<ty_python_core::definition::Definition<'db>> {
-    use ty_python_semantic::types::ide_support::{
-        ImportAliasResolution, ResolvedDefinition, definitions_for_name,
-    };
-    let bindings = definitions_for_name(
-        model,
-        name.id.as_str(),
-        name.into(),
-        ImportAliasResolution::ResolveAliases,
-    );
+    use ty_python_semantic::types::ide_support::{ResolvedDefinition, definitions_for_name};
+    let bindings = definitions_for_name(model, name.id.as_str(), name.into(), aliases);
     let [ResolvedDefinition::Definition(definition)] = bindings.as_slice() else {
         return None;
     };
@@ -4327,16 +4378,18 @@ fn runtime_argument(db: &dyn Db, checked: CheckedFile<'_>, range: TextRange, rul
         {
             return true;
         }
-        return resolved_name_definition(&model, name).is_none_or(|definition| {
-            declarations
-                .call_shapes(db)
-                .binary_search(&definition)
-                .is_err()
-                || declarations
-                    .program_files(db)
-                    .iter()
-                    .any(|&file| function_layout_writes(db, file).contains(&definition))
-        });
+        return resolved_name_definition(&model, name, ImportAliasResolution::ResolveAliases)
+            .is_none_or(|definition| {
+                declarations
+                    .call_shapes(db)
+                    .binary_search(&definition)
+                    .is_err()
+                    || changed_module_binding(&model, call, name, definition)
+                    || declarations
+                        .program_files(db)
+                        .iter()
+                        .any(|&file| function_layout_writes(db, file).contains(&definition))
+            });
     }
     let Some(callee) = call.func.inferred_type(&model) else {
         return local_calls;
