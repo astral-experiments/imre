@@ -16,6 +16,17 @@ pub(crate) struct Target {
     pub bound: bool,
 }
 
+/// A static function may present its declaring entry through an inherited receiver view.
+pub(crate) fn singleton_entry(operand: &ir::Expr) -> &ir::Expr {
+    if let ExprKind::Builtin(ir::Builtin::RecordView, args) = &operand.kind
+        && let [entry] = args.as_slice()
+    {
+        entry
+    } else {
+        operand
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Targets(SourceTargets);
 
@@ -50,6 +61,16 @@ impl TargetCollector {
             // These builtins have runtime entry points. A singleton Python
             // function of this signature cannot prove the target of a live lookup.
             self.open.insert(value.ty);
+        }
+        // The inherited spelling and the declaring entry can both call this singleton.
+        if let ExprKind::Builtin(ir::Builtin::StaticFunction(function), args) = &value.kind
+            && let [operand] = args.as_slice()
+            && singleton_entry(operand).ty != value.ty
+        {
+            self.constructed.entry(value.ty).or_default().push(Target {
+                function: *function,
+                bound: false,
+            });
         }
         if let ExprKind::Callable { function, receiver } = &value.kind {
             let target = Target {

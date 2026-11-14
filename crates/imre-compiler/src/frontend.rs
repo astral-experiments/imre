@@ -4290,6 +4290,10 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn record_upcast(&self, from: Type, to: Type) -> bool {
+        matches!((from, to), (Type::Class(child), Type::Class(parent)) if self.classes.parsers.child_of(child, parent) || self.classes.declarations.definitions[child].bases.contains(&parent))
+    }
+
     /// Optional and finite-union promotions are explicit; containers stay invariant.
     fn coerce(&self, value: Expr, expected: Type, node: &impl Ranged) -> Result<Expr, String> {
         self.keep_module_list_layout(&value);
@@ -4465,8 +4469,7 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::DirectoryContextView, vec![value]),
             });
         }
-        if matches!((value.ty, expected), (Type::Class(child), Type::Class(parent)) if self.classes.parsers.child_of(child, parent) || self.classes.declarations.definitions[child].bases.contains(&parent))
-        {
+        if self.record_upcast(value.ty, expected) {
             return Ok(Expr {
                 ty: expected,
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),

@@ -746,6 +746,17 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
+                    Builtin::StaticFunction(function) => {
+                        let [entry] = args.as_slice() else {
+                            return Err("static function needs one callable".into());
+                        };
+                        same(value.ty, entry.ty)?;
+                        require(
+                            matches!(crate::callables::singleton_entry(entry).kind,
+                                ExprKind::Callable { function: target, receiver: None } if target == *function),
+                            "static function does not own its declared entry",
+                        )?;
+                    }
                     Builtin::RecordFromFields => {
                         let layout: &[Type] = match value.ty {
                             Type::Range => &[Type::Int; 3],
