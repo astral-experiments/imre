@@ -14,6 +14,8 @@ def current():
     assert list(("one", "two").__iter__()) == ["one", "two"]
     value = Override((1, 2))
     assert list(iter(value)) == ["override"]
+    assert 2 in value and "override" not in value
+    assert tuple.__contains__(value, 1)
     cursor = slot(value)
     assert type(cursor).__name__ == "tuple_iterator"
     assert cursor.__iter__() is cursor
@@ -22,8 +24,10 @@ def current():
     assert next(cursor, None) is None
     Point = namedtuple("Point", "x y")
     assert list(slot(Point(3, 4))) == [3, 4]
+    assert tuple.__contains__(Point(3, 4), 4)
     stamp = gmtime(0)
     assert type(iter(stamp)) is type(cursor)
+    assert tuple.__contains__(stamp, 1970)
     assert list(slot(stamp)) == [1970, 1, 1, 0, 0, 0, 3, 1, 0]
 
     try:
