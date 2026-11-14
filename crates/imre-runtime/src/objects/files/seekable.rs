@@ -298,7 +298,7 @@ impl FileState {
                 Ok(offset.clamp(0, i128::from(i64::MAX)) as u64)
             }
             _ => {
-                self.stream()?;
+                self.seek_stream()?;
                 disk_offset(offset)
             }
         }
@@ -351,16 +351,18 @@ impl FileState {
         self.seek(SeekFrom::Current(0))
     }
 
-    pub(crate) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
-        if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom)
-            && self.stream.is_none()
-        {
+    fn seek_stream(&mut self) -> Result<&mut Stream> {
+        if matches!(self.kind, FileKind::BinaryRead | FileKind::BinaryRandom) && self.closed() {
             return Err(Error::new(Kind::ValueError, "seek of closed file"));
         }
+        self.stream()
+    }
+
+    pub(crate) fn seek(&mut self, at: SeekFrom) -> Result<u64> {
         if let (FileKind::BinaryWrite, Some(Stream::Write(file))) = (self.kind, &mut self.stream) {
             return file.binary_seek(at).map_err(super::errno_error);
         }
-        match self.stream()? {
+        match self.seek_stream()? {
             Stream::Read(input) => input.seek(at),
             Stream::Random(file) => file.seek(at).map_err(super::errno_error),
             Stream::Memory(m) => m.seek(at),
