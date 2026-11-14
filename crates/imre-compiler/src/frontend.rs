@@ -5060,8 +5060,7 @@ impl<'a> Checker<'a> {
                     },
                 }
             }
-            ast::Expr::List(list) if self.types.element(concrete).is_some() => {
-                let element = self.types.element(concrete).unwrap();
+            ast::Expr::List(list) if let Some(element) = self.types.element(concrete) => {
                 if list
                     .elts
                     .iter()
@@ -5080,8 +5079,7 @@ impl<'a> Checker<'a> {
                     ExprKind::List,
                 )?
             }
-            ast::Expr::Tuple(tuple) if self.types.fields(concrete).is_some() => {
-                let fields = self.types.fields(concrete).unwrap();
+            ast::Expr::Tuple(tuple) if let Some(fields) = self.types.fields(concrete) => {
                 if tuple
                     .elts
                     .iter()

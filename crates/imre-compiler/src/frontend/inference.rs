@@ -972,7 +972,7 @@ impl Inference {
         let mut checked_bodies = HashSet::new();
         let mut suspended_bodies = HashSet::new();
         let mut method_returns = HashMap::new();
-        // Completed scalar returns that use only bound locals survive unrelated revisions.
+        // Completed returns that use only bound locals survive unrelated revisions.
         let mut local_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
         // Without input or layout inference, resolved return slots stay resolved.
@@ -1149,8 +1149,8 @@ impl Inference {
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
                 let body_revision = self.revision.get();
-                // Keep a physical return checked after the last signature change. A scalar
-                // function reading only locals is independent of the solver's module bindings.
+                // With only scalar inputs and local bindings, a checked return can keep
+                // its settled scalar, list or tuple layout across unrelated revisions.
                 let keep_return = body_revision != before
                     && !self.widened.get()
                     && !discover_returns
@@ -1161,7 +1161,9 @@ impl Inference {
                         || signature.method.is_none()
                             && physical
                             && signature.physical_frame
-                            && signature.returns.builtin_scalar_name().is_some()
+                            && (signature.returns.builtin_scalar_name().is_some()
+                                || types.is_plain_tuple(signature.returns)
+                                || types.element(signature.returns).is_some())
                             && signature
                                 .params
                                 .iter()
