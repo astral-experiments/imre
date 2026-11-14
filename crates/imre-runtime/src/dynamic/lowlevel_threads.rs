@@ -98,7 +98,6 @@ pub(super) fn call(
     }
     match name {
         "_thread.exit" | "_thread.exit_thread" => Err(ctx.exception("SystemExit", &[])),
-        "_thread._shutdown" => super::thread_worker::call(ctx, "shutdown", args, kwargs),
         "_thread._count" => {
             let count = ctx.interpreter.worker_count.load(Ordering::SeqCst);
             ctx.workers.reap_finished(&mut ctx.heap);

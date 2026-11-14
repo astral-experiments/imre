@@ -60,7 +60,7 @@ impl Join {
     #[inline(never)]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         // SAFETY: the registered caller owns the interrupted frame through signal dispatch.
-        let result = unsafe { self.handle.wait_interruptible(context, self.deadline) }
+        let result = unsafe { NativeWait::Join(self.deadline, &self.handle).run(context) }
             .and_then(|done| self.handle.join_result(done));
         // SAFETY: the native wait and any signal callback have returned to their owner.
         let ctx = unsafe { &mut *context };
@@ -263,17 +263,6 @@ impl Handle {
             deadline: timeout.map(Deadline::after),
         })
     }
-
-    /// # Safety
-    /// The interrupted Python frame belongs to this thread throughout the wait.
-    unsafe fn wait_interruptible(
-        &self,
-        context: *mut Context,
-        deadline: Option<Deadline>,
-    ) -> Result<bool> {
-        // SAFETY: the handle retains no Python values and the wait drops its mutex on return.
-        unsafe { NativeWait::Join(deadline, self).run(context) }
-    }
 }
 
 struct RegisteredThread {
@@ -438,6 +427,10 @@ impl RegisteredThread {
 }
 
 impl Entry {
+    fn shutdown_handle(&self, caller: usize) -> Option<&Arc<Handle>> {
+        (!self.thread.as_ref()?.daemon && self.handle.ident() != caller).then_some(&self.handle)
+    }
+
     fn roots(&self) -> impl Iterator<Item = &Id> {
         self.thread
             .iter()
@@ -515,9 +508,7 @@ impl Registry {
         let caller = thread_ident();
         self.entries
             .iter()
-            .filter(|entry| entry.thread.as_ref().is_some_and(|worker| !worker.daemon))
-            .map(|entry| &entry.handle)
-            .filter(move |handle| handle.ident() != caller)
+            .filter_map(move |entry| entry.shutdown_handle(caller))
     }
 
     fn join_non_daemon(&self) {
@@ -571,6 +562,51 @@ pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::Regist
     };
     let shutdown = ctx.lookup_attr(module, "_shutdown")?;
     ctx.prepare_call(shutdown, Vec::new(), Vec::new())
+}
+
+/// Wait for the non-daemon workers of the registered caller.
+///
+/// # Safety
+/// The caller owns this context through signal dispatch and resumption.
+pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
+    // SAFETY: each registry borrow ends before the retained handle can block.
+    unsafe { &mut *context }.reap_thread_operands();
+    loop {
+        let handle = unsafe { &*context }
+            .workers
+            .shutdown_handles()
+            .find(|handle| handle.awaiting_exit())
+            .cloned();
+        let Some(handle) = handle else { break };
+        if let Err(error) = unsafe { NativeWait::Join(None, &handle).run(context) } {
+            super::unraisable::report(
+                unsafe { &mut *context },
+                error,
+                false,
+                None,
+                "Exception ignored while joining a thread in _thread._shutdown()",
+            );
+            return Ok(NONE);
+        }
+        // Detaching completes a Python join before the worker has actually exited.
+        handle.wait(None, State::worker_pending);
+        drop(handle.joined());
+    }
+    // Other workers may have published completion during an interruptible wait.
+    // Finish their native joins, which can still block in native thread teardown.
+    // No Python is dispatched during this final sweep.
+    let caller = thread_ident();
+    let count = unsafe { &*context }.workers.entries.len();
+    for index in 0..count {
+        let handle = unsafe { &*context }.workers.entries[index]
+            .shutdown_handle(caller)
+            .cloned();
+        if let Some(handle) = handle {
+            drop(handle.joined());
+        }
+    }
+    unsafe { &mut *context }.reap_thread_operands();
+    Ok(NONE)
 }
 
 /// Reject new work before binding or moving its Python callback operands.
@@ -963,39 +999,6 @@ pub(super) fn call(
     }
     ctx.reap_thread_operands();
     match (name, args) {
-        ("shutdown", &[]) => {
-            // A signal handler may start a worker or reap entries. Keep only the
-            // native handle across dispatch, then look up the next live worker.
-            loop {
-                let Some(handle) = ctx
-                    .workers
-                    .shutdown_handles()
-                    .find(|h| h.awaiting_exit())
-                    .cloned()
-                else {
-                    break;
-                };
-                // SAFETY: shutdown waits synchronously on the thread that owns the context.
-                if let Err(error) = unsafe { handle.wait_interruptible(ctx, None) } {
-                    super::unraisable::report(
-                        ctx,
-                        error,
-                        false,
-                        None,
-                        "Exception ignored while joining a thread in _thread._shutdown()",
-                    );
-                    return Ok(NONE);
-                }
-                // Explicit detach completes handle joins. CPython keeps this entry
-                // in its shutdown list until the worker exits, without running a
-                // pending Python handler while waiting on the completed handle.
-                handle.wait(None, State::worker_pending);
-                drop(handle.joined());
-            }
-            ctx.workers.join_non_daemon();
-            ctx.reap_thread_operands();
-            Ok(NONE)
-        }
         ("join", [_, _]) => super::thread_handle::method(ctx, "join", args, kwargs),
         ("alive", &[handle]) => {
             let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
