@@ -167,7 +167,7 @@ def current():
             alias.append(9)
             raise ValueError("stop")
 
-    for consume in (target.extend, list):
+    for consume in (target.extend, list, bytearray().extend):
         events = []
         try:
             consume(Hint())
