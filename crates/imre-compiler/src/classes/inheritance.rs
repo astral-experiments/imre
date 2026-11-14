@@ -166,6 +166,15 @@ pub(super) fn resolve<'syntax>(
                             base = Some(next);
                         }
                     }
+                    binding
+                        if matches!(binding, Some(Binding::RegisteredClass(_)))
+                            || argument.is_call_expr() =>
+                    {
+                        // The Python class statement consumes the evaluated base object.
+                        layouts.registered.insert(definition);
+                        path.pop();
+                        return Ok(());
+                    }
                     _ => {
                         let origin = match argument {
                             ast::Expr::Subscript(subscript) => &*subscript.value,

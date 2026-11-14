@@ -43,33 +43,19 @@ pub(super) fn options(
 ) -> Result<Option<DataclassOptions>, String> {
     let module = &graph.modules[module_id];
     let [decorator] = node.decorator_list.as_slice() else {
-        return if node.decorator_list.is_empty() {
-            Ok(None)
-        } else {
-            Err(module.error(node, "class decorators cannot be stacked"))
-        };
+        return Err(module.error(node, "class decorators cannot be stacked"));
     };
     let (target, arguments) = match &decorator.expression {
         ast::Expr::Call(call) => (&*call.func, Some(&call.arguments)),
         expression => (expression, None),
     };
     let binding = graph.resolve(module_id, target);
-    if let Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) = binding {
-        graph.needs_object_runtime.set(true);
-        return Err(module.error(
-            decorator,
-            &format!("{name} requires native Python object operations"),
-        ));
-    }
     let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
     if value_struct && arguments.is_some() {
         return Err(module.error(decorator, "use bare @imre.struct without options"));
     }
     if !value_struct && binding != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
-        return Err(module.error(
-            decorator,
-            "only the sealed @dataclasses.dataclass decorator is supported",
-        ));
+        return Ok(None);
     }
     let mut options = DataclassOptions {
         value_struct,

@@ -1306,7 +1306,11 @@ impl Function<'_, '_, '_> {
             self.in_function,
             Some((site, 0)),
         );
-        CompiledDefinition::new(code, signature.to_string(), name, qualname, false)
+        CompiledDefinition {
+            // A decorator starts the statement, but construction takes place at the class keyword.
+            class_header: (site != class.range.start()).then_some(class.range),
+            ..CompiledDefinition::new(code, signature.to_string(), name, qualname, false)
+        }
     }
 
     /// Compile the scope that evaluates a generic class's bases and keywords.

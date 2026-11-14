@@ -802,6 +802,8 @@ impl Initialization {
                             emit.then_some(&mut body),
                             checkpoints.as_mut(),
                         )?;
+                    } else if declarations.registered_classes.contains(&definition) {
+                        checker.require_registered_operation(statement)?;
                     }
                     available.insert(definition);
                     continue;
