@@ -3886,6 +3886,20 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    /// Returns the arms taken when the tested local is true and false, respectively.
+    pub(crate) fn branches_for_flag(&self, flag: usize) -> Option<(&[Self], &[Self])> {
+        let Self::If(test, yes, no) = self else {
+            return None;
+        };
+        match &test.kind {
+            ExprKind::Local(slot) if *slot == flag => Some((yes, no)),
+            ExprKind::Unary(UnaryOp::Not, value) if matches!(value.kind, ExprKind::Local(slot) if slot == flag) => {
+                Some((no, yes))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn assign_item(receiver: Expr, key: Expr, value: Expr) -> Self {
         Self::SetItem(ItemOrder::Assignment, receiver, key, value)
     }

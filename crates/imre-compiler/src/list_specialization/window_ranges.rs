@@ -2,7 +2,6 @@ use super::{builtin, list_local};
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, Statement, Type};
 use crate::ranges::{self, IntegerFacts};
 use ruff_python_ast::CmpOp;
-use ruff_python_ast::UnaryOp;
 
 const LOW: i64 = i32::MIN as i64;
 const HIGH: i64 = i32::MAX as i64;
@@ -315,21 +314,13 @@ fn visit_successful_pulls(body: &[Statement], ready: usize, mut visit: impl FnMu
     for statement in body {
         if after_success {
             visit(std::slice::from_ref(statement));
-        } else if let Statement::If(test, yes, no) = statement {
-            match &test.kind {
-                ExprKind::Local(slot) if *slot == ready => visit(yes),
-                ExprKind::Unary(UnaryOp::Not, value)
-                    if matches!(value.kind, ExprKind::Local(slot) if slot == ready)
-                        && matches!(
-                            yes.as_slice(),
-                            [Statement::Exhaust | Statement::Break(_) | Statement::Continue(_)]
-                        )
-                        && no.is_empty() =>
-                {
-                    after_success = true
-                }
-                _ => {}
-            }
+        } else if let Some((produced, empty)) = statement.branches_for_flag(ready) {
+            visit(produced);
+            after_success = produced.is_empty()
+                && matches!(
+                    empty,
+                    [Statement::Exhaust | Statement::Break(_) | Statement::Continue(_)]
+                );
         }
     }
 }

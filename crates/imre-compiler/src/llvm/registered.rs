@@ -880,18 +880,14 @@ impl<'f> Frame<'f, '_, '_> {
                 ready,
                 kind,
             },
-            Statement::If(test, yes, no),
+            guard,
             ..,
         ] = statements
         else {
             return 0;
         };
-        if let ExprKind::Unary(ruff_python_ast::UnaryOp::Not, flag) = &test.kind
-            && matches!(flag.kind, ExprKind::Local(slot) if slot == *ready)
-            && matches!(yes.as_slice(), [Statement::Exhaust])
-            && no.is_empty()
-        {
-            self.pull(*iterator, *key, *value, *ready, *kind, true);
+        if let Some(([], [edge @ Statement::Exhaust])) = guard.branches_for_flag(*ready) {
+            self.pull(*iterator, *key, *value, *ready, *kind, Some(edge));
             return 2;
         }
         0
@@ -904,15 +900,15 @@ impl<'f> Frame<'f, '_, '_> {
         second: Option<usize>,
         ready: usize,
         kind: ir::IterNextKind,
-        exhaust: bool,
+        exhaust: Option<&Statement>,
     ) {
         let cursor = self.load_private(iterator);
         let done = self.code.name("b");
-        let exhausted = exhaust.then(|| self.code.name("b"));
-        let empty = exhausted.as_deref().unwrap_or(&done);
+        let exhausted = exhaust.map(|edge| (self.code.name("b"), edge));
+        let empty = exhausted.as_ref().map_or(&done, |(label, _)| label);
         // The landing clears this private flag before its handler can read it.
         // Only normal exhaustion needs to reset it when the pull owns that edge.
-        let reset_on_exhaustion = exhaust
+        let reset_on_exhaustion = exhaust.is_some()
             && kind == ir::IterNextKind::Generic
             && !self.code.native_suspension
             && self
@@ -945,12 +941,12 @@ impl<'f> Frame<'f, '_, '_> {
         }
         self.store_private(ready, &permanent::TRUE.to_string());
         self.code.jump(&done);
-        if let Some(label) = exhausted {
+        if let Some((label, edge)) = exhausted {
             self.code.label(&label);
             if reset_on_exhaustion {
                 self.store_private(ready, &permanent::FALSE.to_string());
             }
-            CheckedBody::registered(self.reborrow()).loop_transfer(&Statement::Exhaust);
+            CheckedBody::registered(self.reborrow()).loop_transfer(edge);
         }
         self.code.label(&done);
     }
