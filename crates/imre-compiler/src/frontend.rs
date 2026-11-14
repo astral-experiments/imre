@@ -1817,25 +1817,75 @@ fn lower_graph(
         typing::validate_functions(functions, &entry, &types, graph, &callable_definitions)?;
         let mut indirect = Vec::new();
         let mut storage = Ok(());
+        let mut dictionaries = HashMap::new();
+        // A checked direct call supplies every formal. An uncalled declaration
+        // cannot establish an ABI for its dictionary merely by naming the type.
+        let mut uncalled = functions
+            .iter()
+            .enumerate()
+            .filter_map(|(id, function)| {
+                function
+                    .params
+                    .iter()
+                    .any(|&slot| {
+                        callables::handler_signature(function.locals[slot], &types)
+                            .is_some_and(|item| !types.is_plain_callback(item))
+                    })
+                    .then_some(id)
+            })
+            .collect::<HashSet<_>>();
+        let mut keyword_handler = false;
         for (slot, function) in functions.iter().chain([&entry]).enumerate() {
-            let checked = callables::validate_storage(function, &types, |value| {
-                callable_targets.inspect(slot, &types, value);
-                record_builtin(value);
-                entry_operations.record(value);
-                if let Some(calls) = call_graph.get_mut(slot) {
-                    if let Some(targets) = globals.invoked_functions(value) {
-                        calls.extend(targets.iter().copied());
-                    } else if let Some(signature) = callables::invoked_signature(value) {
-                        indirect.push((slot, signature));
+            let checked = callables::validate_storage(
+                function,
+                &types,
+                &mut dictionaries,
+                |value| {
+                    match &value.kind {
+                        ExprKind::Call(id, _) if !uncalled.is_empty() => {
+                            uncalled.remove(id);
+                        }
+                        ExprKind::Invoke { callable, args }
+                            if args.site.python().is_some()
+                                && matches!(&callable.kind, ExprKind::Builtin(Builtin::DictGet, values)
+                            if callables::handler_signature(values[0].ty, &types).is_some()) =>
+                        {
+                            keyword_handler = true;
+                        }
+                        _ => {}
                     }
-                }
-            });
+                    callable_targets.inspect(slot, &types, value);
+                    record_builtin(value);
+                    entry_operations.record(value);
+                    if let Some(calls) = call_graph.get_mut(slot) {
+                        if let Some(targets) = globals.invoked_functions(value) {
+                            calls.extend(targets.iter().copied());
+                        } else if let Some(signature) = callables::invoked_signature(value) {
+                            indirect.push((slot, signature));
+                        }
+                    }
+                },
+            );
             storage = storage.and(checked);
         }
         // An invalid coroutine adapter precedes a storage error anywhere in the program.
         callable_targets.deduplicate();
         callables::validate_targets(functions, &types, &callable_targets.constructed)?;
         storage?;
+        if !uncalled.is_empty()
+            || dictionaries.into_iter().any(|(ty, display)| {
+                !display
+                    || !callable_targets.plain_sources(ty, |id| {
+                        callable_definitions
+                            .get(id)
+                            .and_then(|definition| signatures.get(definition))
+                            .is_some_and(|signature| signature.id == id && !signature.asynchronous)
+                            && types.cache_adapter(id).is_none()
+                    })
+            })
+        {
+            return Err("callable values cannot be stored in containers or tuples".into());
+        }
         for (slot, signature) in indirect {
             if let Some(targets) = callable_targets.constructed.get(&signature) {
                 call_graph[slot].extend(targets.iter().map(|target| target.function));
@@ -1852,11 +1902,20 @@ fn lower_graph(
             &callable_definitions,
             &callable_targets.constructed,
         )?;
+        if keyword_handler {
+            return Err(Diagnostic::from(
+                "the selected dictionary callable needs its Python frame",
+            )
+            .classified(Kind::ScopedObject));
+        }
         Ok(())
     };
-    validate_calls(functions).inspect_err(|_| {
+    validate_calls(functions).inspect_err(|reason| {
         // A failed layout trial goes through ordinary lowering before registration.
         if graph.layout_hint.get() != crate::modules::LayoutHint::Applied {
+            if reason.kind.is_object() {
+                capture_on_object(&Failure::from(reason.clone()));
+            }
             place_completed(&mut completed, &owners);
         }
     })?;
@@ -11461,9 +11520,7 @@ impl<'a> Checker<'a> {
             target => self.live_module_binding(target),
         };
         if let Some(callee) = live {
-            let value = self.call_with_target(call, callee)?;
-            self.graph.checked_live_call(self.module, call);
-            return Ok(value);
+            return self.call_live_target(call, callee);
         }
         if self.module_scope
             && self.globals.registered_initializers

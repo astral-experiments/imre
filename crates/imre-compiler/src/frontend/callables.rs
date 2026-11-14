@@ -43,17 +43,34 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     }
 }
 
+/// Ordinary dictionary values use the synchronous positional callable ABI.
+pub(super) fn handler_signature(ty: Type, types: &Types) -> Option<Type> {
+    let (key, item) = types.mapping(ty)?;
+    if !matches!(item, Type::Callable(_)) || ty != types.dict(key, item) {
+        return None;
+    }
+    types.with_callback_signature(item, |_, _| item)
+}
+
 /// Check inferred displays and annotations while visiting the function's call and frame uses.
 pub(super) fn validate_storage(
     function: &ir::Function,
     types: &Types,
+    dictionaries: &mut HashMap<Type, bool>,
     mut visit: impl FnMut(&Expr),
 ) -> std::result::Result<(), String> {
+    let mut check = |ty, display| {
+        if !invalid_aggregate(ty, types) {
+            return false;
+        }
+        if let Some(signature) = handler_signature(ty, types) {
+            *dictionaries.entry(signature).or_default() |= display;
+            return false;
+        }
+        true
+    };
     let mut invalid = invalid_aggregate(function.returns, types)
-        || function
-            .locals
-            .iter()
-            .any(|&ty| invalid_aggregate(ty, types));
+        || function.locals.iter().any(|&ty| check(ty, false));
     // A cold indirect call owns a private argument frame for its continuation.
     // Its callable cannot enter a language-visible tuple or container.
     let mut frames = HashSet::new();
@@ -72,7 +89,8 @@ pub(super) fn validate_storage(
             frames.insert(std::ptr::from_ref(&args[0]));
         }
         if !frames.contains(&std::ptr::from_ref(value)) {
-            invalid |= invalid_aggregate(value.ty, types);
+            let display = matches!(&value.kind, ExprKind::Dict(entries) if !entries.is_empty());
+            invalid |= check(value.ty, display);
         }
     });
     if invalid {
@@ -782,6 +800,17 @@ impl Checker<'_> {
         let needs_cell_default = call.arguments.args.len() < params.len()
             && matches!(callable.kind, ExprKind::Local(slot)
                 if self.assigned.value_source(slot) == Some(ValueSource::ReboundMethod));
+        // A positional Callable carries no keyword names. The selected dictionary
+        // value binds the written keywords in its Python call frame.
+        if !call.arguments.keywords.is_empty()
+            && matches!(&callable.kind, ExprKind::Builtin(Builtin::DictGet, args)
+                if handler_signature(args[0].ty, self.types).is_some())
+        {
+            return Ok(Expr {
+                ty: returns,
+                ..self.call_live_target(call, callable)?
+            });
+        }
         if !call.arguments.keywords.is_empty()
             || (call.arguments.args.len() != params.len() && !needs_cell_default)
         {

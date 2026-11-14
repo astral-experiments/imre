@@ -586,6 +586,17 @@ impl Checker<'_> {
         Ok(())
     }
 
+    pub(in crate::frontend) fn call_live_target(
+        &mut self,
+        call: &ast::ExprCall,
+        target: Expr,
+    ) -> Result<Expr, String> {
+        let ty = target.ty;
+        let value = self.call_with_target(call, target)?;
+        self.graph.checked_live_call(self.module, call, ty);
+        Ok(value)
+    }
+
     pub(in crate::frontend) fn call_with_target(
         &mut self,
         call: &ast::ExprCall,

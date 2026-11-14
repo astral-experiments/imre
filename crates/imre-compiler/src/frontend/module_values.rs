@@ -550,6 +550,7 @@ impl Checker<'_> {
             && !frozen_predicate
             && saved.is_none()
             && callables::contains_callable(value.ty, self.types)
+            && callables::handler_signature(value.ty, self.types).is_none()
         {
             return Err(error(
                 self.source,

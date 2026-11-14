@@ -60,6 +60,11 @@ REJECTED = {
     "incomplete_bound_receiver": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\nclass Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = apply(self.read, 1)\n    def read(self, value: int) -> int:\n        return value\n",
     "callable_list": IMPORT + "def use(values: list[Callable[[int], int]]) -> None:\n    pass\n",
     "callable_tuple": IMPORT + "def use(values: tuple[Callable[[int], int], int]) -> None:\n    pass\n",
+    "unselected_callable_storage": (
+        IMPORT + FUNCTION
+        + "def cold(values: dict[str, Callable[[int], int]]) -> None: pass\n"
+        + "handlers = {'id': identity}\nprint(handlers['id'](value=21))\n"
+    ),
     "callable_dictionary": IMPORT + "def use(values: dict[str, Callable[[int], int]]) -> None:\n    pass\n",
     "optional_without_guard": IMPORT + "def use(fn: Callable[[int], int] | None) -> int:\n    return fn(1)\n",
     "lambda_default": IMPORT + "def run() -> None:\n    fn: Callable[[int], int] = lambda value=1: value\nrun()\n",
