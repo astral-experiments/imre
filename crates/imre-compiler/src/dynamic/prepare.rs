@@ -7,6 +7,7 @@ use super::ModuleSyntaxError;
 use super::emit::{ModuleOrigin, PhysicalFile, PreparedBody, RegisteredBodies};
 use crate::frontend::module_source::ParsedModule;
 use crate::ir::PhysicalModuleKind;
+use crate::modules::{CheckedInitializers, ModuleId};
 
 pub(crate) type ModuleSource<'a> = (String, PathBuf, Cow<'a, str>);
 
@@ -19,7 +20,8 @@ pub(super) enum Shipped<'a> {
 pub(super) struct SourceInputs<'a> {
     pub(super) literal_sites: BTreeMap<usize, super::literal::LiteralSites>,
     pub(super) entry_source: Option<ParsedModule<'a, 'a>>,
-    pub(super) checked_entry: Option<(usize, Box<crate::frontend::RegisteredFunction>)>,
+    pub(super) entry: Option<(ModuleId, Option<usize>)>,
+    pub(super) initializers: CheckedInitializers,
     pub(super) scanned_modules: HashMap<usize, super::ScannedModule>,
     pub(super) shipped_checks: HashMap<usize, Shipped<'a>>,
 }
@@ -61,7 +63,8 @@ pub(super) fn units<'a>(
     (files, builtins): (&'a [ModuleSource<'a>], &'a [ModuleSource<'a>]),
     SourceInputs {
         mut entry_source,
-        mut checked_entry,
+        entry,
+        mut initializers,
         mut literal_sites,
         mut scanned_modules,
         mut shipped_checks,
@@ -182,6 +185,17 @@ pub(super) fn units<'a>(
                     ModuleOrigin::Program(_) => file.map(|file| file.module(registrations.modules)),
                     _ => None,
                 };
+                let initializer = module_id.zip(checked_source).and_then(|(id, source)| {
+                    let winner = match entry {
+                        Some((root, main)) if root == id => main == Some(unit),
+                        _ => source.name == *name,
+                    };
+                    if winner && std::ptr::eq(source, &registrations.modules[id]) {
+                        initializers.remove(&id)
+                    } else {
+                        None
+                    }
+                });
                 let mut body = PreparedBody::from_parsed(
                     name,
                     path.as_path(),
@@ -189,13 +203,7 @@ pub(super) fn units<'a>(
                     python_optimization,
                     origin,
                     literals.unwrap_or_default(),
-                    (
-                        types,
-                        checked_source,
-                        checked_entry
-                            .take_if(|(id, _)| *id == unit)
-                            .map(|(_, body)| body),
-                    ),
+                    (types, checked_source, initializer),
                 )?;
                 if python_optimization < 2
                     && let Some(module) = module_id

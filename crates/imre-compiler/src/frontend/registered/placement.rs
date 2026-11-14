@@ -20,8 +20,9 @@ mod tests {
             crate::CheckedProgram::Registered(_)
         ));
         let module = &graph.modules[graph.entry];
-        let (_, entry) = graph.take_registered_functions();
-        let entry = entry.unwrap();
+        let (_, mut initializers) = graph.take_registered_functions();
+        assert_eq!(initializers.len(), 1);
+        let entry = initializers.remove(&graph.entry).unwrap();
         let original = entry.function.body.as_ptr();
         let operations = HashMap::new();
         let mut prepare =
@@ -38,6 +39,39 @@ mod tests {
             panic!("expected the installed module binding");
         };
         assert_eq!(suite.checked.local_names[&slot].name, "render");
+    }
+
+    #[test]
+    fn imported_initializer_keeps_its_checked_tail_after_the_definition() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.py");
+        let text = "def increment(x: int) -> int: return x + 1\nprint('leaf initialized')\n";
+        std::fs::write(dir.path().join("leaf.py"), text).unwrap();
+        std::fs::write(&main, "from leaf import increment\nprint(increment(3))\n").unwrap();
+        let mut graph = SourceGraph::load(&main, None, &[]).unwrap();
+        graph.registered_startup = true;
+        assert!(matches!(
+            crate::checked_lower(&mut graph).unwrap(),
+            crate::CheckedProgram::Registered(_)
+        ));
+        let mut seen = false;
+        let (_, initializers) = graph.take_registered_functions();
+        for (id, body) in initializers {
+            if id == graph.entry {
+                continue;
+            }
+            let module = &graph.modules[id];
+            assert_eq!(module.name, "leaf");
+            let original = body.function.body.as_ptr();
+            let operations = HashMap::new();
+            let mut prepare =
+                SuitePreparation::new(&operations, module.registered_values().context(text), true);
+            let suite = prepare.module(&module.parsed.syntax().body, Some((module, body)));
+            assert_eq!(suite.checked.function.body.as_ptr(), original);
+            assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+            assert!(!std::mem::replace(&mut seen, true));
+        }
+        assert!(seen);
     }
 
     #[test]

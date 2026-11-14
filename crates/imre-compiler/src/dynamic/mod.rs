@@ -2718,13 +2718,12 @@ pub(crate) fn compile(
     inputs.boxed_imports = true;
     // Registration has committed to the selected bodies. Leave the type database
     // and import graph behind before preparing their source initializers.
-    let checked_entry = project.as_ref().and_then(|graph| {
-        let (functions, entry) = graph.take_registered_functions();
-        registrations.functions = functions;
-        let unit = main_unit?;
-        let owner = registrations.checked_units.get(&unit)?.module;
-        (owner == Some(graph.entry)).then_some((unit, entry?))
-    });
+    let entry = project.as_ref().map(|graph| (graph.entry, main_unit));
+    let (functions, initializers) = project
+        .as_ref()
+        .map(|graph| graph.take_registered_functions())
+        .unwrap_or_default();
+    registrations.functions = functions;
     let modules = project
         .take()
         .map(|graph| graph.modules)
@@ -2737,7 +2736,8 @@ pub(crate) fn compile(
         (&sources, &builtins),
         prepare::SourceInputs {
             entry_source: file_source,
-            checked_entry,
+            entry,
+            initializers,
             literal_sites,
             scanned_modules,
             shipped_checks,

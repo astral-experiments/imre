@@ -1756,7 +1756,7 @@ fn lower_graph(
         ExprKind::Builtin(Builtin::GeneratorFrameEnter(_), _) => generator_sites += 1,
         _ => {}
     };
-    let validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
+    let mut validate_calls = |functions: &[ir::Function]| -> StdResult<(), Diagnostic> {
         typing::validate_functions(functions, &entry, &types)?;
         let mut callable_targets = HashMap::new();
         let mut indirect = Vec::new();
@@ -1788,7 +1788,7 @@ fn lower_graph(
             return Err(recursion_errors.swap_remove(id).into());
         }
         globals.validate_initializers(
-            initializer_ids.clone().zip(initialization_order),
+            initializer_ids.clone().zip(&initialization_order),
             graph,
             functions,
             &class_reads,
@@ -1853,8 +1853,18 @@ fn lower_graph(
     let selected = registered_entry(graph, functions, &entry, entry_operations)
         .inspect_err(|_| place_completed(&mut completed, &owners))?;
     if let Some(registered) = selected {
+        for (order, function) in initialization_order
+            .into_iter()
+            .zip(completed.functions.drain(initializer_ids))
+        {
+            if let Some(source) = order.source
+                && let Ok(frame) = source.place(function)
+            {
+                graph.register_initializer(order.module, frame);
+            }
+        }
         if let Some(frame) = entry_source.and_then(|source| source.place(entry).ok()) {
-            graph.register_entry(frame);
+            graph.register_initializer(graph.entry, frame);
         }
         register(completed, &owners);
         if recover_completed.get() {

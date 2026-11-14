@@ -3204,14 +3204,15 @@ pub(crate) struct LoweringBaseline {
     traceback_objects: bool,
 }
 
+pub(crate) type CheckedInitializers = HashMap<ModuleId, Box<crate::frontend::RegisteredFunction>>;
+
 #[derive(Default)]
 struct RegisteredFunctions {
-    /// The checked executable tail of the graph entry.
-    entry: Option<Box<crate::frontend::RegisteredFunction>>,
     admitted: HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
     /// Completed solved bodies which cannot establish graph admission. Lexical
     /// placement may use them after the selected source passes its own checks.
     lexical: Vec<(ModuleId, TextSize, crate::frontend::RegisteredFunction)>,
+    initializers: CheckedInitializers,
 }
 
 pub(crate) struct SourceGraph {
@@ -3330,11 +3331,18 @@ impl SourceGraph {
         let mut functions = self.registered_functions.borrow_mut();
         functions.admitted.clear();
         functions.lexical.clear();
-        functions.entry = None;
+        functions.initializers.clear();
     }
 
-    pub(crate) fn register_entry(&self, entry: crate::frontend::RegisteredFunction) {
-        self.registered_functions.borrow_mut().entry = Some(Box::new(entry));
+    pub(crate) fn register_initializer(
+        &self,
+        module: ModuleId,
+        body: crate::frontend::RegisteredFunction,
+    ) {
+        self.registered_functions
+            .borrow_mut()
+            .initializers
+            .insert(module, Box::new(body));
     }
 
     pub(crate) fn register_function(
@@ -3386,14 +3394,11 @@ impl SourceGraph {
     /// parameter convention must still be valid with live Python arguments.
     pub(crate) fn take_registered_functions(
         &self,
-    ) -> (
-        HashMap<ModuleId, crate::dynamic::CheckedFunctions>,
-        Option<Box<crate::frontend::RegisteredFunction>>,
-    ) {
+    ) -> (HashMap<ModuleId, crate::dynamic::CheckedFunctions>, CheckedInitializers) {
         let RegisteredFunctions {
-            entry,
             mut admitted,
             lexical,
+            initializers,
         } = self.registered_functions.take();
         for (module, start, mut body) in lexical {
             use crate::frontend::{FrameArguments, FrameInputs};
@@ -3419,7 +3424,7 @@ impl SourceGraph {
                 .entry(start)
                 .or_insert(body);
         }
-        (admitted, entry)
+        (admitted, initializers)
     }
 
     /// The fixed adapter displaced when this source supplies the import.

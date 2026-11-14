@@ -667,6 +667,7 @@ pub(super) struct Initialization {
 pub(super) struct InitializationOrder {
     pub module: ModuleId,
     checkpoints: Vec<Checkpoint>,
+    pub(super) source: Option<Box<FixedBodySource>>,
 }
 
 impl Initialization {
@@ -683,6 +684,13 @@ impl Initialization {
         let mut checkpoints = output.as_ref().map(|_| Vec::new());
         let mut pending = None;
         let complete = range.end == module.parsed.syntax().body.len();
+        let tail = (complete
+            && output.is_some()
+            && checker.graph.registered_startup
+            && checker.module != checker.graph.entry
+            && module.is_program_source())
+        .then(|| module.executable_suffix())
+        .flatten();
         for index in range {
             // A refused region cannot publish a fixed initializer. Continue checking
             // its bindings and diagnostics without retaining stores or their checkpoints.
@@ -690,6 +698,16 @@ impl Initialization {
                 checkpoints = None;
             }
             let emit = checkpoints.is_some();
+            // A placed tail must account for the entire native segment. Declarations
+            // and imports still run in the receiving Python namespace.
+            if emit
+                && body.is_empty()
+                && let Some((prefix, tail)) = tail
+                && index == prefix.len()
+            {
+                checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
+                body.reserve(tail.len() + 2 * prefix.len());
+            }
             if !emit {
                 body.clear();
             }
@@ -893,7 +911,12 @@ impl Initialization {
                     }
                 }
             } else {
+                let parent = checker
+                    .fixed_sites
+                    .as_mut()
+                    .and_then(|sites| sites.enter(statement.range()));
                 let falls_through = checker.statement(statement, Some(&mut body))?;
+                checker.leave_fixed_site(parent);
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry
@@ -930,6 +953,19 @@ impl Initialization {
                 order: InitializationOrder {
                     module: checker.module,
                     checkpoints,
+                    source: checker.fixed_sites.take().and_then(|sites| {
+                        let (_, tail) = tail?;
+                        sites
+                            .finish(
+                                tail.len(),
+                                &body,
+                                checker.names,
+                                &checker.locals,
+                                None,
+                                FrameArguments::Python,
+                            )
+                            .map(Box::new)
+                    }),
                 },
                 function: ir::Function {
                     params: Vec::new(),
@@ -947,9 +983,9 @@ impl Initialization {
 impl ModuleValues {
     /// Rejects early direct and transitive reads, including hidden comprehensions.
     /// Requiring every potential callee to be available is deliberately conservative.
-    pub(super) fn validate_initializers(
+    pub(super) fn validate_initializers<'a>(
         &self,
-        initializers: impl IntoIterator<Item = (usize, InitializationOrder)>,
+        initializers: impl IntoIterator<Item = (usize, &'a InitializationOrder)>,
         graph: &SourceGraph,
         functions: &[ir::Function],
         binding_reads: &[HashSet<DefinitionId>],
