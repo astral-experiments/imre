@@ -1425,13 +1425,13 @@ impl LexicalDefinitions<'_, '_> {
         } else {
             format!("{qualname}.<locals>.")
         };
-        let mut signature = json!({});
-        if !matches!(body, Body::Namespace(..)) {
-            signature["code_flags"] = json!(
-                self.source
-                    .function_flags(self.in_function || type_parameter_scope, false)
-            );
-        }
+        let flags = if matches!(body, Body::Namespace(..)) {
+            self.source.future_flags
+        } else {
+            self.source
+                .function_flags(self.in_function || type_parameter_scope, false)
+        };
+        let mut signature = json!({ "code_flags": flags });
         if let Body::Namespace(class, scope) = &body {
             signature["postponed_annotations"] = json!(class.annotations.postponed);
             if class.annotations.conditional_count != 0 || scope.cells.conditional {
@@ -1587,7 +1587,8 @@ impl SourceMap<'_> {
             return;
         }
         let signature = json!({
-            "posonly": ["format"], "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
+            "posonly": ["format"], "scope_locals_complete": true,
+            "scope_complete": !plan.incomplete, "scope_reads": plan.reads,
             "code_flags": self.function_flags(in_function, false),
         });
         let scope = AnnotationScope::Class {
