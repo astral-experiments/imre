@@ -458,7 +458,7 @@ impl<'a> PreparedBody<'a> {
         };
         let syntax = parsed.syntax();
         let tokens = parsed.tokens();
-        let replacements = module_source::validate(
+        let (replacements, has_templates) = module_source::validate(
             &path,
             source,
             &parsed,
@@ -474,14 +474,6 @@ impl<'a> PreparedBody<'a> {
         let registered_values = checked_source
             .filter(|source| std::ptr::eq(source.parsed.syntax(), syntax))
             .and_then(|source| source.cached_registered_values());
-        let has_templates = registered_values.map_or_else(
-            || {
-                tokens
-                    .iter()
-                    .any(|t| t.kind() == ast::token::TokenKind::TStringStart)
-            },
-            |values| values.has_templates,
-        );
         let template_fields = if has_templates {
             imre_ast::strings::template_fields(source, tokens, syntax)
         } else {

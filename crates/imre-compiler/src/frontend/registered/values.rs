@@ -23,12 +23,11 @@ impl ModuleSource {
         tokens: &ast::token::Tokens,
         method_imports: BTreeSet<String>,
     ) -> Self {
+        let (replacements, has_templates) = scan_literals(text, tokens);
         Self {
             method_imports,
-            replacements: literal_replacements(text, tokens),
-            has_templates: tokens
-                .iter()
-                .any(|token| token.kind() == ast::token::TokenKind::TStringStart),
+            replacements,
+            has_templates,
         }
     }
     #[cfg(test)]
@@ -188,12 +187,18 @@ pub(crate) fn validate_docstring_literals(
     Ok(())
 }
 
-pub(crate) fn literal_replacements(
+/// Find cooked Unicode replacements and whether to collect template fields in the same token pass.
+pub(crate) fn scan_literals(
     source: &str,
     tokens: &ast::token::Tokens,
-) -> HashMap<TextRange, Vec<u32>> {
+) -> (HashMap<TextRange, Vec<u32>>, bool) {
+    let mut has_templates = false;
     let mut replacements = HashMap::new();
     for token in tokens {
+        if token.kind() == ast::token::TokenKind::TStringStart {
+            has_templates = true;
+            continue;
+        }
         let Some(range) = imre_ast::strings::cooked_content(token) else {
             continue;
         };
@@ -202,7 +207,7 @@ pub(crate) fn literal_replacements(
             replacements.insert(token.range(), points);
         }
     }
-    replacements
+    (replacements, has_templates)
 }
 
 pub(crate) fn push_codepoints(bytes: &mut Vec<u8>, text: &str, replacements: Option<&[u32]>) {

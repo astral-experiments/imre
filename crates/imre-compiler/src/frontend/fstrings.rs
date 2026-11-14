@@ -333,7 +333,7 @@ mod tests {
             generators: None,
             lambdas: None,
             text,
-            replacements: &literal_replacements(text, module.parsed.tokens()),
+            replacements: &module.registered_values().replacements,
             method_imports: &Default::default(),
             private_names: None,
         };

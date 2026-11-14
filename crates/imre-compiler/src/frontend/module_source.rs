@@ -165,24 +165,34 @@ pub(crate) fn validate_file(
         .map_err(|error| format!("{}:{error}", path.display()))
 }
 
-/// Check syntax and prepare the literal escapes that this module can emit.
+/// Check syntax, recover literal escapes and determine whether this parse contains templates.
 pub(crate) fn validate<'a>(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
     checked: Option<&'a crate::modules::SourceModule>,
     keep_docstrings: bool,
-) -> Result<Cow<'a, HashMap<TextRange, Vec<u32>>>, String> {
+) -> Result<(Cow<'a, HashMap<TextRange, Vec<u32>>>, bool), String> {
     validate_syntax(path, source, parsed, checked)?;
-    let replacements = checked
-        .and_then(|module| module.cached_registered_values())
-        .map_or_else(
-            || Cow::Owned(super::literal_replacements(source, parsed.tokens())),
-            |values| Cow::Borrowed(&values.replacements),
-        );
+    let (replacements, has_templates) = if let Some(module) = checked
+        && let Some(values) = module.cached_registered_values()
+    {
+        let has_templates = if std::ptr::eq(module.parsed.syntax(), parsed.syntax()) {
+            values.has_templates
+        } else {
+            parsed
+                .tokens()
+                .iter()
+                .any(|t| t.kind() == ast::token::TokenKind::TStringStart)
+        };
+        (Cow::Borrowed(&values.replacements), has_templates)
+    } else {
+        let (replacements, has_templates) = super::scan_literals(source, parsed.tokens());
+        (Cow::Owned(replacements), has_templates)
+    };
     super::validate_docstring_literals(source, parsed, keep_docstrings, Some(&replacements))
         .map_err(|error| format!("{}:{error}", path.display()))?;
-    Ok(replacements)
+    Ok((replacements, has_templates))
 }
 
 pub(crate) fn validate_names(
@@ -218,20 +228,22 @@ mod tests {
         let module = &graph.modules[graph.entry];
         let validate =
             |checked, keep| validate(&module.path, &module.source, &module.parsed, checked, keep);
-        let independent = validate(None, false).unwrap();
+        let (independent, has_templates) = validate(None, false).unwrap();
+        assert!(!has_templates);
         assert!(matches!(independent, Cow::Owned(_)));
         let map = &module.registered_values().replacements;
         assert_eq!(&*independent, map);
         assert!(matches!(
             validate(Some(module), false).unwrap(),
-            Cow::Borrowed(borrowed) if std::ptr::eq(borrowed, map)
+            (Cow::Borrowed(borrowed), false) if std::ptr::eq(borrowed, map)
         ));
         let error = validate(None, true).unwrap_err();
         assert!(
             error.ends_with(":2:5: Imre: surrogate string escapes are unsupported in docstrings")
         );
         assert_eq!(validate(Some(module), true).unwrap_err(), error);
-        let layout = ParsedModule::parse(&module.path, module.source.as_str().into()).unwrap();
+        let text = format!("{}t'{{name}}'\n", module.source);
+        let layout = ParsedModule::parse(&module.path, text.into()).unwrap();
         let borrowed = super::validate(
             &module.path,
             &layout.text,
@@ -240,7 +252,7 @@ mod tests {
             false,
         )
         .unwrap();
-        assert!(matches!(borrowed, Cow::Borrowed(borrowed) if std::ptr::eq(borrowed, map)));
+        assert!(matches!(borrowed, (Cow::Borrowed(borrowed), true) if std::ptr::eq(borrowed, map)));
     }
 
     #[test]
