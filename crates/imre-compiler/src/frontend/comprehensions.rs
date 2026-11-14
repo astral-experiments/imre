@@ -229,12 +229,7 @@ pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
             let (empty, store) = match (collector, output, key) {
                 (Collector::Display(_), Output::Dict(..), Some(key)) => (
                     ExprKind::Dict(Vec::new()),
-                    Statement::SetItem(
-                        ir::ItemOrder::Display,
-                        Expr::local(result, ty),
-                        key,
-                        item,
-                    ),
+                    Statement::SetItem(ir::ItemOrder::Display, Expr::local(result, ty), key, item),
                 ),
                 (Collector::Display(_), Output::List(_) | Output::Set(_), None) => {
                     let (empty, operation) = if matches!(output, Output::Set(_)) {
