@@ -6009,24 +6009,7 @@ impl Heap {
 
     /// A suspended caller keeps its operands when the current frame releases temporaries.
     fn caller_keeps_generator(&self, owner: Id) -> bool {
-        matches!(self.get(owner), Value::Generator { .. })
-            && self
-                .execution
-                .frames
-                .iter()
-                .rev()
-                .take(24)
-                .skip(1)
-                .any(|frame| {
-                    // Context manager exits and loop iterators survive at the front of a
-                    // caller's operands as newer expression temporaries fill the other end.
-                    frame.live.iter().take(8).any(|id| {
-                        matches!(
-                            self.get(*id),
-                            Value::Method { .. } | Value::LoopIterator { .. }
-                        ) && self.short_path_keeps_owner(*id, owner)
-                    })
-                })
+        matches!(self.get(owner), Value::Generator { .. }) && self.operand_keeps_finalizer(owner, 0)
     }
 
     /// Look for a short strong path from a current frame to an owner.

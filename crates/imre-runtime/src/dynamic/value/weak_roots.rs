@@ -707,7 +707,7 @@ impl Heap {
                 .is_some_and(|&root| self.short_path_keeps_owner(root, owner))
     }
 
-    fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
+    pub(super) fn operand_keeps_finalizer(&self, owner: Id, retained_current: usize) -> bool {
         self.cached_operand_keeps_finalizer(owner, retained_current)
             || self.find_finalizer_operand(owner, retained_current)
     }
