@@ -423,18 +423,11 @@ class TestCase(_SuiteMember):
             self._list_difference(left, right, left, right, msg)
 
     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
-        if len(d1) == len(d2):
-            equal = True
-            for key in d1:
-                if key not in d2 or d1[key] != d2[key]:
-                    equal = False
-                    break
-            if equal:
-                return
-        sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
-        message = sides[0] + " != " + sides[1]
-        diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
-        self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
+        if d1 != d2:
+            sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+            message = sides[0] + " != " + sides[1]
+            diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
+            self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
 
     def _failMembership(self, member: str, container: str, msg: str | None, expected: bool) -> None:
         detail = " not found in " if expected else " unexpectedly found in "
