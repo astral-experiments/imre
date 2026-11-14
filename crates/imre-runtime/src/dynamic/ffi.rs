@@ -1,5 +1,6 @@
 //! ABI between LLVM-generated Python functions and Imre-owned objects.
 
+use std::borrow::Cow;
 use std::ffi::{CStr, c_char};
 use std::slice;
 use std::sync::Arc;
@@ -8,6 +9,16 @@ use super::source_code::CONDITIONAL;
 use super::*;
 
 mod linked_literals;
+
+/// The checked compiler supplies the field counts directly. Earlier native objects
+/// encode positional markers and keyword names in a private list.
+enum ClassPatternFields<'a> {
+    Written {
+        positional: usize,
+        keywords: &'a [Id],
+    },
+    List(Id),
+}
 
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
@@ -190,19 +201,33 @@ impl Context {
 
     /// Resolve positional names only after isinstance succeeds, then fetch all
     /// fields in source order before testing any nested patterns.
-    fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
+    fn match_class(
+        &mut self,
+        subject: Id,
+        class: Id,
+        fields: ClassPatternFields<'_>,
+    ) -> Result<Id> {
         if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
-        let Value::List(names) = self.heap.get(names) else {
-            unreachable!("compiled class pattern arguments")
+        let (positional, keywords) = match fields {
+            ClassPatternFields::Written {
+                positional,
+                keywords,
+            } => (positional, Cow::Borrowed(keywords)),
+            ClassPatternFields::List(names) => {
+                let Value::List(names) = self.heap.get(names) else {
+                    unreachable!("compiled class pattern arguments")
+                };
+                let positional = names.iter().take_while(|&&name| name == NONE).count();
+                (positional, Cow::Owned(names[positional..].to_vec()))
+            }
         };
-        let mut names = names.clone();
-        let positional = names.iter().take_while(|&&name| name == NONE).count();
-        let mut fields = Vec::with_capacity(names.len());
+        let mut fields = Vec::with_capacity(positional + keywords.len());
         let mut seen = Vec::new();
         let mut first = 0;
         let args_mark = self.heap.temporary_mark();
+        let mut positional_names = Vec::new();
         if positional > 0 {
             let match_args = self.optional_attr(class, "__match_args__")?;
             let match_self = match_args.is_none() && self.class_matches_self(class)?;
@@ -238,10 +263,10 @@ impl Context {
                 fields.push(subject);
                 first = 1;
             } else {
-                names[..positional].copy_from_slice(&elements[..positional]);
+                positional_names.extend_from_slice(&elements[..positional]);
             }
         }
-        for (index, &name) in names.iter().enumerate().skip(first) {
+        for (index, &name) in (first..).zip(positional_names.iter().chain(keywords.iter())) {
             if index < positional
                 && !matches!(self.heap.get(name), Value::Str(_) | Value::SurrogateStr(_))
             {
@@ -349,7 +374,7 @@ impl Context {
                 })
             }
             "linked_string" => self.heap.linked_string_constant(b, |_| a),
-            "match_class" => self.match_class(a, b, c),
+            "match_class" => self.match_class(a, b, ClassPatternFields::List(c)),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
             "match_sequence" => Ok(builtins::boolean(
@@ -2425,6 +2450,34 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
         ctx.heap.use_expression_line();
     }
     finish_at(ctx, result, span)
+}
+
+/// Match a class using the written positional count and the caller's keyword handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_match_class(
+    ctx: *mut Context,
+    subject: Id,
+    class: Id,
+    positional: usize,
+    keywords: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: generated code owns an active context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    // SAFETY: the caller keeps its keyword handles valid for this call.
+    let keywords = unsafe { live_handles(keywords, count) };
+    let result = ctx.match_class(
+        subject,
+        class,
+        ClassPatternFields::Written {
+            positional,
+            keywords,
+        },
+    );
+    finish(ctx, result)
 }
 
 /// Test the operand at its source position, preserving exceptions raised by Python truth hooks.

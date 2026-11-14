@@ -200,17 +200,17 @@ impl Frame<'_, '_, '_> {
                 keywords,
             } => {
                 let class = self.pattern_value(class);
-                let f = &mut *self.code;
-                let keys = f.op("list", &[]);
-                for _ in positional {
-                    f.op("append", &[&keys, &super::permanent::NONE.to_string()]);
-                }
-                for (key, _) in keywords {
-                    let key = f.code_name(key);
-                    f.op("append", &[&keys, &key]);
-                }
+                let keys: Vec<_> = keywords
+                    .iter()
+                    .map(|(key, _)| self.code_name(key))
+                    .collect();
+                let positional_count = positional.len();
                 let fields = self.with_source_range(*range, |frame| {
-                    frame.op("match_class", &[value, &class, &keys])
+                    frame.take_matching_check();
+                    let (keys, count) = frame.handle_array(&keys);
+                    frame.checked(&format!(
+                        "call i64 @imre_dyn_match_class(ptr %ctx, i64 {value}, i64 {class}, i64 {positional_count}, ptr {keys}, i64 {count})"
+                    ))
                 });
                 let f = &mut *self.code;
                 let ok = f.value(&format!("icmp ne i64 {fields}, 0"));
