@@ -4,7 +4,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
-    pub(crate) method: Option<Arc<ast::StmtFunctionDef>>,
+    pub(crate) method: Option<crate::classes::MethodSource>,
     arguments: FrameArguments,
     pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
     sites: Vec<(TextRange, Option<FixedNode>)>,
@@ -503,7 +503,7 @@ impl SourceSites {
         body: &[Statement],
         names: HashMap<String, usize>,
         locals: &[Type],
-        method: Option<&Arc<ast::StmtFunctionDef>>,
+        method: Option<&crate::classes::MethodSource>,
         arguments: FrameArguments,
     ) -> Option<FixedBodySource> {
         if body.is_empty()
@@ -941,7 +941,7 @@ mod tests {
                     assert_eq!(method.range(), *range);
                     Some((
                         method.start(),
-                        Arc::as_ptr(method),
+                        std::ptr::from_ref(&**method),
                         fixed.ir.0.functions[*slot].body.as_ptr(),
                         source
                             .sites
@@ -980,7 +980,7 @@ mod tests {
                 assert_eq!(placed.function.body.as_ptr(), operations);
                 assert_eq!(&*placed.fixed_sites, positions.as_slice());
                 assert!(matches!(&placed.inputs, FrameInputs::Protocol { sites }
-                    if matches!(sites.as_ref(), [FrameSite::Method(method)] if Arc::as_ptr(method) == declaration)));
+                    if matches!(sites.as_ref(), [FrameSite::Method(method)] if std::ptr::from_ref(&**method) == declaration)));
             }
         }
     }

@@ -662,12 +662,15 @@ class Child(Fixed):
         let get = &fixed.methods[method(fixed, "get")].function;
         let property = &fixed.methods[method(fixed, "item")].function;
         let inherited = &child.methods[method(child, "item")].function;
-        assert!(std::sync::Arc::ptr_eq(get, property));
-        assert!(std::sync::Arc::ptr_eq(get, inherited));
-        assert!(!std::sync::Arc::ptr_eq(
-            get,
-            &child.methods[method(child, "get")].function
-        ));
+        let source = &graph.modules[fixed.definition.module].parsed.syntax().body[fixed.definition.statement];
+        let original = source.as_class_def_stmt().unwrap().body[1]
+            .as_function_def_stmt()
+            .unwrap();
+        assert!(std::ptr::eq(&**get, original));
+        assert!(std::ptr::eq(&**property, original));
+        assert!(std::ptr::eq(&**inherited, original));
+        let overriding = &child.methods[method(child, "get")].function;
+        assert!(!std::ptr::eq(&**overriding, original));
     }
 
     #[test]

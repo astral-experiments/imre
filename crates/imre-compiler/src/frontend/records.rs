@@ -30,7 +30,7 @@ pub(super) fn executable_method<'a>(
     graph: &SourceGraph,
     types: &Types,
 ) -> std::result::Result<(Cow<'a, ast::StmtFunctionDef>, bool), String> {
-    let mut method = Cow::Borrowed(binding.function.as_ref());
+    let mut method = Cow::Borrowed(&*binding.function);
     if binding.name != method.name {
         method.to_mut().name.clone_from(&binding.name);
     }

@@ -4,8 +4,10 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ty_python_core::ast_node_ref::AstNodeRef;
 
 use crate::frontend::phase::{Diagnostic, Kind};
 use crate::ir::Type;
@@ -39,11 +41,41 @@ pub(crate) enum MethodKind {
     Static,
 }
 
+/// A physical method pins its indexed parse, including when a placed frame outlives the graph.
+#[derive(Clone)]
+pub(crate) enum MethodSource {
+    Parsed(ParsedModuleRef, AstNodeRef<ast::StmtFunctionDef>),
+    Owned(Arc<ast::StmtFunctionDef>),
+}
+
+impl MethodSource {
+    pub(crate) fn make_mut(&mut self) -> &mut ast::StmtFunctionDef {
+        if let Self::Parsed(parsed, node) = self {
+            *self = Self::Owned(Arc::new(node.node(parsed).clone()));
+        }
+        let Self::Owned(function) = self else {
+            unreachable!()
+        };
+        Arc::make_mut(function)
+    }
+}
+
+impl std::ops::Deref for MethodSource {
+    type Target = ast::StmtFunctionDef;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Parsed(parsed, node) => node.node(parsed),
+            Self::Owned(function) => function,
+        }
+    }
+}
+
 /// A class can bind the same function under its method name and a property name.
 #[derive(Clone)]
 pub(crate) struct ClassMethod {
     pub(crate) name: ast::Identifier,
-    pub(crate) function: Arc<ast::StmtFunctionDef>,
+    pub(crate) function: MethodSource,
 }
 
 impl ruff_text_size::Ranged for ClassMethod {
@@ -56,7 +88,7 @@ impl From<ast::StmtFunctionDef> for ClassMethod {
     fn from(function: ast::StmtFunctionDef) -> Self {
         Self {
             name: function.name.clone(),
-            function: Arc::new(function),
+            function: MethodSource::Owned(Arc::new(function)),
         }
     }
 }
@@ -1107,11 +1139,21 @@ fn collect_class<'syntax>(
                     }
                     initializer = Some(methods.len());
                 }
-                let mut method = method.clone();
+                let mut binding = if matches!(source, Cow::Borrowed(_)) {
+                    ClassMethod {
+                        name: method.name.clone(),
+                        function: MethodSource::Parsed(
+                            module.parsed.clone(),
+                            AstNodeRef::new(&module.parsed, method),
+                        ),
+                    }
+                } else {
+                    method.clone().into()
+                };
                 if forwarder.is_some() {
-                    mangle_fields(node.name.as_str(), &mut method, |_| true);
+                    mangle_fields(node.name.as_str(), binding.function.make_mut(), |_| true);
                 }
-                methods.push(method.into());
+                methods.push(binding);
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }
@@ -1167,7 +1209,7 @@ fn collect_class<'syntax>(
                     }
                     methods.push(ClassMethod {
                         name: ast::Identifier::new(name.id.as_str(), name.range),
-                        function: Arc::clone(&method.function),
+                        function: method.function.clone(),
                     });
                     method_kinds.push(kind);
                 }
@@ -1343,7 +1385,7 @@ fn collect_class<'syntax>(
         inheritance::annotated_fields(
             graph,
             definition.module,
-            Arc::make_mut(&mut methods[init].function),
+            methods[init].function.make_mut(),
             &mut fields,
         );
         if infer {

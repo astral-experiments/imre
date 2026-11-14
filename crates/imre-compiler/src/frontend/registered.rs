@@ -193,7 +193,7 @@ impl RegisteredOperand {
 }
 
 pub(crate) enum FrameSite {
-    Method(Arc<ast::StmtFunctionDef>),
+    Method(crate::classes::MethodSource),
     Lambda(TextSize),
     Generator(TextRange),
 }
@@ -765,11 +765,11 @@ pub(super) fn physical_method<'a>(
     signature: &Signature,
     checked: &ast::StmtFunctionDef,
     classes: &'a ClassInfo,
-) -> Option<&'a Arc<ast::StmtFunctionDef>> {
+) -> Option<&'a crate::classes::MethodSource> {
     let method = signature.method?;
     let declaration =
         &classes.declarations.definitions[method.class].methods[method.index].function;
-    (signature.physical_frame && std::ptr::eq(checked, declaration.as_ref())).then_some(declaration)
+    (signature.physical_frame && std::ptr::eq(checked, &**declaration)).then_some(declaration)
 }
 
 /// A declaration without fixed callers uses the live Python argument binder.
@@ -804,7 +804,7 @@ pub(super) fn capture(
         let owner = owners[slot];
         let method = physical_method(signature, checked, classes);
         let function = match method {
-            Some(physical) => physical.as_ref(),
+            Some(physical) => &**physical,
             None if signatures
                 .get(&owner)
                 .is_some_and(|original| original.id == slot) =>
@@ -895,7 +895,7 @@ pub(super) fn capture(
                     return None;
                 };
                 let mut required = std::mem::take(sites).into_vec();
-                required.push(FrameSite::Method(Arc::clone(method)));
+                required.push(FrameSite::Method(method.clone()));
                 *sites = required.into_boxed_slice();
             }
             Some(body)
@@ -1994,7 +1994,7 @@ impl<'a> SuitePreparation<'a> {
             | FrameInputs::Deferred { sites, .. }
             | FrameInputs::Protocol { sites }) = &body.inputs;
             sites.iter().all(|site| match site {
-                FrameSite::Method(declaration) => declaration.as_ref() == def,
+                FrameSite::Method(declaration) => &**declaration == def,
                 FrameSite::Lambda(start) => self
                     .source
                     .lambdas
