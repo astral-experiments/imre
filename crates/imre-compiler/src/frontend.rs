@@ -212,10 +212,10 @@ impl Signature {
     /// An eager source frame reads its declared pack from the tuple bound by the Python caller.
     fn takes_positional_tuple(
         &self,
-        source: &Cow<'_, ast::StmtFunctionDef>,
+        source: &ast::StmtFunctionDef,
         session: &crate::analysis::Session,
     ) -> bool {
-        matches!(source, Cow::Borrowed(def) if !def.is_async)
+        !source.is_async
             && matches!(self.params.as_slice(), [param] if param.kind == ParameterKind::Variadic)
             && self.parameter_declaration(0).is_some_and(|declaration| {
                 !session.is_generator_definition(declaration.module, source)
@@ -1543,13 +1543,14 @@ fn lower_graph(
                                     *module_id,
                                     definition.range(),
                                 ) == Some(true)))))
-            || named_scalar && signature.takes_positional_tuple(source, &graph.session)
+            || named_scalar
+                && matches!(source, Cow::Borrowed(def) if signature.takes_positional_tuple(def, &graph.session))
         {
             registered::place_checked_definition(
                 &checker,
                 definition,
                 signature,
-                &inference,
+                inference,
                 callable_inputs.as_mut(),
             )
             .ok()
@@ -1565,7 +1566,7 @@ fn lower_graph(
                     && definition.returns.is_some()
                     && signature.returns == Type::None)
         {
-            lower_function(checker, definition, signature, None, Some(&inference))
+            lower_function(checker, definition, signature, None, Some(inference))
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
         } else {
