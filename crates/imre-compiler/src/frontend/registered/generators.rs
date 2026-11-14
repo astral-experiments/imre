@@ -65,13 +65,8 @@ impl RegisteredGenerator {
     ) -> Option<Self> {
         // The constructor installs the target declarations and the acquired cursor in
         // a fresh comprehension frame. Reads and writes now use that frame directly.
-        let operations = HashMap::new();
-        let mut scope = SourceScope::new(
-            RegisteredScope::Function { is_async },
-            source,
-            &operations,
-            false,
-        );
+        let mut scope =
+            SourceScope::new(RegisteredScope::Function { is_async }, source, None, false);
         scope.generator_expression = true;
         let outer = imre_ast::comprehension::outer_clause(plan.clauses);
         let pull = comprehensions::async_pull(outer);

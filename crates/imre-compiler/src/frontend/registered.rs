@@ -144,8 +144,7 @@ impl RegisteredOperand {
         kind: RegisteredScope,
         lower: impl FnOnce(&mut SourceScope<'_>) -> Option<Expr>,
     ) -> Option<Self> {
-        let operations = HashMap::new();
-        let mut scope = SourceScope::new(kind, source, &operations, false);
+        let mut scope = SourceScope::new(kind, source, None, false);
         let value = lower(&mut scope)?;
         Some(Self::from_scope(value, scope))
     }
@@ -324,7 +323,7 @@ impl RegisteredFunction {
         operations: &HashMap<TextRange, Expr>,
         assertions_enabled: bool,
     ) -> Option<Self> {
-        let mut scope = SourceScope::new(kind, source, operations, !assertions_enabled);
+        let mut scope = SourceScope::new(kind, source, Some(operations), !assertions_enabled);
         let (body, _) = scope.block(stmts).ok()?;
         Some(scope.finish(body))
     }
@@ -1093,12 +1092,11 @@ impl ParameterAnnotations {
         let reads = super::function_scope::parameter_reads(&annotations, string_annotations);
         let mut entries = Vec::with_capacity(annotations.len());
         let mut references = HashMap::new();
-        let operations = HashMap::new();
         // Each annotation is evaluated in the same provider activation.
         let mut scope = SourceScope::new(
             RegisteredScope::Function { is_async: false },
             source,
-            &operations,
+            None,
             false,
         );
         for (name, expression) in annotations {
@@ -1363,7 +1361,7 @@ pub(super) fn collect_sites<'a>(
                     let child = SourceScope::new(
                         self.annotations.kind,
                         self.source,
-                        self.annotations.operations,
+                        None,
                         self.annotations.omit_assertions,
                     );
                     let outer_annotations = std::mem::replace(&mut self.annotations, child);
@@ -1501,7 +1499,6 @@ pub(super) fn collect_sites<'a>(
             }
         }
     }
-    let operations = HashMap::new();
     let mut sites = Collector {
         children: &children,
         names,
@@ -1510,7 +1507,7 @@ pub(super) fn collect_sites<'a>(
         annotations: SourceScope::new(
             RegisteredScope::Function { is_async: false },
             source,
-            &operations,
+            None,
             false,
         ),
         scope: RegisteredScope::Module,
@@ -1767,6 +1764,15 @@ impl<'a> SuitePreparation<'a> {
         }
     }
 
+    fn source_scope(&self, kind: RegisteredScope) -> SourceScope<'a> {
+        SourceScope::new(
+            kind,
+            self.source,
+            Some(self.operations),
+            self.sites.omit_assertions,
+        )
+    }
+
     #[cfg(test)]
     pub(crate) fn class_suites(
         &mut self,
@@ -1801,7 +1807,7 @@ impl<'a> SuitePreparation<'a> {
             let mut scope = SourceScope::new(
                 RegisteredScope::Function { is_async: false },
                 self.source,
-                self.operations,
+                None,
                 self.sites.omit_assertions,
             );
             scope.report_child_refusals = true;
@@ -1873,12 +1879,7 @@ impl<'a> SuitePreparation<'a> {
     }
 
     pub(crate) fn interactive(&self, stmts: &[ast::Stmt]) -> Option<RegisteredSuite> {
-        let mut scope = SourceScope::new(
-            RegisteredScope::Module,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(RegisteredScope::Module);
         scope.interactive = true;
         let (body, falls_through) = scope.block(stmts).ok()?;
         let refusal = self.checked_declaration_refusal(&body);
@@ -2180,12 +2181,7 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn region(&self, kind: RegisteredScope) -> RegisteredSuite {
-        let scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let scope = self.source_scope(kind);
         RegisteredSuite::new(scope.finish(Vec::new()), Vec::new())
     }
 
@@ -2248,12 +2244,7 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        let mut scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(kind);
         let mut operands = Vec::new();
         let mut suites = Vec::new();
 
@@ -2307,12 +2298,7 @@ impl<'a> SuitePreparation<'a> {
         selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        let mut scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(kind);
         let mut operands = Vec::new();
         let mut statements = vec![Statement::Position(stmt.range(), None)];
         let mut protected = &mut statements;
@@ -2400,12 +2386,7 @@ impl<'a> SuitePreparation<'a> {
         suspended: bool,
     ) -> StdResult<RegisteredSuite, OperandRefusal> {
         let mut operands = Vec::new();
-        let mut scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(kind);
         let iterable =
             self.region_operand(&loop_.iter, &mut scope, &mut operands, selection, suspended);
         let mut input = cursor_input(
@@ -2446,12 +2427,7 @@ impl<'a> SuitePreparation<'a> {
         child_selection: SuiteSelection,
         suspended: bool,
     ) -> RegisteredSuite {
-        let mut scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(kind);
         let mut body = SuiteBody {
             statements: Vec::new(),
             check_from: Some(0),
@@ -3163,7 +3139,10 @@ impl statements::StatementLowering for SourceScope<'_> {
                 // A function-local annotation has no runtime operand. A simple
                 // namespace annotation records its declaration for later evaluation.
                 if !matches!(self.kind, RegisteredScope::Function { .. }) && ann.simple {
-                    let marker = self.operations.get(&ann.target.range()).ok_or(())?;
+                    let marker = self
+                        .suite_operations
+                        .and_then(|operations| operations.get(&ann.target.range()))
+                        .ok_or(())?;
                     body.push(Statement::Expr(marker.clone()));
                 }
                 Ok((body, true))
@@ -3244,7 +3223,8 @@ struct SourceScope<'a> {
     kind: RegisteredScope,
     interactive: bool,
     omit_assertions: bool,
-    operations: &'a HashMap<TextRange, Expr>,
+    // Only source statement suites own namespace operations; expression providers have none.
+    suite_operations: Option<&'a HashMap<TextRange, Expr>>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
     namespaces: HashMap<usize, LocalBinding>,
@@ -3347,14 +3327,14 @@ impl<'a> SourceScope<'a> {
     fn new(
         kind: RegisteredScope,
         source: values::RegisteredSource<'a>,
-        operations: &'a HashMap<TextRange, Expr>,
+        suite_operations: Option<&'a HashMap<TextRange, Expr>>,
         omit_assertions: bool,
     ) -> Self {
         Self {
             kind,
             interactive: false,
             source,
-            operations,
+            suite_operations,
             omit_assertions,
             names: HashMap::new(),
             namespaces: HashMap::new(),
@@ -3957,19 +3937,7 @@ impl SourceScope<'_> {
         {
             self.suspend_operand(ir::SuspendValue::Await, Some(&awaited.value), expr.range())?
         } else if let ast::Expr::Lambda(lambda) = expr {
-            if !values::has_checked_lambda_body(lambda, self.source) {
-                if self.report_child_refusals {
-                    self.refusal = Some((
-                        expr.range(),
-                        "cannot compile this lambda body ahead of time",
-                    ));
-                }
-                return None;
-            }
-            let binding = self
-                .lambda_binding(lambda)
-                .inspect_err(|&error| self.refusal = Some(error))
-                .ok()?;
+            let binding = self.checked_lambda_binding(lambda)?;
             // The pending result of an eager comprehension lives across its element defaults.
             if self.comprehension.is_some()
                 && !self.generator_expression

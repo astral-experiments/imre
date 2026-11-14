@@ -1137,19 +1137,6 @@ pub(super) fn lambda_binding(lambda: &ast::ExprLambda, defaults: Vec<Expr>) -> E
     )
 }
 
-/// The caller lowers each default in its enclosing lexical scope.
-pub(super) fn has_checked_lambda_body(
-    lambda: &ast::ExprLambda,
-    source: RegisteredSource<'_>,
-) -> bool {
-    match source.lambdas {
-        Some(sites) => sites
-            .get(&lambda.start())
-            .is_some_and(|site| site.body.is_some()),
-        None => RegisteredLambda::body(lambda, source).is_some(),
-    }
-}
-
 pub(super) fn checked_binding(
     lambda: &ast::ExprLambda,
     source: RegisteredSource<'_>,

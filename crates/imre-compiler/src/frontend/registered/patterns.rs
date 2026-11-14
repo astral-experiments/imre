@@ -35,12 +35,7 @@ impl SuitePreparation<'_> {
                 )),
             })
             .collect::<Vec<_>>();
-        let mut scope = SourceScope::new(
-            kind,
-            self.source,
-            self.operations,
-            self.sites.omit_assertions,
-        );
+        let mut scope = self.source_scope(kind);
         for case in &mut cases {
             case.captures = scope.match_slots(&case.pattern);
         }
