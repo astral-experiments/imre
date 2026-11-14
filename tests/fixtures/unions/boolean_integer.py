@@ -90,3 +90,9 @@ for flag in (False, True):
         print(repr(Row(left)))
         compare(flag, n)
         compare(n, n)
+
+keys: dict[int, str] = {3: "small", large: "wide"}
+for number in (3, large):
+    key = retain_integer(number)
+    if key is not None:
+        print(keys[key])
