@@ -1359,7 +1359,7 @@ fn lower_graph(
             if let Some(solved) = &checks.solved {
                 solved
                     .borrow_mut()
-                    .push((module, range, registered::SourceFrame::Fixed));
+                    .insert((module, range), registered::SourceFrame::Fixed);
                 true
             } else {
                 checks.accepts(graph, module, range)
