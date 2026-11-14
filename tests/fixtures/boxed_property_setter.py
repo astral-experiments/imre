@@ -58,6 +58,20 @@ def current():
         except AttributeError as exc:
             print(exc.args)
 
+    def replacement():
+        pass
+
+    replacement.__isabstractmethod__ = True
+
+    class ReplacesSetter:
+        @property
+        def __isabstractmethod__(self):
+            probe.__init__(None, replacement)
+            return False
+
+    probe = property(ReplacesSetter())
+    assert property.__isabstractmethod__.__get__(probe) and probe.fset is replacement
+
     class RenamingProperty(property):
         def __init__(self, fget, fset=None, fdel=None, doc=None):
             super().__init__(fget, fset, fdel, doc)
