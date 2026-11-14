@@ -244,6 +244,9 @@ impl<'syntax> Classes<'syntax> {
 
     /// The entry module may need to execute class bodies even without module globals.
     pub(crate) fn has_class_values(&self, module: usize) -> bool {
+        if self.registered_classes.iter().any(|id| id.module == module) {
+            return true;
+        }
         self.definitions.iter().any(|class| {
             class.definition.module == module && (!class.skip_decorators.is_empty() || class.static_bindings.values().any(|value| {
                 matches!(value, ClassValue::Runtime { .. })
@@ -627,9 +630,6 @@ fn collect_class<'syntax>(
         graph.needs_object_runtime.set(true);
         return Err(module.diagnostic(node, "class type parameters require the object runtime"));
     }
-    if is_enum && http.is_none() && !node.decorator_list.is_empty() {
-        return Err(module.diagnostic(node, "decorated StrEnum declarations are unsupported"));
-    }
     let mut enum_members = is_enum.then(enums::Members::default);
     if let Some(members) = &mut enum_members {
         members.http = http;
@@ -646,11 +646,15 @@ fn collect_class<'syntax>(
         };
         skip_decorators.push(skip);
     }
-    let dataclass = if http.is_some() || !skip_decorators.is_empty() {
-        None
-    } else {
-        dataclasses::options(graph, definition.module, node)?
-    };
+    let dataclass =
+        if http.is_some() || !skip_decorators.is_empty() || node.decorator_list.is_empty() {
+            None
+        } else if let Some(options) = dataclasses::options(graph, definition.module, node)? {
+            Some(options)
+        } else {
+            // An ordinary decorator can publish any value in place of the class.
+            return Ok(None);
+        };
     let value_struct = dataclass.is_some_and(|options| options.value_struct);
     if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
         || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())

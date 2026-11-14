@@ -67,13 +67,19 @@ impl CompiledDefinition {
             frame.op("append", &[&bases, &base]);
         }
         let namespace = self.bind_defaults(frame, &scope, &[]);
-        let operation = if let Some(range) = parameter_range {
+        if let Some(range) = parameter_range.or(self.class_header) {
             frame.set_source_range(Some(range));
+        }
+        let operation = if parameter_range.is_some() {
             "parameterized_class"
         } else {
             "class"
         };
-        frame.op(operation, &[&kwargs, &bases, &namespace])
+        let class = frame.op(operation, &[&kwargs, &bases, &namespace]);
+        if parameter_range.is_none() && self.class_header.is_some() {
+            frame.set_source_range(None);
+        }
+        class
     }
 
     pub(crate) fn bind_defaults(
