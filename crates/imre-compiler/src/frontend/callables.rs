@@ -52,32 +52,44 @@ pub(super) fn handler_signature(ty: Type, types: &Types) -> Option<Type> {
     types.with_callback_signature(item, |_, _| item)
 }
 
+#[derive(Default)]
+pub(super) struct DictionaryWrites {
+    pub(super) display: bool,
+    pub(super) needs_targets: bool,
+}
+
 /// Check inferred displays and annotations while visiting the function's call and frame uses.
 pub(super) fn validate_storage(
     function: &ir::Function,
     types: &Types,
-    dictionaries: &mut HashMap<Type, bool>,
+    dictionaries: &mut HashMap<Type, DictionaryWrites>,
     mut visit: impl FnMut(&Expr),
 ) -> std::result::Result<(), String> {
     let unsupported = |ty| invalid_aggregate(ty, types) && handler_signature(ty, types).is_none();
     let mut invalid = invalid_aggregate(function.returns, types)
         || function.locals.iter().copied().any(unsupported);
-    // Only an insertion can give a dictionary a callable to own. Declarations,
-    // empty displays and reads don't need to borrow a target from another body.
-    let mut insertion = |dict, display| {
-        if let Some(item) = handler_signature(dict, types)
-            && !types.is_plain_callback(item)
-        {
-            *dictionaries.entry(item).or_default() |= display;
-        }
+    let signature =
+        |dict| handler_signature(dict, types).filter(|&item| !types.is_plain_callback(item));
+    // A source singleton has no bound receiver. A cached adapter owns extra
+    // context even when coerced to the same positional signature.
+    let fixed = |value: &Expr| {
+        matches!(value.kind, ExprKind::Builtin(Builtin::StaticFunction(id), _)
+        if types.cache_adapter(id).is_none())
     };
     // A cold indirect call owns a private argument frame for its continuation.
     // Its callable cannot enter a language-visible tuple or container.
     let mut frames = HashSet::new();
     ir::walk_nodes(&function.body, &mut |node, _| {
+        let mut insert = |dict, value: &Expr| {
+            if let Some(item) = signature(dict)
+                && !fixed(value)
+            {
+                dictionaries.entry(item).or_default().needs_targets = true;
+            }
+        };
         let value = match node {
-            ir::Node::Statement(Statement::SetItem(_, dict, _, _)) => {
-                insertion(dict.ty, false);
+            ir::Node::Statement(Statement::SetItem(_, dict, _, value)) => {
+                insert(dict.ty, value);
                 return;
             }
             ir::Node::Statement(_) => return,
@@ -99,8 +111,14 @@ pub(super) fn validate_storage(
         if !frames.contains(&std::ptr::from_ref(value)) {
             invalid |= unsupported(value.ty);
             match &value.kind {
-                ExprKind::Dict(entries) if !entries.is_empty() => insertion(value.ty, true),
-                ExprKind::Builtin(Builtin::DictSetDefault, args) => insertion(args[0].ty, false),
+                ExprKind::Dict(entries) if !entries.is_empty() => {
+                    if let Some(item) = signature(value.ty) {
+                        let writes = dictionaries.entry(item).or_default();
+                        writes.display = true;
+                        writes.needs_targets |= entries.iter().any(|entry| !fixed(&entry.value));
+                    }
+                }
+                ExprKind::Builtin(Builtin::DictSetDefault, args) => insert(args[0].ty, &args[2]),
                 _ => {}
             }
         }
