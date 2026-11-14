@@ -795,7 +795,8 @@ fn lower_graph(
     let mut callable_definitions = Vec::new();
     // A source method needs its original binder and operand sites if its
     // callable layout requires a registered frame.
-    let can_transfer_frames = !classes.declarations.definitions.is_empty();
+    let can_transfer_frames = !classes.declarations.definitions.is_empty()
+        || !classes.declarations.registered_classes.is_empty();
     for (module_id, module) in graph.modules.iter().enumerate() {
         if !module.executable.is_empty() {
             inference.discover_list_elements(graph, module_id, None);
