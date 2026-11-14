@@ -2,9 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ruff_python_ast::{self as ast, visitor::Visitor};
-
-use super::{ClassBindings, ClosureNames, FunctionScope, class_metadata::Uses};
+use super::{ClassBindings, ClosureNames, FunctionScope};
 
 #[derive(Clone, Copy, Default)]
 pub(super) struct Symbol {
@@ -34,6 +32,13 @@ impl ParameterReads {
         self.nested
             .iter()
             .filter(|name| !self.symbols.get(*name).is_some_and(|symbol| symbol.local))
+    }
+
+    pub(super) fn include(&mut self, source: &Self) {
+        for name in source.direct_reads() {
+            self.read(name);
+        }
+        self.nested.extend(source.nested_reads().cloned());
     }
 
     pub(super) fn remove_locals(&mut self) {
@@ -101,31 +106,9 @@ impl ParameterReads {
 }
 
 #[derive(Default)]
-pub(crate) struct ClassAnnotations<R = BTreeSet<String>> {
+pub(crate) struct ClassAnnotations {
     pub(crate) conditional_count: usize,
     pub(crate) body: Option<Box<crate::frontend::AnnotationProvider>>,
-    pub(crate) reads: R,
+    pub(crate) reads: BTreeSet<String>,
     pub(crate) postponed: bool,
-}
-
-impl ClassAnnotations<Uses> {
-    pub(in crate::frontend) fn read(&mut self, expr: &ast::Expr) {
-        self.reads.visit_expr(expr);
-    }
-
-    pub(in crate::frontend) fn resolve(self, bindings: &ClassBindings) -> ClassAnnotations {
-        let mut reads = self.reads.reads.resolve(Some(bindings));
-        if self.body.is_some() {
-            reads.insert("__classdict__".into());
-            if self.conditional_count != 0 {
-                reads.insert("__conditional_annotations__".into());
-            }
-        }
-        ClassAnnotations {
-            reads,
-            conditional_count: self.conditional_count,
-            body: self.body,
-            postponed: self.postponed,
-        }
-    }
 }

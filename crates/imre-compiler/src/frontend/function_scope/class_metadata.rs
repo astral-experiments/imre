@@ -17,8 +17,10 @@ pub(super) fn capture(
     scopes: &mut ScopeFacts<'_>,
 ) {
     let mut uses = Uses::new(string_annotations);
+    let mut fields = Uses::new(string_annotations);
     BodyUses {
         uses: &mut uses,
+        fields: Some(&mut fields),
         scopes,
     }
     .visit_body(&class.body);
@@ -26,6 +28,8 @@ pub(super) fn capture(
         .classes
         .get_mut(&classes::site(class))
         .expect("class bindings on entry");
+    uses.reads.include(&fields.reads);
+    scope.annotation_reads = fields.reads.resolve(Some(&scope.bindings));
     let names = &mut scope.namespace.names;
     let mut reads = uses.reads.enclosing(Some(&scope.bindings));
     for name in GENERATED {
@@ -288,6 +292,7 @@ impl Uses {
 
 struct BodyUses<'s, 'p> {
     uses: &'s mut Uses,
+    fields: Option<&'s mut Uses>,
     scopes: &'s ScopeFacts<'p>,
 }
 
@@ -302,6 +307,16 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
 
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         match stmt {
+            ast::Stmt::AnnAssign(ann)
+                if ann.simple
+                    && let Some(fields) = &mut self.fields =>
+            {
+                if let Some(value) = &ann.value {
+                    self.uses.visit_expr(value);
+                }
+                // A simple annotation stores to a name, so its target has no reads.
+                fields.visit_annotation(&ann.annotation);
+            }
             ast::Stmt::FunctionDef(f) => {
                 for expr in imre_ast::function_definition_expressions(f) {
                     self.visit_expr(expr);
@@ -313,6 +328,7 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     let mut child = self.uses.child_scope(false);
                     BodyUses {
                         uses: &mut child,
+                        fields: None,
                         scopes: self.scopes,
                     }
                     .visit_body(&f.body);
@@ -330,13 +346,7 @@ impl<'a> Visitor<'a> for BodyUses<'_, '_> {
                     .chain(extra.iter().map(String::as_str));
                 self.uses.declaration(f.type_params.as_deref(), |scope| {
                     if let Some(annotations) = &method.annotation_reads {
-                        for name in annotations.direct_reads() {
-                            scope.reads.read(name);
-                        }
-                        scope
-                            .reads
-                            .nested
-                            .extend(annotations.nested_reads().cloned());
+                        scope.reads.include(annotations);
                     }
                     scope.reads.nested.extend(reads.map(str::to_owned));
                 });

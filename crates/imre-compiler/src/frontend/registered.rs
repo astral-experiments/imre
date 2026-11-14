@@ -1315,7 +1315,7 @@ pub(crate) enum DeclarationSite<'a> {
 
 pub(crate) struct ClassSite<'a> {
     def: &'a ast::StmtClassDef,
-    annotations: super::ClassAnnotations<super::function_scope::Uses>,
+    annotations: super::ClassAnnotations,
 }
 
 #[derive(Default)]
@@ -1370,7 +1370,7 @@ pub(super) fn collect_sites<'a>(
     use ast::statement_visitor::{StatementVisitor, walk_body, walk_stmt};
     #[derive(Default)]
     struct ClassFields {
-        plan: super::ClassAnnotations<super::function_scope::Uses>,
+        plan: super::ClassAnnotations,
         fields: Vec<(DeferredAnnotation, Option<usize>)>,
         conditional: bool,
     }
@@ -1512,7 +1512,6 @@ pub(super) fn collect_sites<'a>(
                             fields.push(field);
                             ir::NamespaceAnnotation::Module { index }
                         } else {
-                            self.class.plan.read(&ann.annotation);
                             let index = self.class.conditional.then(|| {
                                 let index = self.class.plan.conditional_count;
                                 self.class.plan.conditional_count += 1;
@@ -1835,7 +1834,7 @@ impl<'a> SuitePreparation<'a> {
         &mut self,
         ClassSite {
             def: class,
-            annotations,
+            mut annotations,
         }: ClassSite<'_>,
         names: &imre_ast::Names,
         classes: &mut HashMap<TextSize, super::function_scope::classes::ClassScope>,
@@ -1898,7 +1897,15 @@ impl<'a> SuitePreparation<'a> {
         {
             self.declaration_refusals.insert(start, refusal);
         }
-        let annotations = annotations.resolve(&scope.bindings);
+        if annotations.body.is_some() {
+            annotations.reads = std::mem::take(&mut scope.annotation_reads);
+            annotations.reads.insert("__classdict__".into());
+            if annotations.conditional_count != 0 {
+                annotations
+                    .reads
+                    .insert("__conditional_annotations__".into());
+            }
+        }
         scope.body = Some(RegisteredClass {
             annotations,
             name: class.name.clone(),
