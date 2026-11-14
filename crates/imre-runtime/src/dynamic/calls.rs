@@ -1995,7 +1995,8 @@ impl Context {
     pub(super) fn getset_documentation(&mut self, descriptor: Id) -> Result<Id> {
         let doc = match *self.heap.get(descriptor) {
             Value::LayoutDescriptor(owner, field) => {
-                if matches!(self.heap.get(owner), Value::Native(name) if name == "BaseException") {
+                if matches!(self.heap.get(owner), Value::Native(name) if matches!(name.as_str(), "type" | "BaseException"))
+                {
                     None
                 } else {
                     match field {
@@ -4892,7 +4893,8 @@ impl Context {
             ) || HashState::is_provider_class(owner)
                 || Self::dict_view_owner(owner).is_some()
                 || owner == value::TEMPLATE_TYPE
-                || stdlib::datetime::members(owner).is_some() =>
+                || stdlib::datetime::members(owner).is_some()
+                || matches!(name, "__name__" | "__objclass__") =>
             {
                 match name {
                     "__objclass__" => {
@@ -4901,7 +4903,11 @@ impl Context {
                         {
                             return Ok(owner);
                         }
-                        return Ok(self.builtin(owner));
+                        return Ok(self
+                            .classes
+                            .get(owner)
+                            .copied()
+                            .unwrap_or_else(|| self.builtin(owner)));
                     }
                     "__name__" => return Ok(self.text(field)),
                     "__qualname__" => {
@@ -7090,6 +7096,14 @@ impl Context {
                 self.module_annotation(scope, name)
             }
             "__class__" => self.exact_type(receiver),
+            "__mro__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                if let Value::Class { scope, .. } = *self.heap.get(receiver) {
+                    let namespace = self.scope_data(scope).class_namespace.as_ref();
+                    return Ok(namespace.map_or(NONE, |class| class.mro));
+                }
+                Ok(self.builtin_hierarchy_tuple(receiver, name))
+            }
             "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 // Native types publish their existing constructor metadata on the type itself.
@@ -7110,6 +7124,11 @@ impl Context {
             }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;
+                if matches!(self.heap.get(owner), Value::Native(class) if class == "type")
+                    && matches!(self.heap.get(receiver), Value::Native(_))
+                {
+                    return self.default_get_attr(receiver, name);
+                }
                 if let Some((get, _)) = self.native_dictionary_getset(class) {
                     return self.call(get, vec![receiver], Vec::new());
                 }
@@ -7148,12 +7167,15 @@ impl Context {
                 self.layout_receiver_class(owner, field, receiver)?;
                 self.write_exception_getset(receiver, field, value)
             }
-            "f_builtins" | "__text_signature__" => {
+            "f_builtins" | "__mro__" | "__text_signature__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 Err(self.readonly_getset_error(self.layout_owner_name(owner), name, receiver))
             }
             "__dict__" => {
                 let class = self.layout_receiver_class(owner, name, receiver)?;
+                if matches!(self.heap.get(owner), Value::Native(class) if class == "type") {
+                    return Err(self.readonly_getset_error("type", name, receiver));
+                }
                 if let Some((_, set)) = self.native_dictionary_getset(class) {
                     let set =
                         set.ok_or_else(|| Error::new("AttributeError", "readonly attribute"))?;

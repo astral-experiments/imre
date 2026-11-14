@@ -926,7 +926,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "_abstract_flags"
             | "_descriptor_get"
             | "_native_data_descriptor"
-            | "_static_member"
         )
         | (
             "email.utils",
