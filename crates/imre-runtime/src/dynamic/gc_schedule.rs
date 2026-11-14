@@ -49,6 +49,8 @@ pub(super) struct GcSchedule {
     counts: [i32; 3],
     requested: bool,
     settling: bool,
+    // The public collection includes both callback phases outside the heap's cyclic pass.
+    pub(super) collecting: bool,
     long_lived_pending: usize,
     long_lived_total: usize,
 }
@@ -60,6 +62,7 @@ impl GcSchedule {
         if self.counts[0] > young
             && young != 0
             && !collecting
+            && !self.collecting
             && !self.settling
             && settings.enabled.load(Ordering::Relaxed)
         {
@@ -74,7 +77,7 @@ impl GcSchedule {
     }
 
     pub(super) fn requested(&self) -> bool {
-        self.requested
+        self.requested && !self.collecting
     }
 
     pub(super) fn begin_settling(&mut self) {

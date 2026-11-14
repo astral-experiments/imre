@@ -3773,6 +3773,7 @@ pub(super) struct Heap {
     pub(super) gc_settings: Arc<GcSettings>,
     // This root survives replacement of the gc module attribute.
     pub(super) gc_garbage: Id,
+    pub(super) gc_callbacks: Id,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
     weak_roots: weak_roots::RootPaths,
@@ -4079,6 +4080,7 @@ impl Heap {
             byte_buffer_allowance: BYTE_BUFFER_FLOOR,
             gc_settings,
             gc_garbage: NONE,
+            gc_callbacks: NONE,
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
             weak_roots: Default::default(),
@@ -4109,6 +4111,7 @@ impl Heap {
             heap.gc_order.push(id, &heap.slots);
         }
         heap.gc_garbage = heap.alloc_slot_with_trace(Value::List(Vec::new()), false);
+        heap.gc_callbacks = heap.alloc_slot_with_trace(Value::List(Vec::new()), false);
         heap
     }
 
@@ -5714,6 +5717,7 @@ impl Heap {
     fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
         globals.for_each(pending.visitor());
         pending.push(self.gc_garbage);
+        pending.push(self.gc_callbacks);
         pending.extend(self.full_collection_members());
         pending.extend(self.linked_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
@@ -6893,6 +6897,13 @@ impl Heap {
         let last = self.traces[child as usize].get() == UNMARKED;
         self.clear_marks();
         Ok(last)
+    }
+
+    pub(super) fn gc_callback(&self, index: usize) -> Option<Id> {
+        let Value::List(callbacks) = self.get(self.gc_callbacks) else {
+            unreachable!("collector-owned callback list")
+        };
+        callbacks.get(index).copied()
     }
 
     pub(super) fn full_collection_active(&self) -> bool {

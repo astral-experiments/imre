@@ -315,6 +315,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "gc",
             "DEBUG_LEAK",
             "DEBUG_SAVEALL",
+            "callbacks",
             "collect",
             "disable",
             "enable",
