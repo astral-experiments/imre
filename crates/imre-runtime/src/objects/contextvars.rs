@@ -438,9 +438,9 @@ pub unsafe extern "C" fn imre_contextvars_old(tok: *const Object) -> *const Obje
     token(unsafe { object(tok) }, |t| match &t.old {
         None => missing(),
         Some(v) => {
-            // Only scalars, tuples and existing ObjectValue views reach this ABI.
-            // For kind 5 preserve that existing view, including module attributes.
-            if v.kind.raw() == 5 {
+            // Preserve the original view, including in a populated nullable slot.
+            // A null nullable word represents a stored None and needs boxing below.
+            if v.kind.base() == 5 && v.word != 0 {
                 // SAFETY: the token roots the checked view.
                 return crate::ObjectOwner::into_raw(unsafe {
                     crate::ObjectOwner::acquire_word(v.word)
