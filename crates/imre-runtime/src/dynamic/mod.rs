@@ -3471,6 +3471,7 @@ impl Context {
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
             "getset_descriptor" => namedtuple::MEMBER_SLOTS,
             "tuple" => &[
+                "__contains__",
                 "__repr__",
                 "__getitem__",
                 "__getnewargs__",

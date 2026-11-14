@@ -1058,7 +1058,13 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         Value::Tuple(_) | Value::NamedTuple { .. }
             if matches!(
                 attr,
-                "__getitem__" | "__getnewargs__" | "__iter__" | "__len__" | "count" | "index"
+                "__contains__"
+                    | "__getitem__"
+                    | "__getnewargs__"
+                    | "__iter__"
+                    | "__len__"
+                    | "count"
+                    | "index"
             ) =>
         {
             "tuple"

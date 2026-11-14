@@ -791,6 +791,7 @@ pub(super) fn method(
         name,
         "list.__add__"
             | "list.__contains__"
+            | "tuple.__contains__"
             | "list.__setitem__"
             | "list.__iadd__"
             | "list.__init__"
@@ -1522,7 +1523,9 @@ pub(super) fn builtin_slot(
             )));
         };
         if method == "__contains__" {
-            return Ok(boolean(ctx.contains(*value, storage)?));
+            return Ok(boolean(
+                find_sequence_item(ctx, storage, *value, 0..i64::MAX)?.is_some(),
+            ));
         }
         if let Some(op) = comparison {
             return Ok(ctx

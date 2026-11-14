@@ -429,6 +429,7 @@ impl BuiltinDescriptor {
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
             "types.SimpleNamespace.__eq__" => (super::namespace::CLASS, "__eq__"),
             "types.SimpleNamespace.__ne__" => (super::namespace::CLASS, "__ne__"),
+            "tuple.__contains__" => ("tuple", "__contains__"),
             "tuple.__getitem__" => ("tuple", "__getitem__"),
             "tuple.__getnewargs__" => ("tuple", "__getnewargs__"),
             "tuple.__iter__" => ("tuple", "__iter__"),
