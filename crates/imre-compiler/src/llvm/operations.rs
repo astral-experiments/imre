@@ -332,12 +332,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         let mark = usage.operand_mark(frame);
         let edge = frame.begin_operand_scope();
         if frame.native_suspension
-            && let RegisteredCallTarget::Callable {
-                suspended_name: Some(name),
-                ..
-            } = &call.target
+            && let Some(name) = call.target.suspended_name()
         {
-            frame.call_position(*name);
+            frame.call_position(name);
         }
         let mut next = mark.to_string();
         let packed = matches!(call.arguments, RegisteredArguments::Packed(_));
@@ -348,13 +345,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 frame.kept_call_value(scope, &mut next)
             }
         });
-        let target = if matches!(call.target, RegisteredCallTarget::Callable { .. }) && !packed {
+        let target = if !matches!(call.target, RegisteredCallTarget::Method { .. }) && !packed {
             load_callable(frame, target, &mut next)
         } else {
             frame.evaluate_handle(target)
         };
         let (callable, receiver, range, end) = match &call.target {
-            RegisteredCallTarget::Callable { end, .. } => (target, None, Some(call.range), *end),
+            RegisteredCallTarget::Callable { .. } | RegisteredCallTarget::FixedExec { .. } => {
+                (target, None, Some(call.range), call.target.end())
+            }
             RegisteredCallTarget::Method {
                 name,
                 attribute,

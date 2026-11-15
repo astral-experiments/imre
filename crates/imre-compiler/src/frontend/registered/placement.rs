@@ -456,8 +456,28 @@ mod tests {
         );
     }
 
+    fn checked_exec_operand(body: &RegisteredFunction) -> (&ir::RegisteredCall, &Expr) {
+        let [
+            Statement::Expr(Expr {
+                kind: ExprKind::Invoke { callable, args },
+                ..
+            }),
+        ] = &body.function.body[..]
+        else {
+            panic!("expected the checked exec invocation");
+        };
+        let [source] = &args.values[..] else {
+            panic!("expected one exec source operand");
+        };
+        let call = &args.site.python().unwrap().call;
+        assert_eq!(body.fixed_sites[0], call.range);
+        assert!(matches!(&callable.without_location().kind,
+            ExprKind::Builtin(Builtin::RegisteredName(name), values) if name == "exec" && values.is_empty()));
+        (call, source)
+    }
+
     #[test]
-    fn late_registered_entry_places_only_existing_frames() {
+    fn late_registered_entry_places_the_arithmetic_and_exec_frames() {
         let text = "def scale(x: int) -> int: return x + x\ndef startup(source: str) -> None: exec(source)\nprint(scale(3))\n";
         let mut graph = SourceGraph::single(text).unwrap();
         let (program, lowered) =
@@ -465,11 +485,116 @@ mod tests {
         assert!(matches!(program, crate::CheckedProgram::Registered(_)));
         assert_eq!(lowered.iter().filter(|name| *name == "startup").count(), 1);
         let functions = graph.registered_functions();
-        assert_eq!(functions[&graph.entry].len(), 1);
+        assert_eq!(functions[&graph.entry].len(), 2);
         assert!(
             !functions[&graph.entry][&TextSize::default()]
                 .fixed_sites
                 .is_empty()
+        );
+        let start = TextSize::try_from(text.find("def startup").unwrap()).unwrap();
+        let startup = &functions[&graph.entry][&start];
+        let (call, source) = checked_exec_operand(startup);
+        let ir::RegisteredCallTarget::FixedExec {
+            module,
+            operand: parameter,
+            ..
+        } = call.target
+        else {
+            panic!("expected the fixed checker to select exec for the parameter");
+        };
+        assert_eq!(module, graph.entry);
+        assert_eq!(&text[parameter], "source");
+        assert!(matches!(source.kind, ExprKind::Local(slot)
+            if startup.local_names[&slot].name == "source"));
+    }
+
+    #[test]
+    fn imported_exec_keeps_its_checked_operand_and_live_callees() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        let producer = dir.path().join("producer.py");
+        std::fs::write(
+            &entry,
+            "import bridge\nfrom producer import consume\nconsume('ok')\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("leaf.py"),
+            "print('enter leaf')\nraise LookupError()\n",
+        )
+        .unwrap();
+        let lower = |bridge: &str, source: &str| {
+            std::fs::write(&producer, source).unwrap();
+            std::fs::write(dir.path().join("bridge.py"), bridge).unwrap();
+            let mut graph = SourceGraph::load(&entry, None, &[]).unwrap();
+            let owner = graph.python_file("producer").unwrap();
+            let program = crate::checked_lower(&mut graph).unwrap();
+            let (mut functions, _) = graph.take_registered_functions();
+            let body = functions
+                .get_mut(&owner)
+                .unwrap()
+                .remove(&TextSize::default())
+                .unwrap();
+            let (compilation, lowered) = caller_cache::observe_lowerings(|| {
+                crate::compile_file(&entry, None, &Default::default()).unwrap()
+            });
+            assert_eq!(
+                lowered.iter().filter(|name| *name == "consume").count(),
+                1,
+                "{lowered:?}"
+            );
+            (owner, program, body, compilation)
+        };
+        let source = "def consume(value):\n    exec(input())\n";
+        let (owner, program, body, _) = lower("import leaf\n", source);
+        let crate::CheckedProgram::Registered(Some(reason)) = program else {
+            panic!("expected the checked exec operation to select registered startup");
+        };
+        assert!(
+            reason
+                .to_string()
+                .contains("producer.py:2:10: Imre: exec requires native Python object operations"),
+            "{reason}"
+        );
+        let (call, inner) = checked_exec_operand(&body);
+        assert_eq!(&source[call.range], "exec(input())");
+        let ir::RegisteredCallTarget::FixedExec {
+            module,
+            operand,
+            name,
+        } = call.target
+        else {
+            panic!("expected the fixed checker to select exec");
+        };
+        assert_eq!(&source[name], "exec");
+        assert_eq!(module, owner);
+        assert_eq!(&source[operand], "input()");
+        let binding = body.fixed_attribute(operand).unwrap();
+        let (read, []) = binding.call_operands(inner).unwrap() else {
+            panic!("expected input without arguments");
+        };
+        assert!(matches!(binding, FixedAttribute::Call(_, call) if call.range == operand));
+        assert!(matches!(&read.without_location().kind,
+            ExprKind::Builtin(Builtin::RegisteredName(key), args) if key == "input" && args.is_empty()));
+
+        let source = "def consume(value):\n    exec(\"print('producer')\")\n";
+        let (_, _, body, compilation) = lower(
+            "try:\n    import leaf\nexcept LookupError:\n    print('caught leaf')\n",
+            source,
+        );
+        let (call, literal) = checked_exec_operand(&body);
+        assert_eq!(&source[call.range], "exec(\"print('producer')\")");
+        assert!(matches!(
+            call.target,
+            ir::RegisteredCallTarget::Callable { .. }
+        ));
+        assert!(matches!(&literal.kind, ExprKind::Str(text) if text == "print('producer')"));
+        assert_eq!(
+            compilation
+                .llvm_ir
+                .matches("call i64 @imre_dyn_exec_operand(")
+                .count(),
+            1
         );
     }
 

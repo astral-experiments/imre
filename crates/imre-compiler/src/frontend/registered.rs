@@ -5244,6 +5244,7 @@ else:
                         assert_eq!(args.values.len(), 1);
                         calls.push(name.as_str());
                     }
+                    ir::RegisteredCallTarget::FixedExec { .. } => panic!("unexpected exec target"),
                     ir::RegisteredCallTarget::Callable { .. } => {
                         assert_eq!(args.values.len(), 2);
                         assert_eq!(
@@ -5816,6 +5817,7 @@ print(capture(["echo", "capture"], cwd=Path(".")))
                     return;
                 };
                 let name: &str = match &site.target {
+                    ir::RegisteredCallTarget::FixedExec { .. } => panic!("unexpected exec target"),
                     ir::RegisteredCallTarget::Callable { .. } => {
                         let ExprKind::Invoke { callable, .. } = &value.kind else {
                             panic!("expected a checked invocation")

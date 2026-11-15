@@ -2299,14 +2299,25 @@ struct EntryOperations {
 }
 
 impl EntryOperations {
+    fn object_call(&mut self, call: ir::ObjectCall, module: ModuleId, span: TextRange) {
+        if self.first_object.is_none_or(|(kind, id, range)| {
+            (call, module, span.start()) < (kind, id, range.start())
+        }) {
+            self.first_object = Some((call, module, span));
+        }
+    }
+
     fn record(&mut self, expr: &Expr) {
         match &expr.kind {
-            ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _)
-                if self.first_object.is_none_or(|(kind, id, range)| {
-                    (*call, *module, span.start()) < (kind, id, range.start())
-                }) =>
+            ExprKind::Builtin(Builtin::ObjectCall(call, module, span), _) => {
+                self.object_call(*call, *module, *span);
+            }
+            ExprKind::Invoke { .. }
+                if let Some(ir::RegisteredCallTarget::FixedExec {
+                    module, operand, ..
+                }) = expr.python_call().map(|call| &call.target) =>
             {
-                self.first_object = Some((*call, *module, *span));
+                self.object_call(ir::ObjectCall::ExecText, *module, *operand);
             }
             ExprKind::Builtin(Builtin::Chr, _) => self.creates_character = true,
             ExprKind::Compare(values, operators) => {
@@ -12077,7 +12088,22 @@ impl<'a> Checker<'a> {
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }
         if self.graph.session.fixed_exec_call(self.module, call) {
-            return Err(self.scoped_builtin_error("exec", call));
+            let refusal = self.scoped_builtin_error("exec", call);
+            if self.registered.is_none()
+                && self.namespace.is_none()
+                && let Some(sites) = &mut self.fixed_sites
+                && call.arguments.keywords.is_empty()
+                && let [operand @ ast::Expr::StringLiteral(_)] = call.arguments.args.as_ref()
+                && let Ok(Some(text)) = literals::unsigned_scalar(operand, self.source)
+            {
+                // Keep the checked text and the live callee at the original call site.
+                // Literal linking uses that same site after initializer checks select startup.
+                sites.leaf(operand.range(), &text);
+                if self.missing_operation(&refusal) {
+                    return Ok(self.exec_with_operand(call, text, None));
+                }
+            }
+            return Err(refusal);
         }
         if self.unshadowed_builtin(&call.func, "range") {
             return self.range_value(call);
@@ -12135,17 +12161,7 @@ impl<'a> Checker<'a> {
             {
                 match self.expr(operand) {
                     Ok(source) if source.ty == Type::Str => {
-                        return Ok(Expr {
-                            ty: Type::None,
-                            kind: ExprKind::Builtin(
-                                Builtin::ObjectCall(
-                                    ir::ObjectCall::ExecText,
-                                    self.module,
-                                    operand.range(),
-                                ),
-                                vec![source],
-                            ),
-                        });
+                        return Ok(self.exec_with_operand(call, source, Some(operand.range())));
                     }
                     Err(error) if !error.is_object() => return Err(error),
                     _ => {}

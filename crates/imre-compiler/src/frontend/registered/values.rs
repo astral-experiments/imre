@@ -540,7 +540,9 @@ impl ir::RegisteredCallTarget {
     ) -> (Box<ir::RegisteredCall>, Box<Expr>) {
         let arguments = layout.unwrap_or_else(|| match self {
             Self::Method { .. } => fixed_argument_layout(&call.arguments),
-            Self::Callable { .. } => argument_layout(&call.arguments, calls::has_unpacking(call)),
+            Self::Callable { .. } | Self::FixedExec { .. } => {
+                argument_layout(&call.arguments, calls::has_unpacking(call))
+            }
         });
         (
             ir::RegisteredCall::new(call.range(), self, arguments),
@@ -730,7 +732,35 @@ impl Checker<'_> {
             .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        let value = self.scoped_call(bound_call(call, selection, target, operands));
+        Ok(self.placed_call(call, bound_call(call, selection, target, operands)))
+    }
+
+    /// Both the linked literal and the checked str call load exec before the source operand.
+    pub(in crate::frontend) fn exec_with_operand(
+        &mut self,
+        call: &ast::ExprCall,
+        operand: Expr,
+        fixed_exec: Option<TextRange>,
+    ) -> Expr {
+        let callee = located(call.func.range(), call.func.start(), name_binding("exec"));
+        let selection = match fixed_exec {
+            Some(operand) => ir::RegisteredCallTarget::FixedExec {
+                name: call.func.range(),
+                module: self.module,
+                operand,
+            },
+            None => callable_target(call),
+        };
+        let (site, target) = selection.bind(call, callee, None);
+        let mut value = invoke_value(site, target, vec![operand]);
+        if fixed_exec.is_some() {
+            value.ty = Type::None;
+        }
+        self.placed_call(call, value)
+    }
+
+    fn placed_call(&mut self, call: &ast::ExprCall, value: Expr) -> Expr {
+        let value = self.scoped_call(value);
         if self.namespace.is_none()
             && let Some(sites) = &mut self.fixed_sites
             && let ExprKind::Invoke { args, .. } = &value.kind
@@ -738,7 +768,7 @@ impl Checker<'_> {
         {
             sites.invoked(call, &value);
         }
-        Ok(value)
+        value
     }
 
     /// Bind the Python method and check its operands in source order. A fixed
