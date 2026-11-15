@@ -639,6 +639,10 @@ mod tests {
             panic!()
         };
         right.kind = ExprKind::Local(0);
+        let [Statement::Return(erased)] = fixed.ir.0.functions[2].body.as_mut_slice() else {
+            panic!()
+        };
+        *erased = Expr::local(0, Type::Int);
         let occupied = TextSize::try_from(text.find("def occupied").unwrap()).unwrap();
         let (slot, _, source) = fixed
             .frame_sources

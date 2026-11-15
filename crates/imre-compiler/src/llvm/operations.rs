@@ -810,7 +810,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         emitter.small_binary(Binary::BitXor, scalar, &small(-1), false, None)
                     }
                     UnaryOp::Invert => emitter.binary(Binary::BitXor, scalar, &small(-1)),
-                    UnaryOp::UAdd => return CheckedValue::Native(input, None),
+                    UnaryOp::UAdd => return CheckedValue::owned(emitter.own_operand(input)),
                 };
                 emitter.release_operand(&input);
                 CheckedValue::owned(result)
