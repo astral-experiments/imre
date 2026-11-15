@@ -68,7 +68,7 @@ mod exception_forwarders;
 mod expandtabs;
 mod expansions;
 mod fixed_body_source;
-pub(crate) use fixed_body_source::{FixedAttribute, FixedBodySource, FixedNode};
+pub(crate) use fixed_body_source::{FixedAttribute, FixedBodySource};
 mod fixed_tuples;
 mod fnmatch;
 mod format_cursors;
@@ -9148,12 +9148,7 @@ impl<'a> Checker<'a> {
             if let Some(sites) = &mut checker.fixed_sites
                 && matches!(
                     (expression, &value.kind),
-                    (ast::Expr::StringLiteral(_), ExprKind::Str(_))
-                        | (ast::Expr::BytesLiteral(_), ExprKind::Bytes(_))
-                        | (ast::Expr::NumberLiteral(_), ExprKind::Float(_))
-                        | (ast::Expr::BooleanLiteral(_), ExprKind::Bool(_))
-                        | (ast::Expr::NoneLiteral(_), ExprKind::None)
-                        | (ast::Expr::List(_), ExprKind::List(_))
+                    (ast::Expr::List(_), ExprKind::List(_))
                         | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
                         | (ast::Expr::Named(_), ExprKind::Bind(_, _))
                         | (
@@ -9900,35 +9895,19 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+        if let Some(literal) = literals::unsigned_scalar(expression, self.source)? {
+            return Ok(self.expression_at(expression.range(), literal));
+        }
         let (ty, kind) = match expression {
-            ast::Expr::NumberLiteral(value) => match &value.value {
-                ast::Number::Int(value) => {
-                    if let Some(sites) = &mut self.fixed_sites
-                        && let Some(integer) = value.as_i64()
-                    {
-                        sites.record(expression.range(), FixedNode::Integer(integer));
-                    }
-                    (Type::Int, ExprKind::Int(value.to_string()))
-                }
-                ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
-                _ if self.graph.command_startup.is_some() => {
-                    return Err(self.scoped_builtin_error("complex literal", expression));
-                }
-                _ => {
-                    return Err(error(
-                        self.source,
-                        expression,
-                        "complex numeric literals are unsupported",
-                    ));
-                }
-            },
-            ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
-            ast::Expr::StringLiteral(value) => {
-                check_string(value, self.source)?;
-                (Type::Str, ExprKind::Str(value.value.to_string()))
+            ast::Expr::NumberLiteral(_) if self.graph.command_startup.is_some() => {
+                return Err(self.scoped_builtin_error("complex literal", expression));
             }
-            ast::Expr::BytesLiteral(value) => {
-                (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
+            ast::Expr::NumberLiteral(_) => {
+                return Err(error(
+                    self.source,
+                    expression,
+                    "complex numeric literals are unsupported",
+                ));
             }
             ast::Expr::FString(value) => return self.fstring(value),
             ast::Expr::TString(_) => {
@@ -9937,7 +9916,6 @@ impl<'a> Checker<'a> {
             ast::Expr::Lambda(lambda) => return self.lambda_value(lambda, None, None),
             ast::Expr::Named(value) => return self.named_expression(value, None),
             ast::Expr::If(value) => return self.conditional(value, None),
-            ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
             ast::Expr::Name(name)
                 if let Some(value) = debug_operand(name, self.graph.python_optimization()) =>
             {
