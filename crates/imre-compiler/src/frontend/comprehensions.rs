@@ -75,6 +75,18 @@ impl Helpers {
         functions[id - self.first] = Some(helper);
     }
 
+    /// Only completed list producers without a frame of their own can move with the caller.
+    pub(super) fn caller_list_helpers_since(&self, start: usize, types: &Types) -> bool {
+        let helpers = self.functions.borrow();
+        start < self.len()
+            && helpers.len() == self.len()
+            && helpers[start..].iter().all(|helper| {
+                helper.as_ref().is_some_and(|helper| {
+                    !helper.source_frame && types.element(helper.function.returns).is_some()
+                })
+            })
+    }
+
     pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
         let functions = self.functions.take();
         assert_eq!(functions.len(), self.reserved.replace(0));
@@ -397,7 +409,9 @@ impl EagerDisplay for Checker<'_> {
                     }
                 });
                 let value = self.guarded_element(item, element, guarded)?;
-                let ty = if is_set {
+                let ty = if self.registered.is_some() && value.ty == Type::PythonObject {
+                    Type::PythonObject
+                } else if is_set {
                     if !self.comprehension_key(value.ty) {
                         return Err(error(
                             self.source,
@@ -405,13 +419,7 @@ impl EagerDisplay for Checker<'_> {
                             "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                         ));
                     }
-                    // A registered iterator can yield arbitrary Python keys. The set
-                    // must hash and retain their actual objects at insertion.
-                    if value.ty == Type::PythonObject {
-                        Type::PythonObject
-                    } else {
-                        self.types.set(value.ty)
-                    }
+                    self.types.set(value.ty)
                 } else {
                     self.types.list(value.ty)
                 };
