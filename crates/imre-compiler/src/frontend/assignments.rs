@@ -344,7 +344,7 @@ impl Transformer for BuiltinAlias {
     }
 }
 
-/// Facts about the live Python namespace, local to one module initializer.
+/// Effects on Python namespaces along the current control-flow path.
 #[derive(Clone, Default)]
 pub(super) struct ModuleNamespace {
     aliases: HashSet<usize>,
@@ -353,6 +353,8 @@ pub(super) struct ModuleNamespace {
     unknown_key: bool,
     last_python_call: Option<TextSize>,
     released_owner: bool,
+    /// Pairs of supplied class objects and layouts whose fields a parser can write.
+    pub(super) supplied_classes: HashSet<(usize, usize)>,
 }
 
 impl ModuleNamespace {
@@ -366,6 +368,7 @@ impl ModuleNamespace {
     }
 
     pub(super) fn join(&mut self, other: &Self) {
+        self.supplied_classes.extend(&other.supplied_classes);
         self.aliases.extend(&other.aliases);
         self.keys
             .retain(|slot, key| other.keys.get(slot) == Some(key));
