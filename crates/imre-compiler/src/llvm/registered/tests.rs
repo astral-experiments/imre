@@ -150,6 +150,31 @@ fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
 }
 
 #[test]
+fn nested_call_uses_the_boundary_above_the_previous_argument() {
+    let output = emit_captured_body("def send(first, read, sink):\n    sink(first, read())\n");
+    let body = &output.functions;
+    assert_eq!(body.matches("call i64 @imre_dyn_truth_mark(").count(), 1);
+    let mut calls = body
+        .lines()
+        .filter(|line| line.contains("call i64 @imre_dyn_positional_call_at("));
+    let nested = calls.next().unwrap();
+    let outer = calls.next().unwrap();
+    let before_nested = body.split_once(nested).unwrap().0;
+    // The outer callable and its first argument are already rooted. Discarding
+    // the inner callable on return or error must preserve both of them.
+    let first = before_nested
+        .lines()
+        .filter(|line| line.contains("call i64 @imre_dyn_keep_operands("))
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+    assert!(nested.contains(&format!(", i64 {first}, ptr ")));
+    assert!(!outer.contains(&format!(", i64 {first}, ptr ")));
+}
+
+#[test]
 fn captured_publish_emits_its_registered_callback_and_error_return() {
     let output = emit_captured_body(
         "def publish(a: int, b: int, send):\n    total = a + b\n    send(total)\n",
