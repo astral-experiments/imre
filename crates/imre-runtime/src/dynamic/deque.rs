@@ -157,18 +157,6 @@ pub(super) fn owns(name: &str) -> bool {
     member(name).is_some() || matches!(name, "__new__" | "__hash__" | "maxlen")
 }
 
-/// Expose the immutable native type's own members through the same objects as class lookup.
-pub(super) fn class_dictionary(ctx: &mut Context, class: Id) -> Result<Id> {
-    ctx.native_class_dictionary(
-        class,
-        "<collections.deque namespace>",
-        MEMBERS
-            .iter()
-            .map(|entry| entry.name)
-            .chain(["__new__", "__hash__", "maxlen"]),
-    )
-}
-
 /// Install the iterator's own descriptors in CPython type-dictionary order.
 pub(super) fn install_iterator_namespace(ctx: &mut Context, class: Id, owner: &str) {
     let entries = std::iter::once("__new__")
@@ -342,13 +330,15 @@ pub(super) fn iterator_method(
 }
 
 /// Publish the allocator, data descriptor and inherited native methods for deque subtypes.
-pub(super) fn install(ctx: &mut Context) {
-    for member in MEMBERS {
-        ctx.builtin(&format!("{CLASS}.{}", member.name));
+pub(super) fn install(ctx: &mut Context, class: Id) {
+    let mut entries = Vec::with_capacity(MEMBERS.len() + 3);
+    for name in MEMBERS.iter().map(|member| member.name).chain(["__new__"]) {
+        let member = ctx.builtin(&format!("{CLASS}.{name}"));
+        entries.push((ctx.heap.code_name(name), member));
     }
-    ctx.builtin("collections.deque.__new__");
     ctx.builtins
         .insert("collections.deque.__hash__".into(), NONE);
+    entries.push((ctx.heap.code_name("__hash__"), NONE));
     let get = ctx.builtin("collections.deque._get_maxlen");
     let descriptor = ctx.alloc(Value::GetSetDescriptor {
         owner: CLASS,
@@ -358,6 +348,9 @@ pub(super) fn install(ctx: &mut Context) {
     });
     ctx.builtins
         .insert("collections.deque.maxlen".into(), descriptor);
+    entries.push((ctx.heap.code_name("maxlen"), descriptor));
+    let dict = ctx.dict(entries);
+    ctx.native_type_dicts.attach(class, dict);
 }
 
 fn empty(ctx: &mut Context) -> Id {

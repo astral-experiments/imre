@@ -1006,7 +1006,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
         scope_name_slots: Default::default(),
-        native_type_dicts: HashMap::new(),
+        native_type_dicts: Default::default(),
         sources: HashMap::new(),
         deque_comparison_repeats: 0,
     };
@@ -3694,7 +3694,12 @@ impl Context {
                 .chain(self.displaced_sni_callbacks.iter())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
-                .chain(self.native_type_dicts.values())
+                .chain(
+                    self.native_type_dicts
+                        .0
+                        .values()
+                        .map(super::NativeTypeNamespace::dictionary),
+                )
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)

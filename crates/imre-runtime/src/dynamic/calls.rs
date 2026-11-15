@@ -3184,9 +3184,10 @@ impl Context {
             && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
         {
             // A mapping proxy exposes the identity of its type's underlying dictionary.
-            self.native_type_dicts
-                .entry(obj)
-                .or_insert_with(|| self.heap.alloc(Value::Dict(Default::default())));
+            if self.native_type_dicts.get(&obj).is_none() {
+                let dictionary = self.heap.alloc(Value::Dict(Default::default()));
+                self.native_type_dicts.insert(obj, dictionary);
+            }
         }
         if name == "__dict__"
             && let Some(&dictionary) = self.native_type_dicts.get(&obj)
@@ -5110,9 +5111,6 @@ impl Context {
                     "__reduce_ex__" if class == super::deque::CLASS => {
                         return Ok(self.builtin("object.__reduce_ex__"));
                     }
-                    "__dict__" if class == super::deque::CLASS => {
-                        return super::deque::class_dictionary(self, obj);
-                    }
                     "__base__" if class == value::STRUCT_UNPACK_ITERATOR => {
                         return Ok(self.builtin("object"));
                     }
@@ -6997,6 +6995,18 @@ impl Context {
         self.scalar_dict_name(self.dict_storage((*namespace)?)?, name)?
     }
 
+    /// A type object's own instance dictionary, before any mapping-proxy or MRO lookup.
+    fn type_instance_dictionary(&mut self, obj: Id) -> Option<Id> {
+        match *self.heap.get(obj) {
+            Value::Class { scope, .. }
+                if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
+            {
+                Some(self.class_namespace_dict(scope, false))
+            }
+            _ => self.native_type_dicts.instance(obj),
+        }
+    }
+
     /// Return the live instance dictionary for default object state, bypassing attribute hooks.
     pub(super) fn pickle_instance_state_dict(&mut self, obj: Id) -> Result<Id> {
         let dictionary = match *self.heap.get(obj) {
@@ -7017,12 +7027,7 @@ impl Context {
             Value::ClassMethod { dictionary, .. }
             | Value::StaticMethod { dictionary, .. }
             | Value::Cached { dictionary, .. } => Some(dictionary),
-            Value::Class { scope, .. }
-                if self.classes.get(super::namespace::CLASS) != Some(&obj) =>
-            {
-                let proxy = self.class_dictionary(scope);
-                Some(self.mapping_proxy_target(proxy))
-            }
+            Value::Class { .. } | Value::Native(_) => self.type_instance_dictionary(obj),
             ref value => value.native_file_dict(),
         };
         Ok(dictionary
@@ -10629,16 +10634,16 @@ mod tests {
         let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let first = ctx.builtin("FileNotFoundError");
         let second = ctx.builtin("PermissionError");
-        assert!(!ctx.native_type_dicts.contains_key(&first));
-        assert!(!ctx.native_type_dicts.contains_key(&second));
+        assert!(ctx.native_type_dicts.get(&first).is_none());
+        assert!(ctx.native_type_dicts.get(&second).is_none());
 
         let proxy = ctx.default_get_attr(first, "__dict__").unwrap();
-        let dictionary = ctx.native_type_dicts[&first];
+        let dictionary = *ctx.native_type_dicts.get(&first).unwrap();
         assert!(matches!(ctx.heap.get(proxy), Value::MappingProxy(id) if *id == dictionary));
         let next = ctx.default_get_attr(first, "__dict__").unwrap();
         assert!(matches!(ctx.heap.get(next), Value::MappingProxy(id) if *id == dictionary));
 
         ctx.default_get_attr(second, "__dict__").unwrap();
-        assert_ne!(ctx.native_type_dicts[&second], dictionary);
+        assert_ne!(*ctx.native_type_dicts.get(&second).unwrap(), dictionary);
     }
 }

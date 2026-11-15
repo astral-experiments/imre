@@ -227,6 +227,44 @@ struct InterpreterState {
     finalizing: AtomicBool,
 }
 
+/// A native class can expose a managed namespace or own a dictionary as a type instance.
+enum NativeTypeNamespace {
+    Managed(Id),
+    Instance(Id),
+}
+
+impl NativeTypeNamespace {
+    fn dictionary(&self) -> &Id {
+        match self {
+            Self::Managed(dict) | Self::Instance(dict) => dict,
+        }
+    }
+}
+
+#[derive(Default)]
+struct NativeTypeDictionaries(HashMap<Id, NativeTypeNamespace>);
+
+impl NativeTypeDictionaries {
+    fn insert(&mut self, class: Id, dict: Id) {
+        self.0.insert(class, NativeTypeNamespace::Managed(dict));
+    }
+
+    fn attach(&mut self, class: Id, dict: Id) {
+        self.0.insert(class, NativeTypeNamespace::Instance(dict));
+    }
+
+    fn get(&self, class: &Id) -> Option<&Id> {
+        self.0.get(class).map(NativeTypeNamespace::dictionary)
+    }
+
+    fn instance(&self, class: Id) -> Option<Id> {
+        match self.0.get(&class)? {
+            NativeTypeNamespace::Instance(dict) => Some(*dict),
+            NativeTypeNamespace::Managed(_) => None,
+        }
+    }
+}
+
 pub(crate) struct Context {
     interpreter: Arc<InterpreterState>,
     // Active calls to an overridable socket.send from sendfile. Receivers stay rooted by the call.
@@ -288,7 +326,7 @@ pub(crate) struct Context {
     builtins: HashMap<String, Id>,
     /// Last observed binding position for each name bucket, validated against the current scope.
     scope_name_slots: [std::cell::Cell<usize>; 16],
-    native_type_dicts: HashMap<Id, Id>,
+    native_type_dicts: NativeTypeDictionaries,
     sources: HashMap<String, Vec<SourceModule>>,
     deque_comparison_repeats: usize,
 }
@@ -3310,7 +3348,7 @@ impl Context {
             let doc = self.text("Create a new function with partial application of the given arguments\nand keywords.");
             entries.push((self.heap.code_name("__doc__"), doc));
             let dictionary = self.dict(entries);
-            self.native_type_dicts.insert(value, dictionary);
+            self.native_type_dicts.attach(value, dictionary);
         }
         if name == stdlib::functools::LRU_CACHE_CLASS {
             let mut entries = Vec::new();
@@ -3359,7 +3397,7 @@ impl Context {
             self.native_type_dicts.insert(value, dictionary);
         }
         if name == deque::CLASS {
-            deque::install(self);
+            deque::install(self, value);
         }
         if let Some(owner) = Self::dict_view_owner(name)
             && owner == name
@@ -3590,7 +3628,7 @@ impl Context {
                 ["real", "imag", "numerator", "denominator"],
             ),
             "float" => self.install_numeric_dictionary(value, "float", entries, ["real", "imag"]),
-            _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
+            _ if !entries.is_empty() && self.native_type_dicts.get(&value).is_none() => {
                 if let Some(field) = match name {
                     "function" => Some("__code__"),
                     "property" => Some("__isabstractmethod__"),

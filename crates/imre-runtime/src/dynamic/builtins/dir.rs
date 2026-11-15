@@ -686,7 +686,7 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             }
         }
         Value::Native(owner)
-            if ctx.native_type_dicts.contains_key(&class)
+            if ctx.native_type_dicts.get(&class).is_some()
                 || super::exception_kind(owner).is_some() =>
         {
             let base =
