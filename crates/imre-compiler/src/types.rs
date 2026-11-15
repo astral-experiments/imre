@@ -922,6 +922,10 @@ impl Types {
         }
     }
 
+    pub(crate) fn is_text_bytes_union(&self, ty: Type) -> bool {
+        self.members(ty).as_deref() == Some(&[Type::Str, Type::Bytes])
+    }
+
     /// A string list can defer its rows; testing a boxed value or a union may read that list.
     pub(crate) fn truth_may_materialize(&self, ty: Type) -> bool {
         let ty = self.payload(ty).unwrap_or(ty);

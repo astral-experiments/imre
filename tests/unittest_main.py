@@ -192,7 +192,7 @@ def main():
                 "method_skips.py", "computed_skip.py",
                 "discover.py", "lifecycle.py", "setup_fields.py", "identity.py",
                 "assert_identity.py", "optional_text.py", "empty.py", "module_loader.py", "main_hook.py",
-                "class_skips.py", "text_runner.py", "subtests.py", "loaded_init.py",
+                "class_skips.py", "text_runner.py", "subtests.py", "loaded_init.py", "bytes_equality.py",
             )
         ]
         if hasattr(os, "getuid"):

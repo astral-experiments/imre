@@ -627,6 +627,13 @@ impl Reachable {
                 found.uses_logger,
                 found.instance_attributes.len(),
             );
+            if case_base.is_some_and(|base| found.definitions.contains(&base))
+                && found.attributes.contains("_bound_assertEqual")
+            {
+                found
+                    .definitions
+                    .extend(graph.bundled_definition("unittest", "_baseAssertEqual"));
+            }
             // Logger and adapter methods lower to bundled functions without a Python call site.
             let adapter = graph
                 .logging_definition("LoggerAdapter")
@@ -729,10 +736,6 @@ impl Reachable {
                             let assertion_helper = source.bundled
                                 && source.name == "unittest"
                                 && match class.name.as_str() {
-                                    "TestCase" => {
-                                        name == "_assertBytesEqual"
-                                            && refs.found.attributes.contains("_bound_assertEqual")
-                                    }
                                     "_AssertRaisesContext" => {
                                         matches!(name, "_missing" | "_check_regex")
                                     }
