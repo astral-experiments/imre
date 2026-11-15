@@ -964,7 +964,11 @@ impl Checker<'_> {
         let (body, _) =
             self.lower_iteration_after(&target, input, &[], before_iteration, |checker, body| {
                 let slot = checker.names[&name];
-                statements::append_block(body, consume(checker, checker.local(slot))?);
+                let statements = consume(checker, checker.local(slot))?;
+                if statements.is_empty() && checker.discarded_function_body() {
+                    return Ok(false);
+                }
+                statements::append_block(body, statements);
                 // Builtin consumers release each yielded item before requesting
                 // the next one. Keeping this private target alive could alter
                 // file finalization or make an iterator's tuple cache shared.
@@ -1001,6 +1005,9 @@ impl Checker<'_> {
         } else {
             self.types.list(ty)
         };
+        if self.discarded_function_body() {
+            return Ok(Vec::new());
+        }
         Ok(vec![Statement::Expr(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(
