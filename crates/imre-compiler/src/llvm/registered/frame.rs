@@ -2137,6 +2137,9 @@ impl RegisteredFrame<'_, '_> {
         tuple: bool,
         slot: Option<&str>,
     ) -> String {
+        // Copying evaluated handles into this frame's scratch array cannot run Python.
+        // The sequence builder propagates any pending exception before reading them.
+        self.take_matching_check();
         let (array, count) = self.handle_array(values);
         let slot = slot.unwrap_or("null");
         self.checked(&format!("call i64 @imre_dyn_build_sequence(ptr %ctx, ptr {array}, i64 {count}, i1 false, i1 {tuple}, ptr {slot})"))

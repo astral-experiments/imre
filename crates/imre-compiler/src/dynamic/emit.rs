@@ -2104,6 +2104,25 @@ mod tests {
     }
 
     #[test]
+    fn from_list_builder_propagates_the_last_name_failure() {
+        let (_, ir) = PreparedBody::module(
+            "example",
+            Path::new("example.py"),
+            "from example_pkg import member\n",
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap()
+        .standalone()
+        .unwrap();
+        let (before, after) = ir.split_once("call i64 @imre_dyn_build_sequence(").unwrap();
+        let (_, copy) = before.rsplit_once("lit(ptr %ctx, i32 6,").unwrap();
+        assert!(copy.contains("store i64 "));
+        assert!(!copy.contains("@imre_dyn_failed("));
+        assert!(after.contains("call i64 @imre_dyn_import_literal("));
+    }
+
+    #[test]
     fn imported_generator_binds_the_generic_default_at_its_definition() {
         use crate::ir::{Builtin, DefinitionSite, ExprKind, SuspendValue};
 
