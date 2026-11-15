@@ -2928,7 +2928,10 @@ unsafe fn scoped_call(
     // Ordinary traceback nodes also own the saved call range, including when the
     // emitter supplied no highlight for the traceback printer.
     finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Call));
-    finish_at(ctx, result, span)
+    match result {
+        Ok(id) if id != NONE && ctx.heap.keeps_single_operand(mark, id) => id,
+        result => finish_at(ctx, result, span),
+    }
 }
 
 /// A registered call and the caller's operand mark to restore on return.
