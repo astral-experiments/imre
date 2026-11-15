@@ -38,6 +38,33 @@ deliver(4, {"one": first, "two": second}[input()])
 }
 
 #[test]
+fn a_named_comprehension_checks_its_conditional_capture_before_the_filter() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("main.py"),
+        r#"def accepts(value: int) -> bool:
+    return bool(value)
+def rows(items: list[int], flag: bool) -> list[str]:
+    lookup: dict[int, int] = {item: item for item in items}
+    if flag:
+        word = "kept"
+    return [word for item in items if accepts("bad")]
+print(rows([], False))
+"#,
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_imre"))
+        .current_dir(project.path())
+        .args(["-B", "-m", "main"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("error[invalid-argument-type]"), "{error}");
+    assert!(error.contains("main.py:7:47"), "{error}");
+}
+
+#[test]
 fn eager_filters_use_the_checked_result_of_the_outer_call() {
     let source = r#"
 def options() -> list[str]:
