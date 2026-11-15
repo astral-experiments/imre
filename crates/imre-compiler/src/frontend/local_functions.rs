@@ -464,15 +464,22 @@ impl Checker<'_> {
         let policy = self.local_cache_policy(definition)?;
         let decorator = self.local_dispatch_decorator(definition)?;
         let mut raw;
-        let signature_def = if policy.is_some() || decorator.is_some() || wraps.is_some() {
+        let implementation = if wraps.is_some() {
             raw = definition.clone();
             raw.decorator_list.clear();
             &raw
         } else {
             definition
         };
+        // The local cache and dispatch decorators have already been resolved.
+        let decorators = if policy.is_some() || decorator.is_some() {
+            &[]
+        } else {
+            implementation.decorator_list.as_slice()
+        };
         let mut signature = signature(
-            signature_def,
+            implementation,
+            decorators,
             self.graph,
             keyword_forwarding::Defaults::local(self.module),
             self.classes.declarations,
@@ -484,11 +491,7 @@ impl Checker<'_> {
             signature.params[0].ty = self.types.callback_argument();
         }
         let function = self.lift_local(
-            if wraps.is_some() {
-                signature_def
-            } else {
-                definition
-            },
+            implementation,
             signature,
             site.value_read && !overload && definition.decorator_list.is_empty(),
         )?;

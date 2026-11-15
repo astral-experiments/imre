@@ -939,6 +939,7 @@ fn lower_graph(
                     };
                     let mut signature = match signature(
                         &function,
+                        &function.decorator_list,
                         graph,
                         defaults,
                         classes.declarations,
@@ -1111,6 +1112,7 @@ fn lower_graph(
                 && defaults.forwarded.is_none();
             let mut signature = signature(
                 &method,
+                &method.decorator_list,
                 graph,
                 defaults,
                 classes.declarations,
@@ -2664,6 +2666,7 @@ fn lower_function(
 
 fn signature(
     function: &ast::StmtFunctionDef,
+    decorators: &[ast::Decorator],
     graph: &SourceGraph,
     defaults: keyword_forwarding::Defaults,
     classes: &Classes,
@@ -2693,8 +2696,8 @@ fn signature(
         }
     }
     // The class collector has already resolved method decorators to their descriptor kinds.
-    if function.type_params.is_some() || (method.is_none() && !function.decorator_list.is_empty()) {
-        if function.decorator_list.iter().any(|decorator| {
+    if function.type_params.is_some() || (method.is_none() && !decorators.is_empty()) {
+        if decorators.iter().any(|decorator| {
             decorator.expression.as_call_expr().is_some_and(|call| {
                 graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::Wraps))
                     && graph
