@@ -1263,6 +1263,7 @@ impl Inference {
                             == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                     })
                     && self.source_checks.accepts(graph, *module, function.range())
+                    && !graph.session.returns_bound_parameter(*module, function)
                 {
                     let mut candidate = signature.clone();
                     candidate.returns = Type::PythonObject;
