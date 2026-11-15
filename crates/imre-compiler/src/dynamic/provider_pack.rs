@@ -1,11 +1,12 @@
 //! Emit independent boxed code for the sealed modules available to this native target.
 
+use std::borrow::Cow;
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::{fs, io};
 
 use super::{
-    Imports, add_late_bundled_imports, bundled_module_source, emit, runtime_sources,
+    Imports, add_late_bundled_imports, bundled_module_source, prepare, runtime_sources,
     scan_imports_for_preparation,
 };
 use crate::SourceKind;
@@ -56,29 +57,15 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             }
             input
         });
-        let compiled = discovered
-            .map_or_else(
-                || match checked.as_deref() {
-                    Some(parsed) => Ok(ParsedModule {
-                        text: source.into(),
-                        parsed: std::borrow::Cow::Borrowed(parsed),
-                    }
-                    .into()),
-                    None => ParsedModule::parse(path, source.into()).map(Into::into),
-                },
-                Ok,
-            )
-            .and_then(|module| {
-                emit::PreparedBody::from_parsed(
-                    name,
-                    path,
-                    module,
-                    0,
-                    emit::ModuleOrigin::Bundled(None),
-                    Default::default(),
-                    Default::default(),
-                )
-            })
+        let input = match discovered {
+            Some(input) => Ok(input),
+            None => {
+                let parser = checked.as_deref().map(Cow::Borrowed);
+                ParsedModule::with_parser(path, source.into(), parser).map(Into::into)
+            }
+        };
+        let compiled = input
+            .and_then(|input| prepare::shipped_body(name, path, input, 0))
             .and_then(|body| {
                 body.has_body_statements
                     .then(|| body.provider_body(None))

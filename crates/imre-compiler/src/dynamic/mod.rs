@@ -1459,7 +1459,7 @@ pub(crate) fn compile(
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
-            let checked = prepare::check_shipped(name, path, input, python_optimization);
+            let checked = prepare::shipped_body(name, path, input, python_optimization).map(drop);
             shipped_checks.insert(unit, prepare::Shipped::Checked(checked));
         }
         Ok(imports)
