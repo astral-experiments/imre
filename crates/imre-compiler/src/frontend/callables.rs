@@ -894,7 +894,8 @@ impl Checker<'_> {
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
-        let mut values = Vec::with_capacity(call.arguments.args.len());
+        let cold_frame = registered_site.is_none() && matches!(returns, Type::Coroutine(_));
+        let mut values = Vec::with_capacity(call.arguments.args.len() + usize::from(cold_frame));
         let source = self.source;
         // An omitted expression may have a source contract of its own. The ordinary
         // binder checks the call whenever its unevaluated tail contains one.
@@ -974,7 +975,7 @@ impl Checker<'_> {
         if let Some(expr) = registered_site {
             return Ok(self.located_callback(expr, call, callable, values));
         }
-        if let Type::Coroutine(_) = returns {
+        if cold_frame {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
         let mut args = ir::CallArgs::positional(values);

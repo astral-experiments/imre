@@ -15,13 +15,12 @@ impl Checker<'_> {
     pub(super) fn indirect_coroutine(
         &self,
         callable: Expr,
-        args: Vec<Expr>,
+        mut values: Vec<Expr>,
         returns: Type,
     ) -> Expr {
         let signature = callable.ty;
-        let mut values = Vec::with_capacity(args.len() + 1);
-        values.push(callable);
-        values.extend(args);
+        values.reserve_exact(1);
+        values.insert(0, callable);
         self.framed_call(
             Op::IndirectCoroutine {
                 signature,
