@@ -47,9 +47,6 @@ REJECTED = {
     "shadow_static_call": "def step(value: int) -> int:\n    return value + 1\nvalues = [step(1) for step in range(3)]\n",
     "dynamic_dead_element": 'values = [eval("1") for value in range(0)]\n',
     "unused_dynamic_function": 'def unused() -> list[int]:\n    return [eval("1") for value in range(0)]\nprint(1)\n',
-    "direct_helper_recursion": "def recursive(value: int) -> list[int]:\n    return [recursive(value)[0] for item in range(0)]\nrecursive(1)\n",
-    "nested_helper_recursion": "def first(value: int) -> list[list[int]]:\n    return [[second(value) for inner in range(0)] for outer in range(0)]\ndef second(value: int) -> int:\n    return first(value)[0][0]\nfirst(1)\n",
-    "method_helper_recursion": "class Item:\n    def __init__(self) -> None:\n        pass\n    def values(self) -> list[int]:\n        return [self.values()[0] for index in range(0)]\nItem().values()\n",
     "constructor_partial_self_body": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = [len(self.values) for index in range(3)]\nItem()\n",
     "constructor_partial_self_iterable": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = [self for self in self.values]\nItem()\n",
 }
@@ -66,11 +63,10 @@ def select(rows: list[Row]) -> dict[int, str]:
 REJECTED["dict_key_invalidates_field"] = FIELD_CASE + "    return {invalidate(r): r.tag for r in rows if r.tag is not None}\n"
 REJECTED["last_filter_invalidates_field"] = FIELD_CASE + "    return {0: r.tag for r in rows if r.tag is not None if invalidate(r)}\n"
 
-IMPORTED_REJECTIONS = {
-    "inactive_dynamic_comprehension": {
-        "main.py": "import helper\nprint(1)\n",
-        "helper.py": 'if __name__ == "__main__":\n    values = [eval("1") for value in range(0)]\n',
-    },
+CHECKED = {
+    "direct_helper_recursion": "def recursive(value: int) -> list[int]:\n    return [recursive(value)[0] for item in range(0)]\nrecursive(1)\n",
+    "nested_helper_recursion": "def first(value: int) -> list[list[int]]:\n    return [[second(value) for inner in range(0)] for outer in range(0)]\ndef second(value: int) -> int:\n    return first(value)[0][0]\nfirst(1)\n",
+    "method_helper_recursion": "class Item:\n    def __init__(self) -> None:\n        pass\n    def values(self) -> list[int]:\n        return [self.values()[0] for index in range(0)]\nItem().values()\n",
     "unused_imported_helper_recursion": {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": "def recursive(value: int) -> list[int]:\n    return [recursive(value)[0] for item in range(0)]\n",
@@ -78,6 +74,13 @@ IMPORTED_REJECTIONS = {
     "inactive_helper_recursion": {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": "def first(value: int) -> list[int]:\n    return [second(value) for item in range(0)]\ndef second(value: int) -> int:\n    return first(value)[0]\nif __name__ == '__main__':\n    values = [first(index) for index in range(0)]\n",
+    },
+}
+
+IMPORTED_REJECTIONS = {
+    "inactive_dynamic_comprehension": {
+        "main.py": "import helper\nprint(1)\n",
+        "helper.py": 'if __name__ == "__main__":\n    values = [eval("1") for value in range(0)]\n',
     },
 }
 
@@ -163,6 +166,20 @@ def write_files(directory: Path, files: dict[str, str]) -> None:
         path = directory / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(dedent(source), encoding="utf-8")
+
+
+def check_programs(
+    compiler: str, temporary: Path, programs: dict[str, str | dict[str, str]]
+) -> int:
+    for name, files in programs.items():
+        directory = temporary / "checked" / name
+        write_files(directory, {"main.py": files} if isinstance(files, str) else files)
+        result = run(
+            [compiler, "check", str(directory / "main.py"), "--module-root", str(directory)],
+            temporary,
+        )
+        require_result(result, None)
+    return len(programs)
 
 
 def cases(
@@ -269,6 +286,7 @@ def main() -> None:
                     expected_files,
                 )
                 checks += 1
+        checks += check_programs(compiler, temporary, CHECKED)
         rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
         rejected.update(IMPORTED_REJECTIONS)
         for name, files in rejected.items():
@@ -283,11 +301,6 @@ def main() -> None:
                 "panicked" not in result.stderr
                 and "AddressSanitizer" not in result.stderr
             ), (name, result.stderr)
-            if "recursion" in name:
-                assert "recursive calls are unsupported" in result.stderr, (
-                    name,
-                    result.stderr,
-                )
             checks += 1
     print(
         f"Passed {checks} comprehension checks ({len(REJECTED) + len(IMPORTED_REJECTIONS)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

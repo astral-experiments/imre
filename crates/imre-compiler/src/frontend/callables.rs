@@ -184,7 +184,6 @@ impl<'a> Checker<'a> {
     /// Give a native method a positional signature and capture its receiver when present.
     pub(super) fn builtin_callable(
         &mut self,
-        node: &impl Ranged,
         receiver: Option<Expr>,
         builtin: Builtin,
         parameters: Vec<Type>,
@@ -218,11 +217,6 @@ impl<'a> Checker<'a> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: diagnostic_message(
-                    self.source,
-                    node,
-                    "recursive native method adapter",
-                ),
             },
         );
         Expr {
@@ -235,7 +229,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Expose str.join or a bound string's join as an exact native callback.
-    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
+    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>) -> Expr {
         let list = self.types.list(Type::Str);
         let context = receiver.map(|value| Expr {
             ty: self.types.tuple(vec![Type::Str]),
@@ -258,8 +252,6 @@ impl<'a> Checker<'a> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module]
-                    .error(site, "recursive calls through str.join are unsupported"),
                 function: ir::Function {
                     params: vec![0, 1],
                     locals: vec![first, list],
@@ -662,8 +654,6 @@ impl<'a> Checker<'a> {
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
                 source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(lambda, "recursive calls are unsupported in this prototype"),
             },
         );
         if pull {

@@ -563,14 +563,37 @@ fn emit_program(
             emitter.body.reset_names();
         }
         let frame = function_source_frame(module, &repr_methods, id);
-        emitter.function(function, entry, frame, &borrows[id]);
+        let stack_layout = module.recursive_functions.contains(&id).then(|| {
+            // The result occupies the first field; the remaining fields carry the checked ABI.
+            let fields = std::iter::once(function.returns.llvm())
+                .chain(
+                    function
+                        .params
+                        .iter()
+                        .map(|&slot| function.locals[slot].llvm()),
+                )
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {fields} }}")
+        });
+        emitter.function(
+            function,
+            entry,
+            frame,
+            &borrows[id],
+            stack_layout.as_deref(),
+        );
         emitter
             .output
             .include_integers(std::mem::take(&mut emitter.body.integers));
         if !entry {
-            emitter
-                .output
-                .finish_function(id, function, attrs, &emitter.body.code);
+            emitter.output.finish_function(
+                id,
+                function,
+                attrs,
+                &emitter.body.code,
+                stack_layout.as_deref(),
+            );
             emitter.body.code.clear();
         }
     }
@@ -2131,6 +2154,7 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
+        stack_layout: Option<&str>,
     ) {
         self.uses_regex_positions =
             self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
@@ -2187,6 +2211,18 @@ impl Emitter<'_, '_> {
         self.cleanups.clear();
         self.handler_depth = 0;
         self.start("entry");
+        if let Some(layout) = stack_layout {
+            for (i, &slot) in function.params.iter().enumerate() {
+                let source = self.instruction(format!(
+                    "getelementptr {layout}, ptr %stack_frame, i32 0, i32 {}",
+                    i + 1
+                ));
+                self.line(format!(
+                    "%arg{i} = load {}, ptr {source}",
+                    function.locals[slot].llvm()
+                ));
+            }
+        }
         for &slot in &function.params {
             if self.cached_string_lengths.contains(&slot) {
                 self.line(format!("%str_count{slot} = alloca i64"));
@@ -2502,15 +2538,19 @@ impl Emitter<'_, '_> {
             self.body.end(format!("ret i32 {status}"));
             // The program entry returns the stdio status after successful cleanup.
             self.start(&flush);
-        } else if function.returns == Type::None {
-            self.body.end("ret i8 0");
         } else {
-            let value = self.instruction(format!(
-                "load {}, ptr %function_return",
-                function.returns.llvm()
-            ));
-            self.body
-                .end(format!("ret {} {value}", function.returns.llvm()));
+            let ty = function.returns.llvm();
+            let value = if function.returns == Type::None {
+                "0".to_owned()
+            } else {
+                self.instruction(format!("load {ty}, ptr %function_return"))
+            };
+            if stack_layout.is_some() {
+                self.line(format!("store {ty} {value}, ptr %stack_frame"));
+                self.body.end("ret void");
+            } else {
+                self.body.end(format!("ret {ty} {value}"));
+            }
         }
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
@@ -11616,6 +11656,24 @@ slow:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn recursive_entry_passes_the_checked_signature_to_one_python_frame() {
+        let llvm = compile(
+            "def copy(text: str) -> str:\n    return text\ndef choose(n: int, x: float, b: bool, text: str) -> str:\n    if n:\n        return choose(n - 1, x, b, text)\n    return copy(text)\nprint(choose(2, 1.0, True, 'ok'))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call void @imre_on_call_stack(").count(), 1);
+        assert!(llvm.contains("alloca { ptr, i64, double, i1, ptr }"));
+        let (_, body) = llvm
+            .split_once("define internal void @fn_1.frame(")
+            .unwrap();
+        let (body, _) = body.split_once("\n}").unwrap();
+        assert_eq!(body.matches("call void @imre_recursion_enter()").count(), 1);
+        assert_eq!(body.matches("call void @imre_recursion_leave()").count(), 1);
+        assert!(body.contains("call ptr @fn_1("));
+    }
 
     #[test]
     fn ascii_membership_shares_only_stable_character_lookups() {

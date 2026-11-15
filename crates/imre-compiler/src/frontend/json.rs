@@ -185,10 +185,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive calls through a JSON decoder are unsupported",
-                ),
                 function: ir::Function {
                     params: (0..locals.len()).collect(),
                     locals,

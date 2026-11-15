@@ -6,7 +6,6 @@ impl Checker<'_> {
     /// Emit a native function value with the same ownership and indirect-call ABI as a def.
     fn shutil_helper(
         &mut self,
-        site: &impl Ranged,
         locals: Vec<Type>,
         result: Type,
         op: ir::ProcessOperation,
@@ -24,10 +23,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive calls through this shutil operation are unsupported",
-                ),
                 function: ir::Function {
                     params: (0..locals.len()).collect(),
                     locals,
@@ -123,7 +118,7 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(self.shutil_helper(site, params, result, op, args, None))
+        Ok(self.shutil_helper(params, result, op, args, None))
     }
 
     pub(super) fn shutil_ignore_patterns(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -159,7 +154,6 @@ impl Checker<'_> {
             .collect();
         let result = self.types.set(ty);
         Ok(self.shutil_helper(
-            call,
             locals,
             result,
             ir::ProcessOperation::IgnorePatterns,

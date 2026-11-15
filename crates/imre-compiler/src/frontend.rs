@@ -1477,7 +1477,6 @@ fn lower_graph(
     let mut owners = Vec::new();
     let mut call_graph = Vec::new();
     let mut class_reads = Vec::new();
-    let mut recursion_errors = Vec::new();
     let mut body_reports = Vec::new();
     for (module_id, source, signature) in &definitions {
         let definition = source.as_ref();
@@ -1781,14 +1780,6 @@ fn lower_graph(
             // Later definitions still receive the checked transfer and wrapper facts above.
             continue;
         }
-        let recursion_error = module.error(
-            definition,
-            "recursive calls are unsupported in this prototype",
-        );
-        // This completed call edge already prevents the trial from producing an acyclic program.
-        if retries_failed_layout(graph) && body.calls.contains(&signature.id) {
-            return Err(recursion_error.into());
-        }
         let LoweredBody {
             function,
             calls,
@@ -1812,10 +1803,6 @@ fn lower_graph(
                     calls,
                     class_reads: reads,
                     source_frame: false,
-                    recursion_error: module.error(
-                        definition,
-                        "recursive calls are unsupported in this prototype",
-                    ),
                 },
             );
             types.register_cache_body(signature.id, raw, policy);
@@ -1831,7 +1818,6 @@ fn lower_graph(
         completed.functions.push(function);
         call_graph.push(calls);
         class_reads.push(reads);
-        recursion_errors.push(recursion_error);
     }
     if needs_registered_entry {
         capture();
@@ -1966,8 +1952,6 @@ fn lower_graph(
             function: initialization.function,
             calls: initialization.calls,
             class_reads: HashSet::new(),
-            recursion_error: module
-                .error(module.parsed.syntax(), "recursive module initialization"),
             source_frame: module.archive.is_none(),
         }
     });
@@ -1988,7 +1972,6 @@ fn lower_graph(
         functions.push(helper.function);
         call_graph.push(helper.calls);
         class_reads.push(helper.class_reads);
-        recursion_errors.push(helper.recursion_error);
     }
     let mut entry = entry.expect("source graph has an entry module");
     let mut entry_operations = EntryOperations::default();
@@ -2098,9 +2081,6 @@ fn lower_graph(
                 call_graph[slot].extend(targets.iter().map(|target| target.function));
             }
         }
-        if let Some(id) = recursive_call_root(&call_graph) {
-            return Err(recursion_errors.swap_remove(id).into());
-        }
         globals.validate_initializers(
             initializer_ids.clone().zip(&initialization_order),
             graph,
@@ -2129,9 +2109,13 @@ fn lower_graph(
     let functions = &mut completed.functions;
     python_frames.push(true); // The program entry runs a Python module body.
     let source_functions = python_frames.iter().filter(|&&frame| frame).count();
-    // The native call graph is acyclic. Programs that cannot inspect frames,
-    // lower their limit, or reach the default depth need no tracking at all.
-    let track_frames = fault_enabled || names || count || source_functions + generator_sites > 1000;
+    // Even a small call graph can exceed the recursion limit when it contains a cycle.
+    let recursive_functions = recursive_call_entries(&call_graph);
+    let track_frames = fault_enabled
+        || names
+        || count
+        || source_functions + generator_sites > 1000
+        || !recursive_functions.is_empty();
     if generator_sites != 0 && !track_frames {
         for function in functions.iter_mut().chain([&mut entry]) {
             ir::walk_expressions_mut(&mut function.body, &mut |value| {
@@ -2285,6 +2269,7 @@ fn lower_graph(
             json_records,
             globals,
             source_frames,
+            recursive_functions,
             functions,
             entry,
         },
@@ -3098,32 +3083,38 @@ fn signature(
     })
 }
 
-fn recursive_call_root(graph: &[HashSet<usize>]) -> Option<usize> {
+fn recursive_call_entries(graph: &[HashSet<usize>]) -> HashSet<usize> {
+    let mut entries = HashSet::new();
     let mut states = vec![0; graph.len()];
-    let mut path = Vec::new();
+    let mut pending = Vec::new();
     for root in 0..graph.len() {
         if states[root] != 0 {
             continue;
         }
-        states[root] = 1;
-        path.push((root, graph[root].iter()));
-        while let Some((id, callees)) = path.last_mut() {
-            let Some(&callee) = callees.next() else {
-                states[*id] = 2;
-                path.pop();
+        pending.push((root, false));
+        while let Some((id, leaving)) = pending.pop() {
+            if leaving {
+                states[id] = 2;
                 continue;
-            };
-            match states[callee] {
-                1 => return Some(root),
-                2 => {}
-                _ => {
-                    states[callee] = 1;
-                    path.push((callee, graph[callee].iter()));
+            }
+            match states[id] {
+                0 => {
+                    states[id] = 1;
+                    pending.push((id, true));
+                    let start = pending.len();
+                    pending.extend(graph[id].iter().map(|&callee| (callee, false)));
+                    // Emission must choose the same entries regardless of hash iteration order.
+                    pending[start..].sort_unstable();
                 }
+                // Every cycle crosses a back edge to an active ancestor.
+                1 => {
+                    entries.insert(id);
+                }
+                _ => {}
             }
         }
     }
-    None
+    entries
 }
 
 fn error(source: &str, node: &impl Ranged, message: &str) -> Failure {
@@ -11421,7 +11412,7 @@ impl<'a> Checker<'a> {
                     && !self.names.contains_key("str")
                     && base_binding.is_none()
                 {
-                    return Ok(self.string_join_value(None, attribute));
+                    return Ok(self.string_join_value(None));
                 }
                 if let Some(Binding::Intrinsic(
                     stream @ (Intrinsic::Stdin | Intrinsic::OriginalStdout | Intrinsic::Stderr),
@@ -11649,14 +11640,13 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
-                    return Ok(self.string_join_value(Some(receiver), attribute));
+                    return Ok(self.string_join_value(Some(receiver)));
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
                 }
                 if receiver.ty == Type::FrozenStrings && attribute.attr.as_str() == "__contains__" {
                     return Ok(self.builtin_callable(
-                        attribute,
                         Some(receiver),
                         Builtin::SetContains,
                         vec![Type::Str],
@@ -11666,7 +11656,6 @@ impl<'a> Checker<'a> {
                 if attribute.attr.as_str() == "reverse" && self.types.element(receiver.ty).is_some()
                 {
                     return Ok(self.builtin_callable(
-                        attribute,
                         Some(receiver),
                         Builtin::ListReverse,
                         Vec::new(),
@@ -16466,9 +16455,18 @@ print(choose("x"))
 
         let mut graph: Vec<_> = (1..=40_000).map(|id| HashSet::from([id])).collect();
         graph.push(HashSet::new());
-        assert_eq!(super::recursive_call_root(&graph), None);
+        assert!(super::recursive_call_entries(&graph).is_empty());
         graph.last_mut().unwrap().insert(0);
-        assert_eq!(super::recursive_call_root(&graph), Some(0));
+        assert_eq!(super::recursive_call_entries(&graph), HashSet::from([0]));
+        graph[1].insert(1);
+        assert_eq!(super::recursive_call_entries(&graph), HashSet::from([0, 1]));
+
+        let graph = [
+            HashSet::from([1, 2]),
+            HashSet::from([2]),
+            HashSet::from([1]),
+        ];
+        assert_eq!(super::recursive_call_entries(&graph), HashSet::from([2]));
     }
 
     #[test]

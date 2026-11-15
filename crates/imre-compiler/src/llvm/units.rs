@@ -130,6 +130,7 @@ impl<'units> Output<'units> {
         function: &Function,
         attrs: &str,
         code: &str,
+        stack_layout: Option<&str>,
     ) {
         let name = self.function_name(id);
         let owner = self.function_owner(id);
@@ -141,16 +142,49 @@ impl<'units> Output<'units> {
             .collect::<Vec<_>>()
             .join(", ");
         self.units[owner].llvm_ir.push('\n');
-        self.define_function(
-            owner,
-            &name,
-            function.returns.llvm(),
-            &params,
-            attrs,
-            |unit| {
-                unit.push_str(code);
-            },
-        );
+        let returns = function.returns.llvm();
+        if let Some(layout) = stack_layout {
+            let body_name = format!("{name}.frame");
+            self.local_helper(
+                "imre_on_call_stack",
+                "declare void @imre_on_call_stack(ptr, ptr)\n",
+            );
+            self.define_function(owner, &name, returns, &params, attrs, |out| {
+                writeln!(out, "entry:\n  %frame = alloca {layout}").unwrap();
+                for (i, &slot) in function.params.iter().enumerate() {
+                    let ty = function.locals[slot].llvm();
+                    writeln!(
+                        out,
+                        "  %slot{i} = getelementptr {layout}, ptr %frame, i32 0, i32 {}",
+                        i + 1
+                    )
+                    .unwrap();
+                    writeln!(out, "  store {ty} %arg{i}, ptr %slot{i}").unwrap();
+                }
+                writeln!(
+                    out,
+                    "  call void @imre_on_call_stack(ptr @{body_name}, ptr %frame)"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "  %result = load {returns}, ptr %frame\n  ret {returns} %result"
+                )
+                .unwrap();
+            });
+            self.define_function(
+                owner,
+                &body_name,
+                "void",
+                "ptr %stack_frame",
+                attrs,
+                |out| out.push_str(code),
+            );
+        } else {
+            self.define_function(owner, &name, returns, &params, attrs, |out| {
+                out.push_str(code)
+            });
+        }
     }
 
     pub fn adapter_name(&self, id: usize, bound: bool) -> String {

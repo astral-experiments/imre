@@ -13,6 +13,7 @@ import tokenize
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from class_data_sources import write_class_data_sources
+from comprehensions import check_programs
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
@@ -154,11 +155,6 @@ Cell(1).copy({"unknown": 2})
     "missing_self": CELL.replace("def add(self, amount: int)", "def add(amount: int)"),
     "method_expression_default": CELL.replace("amount: int)", "amount: int = 1 + 1)"),
     "method_unknown_keyword": CELL + "Cell(1).add(unknown=2)\n",
-    "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
-    "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
-        + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
-    "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
-        + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
     "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
     "dynamic_attribute": CELL + "value = Cell(1)\nvalue.extra = 2\n",
     "dynamic_lookup": CELL + 'print(getattr(Cell(1), "value"))\n',
@@ -194,7 +190,6 @@ Cell(1).copy({"unknown": 2})
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
     "str_wrong_result": CELL + '    def __str__(self) -> int:\n        return self.value\n',
     "str_wrong_body": CELL + '    def __str__(self):\n        return self.value\n',
-    "recursive_str": CELL + '    def __str__(self) -> str:\n        return str(self)\n',
     "finalizer": CELL + "    def __del__(self) -> None:\n        pass\n",
     "private_mangling": CELL.replace("value", "__value"),
     "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
@@ -212,6 +207,15 @@ Cell(1).copy({"unknown": 2})
     "mutual_field_cycle": 'class Left:\n    right: "Right"\n    def __init__(self, right: "Right") -> None:\n        self.right = right\n\nclass Right:\n    left: Left\n    def __init__(self, left: Left) -> None:\n        self.left = left\n',
 }
 
+
+CHECKED = {
+    "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
+    "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
+        + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
+    "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
+        + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
+    "recursive_str": CELL + '    def __str__(self) -> str:\n        return str(self)\n',
+}
 
 IMPORTED_REJECTIONS = {
     "imported_nominal_mismatch": {
@@ -357,6 +361,7 @@ def main() -> None:
                     checks += 1
                 executable.unlink()
 
+        checks += check_programs(compiler, temporary, CHECKED)
         rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
         rejected.update(IMPORTED_REJECTIONS)
         for name, files in rejected.items():
@@ -373,8 +378,6 @@ def main() -> None:
                     assert rejection.returncode and "the base must be a known fixed-layout class" in rejection.stderr, (name, rejection.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
                 assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
-            if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:
-                assert "recursive calls are unsupported" in result.stderr, (name, result.stderr)
             checks += 1
     print(f"Passed {checks} class checks ({len(REJECTED) + len(IMPORTED_REJECTIONS)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})")
 

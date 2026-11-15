@@ -10,6 +10,20 @@ thread_local! {
     static MODULES: RefCell<Vec<StrOwner>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Keep native calls on growable stack segments while they enter Python frames.
+pub(crate) fn on_call_stack<T>(call: impl FnOnce() -> T) -> T {
+    stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, call)
+}
+
+/// The synchronous checked entry borrows its caller's arguments and writes its result there.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_on_call_stack(
+    entry: extern "C" fn(*mut std::ffi::c_void),
+    frame: *mut std::ffi::c_void,
+) {
+    on_call_stack(|| entry(frame));
+}
+
 /// Count an attempted entry until its normal or exceptional cleanup leaves the frame.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_recursion_enter() {

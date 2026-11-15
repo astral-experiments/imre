@@ -65,8 +65,7 @@ fn summaries(
     targets: &Targets,
     private: &[Vec<bool>],
 ) -> (Vec<bool>, Vec<bool>) {
-    // Unknown callees and unexpected recursive cycles retain ordinary owners.
-    // The checked call graph is acyclic, so proving upward loses no precision.
+    // Unknown callees and recursive cycles retain ordinary owners.
     let mut preserves = vec![false; module.functions.len()];
     let mut initializes = preserves.clone();
     loop {
@@ -407,6 +406,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),
         }

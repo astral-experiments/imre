@@ -488,8 +488,6 @@ impl Checker<'_> {
             },
             calls: self.calls,
             class_reads,
-            recursion_error: self.graph.modules[self.module]
-                .error(name, "recursive calls are unsupported in this prototype"),
             source_frame: true,
         })
     }
@@ -1745,11 +1743,6 @@ impl Checker<'_> {
                 calls: HashSet::from([constructor]),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: diagnostic_message(
-                    self.source,
-                    at,
-                    "recursive class constructor callbacks are unsupported",
-                ),
             },
         );
         Ok(Expr {

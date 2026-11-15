@@ -77,7 +77,6 @@ REJECTED = {
     "builtin_class_pattern": "match 1:\n    case int():\n        pass\n",
     "dead_case_dynamic": 'match 1:\n    case 0:\n        eval("bad")\n    case _:\n        pass\n',
     "dead_guard_dynamic": 'match 1:\n    case 0 if eval("bad"):\n        pass\n    case _:\n        pass\n',
-    "recursive_guard": "def recursive(value: int) -> bool:\n    match value:\n        case 0 if recursive(value):\n            return True\n        case _:\n            return False\n",
 }
 
 CLASS = "class Cell:\n    value: int\n    def __init__(self, value: int) -> None:\n        self.value = value\n"
@@ -116,11 +115,15 @@ REJECTED.update(
     {name: source for name, (source, _) in COMPATIBILITY_REJECTIONS.items()}
 )
 
-IMPORTED_REJECTIONS = {
+CHECKED = {
+    "recursive_guard": "def recursive(value: int) -> bool:\n    match value:\n        case 0 if recursive(value):\n            return True\n        case _:\n            return False\n",
     "unused_recursive_case": {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": "def recursive(value: int) -> int:\n    match value:\n        case 0:\n            return recursive(value)\n        case _:\n            return value\n",
     },
+}
+
+IMPORTED_REJECTIONS = {
     "inactive_main_match": {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": 'if __name__ == "__main__":\n    match 1:\n        case _:\n            eval("bad")\n',
@@ -144,8 +147,6 @@ ERRORS = {
 
 
 def check_rejection(name: str, stderr: str) -> None:
-    if "recursive" in name:
-        assert "recursive calls are unsupported" in stderr, (name, stderr)
     if name in COMPATIBILITY_REJECTIONS:
         assert COMPATIBILITY_REJECTIONS[name][1] in stderr, (name, stderr)
 
@@ -159,5 +160,6 @@ if __name__ == "__main__":
         label="structural matching",
         description=__doc__,
         require_imported=True,
+        checked=CHECKED,
         check_rejection=check_rejection,
     )
