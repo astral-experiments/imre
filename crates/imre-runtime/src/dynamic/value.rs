@@ -1019,7 +1019,11 @@ impl From<crate::source_arguments::Error> for Error {
     fn from(error: crate::source_arguments::Error) -> Self {
         match error {
             crate::source_arguments::Error::Memory => Self::new("MemoryError", ""),
-            crate::source_arguments::Error::Type(message) => Self::new("TypeError", message),
+            crate::source_arguments::Error::Arity(message)
+            | crate::source_arguments::Error::Duplicate(message)
+            | crate::source_arguments::Error::UnmatchedKeyword(message) => {
+                Self::new("TypeError", message)
+            }
         }
     }
 }

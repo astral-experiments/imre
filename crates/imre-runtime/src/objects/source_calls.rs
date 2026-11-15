@@ -86,10 +86,15 @@ pub unsafe extern "C" fn imre_bind_source_keywords(
                     given,
                     keys.iter().copied(),
                     positional_defaults,
-                    |k| kwdefaults.iter().any(|key| key.as_str() == k),
+                    |_, k| kwdefaults.iter().any(|key| key.as_str() == k),
+                    crate::objects::exceptions::keyword_suggestion,
                 )
                 .map_err(|err| match err {
-                    source_arguments::Error::Type(msg) => Error::new(Kind::TypeError, msg),
+                    source_arguments::Error::Arity(msg)
+                    | source_arguments::Error::Duplicate(msg)
+                    | source_arguments::Error::UnmatchedKeyword(msg) => {
+                        Error::new(Kind::TypeError, msg)
+                    }
                     source_arguments::Error::Memory => Error::memory_error(),
                 })?;
             for ((key, value), slot) in dict

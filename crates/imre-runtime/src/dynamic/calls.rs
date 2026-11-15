@@ -210,7 +210,11 @@ pub(super) fn module_function(symbol: &str) -> Option<(&str, &str)> {
 pub(super) fn unexpected_keyword_error(name: &str, key: &str, params: &[&str]) -> Error {
     Error::new(
         "TypeError",
-        crate::source_arguments::unexpected_keyword_message(name, key, params),
+        crate::source_arguments::unexpected_keyword_message(
+            name,
+            key,
+            crate::objects::exceptions::keyword_suggestion(key, params),
+        ),
     )
 }
 pub(super) fn excess_positional_error(
@@ -9500,9 +9504,14 @@ impl Context {
                 let pos = &sig.positional;
                 let num_defaults = self.tuple_elements(defaults).map_or(0, <[_]>::len);
                 let keys = kwargs.iter().map(|(key, _)| key.as_str());
-                let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
-                    self.dict_named_item(kwdefaults, n).is_some()
-                })?;
+                let binding = shape.bind(
+                    &name,
+                    args.len(),
+                    keys,
+                    num_defaults,
+                    |_, n| self.dict_named_item(kwdefaults, n).is_some(),
+                    crate::objects::exceptions::keyword_suggestion,
+                )?;
                 for (n, &v) in pos.iter().zip(args.iter()) {
                     self.bind_argument(local, n, v)?;
                 }

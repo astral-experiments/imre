@@ -41,7 +41,7 @@ mod input;
 mod shared;
 #[cfg(unix)]
 mod signals;
-mod source_arguments;
+use imre_ast::source_arguments;
 mod string_cursor;
 mod string_owner;
 mod sumprod;

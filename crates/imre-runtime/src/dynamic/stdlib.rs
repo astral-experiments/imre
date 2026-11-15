@@ -319,7 +319,14 @@ fn bind_python_keywords(
         kwargs: false,
     };
     let keys = kwargs.iter().map(|(key, _)| key.as_str());
-    let binding = shape.bind(name, supplied, keys, defaults, |_| true)?;
+    let binding = shape.bind(
+        name,
+        supplied,
+        keys,
+        defaults,
+        |_, _| true,
+        crate::objects::exceptions::keyword_suggestion,
+    )?;
     for ((_, value), slot) in kwargs.iter().zip(binding.keywords) {
         values[slot.expect("fixed keyword parameter")] = Some(*value);
     }
