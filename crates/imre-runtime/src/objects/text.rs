@@ -11,8 +11,8 @@ pub(crate) mod urlsplit;
 pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
+pub(super) use lowercase::lowercase_chars;
 pub(crate) use lowercase::{Case, case_map, case_map_points, python_islower, python_istitle};
-pub(super) use lowercase::{lowercase, lowercase_chars};
 pub(crate) use normalization::{Form, normalize_unicode};
 
 use num_traits::{Signed, ToPrimitive};

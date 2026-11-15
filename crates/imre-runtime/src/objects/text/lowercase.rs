@@ -231,11 +231,6 @@ fn map_chars(source: &str, case: Case) -> Result<Str, ReserveError> {
     Ok(result)
 }
 
-/// Lowercase a full string with the runtime's pinned Unicode data.
-pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
-    convert(source, Case::Lower)
-}
-
 /// Lowercase an exact native string, setting a pending MemoryError on allocation failure.
 ///
 /// # Safety
@@ -245,9 +240,7 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        lowercase(source)
-            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
-            .map_err(|_| Error::allocation()),
+        case_map(source, Case::Lower).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }
@@ -261,9 +254,7 @@ pub unsafe extern "C" fn imre_str_upper(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string throughout conversion.
     let source = unsafe { &*value };
     finish(
-        convert(source, Case::Upper)
-            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
-            .map_err(|_| Error::allocation()),
+        case_map(source, Case::Upper).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }

@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
 use crate::objects::records::tuples::tuple_from_words;
-use crate::objects::text::{lowercase, lowercase_chars};
+use crate::objects::text::{Case, case_map, lowercase_chars};
 use crate::objects::words::{OwnedWord, WordKind};
 
 pub(in crate::objects) struct PurePath {
@@ -105,8 +105,7 @@ fn win_join(raw: &[StrOwner]) -> Result<Str> {
         if !r.is_empty()
             || (!d.is_empty()
                 && d != drive
-                && lowercase(d).map_err(|_| Error::allocation())?
-                    != lowercase(drive).map_err(|_| Error::allocation())?)
+                && case_map(d, Case::Lower)? != case_map(drive, Case::Lower)?)
         {
             if !d.is_empty() || drive.is_empty() {
                 drive = d;
@@ -261,7 +260,7 @@ impl PurePath {
         if let Some(key) = self.folded.get() {
             return Ok(key);
         }
-        let key = lowercase(&self.text).map_err(|_| Error::allocation())?;
+        let key = case_map(&self.text, Case::Lower)?;
         Ok(self.folded.get_or_init(|| key))
     }
 
@@ -327,7 +326,7 @@ impl PurePath {
 
     /// Return the comparison key of the path left when every tail component is removed.
     fn windows_anchor_key(&self) -> Result<Str> {
-        let mut key = lowercase(&self.drive).map_err(|_| Error::allocation())?;
+        let mut key = case_map(&self.drive, Case::Lower)?;
         append_segment(&mut key, "", &self.root)?;
         if key.is_empty() {
             key.push('.');
