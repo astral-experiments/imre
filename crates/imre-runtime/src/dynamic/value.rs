@@ -74,6 +74,13 @@ impl CodeDefinition {
 }
 
 impl CodeObject {
+    pub(super) fn native_entry(&self) -> Option<Code> {
+        match self.body {
+            Body::Native(entry, _) => Some(entry),
+            _ => None,
+        }
+    }
+
     pub(super) fn is_coroutine(&self) -> bool {
         self.definition.flags & imre_ast::code_flags::COROUTINE != 0
     }
@@ -738,6 +745,9 @@ impl Context {
     /// At the import boundary, unlink frozen loader frames through its explicit call marker.
     /// ImportError discards every frozen loader frame. Exposed Python traceback tails retain identity.
     pub(super) fn trim_import_traceback(&mut self, mut error: Error) -> Error {
+        let Some(importlib) = self.importlib_code else {
+            return error;
+        };
         let trim_all = self.is_builtin_error(&error, "ImportError");
         let Some(trace) = error.trace.as_mut() else {
             return error;
@@ -753,17 +763,21 @@ impl Context {
                 unreachable!("traceback frame")
             };
             let code = self.code_object(code);
-            let frozen = matches!(
-                self.str_value(code.filename),
-                Ok("<frozen importlib._bootstrap>" | "<frozen importlib._bootstrap_external>")
-            );
-            if frozen && !in_loader {
+            let loader = self.heap.compilation_entry(code).is_some_and(|entry| {
+                importlib
+                    .units
+                    .iter()
+                    .any(|&unit| std::ptr::fn_addr_eq(unit, entry))
+            });
+            if loader && !in_loader {
                 before_chunk = previous;
             }
-            in_loader = frozen;
-            if frozen
+            in_loader = loader;
+            if loader
                 && (trim_all
-                    || matches!(self.str_value(code.name), Ok("_call_with_frames_removed")))
+                    || code
+                        .native_entry()
+                        .is_some_and(|entry| std::ptr::fn_addr_eq(entry, importlib.remove_frames)))
             {
                 if before_chunk == NONE {
                     trace.head = next;
@@ -1654,7 +1668,11 @@ pub(super) enum Value {
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
-    CompilationConstants(HashMap<usize, Id>),
+    CompilationConstants {
+        // The linked module owns the code across executions. Each execution owns its literals.
+        entry: Option<Code>,
+        slots: HashMap<usize, Id>,
+    },
     SyntaxMembers([Id; 9]),
     Traceback {
         frame: Id,
@@ -2141,7 +2159,7 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
-            | Self::CompilationConstants(_)
+            | Self::CompilationConstants { .. }
             | Self::SyntaxMembers(_)
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
@@ -2239,7 +2257,7 @@ impl Value {
                 | Self::Code(_)
                 | Self::Scope(_)
                 | Self::Cell(_)
-                | Self::CompilationConstants(_)
+                | Self::CompilationConstants { .. }
                 | Self::SyntaxMembers(_)
                 | Self::Class { .. }
                 | Self::Method { .. }
@@ -2266,7 +2284,7 @@ impl Value {
         visit: &mut impl VisitReferences,
     ) -> std::result::Result<(), std::cell::BorrowError> {
         match self {
-            Self::CompilationConstants(slots) => visit.extend(slots.values().copied()),
+            Self::CompilationConstants { slots, .. } => visit.extend(slots.values().copied()),
             Self::SyntaxMembers(fields) => visit.extend(fields),
             Self::Deque(ring) => visit.extend(&ring.items),
             Self::StructUnpackIterator {
@@ -4425,6 +4443,14 @@ impl Heap {
         )
     }
 
+    /// Nested declarations share the entry that produced their literal table.
+    pub(super) fn compilation_entry(&self, code: &CodeObject) -> Option<Code> {
+        match self.get(code.compilation_constants) {
+            Value::CompilationConstants { entry, .. } => *entry,
+            _ => code.native_entry(),
+        }
+    }
+
     /// Allocate the shared literal table lazily. Each linked code object roots it directly.
     pub(super) fn compilation_constants(&mut self, owner: Id) -> Result<Id> {
         let Value::Code(code) = self.get(owner) else {
@@ -4433,7 +4459,13 @@ impl Heap {
         if code.compilation_constants != NONE {
             return Ok(code.compilation_constants);
         }
-        let pool = self.try_alloc_slot(Value::CompilationConstants(HashMap::new()), false)?;
+        let pool = self.try_alloc_slot(
+            Value::CompilationConstants {
+                entry: code.native_entry(),
+                slots: HashMap::new(),
+            },
+            false,
+        )?;
         let Value::Code(code) = self.get_mut(owner) else {
             unreachable!("linked code owner")
         };
@@ -4447,7 +4479,7 @@ impl Heap {
             && let Value::Code(code) = self.get(frame.code)
         {
             return match self.get(code.compilation_constants) {
-                Value::CompilationConstants(slots) => slots.get(slot).copied(),
+                Value::CompilationConstants { slots, .. } => slots.get(slot).copied(),
                 _ => None,
             };
         }
@@ -4467,14 +4499,14 @@ impl Heap {
             && matches!(self.get(owner), Value::Code(_))
         {
             let pool = self.compilation_constants(owner)?;
-            let Value::CompilationConstants(slots) = self.get_mut(pool) else {
+            let Value::CompilationConstants { slots, .. } = self.get_mut(pool) else {
                 unreachable!("linked literal table")
             };
             slots
                 .try_reserve(1)
                 .map_err(|_| Error::new("MemoryError", ""))?;
             let value = build(self)?;
-            let Value::CompilationConstants(slots) = self.get_mut(pool) else {
+            let Value::CompilationConstants { slots, .. } = self.get_mut(pool) else {
                 unreachable!("linked literal table")
             };
             slots.insert(slot, value);
