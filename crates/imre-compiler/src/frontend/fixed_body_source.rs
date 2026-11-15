@@ -160,24 +160,14 @@ impl FixedNode {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
     }
 
-    fn local_invoke(expr: &Expr) -> Option<Self> {
+    fn positional_invoke(expr: &Expr) -> Option<Self> {
         let ExprKind::Invoke { callable, args } = &expr.kind else {
-            return None;
-        };
-        let ExprKind::Local(slot) = callable.kind else {
             return None;
         };
         (matches!(callable.ty, Type::Callable(_))
             && args.site.python().is_none()
             && args.order.iter().copied().eq(0..args.values.len()))
-        .then(|| {
-            Self::NamedCall(
-                std::mem::discriminant(&expr.kind),
-                slot,
-                args.values.len(),
-                expr.ty,
-            )
-        })
+        .then(|| Self::indexed(&expr.kind, args.values.len(), expr.ty))
     }
 
     /// Compare owned payloads against the final instruction without copying them.
@@ -195,7 +185,7 @@ impl FixedNode {
                     return if let Self::Invocation(call, ty) = self {
                         *ty == expr.ty && expr.python_call() == Some(call.as_ref())
                     } else {
-                        Self::local_invoke(expr).as_ref() == Some(self)
+                        Self::positional_invoke(expr).as_ref() == Some(self)
                     };
                 }
                 _ => {}
@@ -579,19 +569,28 @@ impl SourceSites {
     }
 
     /// A checked positional invocation already owns the callable and every written argument.
-    pub(super) fn local_call(&mut self, call: &ast::ExprCall, value: &Expr) {
+    pub(super) fn positional_invoke(&mut self, call: &ast::ExprCall, value: &Expr, local: bool) {
         let Some(site) = self.site_at(call.range()) else {
             return;
         };
-        let Some(node) = FixedNode::local_invoke(value) else {
+        let checked_callee = self
+            .sites
+            .get(site.index + 1)
+            .is_some_and(|(range, _)| *range == call.func.range());
+        if !local
+            && !(checked_callee
+                && matches!(
+                    self.attributes.get(&call.func.range()),
+                    Some(FixedAttribute::Call(..))
+                ))
+        {
+            return;
+        }
+        let Some(node) = FixedNode::positional_invoke(value) else {
             return;
         };
         self.commit(site, node);
-        if self
-            .sites
-            .get(site.index + 1)
-            .is_none_or(|(range, _)| *range != call.func.range())
-        {
+        if !checked_callee {
             self.invoked(call, value);
         }
         let invoke = ir::RegisteredCall::new(
