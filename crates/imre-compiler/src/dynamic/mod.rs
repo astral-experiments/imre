@@ -893,10 +893,6 @@ fn imports_from_body(
     Ok(imports)
 }
 
-pub(crate) fn is_permanent_integer(value: i64) -> bool {
-    crate::llvm::registered::permanent::small_integer_id(value).is_some()
-}
-
 pub(crate) type CheckedFunctions =
     HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>;
 

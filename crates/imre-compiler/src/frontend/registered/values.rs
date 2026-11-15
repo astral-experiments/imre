@@ -813,7 +813,6 @@ pub(in crate::frontend) fn index_key<E>(
     node: &ast::Expr,
     operand: &mut impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<Expr, E> {
-    use ir::Constant as C;
     let (value, constant) = match node {
         ast::Expr::Slice(slice) => slice_key(slice, |bound| {
             let value = index_key(bound, operand)?;
@@ -849,14 +848,12 @@ pub(in crate::frontend) fn index_key<E>(
             ) {
                 return Ok(located(node.range(), node.start(), value));
             }
+            if crate::llvm::registered::permanent_handle(&value).is_some() {
+                return Ok(value);
+            }
             let Some(key) = ir::Constant::from_expr(&value) else {
                 return Ok(value);
             };
-            if matches!(key, C::None | C::Ellipsis | C::Bool(_))
-                || matches!(&key, C::Int(text) if text.parse::<i64>().is_ok_and(crate::dynamic::is_permanent_integer))
-            {
-                return Ok(value);
-            }
             let value = match value.kind {
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), mut args) => args.remove(0),
                 _ => value,
@@ -868,17 +865,12 @@ pub(in crate::frontend) fn index_key<E>(
 }
 
 fn located_key(node: &ast::Expr, value: Expr, constant: Option<ir::Constant>) -> Expr {
-    use ir::Constant as C;
     let value = if let Some(key) = constant {
-        // Permanent singleton handles already have their Python identity.
-        match key {
-            C::None | C::Ellipsis | C::Bool(_) => value,
-            _ => super::operation(
-                Builtin::RegisteredIndexConstant(key),
-                Type::PythonObject,
-                vec![value],
-            ),
-        }
+        super::operation(
+            Builtin::RegisteredIndexConstant(key),
+            Type::PythonObject,
+            vec![value],
+        )
     } else {
         value
     };
