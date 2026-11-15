@@ -2638,10 +2638,28 @@ fn signature(
             matches!(value, ast::Expr::Subscript(subscript) if annotations::sequence_annotation(graph.resolve(module, &subscript.value))));
         let empty_sequence = sequence
             && matches!(parameter.default.as_deref(), Some(ast::Expr::Tuple(tuple)) if tuple.elts.is_empty());
-        let binding = parameter
-            .default
-            .as_deref()
+        let default = parameter.default.as_deref();
+        let capture = method.filter(|_| origin.is_none()).and_then(|context| {
+            let class = &classes.definitions[context.class];
+            let crate::classes::MethodSource::Parsed(parsed, _) =
+                &class.methods[context.index].function
+            else {
+                return None;
+            };
+            let value = graph.session.class_assignment_value(
+                class.method_origins[context.index],
+                default?,
+                parsed,
+            )?;
+            let value = calls::scalar_literal(value, source).ok()?;
+            (value.tagged_integer_literal().is_some()
+                || matches!(value.ty, Type::Str | Type::Bool | Type::None))
+            .then_some(value)
+        });
+        let binding = default
+            .filter(|_| capture.is_none())
             .and_then(|value| graph.resolve(module, value));
+        let sentinel = binding == Some(Binding::Intrinsic(Intrinsic::InspectSentinel));
         let class_default = parameter.default.as_deref().and_then(|value| {
             let Some(Binding::Definition(id)) = binding else {
                 return None;
@@ -2659,7 +2677,7 @@ fn signature(
             Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
                 Some(functools::wrapper_attributes(fields, types))
             }
-            _ => None,
+            _ => capture,
         };
         let annotation = parameter.annotation().filter(|value| {
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
@@ -2725,7 +2743,7 @@ fn signature(
                     .as_deref()
                     .filter(|value| !empty_sequence && !matches!(value, ast::Expr::Dict(dict) if dict.items.is_empty() && parameter.annotation().is_some()))
                     .map(|value| {
-                        if inspect::is_sentinel(graph, module, value) {
+                        if sentinel {
                             Ok(Type::PlainObject)
                         } else if let Some(class) = class_default {
                             record_constructor_type(class, value, graph, source, classes, types, 0)
@@ -2783,7 +2801,7 @@ fn signature(
                         ty,
                         kind: ExprKind::List(Vec::new()),
                     })
-                } else if ty == Type::PlainObject && inspect::is_sentinel(graph, module, value) {
+                } else if ty == Type::PlainObject && sentinel {
                     Ok(inspect::sentinel())
                 } else if let Some(class) = class_default {
                     // Record the declaration-time identity. Constructor adapters require the
