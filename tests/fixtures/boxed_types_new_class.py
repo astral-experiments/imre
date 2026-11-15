@@ -191,6 +191,10 @@ def prepared_class_statements():
             if key == "matched" and value is None:
                 gc.collect()
                 observed.append("cleared")
+        def __delitem__(self, key):
+            if key == "matched":
+                observed.append(("delete", self[key] is None))
+            super().__delitem__(key)
 
     class Prepared(type):
         @classmethod
@@ -210,9 +214,20 @@ def prepared_class_statements():
                 raise LookupError("replacement")
     except LookupError as replacement:
         assert replacement.args == ("replacement",)
-        assert observed == [42, 43, "cleared"]
+        assert observed == [42, 43, "cleared", ("delete", True)]
     else:
         raise AssertionError("except* lost its replacement")
+
+    observed.clear()
+    try:
+        class Ordinary(metaclass=Prepared):
+            try:
+                raise ValueError
+            except ValueError as matched:
+                raise LookupError("replacement")
+    except LookupError as replacement:
+        observed.append(replacement.args)
+    assert observed == ["cleared", ("delete", True), ("replacement",)]
 
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"

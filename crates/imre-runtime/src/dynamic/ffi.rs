@@ -436,14 +436,13 @@ impl Context {
                 scope.globals.insert(name);
                 Ok(NONE)
             }
-            "delname" | "clearname" => {
+            "delname" => {
                 let name = self.copy_name(b)?;
                 let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
                 let removed = match self.remove_binding(scope, &name, b) {
                     Err(error)
-                        if op == "delname"
-                            && self.scope_data(a).parent.is_none()
+                        if self.scope_data(a).parent.is_none()
                             && !self.scope_data(a).globals.contains(name.as_str()) =>
                     {
                         // DELETE_NAME replaces the mapping error after its callback has unwound.
@@ -452,12 +451,11 @@ impl Context {
                     }
                     result => result?,
                 };
-                if removed {
-                    if released {
-                        self.collect_after_release();
-                    }
-                } else if op == "delname" {
+                if !removed {
                     return Err(self.missing_binding(a, scope, &name));
+                }
+                if released {
+                    self.collect_after_release();
                 }
                 Ok(NONE)
             }
@@ -2247,6 +2245,28 @@ pub(super) unsafe extern "C" fn imre_dyn_assign_target(
         .and_then(|name| ctx.store_source_name(scope, name, value))
         .map(flag);
     finish(ctx, result)
+}
+
+/// Clear a named handler through its ordinary observable store, release and deletion.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_clear_handler_target(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    mark: usize,
+    live: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: the compiled activation owns the context, linked name and live handle array.
+    unsafe {
+        let replaced = imre_dyn_assign_target(ctx, scope, name, len, NONE);
+        if imre_dyn_failed(ctx) {
+            return NONE;
+        }
+        imre_dyn_assignment_target_at(ctx, mark, live, count, replaced);
+        imre_boxed_named_op(ctx, c"delname".as_ptr(), scope, name, len, NONE)
+    }
 }
 
 /// Execute an import statement through the importing frame's builtins.

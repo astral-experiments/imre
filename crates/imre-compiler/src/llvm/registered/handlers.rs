@@ -201,8 +201,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let Some(name) = binding else { return };
         let failed = std::mem::replace(&mut self.body.error_target, outer);
         self.label(&failed);
-        let error = self.op("take_error", &[]);
-        self.clear_exception_name(&name);
+        let error = self.take_error_clearing_target(Some(&name));
         self.raise(&error, None, true);
     }
 
@@ -263,13 +262,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             }
             self.jump(&next);
             self.label(&failed);
-            let error = self.op("take_error", &[]);
-            if let Some(name) = name {
-                // Clearing the binding can run Python before the group owns the new exception.
-                self.live.push(error.clone());
-                self.clear_handler_target(name);
-                self.live.pop();
-            }
+            let error = self.take_error_clearing_target(name);
             self.op("append", &[&raised, &error]);
             self.jump(&next);
             self.label(&next);
@@ -301,16 +294,15 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
 }
 
 impl RegisteredFrame<'_, '_> {
-    /// A custom namespace observes both the None store and the deletion, outside the arm body.
-    pub(super) fn clear_handler_target(&mut self, name: &str) {
-        self.assign_owned_name(&self.scope.clone(), name, "0");
-        let key = self.code_name(name);
-        self.op("delname", &[&self.scope.clone(), &key]);
-    }
-
-    pub(crate) fn clear_exception_name(&mut self, name: &str) {
-        let key = self.code_name(name);
-        self.op("clearname", &[&self.scope.clone(), &key]);
+    fn take_error_clearing_target(&mut self, name: Option<&str>) -> String {
+        let error = self.op("take_error", &[]);
+        if let Some(name) = name {
+            // A namespace callback can collect before the caller owns the replacement.
+            self.live.push(error.clone());
+            self.clear_handler_target(name);
+            self.live.pop();
+        }
+        error
     }
 }
 

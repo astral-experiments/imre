@@ -1040,6 +1040,18 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         self.release_store("2");
     }
 
+    pub(super) fn clear_handler_target(&mut self, name: &str) {
+        self.output.intern_identifier(name);
+        let data = self.output.data(name.as_bytes());
+        let (ptr, count) = self.live_handles(&[]);
+        self.take_matching_check();
+        let mark = self.iteration.expression_mark.as_deref().unwrap_or("0");
+        self.checked(&format!(
+            "call i64 @imre_dyn_clear_handler_target(ptr %ctx, i64 {}, ptr {data}, i64 {}, i64 {mark}, ptr {ptr}, i64 {count})",
+            self.scope, name.len()
+        ));
+    }
+
     fn release_store(&mut self, replaced: &str) {
         let (ptr, count) = self.live_handles(&[]);
         let mark = self.iteration.expression_mark.as_deref().unwrap_or("0");
