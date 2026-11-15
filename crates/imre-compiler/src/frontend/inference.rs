@@ -1804,17 +1804,21 @@ impl Inference {
                 checked_bodies.clear();
             } else if let Some((revision, index)) = layout_refusal
                 && retries_failed_layout(graph)
-                && !graph.registered_startup
                 && !graph.needs_object_runtime.get()
                 && !skipped
                 && !self.widened.get()
                 && revision == self.revision.get()
                 && !self.unresolved()
             {
-                // This layout already failed a physical operand or declared return with the
-                // settled signatures. Let the ordinary file pass place bodies and report errors.
-                let (module, _, failure) = errors.swap_remove(index);
-                return Err(failure.terminal_in(graph, module));
+                let (module, function, failure) = errors.swap_remove(index);
+                if function.is_none() {
+                    // The entry rejected a settled layout. Reconsider inferred returns before
+                    // placing functions, preserving their declarations and checked parameters.
+                    graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
+                    self.layout_changed();
+                } else if !graph.registered_startup {
+                    return Err(failure.terminal_in(graph, module));
+                }
             }
         };
         for (_, _, signature) in definitions.iter_mut() {
