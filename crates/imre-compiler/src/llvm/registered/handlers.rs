@@ -23,8 +23,7 @@ impl RegisteredFrame<'_, '_> {
     pub(in crate::llvm) fn enter_handlers(&mut self, handler: &str) -> (String, String, usize) {
         let done = self.name("b");
         self.jump(&done);
-        self.label(handler);
-        let exception = self.op("take_error", &[]);
+        let exception = self.take_handler_error(handler, None);
         self.live.push(exception.clone());
         self.caught.push(exception.clone());
         (exception, done, self.regions.len())
@@ -128,8 +127,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let failed = self.name("b");
         let done = self.name("b");
         let (mut region, normal) = self.protected_exits(&failed, &done, protected);
-        self.label(&failed);
-        let raised = self.op("take_error", &[]);
+        let raised = self.take_handler_error(&failed, None);
         let outer = self.caught.last().cloned().unwrap_or_else(|| "0".into());
         self.flush_check();
         region.enter(
@@ -173,35 +171,55 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             value: value.to_owned(),
             enclosing,
             outer,
+            binding: None,
         });
     }
 
-    pub(in crate::llvm) fn bind_handler_name(
+    pub(in crate::llvm) fn enter_handler_arm(
         &mut self,
         handler: &ExceptHandler,
         exception: &str,
     ) -> Option<String> {
-        let name = self.handler_name(handler)?;
-        self.code.bind(name, exception);
-        let failed = self.name("b");
-        let outer = std::mem::replace(&mut self.body.error_target, failed.clone());
-        self.regions.push(Region::ExceptionName {
-            name: name.into(),
-            outer,
+        let outer = self.body.error_target.clone();
+        let binding = self.handler_name(handler);
+        let failed = binding.map(|name| {
+            self.code.bind(name, exception);
+            let failed = self.name("b");
+            self.body.error_target.clone_from(&failed);
+            failed
         });
-        Some(failed)
+        // POP_EXCEPT restores the enclosing exception before clearing the optional binding.
+        // The dispatch edge already rooted the handled exception in self.live.
+        let enclosing = self.enclosing_caught();
+        self.regions.push(Region::Pending {
+            value: exception.to_owned(),
+            enclosing: Some(enclosing),
+            outer,
+            binding: binding.map(String::from),
+        });
+        failed
     }
 
     /// Errors raised by the handler clear its binding under the enclosing error target.
-    pub(in crate::llvm) fn leave_handler_name(&mut self, failed: &str) {
-        let Some(Region::ExceptionName { name, outer }) = self.regions.pop() else {
-            unreachable!("named exception handler")
+    pub(in crate::llvm) fn leave_handler_arm(&mut self, failed: Option<&str>) {
+        let Some(Region::Pending { binding, outer, .. }) = self.regions.pop() else {
+            unreachable!("ordinary exception handler")
         };
+        let Some(failed) = failed else { return };
         self.body.error_target = outer;
         self.label(failed);
         let error = self.op("take_error", &[]);
-        self.clear_exception_name(&name);
+        self.clear_exception_name(binding.as_deref().expect("named exception handler"));
         self.raise(&error, None, true);
+    }
+
+    fn enclosing_caught(&self) -> String {
+        self.caught
+            .iter()
+            .rev()
+            .nth(1)
+            .cloned()
+            .unwrap_or_else(|| "0".into())
     }
 
     /// Split a pending group in source order and retain both halves until the handlers finish.
@@ -248,13 +266,16 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             if !self.body.terminated
                 && let Some(name) = name
             {
-                self.clear_star_target(name);
+                self.clear_handler_target(name);
             }
             self.jump(&next);
             self.label(&failed);
             let error = self.op("take_error", &[]);
             if let Some(name) = name {
-                self.clear_star_target(name);
+                // Clearing the binding can run Python before the group owns the new exception.
+                self.live.push(error.clone());
+                self.clear_handler_target(name);
+                self.live.pop();
             }
             self.op("append", &[&raised, &error]);
             self.jump(&next);
@@ -265,13 +286,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         self.op("append", &[&raised, &remainder]);
         let merged = self.op("except_star_merge", &[exc, &raised]);
         self.live.pop();
-        let enclosing = self
-            .caught
-            .iter()
-            .rev()
-            .nth(1)
-            .cloned()
-            .unwrap_or_else(|| "0".into());
+        let enclosing = self.enclosing_caught();
         self.op("restore_caught", &[&enclosing]);
         let propagate = self.name("b");
         let handled = self.value(&format!("icmp eq i64 {merged}, 0"));
@@ -294,8 +309,8 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
 
 impl RegisteredFrame<'_, '_> {
     /// A custom namespace observes both the None store and the deletion, outside the arm body.
-    fn clear_star_target(&mut self, name: &str) {
-        self.bind(name, "0");
+    pub(super) fn clear_handler_target(&mut self, name: &str) {
+        self.assign_owned_name(&self.scope.clone(), name, "0");
         let key = self.code_name(name);
         self.op("delname", &[&self.scope.clone(), &key]);
     }

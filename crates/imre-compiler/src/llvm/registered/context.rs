@@ -157,15 +157,11 @@ impl<'p> Frame<'_, '_, 'p> {
                     self.flush_check();
                     finalbody.enter(&mut self.body, completion.clone(), None);
                 }
-                Region::ExceptionName { name, outer } => {
-                    self.body.error_target.clone_from(outer);
-                    self.clear_exception_name(name);
-                    self.flush_check();
-                }
                 Region::Pending {
                     value,
                     enclosing,
                     outer,
+                    binding,
                 } => {
                     self.body.error_target.clone_from(outer);
                     let pending = self.value(&format!("icmp ne i64 {value}, 0"));
@@ -179,6 +175,10 @@ impl<'p> Frame<'_, '_, 'p> {
                     let index = self.live.iter().rposition(|v| v == value).unwrap();
                     discarded.push((index, self.live.remove(index)));
                     self.release_target();
+                    if let Some(name) = binding {
+                        self.clear_handler_target(name);
+                        self.flush_check();
+                    }
                     self.jump(&done);
                     self.label(&done);
                 }
@@ -196,15 +196,12 @@ impl<'p> Frame<'_, '_, 'p> {
 pub(super) enum Region {
     Slots(Vec<usize>),
     Finally(Finalbody<String>),
-    ExceptionName {
-        name: String,
-        outer: String,
-    },
     /// Replacing an exit releases its rooted owner under the enclosing handler.
     Pending {
         value: String,
         enclosing: Option<String>,
         outer: String,
+        binding: Option<String>,
     },
 }
 
@@ -248,7 +245,7 @@ impl Frame<'_, '_, '_> {
         });
         self.live.pop();
 
-        let raised = self.take_context_error(&failed, &context.callable);
+        let raised = self.take_handler_error(&failed, Some(&context.callable));
         region.enter(
             &mut self.body,
             Completion::Error,

@@ -180,16 +180,17 @@ impl CheckedBody<'_, '_, '_, '_> {
                 self.fixed().catch_exception(handler.name, exception);
                 None
             }
-            Caught::Registered(exception) => self.python().bind_handler_name(handler, exception),
+            Caught::Registered(exception) => self.python().enter_handler_arm(handler, exception),
         };
         self.emit_block(&handler.body);
         if !self.body().terminated {
             self.jump_from_regions(done.to_owned(), depth);
         }
-        if let Some(failed) = binding {
-            self.python().leave_handler_name(&failed);
-        } else if let Entry::Native(code) = &mut self.0 {
-            code.cleanups.pop();
+        match &mut self.0 {
+            Entry::Registered(frame) => frame.leave_handler_arm(binding.as_deref()),
+            Entry::Native(code) => {
+                code.cleanups.pop();
+            }
         }
     }
 
