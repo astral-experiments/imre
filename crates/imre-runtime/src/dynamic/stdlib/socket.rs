@@ -187,23 +187,8 @@ fn registered_socket(ctx: &Context, receiver: Id) -> &crate::ObjectOwner {
 pub(in crate::dynamic) unsafe fn accept(receiver: Id, context: *mut Context) -> Result<Id> {
     use std::os::fd::{AsRawFd, IntoRawFd};
 
-    use crate::dynamic::value::ParkedExecution;
-
-    let accepted = native::read_socket(
-        // SAFETY: the caller roots the receiver. Resolve it only while this execution is active.
-        || native::read_state(registered_socket(unsafe { &*context }, receiver)),
-        &mut (),
-        // SAFETY: each native wait has returned to the interrupted execution before delivery.
-        |()| unsafe { Context::dispatch_pending_signals(context) },
-        // SAFETY: only the listener fd and its original deadline enter the native poll.
-        |(), fd, deadline| unsafe {
-            ParkedExecution::wait(context, || {
-                native::poll_interruptible(fd, libc::POLLIN, Some(deadline))
-            })
-        },
-        // SAFETY: accept_once uses only the fd and returns owned address and descriptor data.
-        |(), fd| unsafe { ParkedExecution::wait(context, || native::accept_once(fd)) },
-    )?;
+    // SAFETY: the registered caller roots the listener through each attempt.
+    let accepted = unsafe { registered_read(receiver, context, native::accept_once) }?;
     let (child, peer) = accepted.into_parts()?;
     // SAFETY: the wait and any signal callbacks have finished.
     let ctx = unsafe { &mut *context };
@@ -214,7 +199,35 @@ pub(in crate::dynamic) unsafe fn accept(receiver: Id, context: *mut Context) -> 
     Ok(result)
 }
 
-/// The requesting thread retains the native socket across the wait and any signal callbacks.
+/// Park for each poll and read, resolving the descriptor again after callbacks.
+///
+/// # Safety
+/// The registered caller roots the socket and owns the context through signal dispatch.
+unsafe fn registered_read<T: Send>(
+    receiver: Id,
+    context: *mut Context,
+    mut read: impl FnMut(std::os::fd::RawFd) -> std::io::Result<T> + Send,
+) -> Result<T> {
+    use crate::dynamic::value::ParkedExecution;
+
+    native::read_socket(
+        // SAFETY: the caller roots the receiver. Resolve it only while this execution is active.
+        || native::read_state(registered_socket(unsafe { &*context }, receiver)),
+        &mut (),
+        // SAFETY: each native wait has returned to the interrupted execution before delivery.
+        |()| unsafe { Context::dispatch_pending_signals(context) },
+        // SAFETY: only the fd and its original deadline enter the native poll.
+        |(), fd, deadline| unsafe {
+            ParkedExecution::wait(context, || {
+                native::poll_interruptible(fd, libc::POLLIN, Some(deadline))
+            })
+        },
+        // SAFETY: the read uses the fd and its native operands while the caller is parked.
+        |(), fd| unsafe { ParkedExecution::wait(context, || read(fd)) },
+    )
+}
+
+/// The requesting frame roots the socket across the wait and any signal callbacks.
 pub(in crate::dynamic) struct Recv {
     receiver: Id,
     size: usize,
@@ -225,11 +238,9 @@ impl Recv {
     /// # Safety
     /// The registered caller owns the context on this thread through signal dispatch and return.
     pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        // SAFETY: the registered caller roots its receiver through this operation.
-        let socket = registered_socket(unsafe { &*context }, self.receiver).clone();
-        let bytes = native::recv_with_signals(&socket, self.size, self.flags, || {
-            // SAFETY: only the interrupted thread reenters Python after the syscall returns.
-            unsafe { Context::dispatch_pending_signals(context) }
+        let bytes = native::recv_bytes(self.size, self.flags, |read| {
+            // SAFETY: the registered frame roots the receiver. The read owns its private buffer.
+            unsafe { registered_read(self.receiver, context, read) }
         })?;
         // SAFETY: the native wait and its signal callbacks have returned.
         Ok(unsafe { (&mut *context).alloc(Value::Bytes(bytes)) })
@@ -2028,7 +2039,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prepared_receive_keeps_its_frame_operand() {
+    fn prepared_receive_parks_with_its_rooted_frame_operand() {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
         fn require_send(_: &impl Send) {}
 
         let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
@@ -2047,18 +2064,45 @@ mod tests {
         let recv = ctx.lookup_attr(reader, "recv").unwrap();
         let size = ctx.int(1);
         let original = owners(&ctx);
-        let call = ctx
-            .prepare_call(recv, vec![size].into(), Vec::new())
-            .unwrap();
-        require_send(&call);
-        assert_eq!(owners(&ctx), original);
-
-        assert!(matches!(
-            native::send(ctx.heap.get(writer).socket_handle().unwrap(), b"x", 0),
-            Ok(1)
-        ));
-        // SAFETY: the original context and its rooted socket pair own this prepared call.
-        let result = unsafe { call.run(&raw mut ctx) }.unwrap();
-        assert!(matches!(ctx.heap.get(result), Value::Bytes(bytes) if bytes.as_slice() == b"x"));
+        let fd = native::detach(registered_socket(&ctx, writer))
+            .ok()
+            .expect("detach socketpair peer");
+        // SAFETY: detach transferred sole ownership of this end of the socket pair.
+        let mut writer = unsafe { std::fs::File::from_raw_fd(fd) };
+        let parked = Arc::new(AtomicUsize::new(0));
+        ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+        let mut depths = Vec::new();
+        // A blocking socket waits inside recv. A socket with a timeout first waits in poll.
+        for timeout in [None, Some(Duration::from_secs(5))] {
+            assert!(native::set_timeout(registered_socket(&ctx, reader), timeout).is_ok());
+            let call = ctx
+                .prepare_call(recv, vec![size].into(), Vec::new())
+                .unwrap();
+            require_send(&call);
+            assert_eq!(owners(&ctx), original);
+            let result = std::thread::scope(|scope| {
+                let peer = scope.spawn(|| {
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    let depth = loop {
+                        let depth = parked.load(Ordering::Acquire);
+                        if depth != 0 || Instant::now() >= deadline {
+                            break depth;
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    };
+                    writer.write_all(b"x").unwrap();
+                    depth
+                });
+                // SAFETY: the registered caller roots the socket through its native wait.
+                let result = unsafe { call.run(&raw mut ctx) }.unwrap();
+                depths.push(peer.join().unwrap());
+                result
+            });
+            assert_eq!(parked.load(Ordering::Acquire), 0);
+            assert!(
+                matches!(ctx.heap.get(result), Value::Bytes(bytes) if bytes.as_slice() == b"x")
+            );
+        }
+        assert_eq!(depths, [1, 1], "blocking recv and timed poll");
     }
 }

@@ -2034,14 +2034,16 @@ pub unsafe extern "C" fn imre_socket_recv(s: &Object, size: usize, flags: usize)
 pub(crate) use crate::zeroed_io_buffer as zeroed_receive_buffer;
 
 pub(crate) fn recv(s: &Object, size: usize, flags: i32) -> Result<Vec<u8>> {
-    recv_with_signals(s, size, flags, super::stdlib::check_interrupt)
+    recv_bytes(size, flags, |read| {
+        local_read(s, super::stdlib::check_interrupt, read)
+    })
 }
 
-pub(crate) fn recv_with_signals<E: From<Error>>(
-    s: &Object,
+/// Own the buffer across attempts and expose only the bytes initialized by a successful recv.
+pub(crate) fn recv_bytes<E: From<Error>>(
     size: usize,
     flags: i32,
-    check_signals: impl FnMut() -> std::result::Result<(), E>,
+    read: impl FnOnce(&mut (dyn FnMut(RawFd) -> io::Result<()> + Send)) -> std::result::Result<(), E>,
 ) -> std::result::Result<Vec<u8>, E> {
     let mut bytes = Vec::<u8>::new();
     if size != 0 {
@@ -2053,17 +2055,15 @@ pub(crate) fn recv_with_signals<E: From<Error>>(
                 .try_reserve_exact(size)
                 .map_err(|_| Error::allocation())?;
         }
-        let received = local_read(s, check_signals, |raw| {
+        read(&mut |raw| {
             // SAFETY: this private allocation has at least size writable bytes.
-            unsafe { receive_once(raw, bytes.as_mut_ptr(), size, flags) }
+            let received = unsafe { receive_once(raw, bytes.as_mut_ptr(), size, flags) }?;
+            // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC selected
+            // initialized storage. A reported packet length can exceed size.
+            unsafe { bytes.set_len(received.min(size)) };
+            Ok(())
         })?;
-        let n = received.min(size);
-        // SAFETY: the kernel initialized the returned prefix or MSG_TRUNC
-        // selected initialized storage. A reported packet length can exceed size.
-        unsafe {
-            bytes.set_len(n);
-        }
-        if n < size / 2 {
+        if bytes.len() < size / 2 {
             crate::compact_bytes(&mut bytes);
         }
     }
