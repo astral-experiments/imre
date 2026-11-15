@@ -686,12 +686,12 @@ enum ImportSource<'s, 'p> {
 fn read_import_source<'s, 'p>(
     source: &'s str,
     kind: SourceKind,
-    existing: Option<&'p ruff_python_parser::Parsed<ast::ModModule>>,
+    existing: impl FnOnce(&str) -> Option<&'p ruff_python_parser::Parsed<ast::ModModule>>,
 ) -> Result<ImportSource<'s, 'p>, String> {
     let normalized = crate::normalize_source(source, kind)?;
     let input = imre_ast::indentation::prepare(&normalized);
     crate::analysis::check_source_complexity(&input.text).map_err(str::to_owned)?;
-    let parsed = match existing {
+    let parsed = match existing(&input.text) {
         Some(parsed) => Ok(Cow::Borrowed(parsed)),
         None => ruff_python_parser::parse_module(&input.text).map(Cow::Owned),
     };
@@ -722,7 +722,7 @@ fn scan_imports(
     file_alternative: Option<(&Path, bool)>,
     shipped: bool,
 ) -> Result<(Imports, Option<ScannedModule>), String> {
-    let module = match read_import_source(source, kind, existing)? {
+    let module = match read_import_source(source, kind, |_| existing)? {
         ImportSource::Module(module) => module,
         ImportSource::Invalid(error) => return Ok((Imports::invalid(error), None)),
     };
@@ -831,7 +831,7 @@ fn retained_imports<'a, 'p>(
 fn scan_imports_for_preparation<'s, 'p>(
     source: &'s str,
     kind: SourceKind,
-    existing: Option<&'p ruff_python_parser::Parsed<ast::ModModule>>,
+    existing: impl FnOnce(&str) -> Option<&'p ruff_python_parser::Parsed<ast::ModModule>>,
     getter: Option<&mut Imports>,
     prepared_text: Option<&str>,
 ) -> Result<(Imports, Option<emit::ParsedInput<'s, 'p>>), String> {
@@ -1148,7 +1148,7 @@ pub(crate) fn compile(
             module_source::into_body(module.parsed).into_owned(),
         )?
     } else {
-        let module = match read_import_source(&src, kind, None) {
+        let module = match read_import_source(&src, kind, |_| None) {
             Ok(ImportSource::Module(module)) => module,
             _ => return Ok(None),
         };
@@ -1456,7 +1456,7 @@ pub(crate) fn compile(
             return Ok(imports);
         }
         let (imports, scanned) =
-            scan_imports_for_preparation(source, kind, existing, getter, Some(source))?;
+            scan_imports_for_preparation(source, kind, |_| existing, getter, Some(source))?;
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
@@ -1969,7 +1969,7 @@ pub(crate) fn compile(
                                 && let Ok((mut imports, scanned)) = scan_imports_for_preparation(
                                     &member.source,
                                     SourceKind::DecodedFile,
-                                    None,
+                                    |_| None,
                                     None,
                                     None,
                                 )
@@ -2229,14 +2229,16 @@ pub(crate) fn compile(
                             |(imports, input)| (imports, input.and_then(ScannedModule::from_input)),
                         )
                     } else if winner && alternative.is_none() && !file_alternate {
-                        if checked.is_none() && kind == SourceKind::DiskFile {
-                            declaration = checked_graph
-                                .and_then(|graph| graph.session.declaration_parser(&path, &src));
-                        }
-                        scan_imports_for_preparation(&src, kind, declaration.as_deref(), None, None)
-                            .map(|(imports, input)| {
-                                (imports, input.and_then(ScannedModule::from_input))
-                            })
+                        let session = checked_graph
+                            .filter(|_| checked.is_none() && kind == SourceKind::DiskFile);
+                        let slot = &mut declaration;
+                        let select = |input: &str| {
+                            let slot = slot;
+                            Some(&**slot.insert(session?.session.declaration_parser(&path, input)?))
+                        };
+                        scan_imports_for_preparation(&src, kind, select, None, None).map(
+                            |(imports, input)| (imports, input.and_then(ScannedModule::from_input)),
+                        )
                     } else {
                         let parser_kind = if file_alternate {
                             SourceKind::DecodedFile
@@ -2391,7 +2393,7 @@ pub(crate) fn compile(
                         scan_imports_for_preparation(
                             &source,
                             SourceKind::DecodedFile,
-                            None,
+                            |_| None,
                             None,
                             None,
                         )
@@ -3203,7 +3205,7 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     let (imports, module) = scan_imports_for_preparation(
         crlf,
         SourceKind::File,
-        None,
+        |_| None,
         Some(&mut getter),
         Some(&normalized),
     )
@@ -3223,7 +3225,7 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     assert_eq!(&normalized[ret.range()], "return fractions");
 
     let (_, module) =
-        scan_imports_for_preparation(crlf, SourceKind::File, None, None, Some(crlf)).unwrap();
+        scan_imports_for_preparation(crlf, SourceKind::File, |_| None, None, Some(crlf)).unwrap();
     assert!(module.is_none());
 }
 

@@ -44,7 +44,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             let (imports, input) = scan_imports_for_preparation(
                 source,
                 SourceKind::File,
-                checked.as_deref().filter(|_| !source.contains('\r')),
+                |_| checked.as_deref().filter(|_| !source.contains('\r')),
                 None,
                 Some(source),
             )
