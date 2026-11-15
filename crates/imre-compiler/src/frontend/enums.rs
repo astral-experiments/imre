@@ -31,7 +31,7 @@ impl Checker<'_> {
         }
         // A finally suite also receives pending returns, breaks and exceptions.
         // ty's ordinary fallthrough narrowing does not cover all those entries.
-        if self.finally_scope == FinallyScope::Cleanup {
+        if self.in_finally {
             return Err(error(
                 self.source,
                 call,
@@ -983,13 +983,18 @@ mod tests {
                 "{err}"
             );
         }
-        let body = "def f(v: State) -> None:\n    try:\n        if v == State.OPEN:\n            return\n    finally:\n        if v == State.CLOSED:\n            return\n        exhausted(v)\n";
+        let body = "def f(v: State) -> None:\n    try:\n        if v == State.OPEN:\n            return\n    finally:\n        if v == State.CLOSED:\n            return\n";
         let two_members = "from enum import StrEnum\nclass State(StrEnum):\n    OPEN = 'open'\n    CLOSED = 'closed'\n";
-        let err = crate::check(&format!("{imported}{two_members}{body}")).unwrap_err();
-        assert!(
-            err.contains("assert_never inside finally is unsupported"),
-            "{err}"
-        );
+        for cleanup in [
+            "        exhausted(v)\n",
+            "        try:\n            exhausted(v)\n        except LookupError:\n            pass\n",
+        ] {
+            let err = crate::check(&format!("{imported}{two_members}{body}{cleanup}")).unwrap_err();
+            assert!(
+                err.contains("assert_never inside finally is unsupported"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
