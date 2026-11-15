@@ -1320,6 +1320,13 @@ fn initializer_calls_use_original_bindings_and_all_arguments() {
         "{error}"
     );
     assert!(check(&format!("{copied}take('x')\n"), "").is_none());
+    let alias = "from scores import take\noriginal = take\nflag = True\n";
+    let error = check(&format!("{alias}original(value=flag)\n"), number).unwrap();
+    assert!(
+        error.contains("main.py:4:16: Imre: expected int, got bool"),
+        "{error}"
+    );
+    assert!(check(&format!("{alias}if False: original(value=flag)\n"), number).is_none());
     let read = "def consume():\n    exec(input('source: '))\n";
     let imported = "from scores import consume\n";
     let error = check(&format!("{imported}consume()\n"), read).unwrap();

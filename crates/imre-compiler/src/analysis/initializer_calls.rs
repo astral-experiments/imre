@@ -671,6 +671,9 @@ impl Session {
             return None;
         }
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
+        let reached = std::cell::LazyCell::new(|| {
+            self.unconditional_module_operand(module, site.guard_start, call.range())
+        });
         let supplied = bound.supplied.iter().zip(actuals.iter().copied());
         // Fixed lowering already checks an incomplete call in operand order. Leave its
         // earlier diagnostics in place before reporting that call on a registered entry.
@@ -682,7 +685,10 @@ impl Session {
         for ((p, value), actual) in supplied.clone() {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
-                && let Some(error) = Session::scalar_contract_error(model, expected, value, actual)
+                && let Some(error) =
+                    Session::scalar_contract_error(model, expected, value, actual, || {
+                        bound.missing.is_none() && *reached
+                    })
             {
                 return Some(Err(error.classified(kind).with_path(path)));
             }
@@ -725,7 +731,7 @@ impl Session {
                     && returned == Some(operand)
                     && !value.is_unknown()
                     && !super::OperandTypes::accepts_type(&owner_model, value, expected)
-                    && self.unconditional_module_operand(module, site.guard_start, call.range())
+                    && *reached
                 {
                     return Some(Err(report.clone()));
                 }
@@ -735,11 +741,7 @@ impl Session {
             }
             return Some(Ok(value));
         }
-        if !iterated
-            && !function.is_async
-            && !generator()?
-            && self.unconditional_module_operand(module, site.guard_start, call.range())
-        {
+        if !iterated && !function.is_async && !generator()? && *reached {
             site.entered_function
                 .set(Some((owner_module, function.range())));
         }
@@ -816,24 +818,37 @@ impl Session {
             .then_some(def)
     }
 
+    /// A selected call can check an evaluated scalar against its written parameter.
+    /// Dormant source and widened annotations retain the semantic checker's assignability.
     pub(super) fn scalar_contract_error<'db>(
         model: &SemanticModel<'db>,
         expected: Type<'db>,
         operand: &impl Ranged,
         actual: Type<'db>,
+        evaluated: impl FnOnce() -> bool,
     ) -> Option<Diagnostic> {
         let db = model.db();
         let env = model.program_environment();
-        if !concrete_scalar(db, &env, expected) || actual.is_assignable_to(db, &env, expected) {
+        if !concrete_scalar(db, &env, expected) {
             return None;
         }
-        let actual = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable)
-            .map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
-        let message = format!(
-            "expected {}, got {actual}; annotations are enforced contracts",
-            expected.display(db, &env)
-        );
+        let layout = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable);
+        let expected = if actual.is_assignable_to(db, &env, expected) {
+            let parameter = Self::scalar_layout(db, &env, expected, ScalarMatch::Exact)?;
+            if layout? == parameter || !evaluated() {
+                return None;
+            }
+            parameter.to_string()
+        } else {
+            expected.display(db, &env).to_string()
+        };
+        let actual = layout.map_or_else(|| actual.display(db, &env).to_string(), |t| t.to_string());
         let text = ruff_db::source::source_text(db, model.file());
-        Some(Diagnostic::at(text.as_str(), operand, message))
+        Some(Diagnostic::exact_type(
+            text.as_str(),
+            operand,
+            expected,
+            actual,
+        ))
     }
 }
