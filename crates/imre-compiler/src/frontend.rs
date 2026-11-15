@@ -776,6 +776,19 @@ pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
         && function.parameters.kwarg.is_none()
 }
 
+/// The fixed frame can retain the bundled or still-bound imported definition.
+fn fixed_frame_provider(
+    graph: &SourceGraph,
+    owner: DefinitionId,
+    function: &ast::StmtFunctionDef,
+) -> bool {
+    let module = &graph.modules[owner.module];
+    module.bundled
+        || owner.module != graph.entry
+            && module.is_program_source()
+            && module.bindings.get(function.name.as_str()) == Some(&Binding::Definition(owner))
+}
+
 /// A newly reachable key formatter changes the method table. Return no program until it is included.
 fn lower_graph(
     graph: &SourceGraph,
@@ -1497,21 +1510,29 @@ fn lower_graph(
                 && signature.physical_frame;
         let source_function = cache.is_none() && signature.method.is_none();
         let physical_function = source_function && signature.physical_frame;
+        // A later entry refusal can still place the provider's original definition.
+        let provider_frame = !needs_registered_entry
+            && source_function
+            && matches!(source, Cow::Borrowed(_))
+            && fixed_frame_entry(definition)
+            && fixed_frame_provider(graph, callable_definitions[signature.id], definition);
+        let collect_sites = prepare_sites || provider_frame;
         let prepared = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
             use std::collections::hash_map::Entry;
             let Entry::Occupied(mut entry) = prepared.entry(signature.id) else {
                 return None;
             };
             match entry.get_mut() {
-                PreparedBody::Fixed((body, _)) if prepare_sites || body.source.is_none() => {}
+                PreparedBody::Fixed((body, _)) if collect_sites || body.source.is_none() => {}
                 PreparedBody::Fixed((body, _))
-                    if signature.method.is_some()
-                        && graph.session.function_uses_fixed_names(
-                            *module_id,
-                            definition,
-                            false,
-                            |_| false,
-                        ) =>
+                    if !signature.physical_frame
+                        || signature.method.is_some()
+                            && graph.session.function_uses_fixed_names(
+                                *module_id,
+                                definition,
+                                false,
+                                |_| false,
+                            ) =>
                 {
                     // Keep the instructions in the ordinary fixed method's layout.
                     body.source = None;
@@ -1526,18 +1547,7 @@ fn lower_graph(
             Some(PreparedBody::Attributes(inputs)) => (None, Some(inputs)),
             _ => (None, None),
         };
-        // A later entry refusal can still place the provider's original definition.
-        let provider_frame = !needs_registered_entry
-            && cache.is_none()
-            && signature.method.is_none()
-            && matches!(source, Cow::Borrowed(_))
-            && (module.bundled
-                || *module_id != graph.entry
-                    && module.is_program_source()
-                    && module.bindings.get(definition.name.as_str())
-                        == Some(&Binding::Definition(callable_definitions[signature.id])))
-            && fixed_frame_entry(definition);
-        checker.fixed_sites = ((prepare_sites || provider_frame) && inferred.is_none())
+        checker.fixed_sites = (collect_sites && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method || live));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         checker.python_method_frame =
