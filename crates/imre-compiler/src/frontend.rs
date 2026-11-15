@@ -15600,7 +15600,11 @@ impl<'a> Checker<'a> {
             && !self.names.contains_key(name.id.as_str())
             && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
             && call.start() == name.start()
-            && self.source.get(name.range().to_std_range()) == Some(name.id.as_str())
+            && self
+                .graph
+                .session
+                .operand_types(self.module)
+                .is_original_operand(&call.func)
         {
             sites.positional_call(call, value, || {
                 Some(registered::values::located(
