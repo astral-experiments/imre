@@ -830,10 +830,7 @@ impl Checker<'_> {
                     .iteration_input(expression, None, None)
                     .map(ExpansionSource::Iteration);
             }
-            if let ast::Expr::Attribute(attribute) = &*call.func
-                && attribute.attr.as_str() == "items"
-                && self.class_reference(&attribute.value).is_none()
-            {
+            if let Some(method) = self.items_method(call) {
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
@@ -842,41 +839,73 @@ impl Checker<'_> {
                     }
                     _ => None,
                 });
-                let iterable = self.boolean_operand(&attribute.value, hint)?;
-                if iterable.ty == Type::PythonObject {
-                    return self
-                        .call_on(call, Some(iterable))
-                        .map(ExpansionSource::Value);
-                }
-                if let Type::Class(class) = iterable.ty {
-                    let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
-                    return Ok(ExpansionSource::Value(iterable));
-                }
-                let iterable = if matches!(iterable.ty, Type::Document(_)) {
-                    self.document_map(iterable)
-                } else {
-                    iterable
-                };
-                if self.types.mapping(iterable.ty).is_none() {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "items() requires a concrete dictionary",
-                    ));
-                }
-                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
-                    return Err(error(self.source, call, "dict.items() takes no arguments"));
-                }
-                return Ok(ExpansionSource::Iteration(Iteration::Container {
-                    iterable,
-                    items: true,
-                    start: None,
-                }));
+                let receiver = self.boolean_operand(&method.value, hint)?;
+                return self.items_source(call, method, receiver)?.ok_or_else(|| {
+                    error(self.source, call, "items() requires a concrete dictionary")
+                });
             }
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
         self.iteration_expression(expression, hint)
             .map(ExpansionSource::Value)
+    }
+
+    fn items_method<'a>(&self, call: &'a ast::ExprCall) -> Option<&'a ast::ExprAttribute> {
+        let method = call.func.as_attribute_expr()?;
+        (method.attr.as_str() == "items" && self.class_reference(&method.value).is_none())
+            .then_some(method)
+    }
+
+    /// A mapping supplies its key/value cursor directly. An override returns an ordinary
+    /// value, which belongs to its consumer (including the mapping form of dict(value)).
+    fn items_source(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<Option<ExpansionSource>, String> {
+        let source = if receiver.ty == Type::PythonObject
+            || (receiver.ty == Type::JsonObject && call.arguments.is_empty())
+        {
+            ExpansionSource::Value(self.call_object_method(call, method, receiver)?)
+        } else if let Type::Class(class) = receiver.ty {
+            ExpansionSource::Value(self.iteration_method_call(call, method, class, receiver)?)
+        } else if self.dict_or_record(receiver.ty).is_some() {
+            ExpansionSource::Iteration(Iteration::Prepared(
+                self.dict_or_record_items(receiver, method, call)?,
+            ))
+        } else {
+            let iterable = if matches!(receiver.ty, Type::Document(_)) {
+                self.document_map(receiver)
+            } else {
+                receiver
+            };
+            if self.types.mapping(iterable.ty).is_none() {
+                return Ok(None);
+            }
+            if !call.arguments.is_empty() {
+                return Err(error(self.source, call, "dict.items() takes no arguments"));
+            }
+            ExpansionSource::Iteration(Iteration::Container {
+                iterable,
+                items: true,
+                start: None,
+            })
+        };
+        Ok(Some(source))
+    }
+
+    pub(super) fn iteration_source(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
+        if let ast::Expr::Call(call) = expression
+            && let Some(method) = self.items_method(call)
+        {
+            let receiver = self.expr(&method.value)?;
+            if let Some(source) = self.items_source(call, method, receiver)? {
+                return source.into_iteration(self, expression);
+            }
+        }
+        let value = self.iteration_expression(expression, None)?;
+        self.iteration_value(self.json_iteration(value), false, expression)
     }
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the
