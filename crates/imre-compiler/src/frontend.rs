@@ -14633,7 +14633,20 @@ impl<'a> Checker<'a> {
                         }
                         self.coerce(value, element, arg)?
                     } else {
-                        self.expr_expected_from(arg, element, declaration)?
+                        match self.expr_expected_from(arg, element, declaration) {
+                            Err(Failure::Diagnostic(report))
+                                if let Some(owner) = declaration
+                                    && owner.module == self.module
+                                    && report.operand_declaration() == Some(owner)
+                                    && report.exact_operand() == Some(arg.range())
+                                    && self.graph.session.unreachable_range(self.module, call.range()) == Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional) =>
+                            {
+                                // No fixed store can run. The caller still checks its remaining
+                                // operands with append's ordinary None result.
+                                return Ok(Expr::none());
+                            }
+                            result => result?,
+                        }
                     };
                     args.push(value);
                     (append, Type::None)
@@ -16020,6 +16033,36 @@ mod tests {
             let error = super::lower(&graph).err().expect("invalid fixed open");
             assert!(error.contains(expected), "{source}: {error}");
         }
+    }
+
+    #[test]
+    fn an_untaken_append_still_checks_the_next_call_argument() {
+        let source = "def take(value: int) -> int: return value\nvalues: list[int] = [3]\nif False:\n    print(values.append(True), take('wrong'))\n";
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+            panic!("expected the independent call diagnostic");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains(":4:37: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_untaken_append_still_checks_the_argument_itself() {
+        let source = "values: list[int] = [3]\nif False:\n    values.append(1 << 'wrong')\n";
+        let mut graph = crate::modules::SourceGraph::single(source).unwrap();
+        let Err(error) = super::lower_with_caller_cache(&mut graph, None, None) else {
+            panic!("expected the bit shift's independent operand diagnostic");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains(":3:19: Imre: expected int, got str"),
+            "{error}"
+        );
     }
 
     #[test]
