@@ -505,6 +505,7 @@ print(down(2))",
     let mut graph = modules::SourceGraph::load(&path, None, &[]).unwrap();
     graph.registered_startup = true;
     checked_lower(&mut graph).unwrap();
+    let source = &graph.modules[graph.entry].source;
     let start = ruff_text_size::TextSize::try_from(source.find("def invoke").unwrap()).unwrap();
     let functions = graph.registered_functions();
     let closure = &functions[&graph.entry][&start];

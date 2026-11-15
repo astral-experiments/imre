@@ -43,7 +43,11 @@ mod tests {
         )
         .unwrap();
         let mut graph = SourceGraph::load(&entry, None, &[]).unwrap();
-        let owner = graph.modules.iter().position(|m| m.path == helper).unwrap();
+        let owner = graph
+            .modules
+            .iter()
+            .position(|m| m.name == "helper")
+            .unwrap();
         crate::checked_lower(&mut graph).unwrap();
         assert!(!graph.registered_functions().contains_key(&owner));
         let (functions, _) = graph.take_registered_functions();
@@ -222,7 +226,7 @@ mod tests {
             })]
         ));
         let site = *caller.fixed_sites.last().unwrap();
-        assert_eq!(&text[site], "run()");
+        assert_eq!(&graph.modules[graph.entry].source[site], "run()");
         assert!(matches!(
             caller.fixed_attribute(site),
             Some(FixedAttribute::Call(Some(_), _))
@@ -771,10 +775,15 @@ mod tests {
         let (_, lowered) =
             caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
         assert_eq!(lowered.iter().filter(|name| *name == "call").count(), 1);
-        let start = TextSize::try_from(text.find("def call(").unwrap()).unwrap();
+        let source = &graph.modules[graph.entry].source;
+        let start = TextSize::try_from(source.find("def call(").unwrap()).unwrap();
         let functions = graph.registered_functions();
         let body = &functions[&graph.entry][&start];
-        let sites: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
+        let sites: Vec<_> = body
+            .fixed_sites
+            .iter()
+            .map(|range| &source[*range])
+            .collect();
         assert_eq!(sites, ["return fn(value)", "fn(value)", "fn", "value"]);
     }
 
