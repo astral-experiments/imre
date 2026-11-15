@@ -1759,7 +1759,7 @@ pub(crate) enum NamespaceImport {
     From {
         module: String,
         level: u32,
-        names: Vec<(String, String)>,
+        names: Vec<(String, Option<String>)>,
     },
 }
 
