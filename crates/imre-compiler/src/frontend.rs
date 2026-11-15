@@ -6978,7 +6978,7 @@ impl<'a> Checker<'a> {
             // Fixed layouts can erase Python stores (for example, a local += becomes +).
             // Keep every operation in this frame explicit until it has an object-ABI lowering.
             let supported = match statement {
-                ast::Stmt::AnnAssign(assign) => assign.target.is_name_expr(),
+                ast::Stmt::AnnAssign(_) => true,
                 ast::Stmt::Assign(assign) => {
                     assign.targets.iter().all(ast::Expr::is_name_expr)
                         || matches!(
@@ -7220,10 +7220,22 @@ impl<'a> Checker<'a> {
                 self.define_local_class(class)?;
                 None
             }
-            ast::Stmt::AnnAssign(assign) => {
-                let ast::Expr::Name(name) = &*assign.target else {
-                    return Err(error(self.source, statement, "only names may be annotated"));
-                };
+            ast::Stmt::AnnAssign(assign) if !imre_ast::annotation_visits_target(assign) => None,
+            ast::Stmt::AnnAssign(assign)
+                if let Some(operands) =
+                    registered::values::bare_target_operands(&assign.target) =>
+            {
+                let mut body = Vec::new();
+                for operand in operands {
+                    let (effect, continues) = statements::StatementLowering::effect(self, operand)?;
+                    body.extend(effect);
+                    if !continues {
+                        return Ok((body, false));
+                    }
+                }
+                return Ok((body, true));
+            }
+            ast::Stmt::AnnAssign(assign) if let ast::Expr::Name(name) = &*assign.target => {
                 let document = documents::annotation(self.graph, self.module, &assign.annotation);
                 let ty = if document == Some(documents::ANY) {
                     Type::ObjectValue

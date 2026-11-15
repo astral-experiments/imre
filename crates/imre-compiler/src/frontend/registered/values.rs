@@ -936,7 +936,7 @@ pub(in crate::frontend) fn slice_bounds(slice: &ast::ExprSlice) -> [Option<&ast:
 
 /// A bare annotated target evaluates its receiver and key expressions without accessing
 /// the final attribute or item. Each slice bound remains an ordinary expression.
-pub(super) fn bare_target_operands(target: &ast::Expr) -> Option<Vec<&ast::Expr>> {
+pub(in crate::frontend) fn bare_target_operands(target: &ast::Expr) -> Option<Vec<&ast::Expr>> {
     fn key_operands<'a>(key: &'a ast::Expr, inputs: &mut Vec<&'a ast::Expr>) {
         match key {
             ast::Expr::Tuple(tuple) => {

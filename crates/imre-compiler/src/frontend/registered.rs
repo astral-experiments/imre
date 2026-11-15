@@ -3162,11 +3162,12 @@ impl statements::StatementLowering for SourceScope<'_> {
 
     fn assignment(
         &mut self,
-        assign: &ast::StmtAssign,
+        targets: &[ast::Expr],
+        rhs: &ast::Expr,
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
-        let value = self.frame_value(&assign.value).ok_or(())?;
-        unpacking::bind_assignment(self, &assign.targets, value, body)?;
+        let value = self.frame_value(rhs).ok_or(())?;
+        unpacking::bind_assignment(self, targets, value, body)?;
         Ok(true)
     }
 
