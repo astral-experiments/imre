@@ -2049,7 +2049,8 @@ fn lower_graph(
     entry.body.splice(..0, startup);
     let source_frames = if track_frames {
         python_frames
-            .into_iter()
+            .iter()
+            .copied()
             .zip(owners.iter().copied().chain([graph.entry]))
             .map(|(frame, module)| {
                 frame.then(|| {
@@ -2074,6 +2075,7 @@ fn lower_graph(
         .extend_layouts(&mut classes.fields);
     let mut globals = globals.into_types();
     types.reserve_constructor_globals(&mut globals, &callable_targets.constructors);
+    callable_targets.keep_source_frames(python_frames);
     let lowered = (
         ir::Module {
             builtin_module_sources: None,
