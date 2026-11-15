@@ -561,7 +561,7 @@ pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::Regist
         return Ok(super::calls::RegisteredCall::Returned(NONE));
     };
     let shutdown = ctx.lookup_attr(module, "_shutdown")?;
-    ctx.prepare_call(shutdown, Vec::new(), Vec::new())
+    ctx.prepare_call(shutdown, Vec::new().into(), Vec::new())
 }
 
 /// Wait for the non-daemon workers of the registered caller.

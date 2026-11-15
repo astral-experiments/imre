@@ -310,6 +310,14 @@ fn copy_label(value: &str) -> Result<String> {
     Ok(copied)
 }
 
+/// Move an owned argument array or copy the caller’s slots when they must escape.
+fn owned_ids(values: Cow<'_, [Id]>) -> Result<Vec<Id>> {
+    match values {
+        Cow::Owned(values) => Ok(values),
+        Cow::Borrowed(values) => copy_ids(values),
+    }
+}
+
 /// Copy IDs or dictionary entry pairs while preserving a catchable allocation failure.
 fn copy_ids<T: Copy>(values: &[T]) -> Result<Vec<T>> {
     let mut copied = Vec::new();

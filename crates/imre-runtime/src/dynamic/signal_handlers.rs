@@ -117,7 +117,7 @@ impl Context {
     fn prepare_signal_handler(&mut self, number: i32, handler: Id) -> Result<RegisteredCall> {
         let number = self.int(i64::from(number));
         let frame = self.active_frame(0)?.map_or(NONE, |(_, frame)| frame);
-        self.prepare_call(handler, vec![number, frame], vec![])
+        self.prepare_call(handler, vec![number, frame].into(), vec![])
     }
 
     pub(super) fn signal_call(

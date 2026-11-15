@@ -2550,7 +2550,7 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
             |ctx| {
                 let arguments = ctx.items(args)?;
                 if kwargs == NONE {
-                    ctx.prepare_call_in_scope(scope, callable, arguments, Vec::new())
+                    ctx.prepare_call_in_scope(scope, callable, arguments.into(), Vec::new())
                 } else {
                     ctx.prepare_call_with_keyword_dict(scope, callable, arguments, kwargs)
                 }
@@ -2773,8 +2773,8 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
             mark,
             callable,
             |ctx| {
-                let args = copy_ids(live_handles(values, count))?;
-                ctx.prepare_call_in_scope(scope, callable, args, Vec::new())
+                let args = live_handles(values, count);
+                ctx.prepare_call_in_scope(scope, callable, args.into(), Vec::new())
             },
             Context::finish_call_operands,
         )
@@ -2815,7 +2815,7 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
                     kwargs.push((copy_label(name)?, value));
                     names = names.add(name.len() + 1);
                 }
-                ctx.prepare_call_in_scope(scope, callable, args, kwargs)
+                ctx.prepare_call_in_scope(scope, callable, args.into(), kwargs)
             },
             Context::finish_call_operands,
         )
