@@ -2877,6 +2877,7 @@ pub(crate) enum StrDescriptor {
     SwapCase,
     IsNumeric,
     Capitalize,
+    IsDecimal,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
@@ -2891,6 +2892,7 @@ impl StrDescriptor {
             "isalnum" => Self::IsAlnum,
             "isascii" => Self::IsAscii,
             "isalpha" => Self::IsAlpha,
+            "isdecimal" => Self::IsDecimal,
             "isdigit" => Self::IsDigit,
             "isnumeric" => Self::IsNumeric,
             "istitle" => Self::IsTitle,
@@ -2905,6 +2907,7 @@ impl StrDescriptor {
             Self::IsAlnum
                 | Self::IsAscii
                 | Self::IsAlpha
+                | Self::IsDecimal
                 | Self::IsDigit
                 | Self::IsNumeric
                 | Self::IsLower
@@ -2923,6 +2926,7 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
             Self::IsAscii => "isascii",
             Self::IsAlpha => "isalpha",
+            Self::IsDecimal => "isdecimal",
             Self::IsDigit => "isdigit",
             Self::IsNumeric => "isnumeric",
             Self::IsTitle => "istitle",
@@ -3027,6 +3031,7 @@ pub(crate) enum TextPredicate {
     Alnum,
     Ascii,
     Alpha,
+    Decimal,
     Digit,
     Numeric,
     Space,

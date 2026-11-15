@@ -13971,6 +13971,7 @@ impl<'a> Checker<'a> {
                     | "isalnum"
                     | "isascii"
                     | "isalpha"
+                    | "isdecimal"
                     | "isdigit"
                     | "isnumeric"
                     | "isspace"
