@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 155 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 157 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -53,6 +53,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `fcntl` | Yes | No API example recorded. | — | — | — |
 | `fnmatch` | Yes | `fnmatch`, `fnmatchcase`, `filter`, `filterfalse` and `translate`. [Evidence](../benchmarks/cpython_stdlib/full/fnmatch/README.md) | [24 / 24](../benchmarks/cpython_stdlib/full/fnmatch/) | 0 | 0 |
 | `fractions` | Yes | No API example recorded. | — | — | — |
+| `ftplib` | Yes | No API example recorded. | — | — | — |
 | `functools` | Yes | Selected `partial`, caching decorators and dispatch operations. [Evidence](../benchmarks/cpython_stdlib/full/functools/EVIDENCE.md) | [0 / 329](../benchmarks/cpython_stdlib/full/functools/) | 18 | 17 |
 | `gc` | Yes | `collect()` and `collect(2)` reclaim unreachable native cycles and dispatch weak-reference callbacks. [Evidence](../tests/fixtures/boxed_gc_collect.py) | — | — | — |
 | `genericpath` | Yes | The genericpath companion suite is counted under `os`. [Evidence](../benchmarks/cpython_stdlib/full/os/README.md) | — | — | — |
@@ -62,7 +63,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `grp` | Yes | No API example recorded. | — | — | — |
 | `gzip` | Yes | Read text lines and binary chunks from gzip files. [Evidence](../tests/fixtures/files/stream_reads.py) | — | — | — |
 | `hashlib` | Yes | SHAKE-128 and SHAKE-256 extendable-output digests. MD5, SHA-1, SHA-2 and SHA-3 (224, 256, 384 and 512) construction, incremental updates, copy, digest and hexdigest. [BLAKE2b and BLAKE2s](../tests/fixtures/bytes/hashlib_blake2.py) support keyed hashing, configurable digest sizes and tree parameters. [Evidence](../benchmarks/cpython_stdlib/full/hashlib/README.md) | [0 / 82](../benchmarks/cpython_stdlib/full/hashlib/) | 2 | 0 |
-| `heapq` | Rejected | Runtime-imported min and max heaps and stable top-N selection by key. [Evidence](../tests/fixtures/boxed_heapq.py) | [— / 69 (0 assessed)](../benchmarks/cpython_stdlib/full/heapq/) | — | — |
+| `heapq` | Yes | Runtime-imported min and max heaps and stable top-N selection by key. [Evidence](../tests/fixtures/boxed_heapq.py) | [— / 69 (0 assessed)](../benchmarks/cpython_stdlib/full/heapq/) | — | — |
 | `hmac` | Yes | No API example recorded. | — | — | — |
 | `html` | Yes | HTML escaping, named HTML5 entities and numeric character references. [Evidence](../tests/fixtures/boxed_html.py) | — | — | — |
 | `http` | Yes | Look up `HTTPStatus(404).phrase` or serve a request with `HTTPServer` and a `BaseHTTPRequestHandler` subclass. [Evidence](../benchmarks/cpython_stdlib/full/http/README.md) | [0 / 346](../benchmarks/cpython_stdlib/full/http/) | 1 | 27 |
@@ -163,7 +164,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `ensurepip` |
 | `filecmp` |
 | `fileinput` |
-| `ftplib` |
 | `getpass` |
 | `graphlib` |
 | `imaplib` |
