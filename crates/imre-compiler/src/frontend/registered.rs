@@ -7982,13 +7982,13 @@ publish(5, callback)
             })
             .expect("report.py source filename");
         let body_at = |line: usize| {
-            let location = format!("ptr {filename}, i32 {line}, i64 0)");
+            let location = format!("ptr {filename}, i32 {line})");
             let mut matches = ir
                 .split("\ndefine ")
                 .filter_map(|definition| definition.split_once("\n}").map(|(body, _)| body))
                 .filter(|body| {
                     body.lines().any(|line| {
-                        line.contains("call void @imre_dyn_statement_with_exception(")
+                        line.contains("call void @imre_dyn_statement_at(")
                             && line.ends_with(&location)
                     })
                 });

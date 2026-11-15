@@ -2384,7 +2384,9 @@ mod tests {
             }
             assert!(std::ptr::eq(plan.checked(), &functions[start]));
             let def_line = source[..usize::from(*start)].lines().count() + 1;
-            let first_statement = format!(", i32 {}, i64 0)", def_line + 1);
+            let position = format!(", i32 {}", def_line + 1);
+            let plain = format!("{position})");
+            let with_roots = format!("{position}, i64 0)");
             let (symbol, body) = llvm
                 .split("\ndefine internal i64 ")
                 .skip(1)
@@ -2394,8 +2396,10 @@ mod tests {
                 })
                 .find(|(_, body)| {
                     body.lines().any(|line| {
-                        line.contains("call void @imre_dyn_statement_with_exception(")
-                            && line.ends_with(&first_statement)
+                        (line.contains("call void @imre_dyn_statement_at(")
+                            && line.ends_with(&plain))
+                            || (line.contains("call void @imre_dyn_statement_with_exception(")
+                                && line.ends_with(&with_roots))
                     })
                 })
                 .unwrap();
@@ -5799,8 +5803,8 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             })
             .expect("alias evaluator");
         assert!(evaluator.lines().any(|line| {
-            line.contains("call void @imre_dyn_statement_with_exception(")
-                && line.contains(&format!(", ptr {file}, i32 4,"))
+            line.contains("call void @imre_dyn_statement_at(")
+                && line.ends_with(&format!(", ptr {file}, i32 4)"))
         }));
         assert!(evaluator.lines().any(|line| {
             line.contains(&format!(
@@ -6075,10 +6079,12 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         .standalone()
         .unwrap();
         for line in [6, 8] {
-            let position = format!(", i32 {line}, i64 ");
+            let position = format!(", i32 {line}");
             let calls = ir.lines().filter(|instruction| {
-                instruction.contains("call void @imre_dyn_statement_with_exception(")
-                    && instruction.contains(&position)
+                instruction.contains("call void @imre_dyn_statement_")
+                    && instruction
+                        .split_once(&position)
+                        .is_some_and(|(_, tail)| tail.starts_with(')') || tail.starts_with(','))
             });
             assert_eq!(calls.count(), 1, "cleanup on line {line}");
         }
