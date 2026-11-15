@@ -654,10 +654,12 @@ impl Checker<'_> {
         }
         // Only the body enters the helper. Its outer iterable was checked in the caller.
         let (targets, captures, writes) = function_scope::display_bindings(display);
+        let check_only = self.registered.is_none() && self.discarded_function_body();
         if !writes.is_empty()
             || captures
                 .iter()
                 .any(|name| self.local_functions.contains_key(name))
+            || check_only && captures.iter().all(|name| !self.names.contains_key(name))
         {
             return self.inline_comprehension(
                 display,
@@ -778,7 +780,8 @@ impl Checker<'_> {
                 .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
         let mut body = Vec::new();
         let first_private = helper.locals.len();
-        let result = (self.inference.is_none() || slice).then(|| helper.hidden(Type::None));
+        let result =
+            (self.inference.is_none() && !check_only || slice).then(|| helper.hidden(Type::None));
         let mut mapping = None;
         let ty = helper.comprehension_body(
             display,
@@ -978,7 +981,7 @@ impl Checker<'_> {
             display,
             input,
             collector,
-            Some((result, &mut prefix)),
+            (!self.discarded_function_body()).then_some((result, &mut prefix)),
             // A refused fixed region still needs the element checks and result type.
             |cx, _, _| cx.registered.is_none() && cx.unrepresented.borrow().is_some(),
         );
