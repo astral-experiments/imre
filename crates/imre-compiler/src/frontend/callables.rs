@@ -76,10 +76,7 @@ pub(super) fn validate_storage(
         matches!(value.kind, ExprKind::Builtin(Builtin::StaticFunction(id), _)
         if types.cache_adapter(id).is_none())
     };
-    // A cold indirect call owns a private argument frame for its continuation.
-    // Its callable cannot enter a language-visible tuple or container.
-    let mut frames = HashSet::new();
-    ir::walk_nodes(&function.body, &mut |node, _| {
+    ir::walk_nodes(&function.body, &mut |node, parent| {
         let mut insert = |dict, value: &Expr| {
             if let Some(item) = signature(dict)
                 && !fixed(value)
@@ -96,12 +93,9 @@ pub(super) fn validate_storage(
             ir::Node::Expression(value) => value,
         };
         visit(value);
-        if let ExprKind::Builtin(op, args) = &value.kind
-            && op.takes_call_frame()
+        // A framed call's sole operand is its private argument record.
+        if !matches!(parent.map(|p| &p.kind), Some(ExprKind::Builtin(op, _)) if op.takes_call_frame())
         {
-            frames.insert(std::ptr::from_ref(&args[0]));
-        }
-        if !frames.contains(&std::ptr::from_ref(value)) {
             invalid |= unsupported(value.ty);
             match &value.kind {
                 ExprKind::Dict(entries) if !entries.is_empty() => {
