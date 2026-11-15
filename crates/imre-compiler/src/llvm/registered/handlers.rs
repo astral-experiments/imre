@@ -175,19 +175,13 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         });
     }
 
-    pub(in crate::llvm) fn enter_handler_arm(
-        &mut self,
-        handler: &ExceptHandler,
-        exception: &str,
-    ) -> Option<String> {
+    pub(in crate::llvm) fn enter_handler_arm(&mut self, handler: &ExceptHandler, exception: &str) {
         let outer = self.body.error_target.clone();
         let binding = self.handler_name(handler);
-        let failed = binding.map(|name| {
+        if let Some(name) = binding {
             self.code.bind(name, exception);
-            let failed = self.name("b");
-            self.body.error_target.clone_from(&failed);
-            failed
-        });
+            self.body.error_target = self.name("b");
+        }
         // POP_EXCEPT restores the enclosing exception before clearing the optional binding.
         // The dispatch edge already rooted the handled exception in self.live.
         let enclosing = self.enclosing_caught();
@@ -197,19 +191,18 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
             outer,
             binding: binding.map(String::from),
         });
-        failed
     }
 
     /// Errors raised by the handler clear its binding under the enclosing error target.
-    pub(in crate::llvm) fn leave_handler_arm(&mut self, failed: Option<&str>) {
+    pub(in crate::llvm) fn leave_handler_arm(&mut self) {
         let Some(Region::Pending { binding, outer, .. }) = self.regions.pop() else {
             unreachable!("ordinary exception handler")
         };
-        let Some(failed) = failed else { return };
-        self.body.error_target = outer;
-        self.label(failed);
+        let Some(name) = binding else { return };
+        let failed = std::mem::replace(&mut self.body.error_target, outer);
+        self.label(&failed);
         let error = self.op("take_error", &[]);
-        self.clear_exception_name(binding.as_deref().expect("named exception handler"));
+        self.clear_exception_name(&name);
         self.raise(&error, None, true);
     }
 
