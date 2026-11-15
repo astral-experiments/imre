@@ -97,7 +97,7 @@ use value::{
 /// A live Python object can carry the linked body supplied by its producer.
 enum LinkedSource {
     Loader(SourceModule),
-    Doctest(SourceModule),
+    Doctest(Rc<DoctestSource>),
     Expression(Code),
 }
 
@@ -147,6 +147,13 @@ struct SourceModule {
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
     single_inputs: Option<Rc<Vec<SingleInput>>>,
+}
+
+struct DoctestSource {
+    path: PathBuf,
+    inputs: Rc<Vec<SingleInput>>,
+    /// The linked name when runpy executes this initializer in the main module.
+    main_alias: Option<Box<str>>,
 }
 
 #[derive(Clone, Copy)]

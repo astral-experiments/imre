@@ -4607,6 +4607,7 @@ for name in ("md4", "ripemd160"):
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare_module(boxed_call_args)
         compare_module(fixtures / "boxed_doctest_results.py")
+        compare_module(fixtures.parents[1] / "benchmarks/cpython_stdlib/full/doctest/controls/prompt_imports.py")
         compare_module(fixtures / "boxed_doctest_bundled.py")
         compare_module(fixtures / "boxed_decorator_operand_lifetime.py")
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
