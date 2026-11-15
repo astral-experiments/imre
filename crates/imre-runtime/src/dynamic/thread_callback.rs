@@ -1,19 +1,19 @@
 //! Move executable code and lock ownership into a fresh boxed context.
 //! Only the compiler can certify that the function needs no surrounding heap.
 
+use super::thread_lock::Lock;
 use super::thread_worker::{Operation, WorkerStatus};
 use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
 use super::{CallParameters, Context, Error, Id, NONE, Result, Value, copy_label, ffi};
-use crate::objects::locks::PrimitiveLock;
-use crate::objects::logging::HandlerLock;
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
 
 enum Argument {
-    Lock(Arc<PrimitiveLock>),
-    RLock(Arc<HandlerLock>),
+    Lock(Lock),
     Builtin(&'static str),
+    /// Another bound slot already holds this Python object.
+    Alias(usize),
 }
 
 pub(super) struct Callback {
@@ -27,7 +27,7 @@ pub(super) struct Callback {
     first_line: u32,
     signature: String,
     values: Vec<Argument>,
-    receiver: Option<Argument>,
+    captured_lock: Option<Lock>,
     config: Arc<serde_json::Value>,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
     allocation_traces: super::allocation_traces::AllocationTraces,
@@ -159,15 +159,16 @@ impl Callback {
                     *entry,
                 _ => return Ok(None),
             };
-            let receiver = match ctx.heap.get(id) {
-                Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
-                // Detached errors use the original low-level reporting policy.
-                Value::HandlerLock(lock) if !high_level => Argument::RLock(Arc::clone(lock)),
-                _ => return Ok(None),
+            let Some(lock) = Lock::from_value(ctx.heap.get(id)) else {
+                return Ok(None);
             };
+            // Detached errors use the original low-level reporting policy.
+            if high_level && matches!(lock, Lock::Reentrant(_)) {
+                return Ok(None);
+            }
             let roots = super::concat_ids(roots, &[id])?;
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
-            callback.receiver = Some(receiver);
+            callback.captured_lock = Some(lock);
             return Ok(Some((Operation::Python(Box::new(callback)), roots)));
         }
         if !code.definition.freevars().is_empty() {
@@ -307,10 +308,17 @@ impl Callback {
         values
             .try_reserve_exact(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for &id in bound.iter() {
+        let mut first_slots = HashMap::new();
+        first_slots
+            .try_reserve(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for (slot, &id) in bound.iter().enumerate() {
+            let first = *first_slots.entry(id).or_insert(slot);
+            if first != slot {
+                values.push(Argument::Alias(first));
+                continue;
+            }
             let value = match ctx.heap.get(id) {
-                Value::PrimitiveLock(lock) => Argument::Lock(Arc::clone(lock)),
-                Value::HandlerLock(lock) => Argument::RLock(Arc::clone(lock)),
                 Value::Native(name) if !high_level => {
                     let symbol = [
                         "_signal.pause",
@@ -330,7 +338,7 @@ impl Callback {
                     .ok_or_else(refused)?;
                     Argument::Builtin(symbol)
                 }
-                _ => return Err(refused()),
+                value => Argument::Lock(Lock::from_value(value).ok_or_else(refused)?),
             };
             values.push(value);
         }
@@ -356,7 +364,7 @@ impl Callback {
             first_line: code.first_line,
             signature: copy_label(ctx.str_value(code.parameters)?)?,
             values,
-            receiver: None,
+            captured_lock: None,
             config: Arc::clone(&ctx.config),
             gc_settings: ctx.heap.gc_settings.clone(),
             allocation_traces: ctx.heap.allocation_traces.worker(),
@@ -369,11 +377,6 @@ impl Callback {
         interpreter: Arc<super::InterpreterState>,
         fault_workers: Arc<()>,
     ) -> Result<impl FnOnce(Option<String>) -> WorkerStatus + Send + use<>> {
-        // Preserve object identity when multiple parameters alias the same lock.
-        let mut aliases = HashMap::new();
-        aliases
-            .try_reserve(self.values.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
         let mut slots = Vec::new();
         slots
             .try_reserve_exact(self.values.len())
@@ -401,12 +404,8 @@ impl Callback {
             );
             let mark = ctx.heap.temporary_mark();
             let globals = ctx.scope(&self.module, None);
-            let cell = self.receiver.map(|receiver| {
-                let value = match receiver {
-                    Argument::Lock(lock) => ctx.alloc(Value::PrimitiveLock(lock)),
-                    Argument::RLock(lock) => ctx.alloc(Value::HandlerLock(lock)),
-                    Argument::Builtin(_) => unreachable!("the terminal receiver is an exact lock"),
-                };
+            let cell = self.captured_lock.map(|lock| {
+                let value = ctx.alloc(lock.into_value());
                 ctx.alloc(Value::Cell(Some(value)))
             });
             let name = ctx.text(self.name);
@@ -432,13 +431,9 @@ impl Callback {
             );
             for value in self.values {
                 let id = match value {
-                    Argument::Lock(lock) => *aliases
-                        .entry(Arc::as_ptr(&lock).addr())
-                        .or_insert_with(|| ctx.alloc(Value::PrimitiveLock(lock))),
-                    Argument::RLock(lock) => *aliases
-                        .entry(Arc::as_ptr(&lock).addr())
-                        .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
+                    Argument::Lock(lock) => ctx.alloc(lock.into_value()),
                     Argument::Builtin(name) => ctx.builtin(name),
+                    Argument::Alias(first) => slots[first],
                 };
                 slots.push(id);
             }
