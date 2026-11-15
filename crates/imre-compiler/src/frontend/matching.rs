@@ -5,34 +5,7 @@ use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use super::*;
 
-#[derive(Clone)]
-struct Flow {
-    assigned: assignments::Assigned,
-    narrowed: assignments::Narrowed,
-}
-
-impl Flow {
-    fn read(checker: &Checker<'_>) -> Self {
-        Self {
-            assigned: checker.assigned.clone(),
-            narrowed: checker.narrowed.clone(),
-        }
-    }
-
-    fn restore(&self, checker: &mut Checker<'_>) {
-        checker.assigned.clone_from(&self.assigned);
-        checker.narrowed.clone_from(&self.narrowed);
-    }
-
-    fn intersect(&mut self, other: &Self) {
-        assignments::intersect(
-            &mut self.assigned,
-            &mut self.narrowed,
-            &other.assigned,
-            &other.narrowed,
-        );
-    }
-}
+use super::assignments::Flow;
 
 struct Capture {
     name: String,

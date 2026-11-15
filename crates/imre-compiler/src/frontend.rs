@@ -5539,7 +5539,7 @@ impl<'a> Checker<'a> {
         mut check: impl FnMut(&mut Self, &ast::Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
         let test = self.condition(&value.test)?;
-        let mut facts = assignments::ConditionalFacts::capture(self, value);
+        let mut facts = assignments::Flow::read(self);
         let mut arm = |checker: &mut Self, truth: bool| {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };

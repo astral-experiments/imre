@@ -3,249 +3,79 @@
 
 use super::*;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
-use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
 
-/// Previously allocated slots keep their facts throughout an expression unless
-/// the expression can write the name or use it in a narrowing test. Names
-/// introduced by a walrus may acquire a slot while checking the first arm.
+/// The assignment and narrowing facts at a checked control-flow edge.
 #[derive(Clone)]
-pub(super) struct ConditionalFacts<'a> {
-    writes: Vec<(String, LocalAssignment)>,
-    narrowed: Vec<(&'a str, Option<Type>)>,
+pub(super) struct Flow {
+    assigned: Assigned,
+    narrowed: Narrowed,
 }
 
-impl<'a> ConditionalFacts<'a> {
-    pub(super) fn capture(checker: &Checker<'_>, value: &'a ast::ExprIf) -> Self {
-        Self::for_expressions(
-            checker,
-            [&*value.test, &*value.body, &*value.orelse],
-            [&*value.test],
-        )
-    }
-
-    fn for_expressions(
-        checker: &Checker<'_>,
-        expressions: impl IntoIterator<Item = &'a ast::Expr>,
-        tests: impl IntoIterator<Item = &'a ast::Expr>,
-    ) -> Self {
-        struct Names<'a>(HashSet<&'a str>);
-        impl<'a> Names<'a> {
-            /// Names that apply_facts can narrow when testing this expression.
-            fn predicate(&mut self, test: &'a ast::Expr) {
-                match test {
-                    ast::Expr::Name(name) => {
-                        self.0.insert(name.id.as_str());
-                    }
-                    ast::Expr::Named(node) => self.visit_expr(&node.target),
-                    ast::Expr::UnaryOp(node) => self.predicate(&node.operand),
-                    ast::Expr::BoolOp(node) => {
-                        for value in &node.values {
-                            self.predicate(value);
-                        }
-                    }
-                    ast::Expr::Call(node) if matches!(&*node.func, ast::Expr::Name(name) if name.id == "bool" || name.id == "isinstance") => {
-                        if let Some(first) = node.arguments.args.first() {
-                            self.predicate(first);
-                        }
-                    }
-                    ast::Expr::Compare(node) => {
-                        for value in &node.operands {
-                            if matches!(value, ast::Expr::Name(_) | ast::Expr::Named(_)) {
-                                self.predicate(value);
-                            } else if let ast::Expr::Call(call) = value
-                                && matches!(&*call.func, ast::Expr::Name(name) if name.id == "type")
-                                && let [ast::Expr::Name(name)] = call.arguments.args.as_ref()
-                            {
-                                // An exact type comparison can narrow the argument's slot.
-                                self.0.insert(name.id.as_str());
-                            } else if let ast::Expr::Attribute(field) = value
-                                && let ast::Expr::Name(receiver) = &*field.value
-                            {
-                                // A subcommand comparison narrows its namespace receiver.
-                                self.0.insert(receiver.id.as_str());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        impl<'a> Visitor<'a> for Names<'a> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                if let ast::Expr::Name(name) = expr {
-                    self.0.insert(name.id.as_str());
-                } else {
-                    walk_expr(self, expr);
-                }
-            }
-        }
-        // Only truth tests, bindings, and comprehension targets can change
-        // narrowing inside an expression. Plain reads in wide displays do not.
-        struct FlowNames<'a> {
-            names: Names<'a>,
-        }
-        impl<'a> Visitor<'a> for FlowNames<'a> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                match expr {
-                    ast::Expr::If(node) => self.names.predicate(&node.test),
-                    ast::Expr::Named(node) => self.names.visit_expr(&node.target),
-                    ast::Expr::BoolOp(_) => self.names.predicate(expr),
-                    _ => {}
-                }
-                walk_expr(self, expr);
-            }
-            fn visit_comprehension(&mut self, node: &'a ast::Comprehension) {
-                self.names.visit_expr(&node.target);
-                for test in &node.ifs {
-                    self.names.predicate(test);
-                }
-                walk_comprehension(self, node);
-            }
-        }
-        let mut flow = FlowNames {
-            names: Names(HashSet::new()),
-        };
-        for test in tests {
-            flow.names.predicate(test);
-        }
-        let mut writes = HashSet::new();
-        for expr in expressions {
-            flow.visit_expr(expr);
-            writes.extend(narrowing::expression_assignments(expr));
-        }
+impl Flow {
+    pub(super) fn read(checker: &Checker<'_>) -> Self {
         Self {
-            writes: writes
-                .into_iter()
-                .map(|name| {
-                    let state = checker.assigned.state(checker.names.get(&name));
-                    (name, state)
-                })
-                .collect(),
-            narrowed: flow
-                .names
-                .0
-                .into_iter()
-                .map(|name| {
-                    let ty = checker
-                        .names
-                        .get(name)
-                        .and_then(|s| checker.narrowed.get(s))
-                        .copied();
-                    (name, ty)
-                })
-                .collect(),
+            assigned: checker.assigned.clone(),
+            narrowed: checker.narrowed.clone(),
         }
     }
 
-    fn read(&mut self, checker: &Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            *assigned = checker.assigned.state(checker.names.get(name));
-        }
-        for (name, ty) in &mut self.narrowed {
-            *ty = checker
-                .names
-                .get(*name)
-                .and_then(|slot| checker.narrowed.get(slot))
-                .copied();
-        }
+    pub(super) fn restore(&self, checker: &mut Checker<'_>) {
+        checker.assigned.clone_from(&self.assigned);
+        checker.narrowed.clone_from(&self.narrowed);
     }
 
-    fn retain_common(&mut self, checker: &Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            assigned.retain_common(checker.assigned.state(checker.names.get(name)));
-        }
-        for (name, ty) in &mut self.narrowed {
-            if checker
-                .names
-                .get(*name)
-                .and_then(|slot| checker.narrowed.get(slot))
-                .copied()
-                != *ty
-            {
-                *ty = None;
-            }
-        }
-    }
-
-    /// Restore the input facts and keep the completed arm's facts for the join.
+    /// Resume the alternative branch, keeping the completed branch for the join.
     pub(super) fn switch_arm(&mut self, checker: &mut Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            if let Some(&slot) = checker.names.get(name) {
-                let current = checker.assigned.state(Some(&slot));
-                checker.assigned.restore(slot, *assigned);
-                *assigned = current;
-            }
-        }
-        for (name, ty) in &mut self.narrowed {
-            if let Some(&slot) = checker.names.get(*name) {
-                let incoming = checker.narrowed.get(&slot).copied();
-                match *ty {
-                    Some(previous) => checker.narrowed.insert_mut(slot, previous),
-                    None => {
-                        checker.narrowed.remove_mut(&slot);
-                    }
-                }
-                *ty = incoming;
-            }
-        }
+        std::mem::swap(&mut self.assigned, &mut checker.assigned);
+        std::mem::swap(&mut self.narrowed, &mut checker.narrowed);
     }
 
-    pub(super) fn join(self, checker: &mut Checker<'_>) {
-        for (name, mut incoming) in self.writes {
-            if let Some(&slot) = checker.names.get(&name) {
-                incoming.retain_common(checker.assigned.state(Some(&slot)));
-                checker.assigned.restore(slot, incoming);
-            }
-        }
-        for (name, ty) in self.narrowed {
-            if let Some(slot) = checker.names.get(name)
-                && checker.narrowed.get(slot).copied() != ty
-            {
-                checker.narrowed.remove_mut(slot);
-            }
-        }
+    pub(super) fn join(&self, checker: &mut Checker<'_>) {
+        intersect(
+            &mut checker.assigned,
+            &mut checker.narrowed,
+            &self.assigned,
+            &self.narrowed,
+        );
+    }
+
+    pub(super) fn intersect(&mut self, other: &Self) {
+        intersect(
+            &mut self.assigned,
+            &mut self.narrowed,
+            &other.assigned,
+            &other.narrowed,
+        );
     }
 }
 
-/// Each boolean operator joins the exits that skip the remaining operands.
-/// Nested operators retain only the names their operands can affect.
-pub(super) struct BooleanExits<'a> {
-    after: ConditionalFacts<'a>,
-    exit: Option<ConditionalFacts<'a>>,
-}
+/// Intersect the exits that short-circuit before the next operand is evaluated.
+#[derive(Default)]
+pub(super) struct BooleanExits(Option<Flow>);
 
-impl<'a> BooleanExits<'a> {
-    pub(super) fn new(checker: &Checker<'_>, boolean: &'a ast::ExprBoolOp) -> Self {
-        Self {
-            after: ConditionalFacts::for_expressions(checker, &boolean.values, &boolean.values),
-            exit: None,
-        }
-    }
-
+impl BooleanExits {
     pub(super) fn short_circuit(
         &mut self,
         checker: &mut Checker<'_>,
         operand: &ast::Expr,
         truth: bool,
     ) {
-        self.after.read(checker);
+        let mut branch = Flow::read(checker);
         checker.apply_facts(operand, truth);
-        if let Some(exit) = &mut self.exit {
-            exit.retain_common(checker);
+        branch.switch_arm(checker);
+        if let Some(exit) = &mut self.0 {
+            exit.intersect(&branch);
         } else {
-            let mut first = self.after.clone();
-            first.read(checker);
-            self.exit = Some(first);
+            self.0 = Some(branch);
         }
-        self.after.switch_arm(checker);
     }
 
     pub(super) fn finish(self, checker: &mut Checker<'_>, reachable: bool) {
-        if let Some(mut exit) = self.exit {
+        if let Some(exit) = self.0 {
             if reachable {
                 exit.join(checker);
             } else {
-                exit.switch_arm(checker);
+                exit.restore(checker);
             }
         }
     }
@@ -274,21 +104,6 @@ pub(super) enum ValueSource {
     ReboundMethod,
 }
 
-#[derive(Default, Clone, Copy)]
-struct LocalAssignment {
-    initialized: bool,
-    source: Option<ValueSource>,
-}
-
-impl LocalAssignment {
-    fn retain_common(&mut self, other: Self) {
-        self.initialized &= other.initialized;
-        if self.source != other.source {
-            self.source = None;
-        }
-    }
-}
-
 impl Assigned {
     pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
         self.type_sources.get(&slot).copied()
@@ -303,22 +118,6 @@ impl Assigned {
             self.type_sources.insert_mut(slot, source);
         } else {
             self.type_sources.remove_mut(&slot);
-        }
-    }
-
-    fn state(&self, slot: Option<&usize>) -> LocalAssignment {
-        LocalAssignment {
-            initialized: slot.is_some_and(|slot| self.contains(slot)),
-            source: slot.and_then(|&slot| self.value_source(slot)),
-        }
-    }
-
-    fn restore(&mut self, slot: usize, state: LocalAssignment) {
-        if state.initialized {
-            self.insert(slot);
-            self.set_value_source(slot, state.source);
-        } else {
-            self.remove(&slot);
         }
     }
 
