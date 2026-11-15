@@ -6802,8 +6802,6 @@ impl<'a> Loader<'a> {
             // ZoneInfo exports belong to the boxed provider. Loading the package's children
             // while scanning this typed namespace would recursively enter its initializer.
             "zoneinfo" => Some(("zoneinfo/__init__.py", "")),
-            // The boxed email package is intrinsic. Typed child modules need a package root.
-            "email" => Some(("email/__init__.py", "")),
             "email.message" => Some((
                 "email/message.py",
                 include_str!("../stdlib/email/message.py"),
@@ -6821,8 +6819,7 @@ impl<'a> Loader<'a> {
             )),
             _ => {
                 path_first = name == "ssl" && self.allow_imports;
-                // Both modules populate their public namespace using a native provider.
-                registered_namespace = source_exports || matches!(name, "bisect" | "ssl");
+                registered_namespace = source_exports || matches!(name, "bisect" | "email" | "ssl");
                 bundled_runtime_source(name)
             }
         };
@@ -7762,6 +7759,10 @@ mod native_tests {
         .unwrap();
         let child = loader.load_module("email.encoders").unwrap();
         assert!(!loader.modules[child].registered_namespace);
+        let package = &loader.modules[loader.by_name["email"]];
+        let (_, source) = super::bundled_runtime_source("email").unwrap();
+        assert_eq!(package.original_source(), source);
+        assert!(package.registered_namespace);
     }
 
     #[test]
