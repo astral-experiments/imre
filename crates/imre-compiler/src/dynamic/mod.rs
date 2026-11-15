@@ -712,11 +712,12 @@ fn read_import_source<'s, 'p>(
 fn scan_imports(
     source: &str,
     kind: SourceKind,
+    existing: Option<&ruff_python_parser::Parsed<ast::ModModule>>,
     getter: Option<&mut Imports>,
     file_alternative: Option<(&Path, bool)>,
     shipped: bool,
 ) -> Result<(Imports, Option<ScannedModule>), String> {
-    let module = match read_import_source(source, kind, None)? {
+    let module = match read_import_source(source, kind, existing)? {
         ImportSource::Module(module) => module,
         ImportSource::Invalid(error) => {
             return Ok((
@@ -1441,16 +1442,17 @@ pub(crate) fn compile(
                                path: &Path,
                                source: &str,
                                kind: SourceKind,
+                               existing: Option<&ruff_python_parser::Parsed<ast::ModModule>>,
                                getter: Option<&mut Imports>| {
         if output.is_some() {
-            let (imports, scanned) = scan_imports(source, kind, getter, None, true)?;
+            let (imports, scanned) = scan_imports(source, kind, existing, getter, None, true)?;
             if let Some(module) = scanned {
                 scanned_modules.insert(unit, module);
             }
             return Ok(imports);
         }
         let (imports, scanned) =
-            scan_imports_for_preparation(source, kind, None, getter, Some(source))?;
+            scan_imports_for_preparation(source, kind, existing, getter, Some(source))?;
         if let Some(input) = scanned
             && imports.invalid_executable.is_none()
         {
@@ -1834,6 +1836,32 @@ pub(crate) fn compile(
                 {
                     let path = Path::new(bundled_root).join(filename);
                     let package = path.ends_with("__init__.py");
+                    let mut checked = None;
+                    let mut parser = None;
+                    if on_sdk_path
+                        && let Some(graph) = checked_graph
+                        && let Some(id) = graph.bundled_module(&prefix)
+                    {
+                        let module = &graph.modules[id];
+                        if module.original_source() == source {
+                            checked = Some(id);
+                            if module.path.strip_prefix(&graph.session.root)
+                                == Ok(Path::new(filename))
+                                && CheckedFile::select(graph, id).is_some()
+                            {
+                                parser = Some(&*module.parsed);
+                            }
+                            if graph.registered_functions().contains_key(&id) {
+                                let unit = registrations
+                                    .checked_units
+                                    .entry(sources.len())
+                                    .or_default();
+                                unit.module = Some(id);
+                            }
+                        } else {
+                            checked_sdk_providers.push((id, sources.len()));
+                        }
+                    }
                     let mut getter = Imports::default();
                     let mut imports = shipped_imports(
                         &mut scanned_modules,
@@ -1842,6 +1870,7 @@ pub(crate) fn compile(
                         &path,
                         source,
                         SourceKind::File,
+                        parser,
                         Some(&mut getter),
                     )
                     .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -1874,24 +1903,6 @@ pub(crate) fn compile(
                     }
                     if on_sdk_path && let Some(name) = options.include_modules.get(&prefix) {
                         bundled_includes.insert(name, frozen);
-                    }
-                    let mut checked = None;
-                    if on_sdk_path
-                        && let Some(graph) = checked_graph
-                        && let Some(id) = graph.bundled_module(&prefix)
-                    {
-                        if graph.modules[id].original_source() == source {
-                            checked = Some(id);
-                            if graph.registered_functions().contains_key(&id) {
-                                let unit = registrations
-                                    .checked_units
-                                    .entry(sources.len())
-                                    .or_default();
-                                unit.module = Some(id);
-                            }
-                        } else {
-                            checked_sdk_providers.push((id, sources.len()));
-                        }
                     }
                     if select_member && on_sdk_path && !project_parent && !builtin {
                         bundled_winner = Some((sources.len(), checked));
@@ -2217,7 +2228,7 @@ pub(crate) fn compile(
                         } else {
                             kind
                         };
-                        scan_imports(&src, parser_kind, None, alternative, false)
+                        scan_imports(&src, parser_kind, None, None, alternative, false)
                     };
                     let (mut imports, scanned) = match imports {
                         Ok(imports) => imports,
@@ -2377,6 +2388,7 @@ pub(crate) fn compile(
                             &path,
                             &source,
                             SourceKind::DecodedFile,
+                            None,
                             None,
                         )
                         .map(|imports| (imports, None))
@@ -3208,14 +3220,19 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
 
 #[test]
 fn shipped_private_parameter_requires_fresh_lowering() {
-    let names = |source| {
-        scan_imports(source, SourceKind::File, None, None, true)
-            .unwrap()
-            .1
-    };
-    assert!(names("class C:\n    def f(self, arg): pass\n").is_some());
-    assert!(names("class C:\n    def f(self, __arg): pass\n").is_none());
-    assert!(names("class C:\r\n    pass\r\n").is_none());
+    for (source, reusable) in [
+        ("class C:\n    def f(self, arg): pass\n", true),
+        ("class C:\n    def f(self, __arg): pass\n", false),
+        ("class C:\r\n    pass\r\n", false),
+    ] {
+        let text = crate::normalize_source(source, SourceKind::File).unwrap();
+        let checked = ruff_python_parser::parse_module(&text).unwrap();
+        for existing in [None, Some(&checked)] {
+            let (_, scanned) =
+                scan_imports(source, SourceKind::File, existing, None, None, true).unwrap();
+            assert_eq!(scanned.is_some(), reusable);
+        }
+    }
 }
 
 #[test]
