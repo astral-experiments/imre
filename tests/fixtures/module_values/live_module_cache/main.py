@@ -68,6 +68,21 @@ finally:
     sys.modules = modules
 assert 'only_in_copy' not in modules
 
+parent_keys = []
+
+class ObservedModules(dict):
+    def __getitem__(self, key):
+        if key == 'pkg':
+            parent_keys.append(key)
+        return super().__getitem__(key)
+
+try:
+    sys.modules = ObservedModules(modules)
+    import pkg.keep
+    assert len(parent_keys) == 2 and parent_keys[0] is parent_keys[1]
+finally:
+    sys.modules = modules
+
 published = ModuleType('pkg.keep')
 
 class PublishingParent:
