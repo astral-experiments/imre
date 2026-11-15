@@ -170,12 +170,18 @@ def read_code(stream):
 def get_data(package, resource):
     """Load a filesystem package and read a resource beside its module file."""
     spec = _find_spec(_spec_name(package, None))
-    if spec is None or not hasattr(spec.loader, 'get_data'):
+    if spec is None:
         return None
-    filename = getattr(_find_module(package), '__file__', None)
-    if filename is None:
+    loader = spec.loader
+    if loader is None or not hasattr(loader, 'get_data'):
         return None
-    return spec.loader.get_data(_join(dirname(filename), *resource.split('/')))
+    module = _find_module(package)
+    if module is None or not hasattr(module, '__file__'):
+        return None
+    parts = resource.split('/')
+    parts.insert(0, _os.path.dirname(module.__file__))
+    resource_name = _os.path.join(*parts)
+    return loader.get_data(resource_name)
 
 
 def _iter_zip_modules(finder, prefix):
