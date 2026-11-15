@@ -103,6 +103,11 @@ pub(crate) fn frame_inputs(
                         let reads = protocol_parameter(value);
                         uses_scalar_protocol |= reads != 0 && source.is_some();
                         protocol_reads += reads;
+                        // Returning a Python parameter forwards the handle bound by the caller.
+                        if let ExprKind::Local(slot) = value.without_location().kind {
+                            uses_python_protocol |= checked.function.params.contains(&slot)
+                                && checked.function.locals[slot] == Type::PythonObject;
+                        }
                         true
                     }
                     Statement::Position(..)

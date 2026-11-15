@@ -78,6 +78,30 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
 }
 
 #[test]
+fn returning_a_callback_keeps_the_checked_parameter_operand() {
+    use crate::ir::{ExprKind, Statement};
+    use ruff_text_size::Ranged;
+
+    let mut graph = SourceGraph::single(concat!(
+        "def forward(value): return value\n",
+        "def get(callback=lambda item: item):\n",
+        "    return callback\n",
+        "print(get()(17))\n",
+    ))
+    .unwrap();
+    crate::checked_lower(&mut graph).unwrap();
+    let definition = &graph.modules[graph.entry].parsed.syntax().body[1];
+    let frames = graph.registered_functions();
+    let function = &frames[&graph.entry][&definition.start()].function;
+    let Some(Statement::Return(value)) = function.body.last() else {
+        panic!("expected the callback return");
+    };
+    assert!(
+        matches!(value.without_location().kind, ExprKind::Local(slot) if function.params == [slot])
+    );
+}
+
+#[test]
 fn placed_field_uses_the_ordinary_descriptor_and_attribute_line() {
     use crate::frontend::{RegisteredFunction, RegisteredScope, RegisteredSource};
     use crate::ir::{ExprKind, Statement};
