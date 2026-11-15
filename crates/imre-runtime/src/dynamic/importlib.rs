@@ -9,19 +9,19 @@ use super::{
 };
 
 /// A registered body, a newly discovered filesystem source, or its ZIP loader.
-#[derive(Clone, Copy)]
 pub(super) enum SourceBody {
-    Registered(ModuleInitializer),
+    /// Direct execution can have a frozen code filename alongside its registered file path.
+    Registered(ModuleInitializer, Option<PathBuf>),
     Filesystem,
     Namespace,
     Zip(Id),
 }
 
 impl SourceBody {
-    fn loader(self) -> Id {
+    fn loader(&self) -> Id {
         match self {
-            Self::Registered(_) | Self::Filesystem | Self::Namespace => NONE,
-            Self::Zip(loader) => loader,
+            Self::Registered(..) | Self::Filesystem | Self::Namespace => NONE,
+            Self::Zip(loader) => *loader,
         }
     }
 }
@@ -457,7 +457,9 @@ impl Context {
                     }
                     return Ok(Some((
                         path,
-                        entry.map_or(SourceBody::Filesystem, SourceBody::Registered),
+                        entry.map_or(SourceBody::Filesystem, |code| {
+                            SourceBody::Registered(code, None)
+                        }),
                     )));
                 }
             }
@@ -882,7 +884,7 @@ impl Context {
             self.lookup_attr(importlib, "_file_spec")?
         };
         let spec = self.call(make, vec![name, origin, locations, body.loader()], vec![])?;
-        if matches!(body, SourceBody::Registered(_))
+        if matches!(body, SourceBody::Registered(..))
             && let Some(loader) = self.raw_instance_field(spec, "loader")
         {
             self.bind_loader_source(loader, name, origin)?;

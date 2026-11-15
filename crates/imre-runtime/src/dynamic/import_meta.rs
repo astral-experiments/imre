@@ -17,6 +17,10 @@ pub(super) struct ImportlibCode {
     pub(super) remove_frames: Code,
 }
 
+fn frozen_filename(original: &str) -> PathBuf {
+    PathBuf::from(format!("<frozen {original}>"))
+}
+
 impl Context {
     /// The bootstrap modules are initialized before user code can replace any import registry.
     pub(super) fn install_import_registry(&mut self) -> Result<()> {
@@ -142,23 +146,31 @@ impl Context {
             if self.scope_data(*scope).class_namespace.as_ref().is_some_and(|layout| layout.bundled_decimal))
     }
 
-    pub(super) fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
+    pub(super) fn bundled_source(
+        &self,
+        name: &str,
+        frozen_original: Option<&str>,
+    ) -> Option<(PathBuf, SourceBody)> {
         let source = self.bundled_registration(name)?;
         Some((
             source.path.to_path_buf(),
-            SourceBody::Registered(source.code),
+            SourceBody::Registered(source.code, frozen_original.map(frozen_filename)),
         ))
     }
 
-    fn frozen_registration<'a>(&self, name: &'a str) -> Option<(&SourceModule, &'a str)> {
+    pub(super) fn frozen_original_name<'a>(&self, name: &'a str) -> Option<&'a str> {
         if !self.is_frozen(name) {
             return None;
         }
-        let original = match name {
+        Some(match name {
             "_frozen_importlib" => "importlib._bootstrap",
             "_frozen_importlib_external" => "importlib._bootstrap_external",
             _ => name,
-        };
+        })
+    }
+
+    fn frozen_registration<'a>(&self, name: &'a str) -> Option<(&SourceModule, &'a str)> {
+        let original = self.frozen_original_name(name)?;
         Some((self.bundled_registration(name)?, original))
     }
 
@@ -181,7 +193,7 @@ impl Context {
             )
             .with_import_name(key)
         })?;
-        self.module_code(source.code, Path::new(&format!("<frozen {original}>")))
+        self.module_code(source.code, &frozen_filename(original))
     }
 
     fn target_native_module(&self, name: &str) -> bool {
@@ -301,7 +313,7 @@ impl Context {
         if self.is_frozen(name) || sealed == bundled || (!bundled && self.is_builtin_module(name)) {
             return Ok(NONE);
         }
-        let source = self.bundled_source(name);
+        let source = self.bundled_source(name, None);
         if source.is_none() && !self.target_native_module(name) {
             return Ok(NONE);
         }
@@ -385,7 +397,7 @@ impl Context {
     }
 
     pub(super) fn create_native_module(&mut self, name: &str) -> Result<Id> {
-        let source = self.bundled_source(name);
+        let source = self.bundled_source(name, None);
         if source.is_none() && !self.target_native_module(name) {
             return Err(Self::missing_module(name, self.text(name)));
         }
@@ -410,7 +422,7 @@ impl Context {
             .scope_name(scope, "__name__")
             .unwrap_or_else(|| self.text(&name));
         let source = self
-            .bundled_source(&name)
+            .bundled_source(&name, None)
             .map(|(path, code)| (path, code, origin));
         if source.is_none() && !self.target_native_module(&name) {
             return Err(Self::missing_module(&name, name_id));
