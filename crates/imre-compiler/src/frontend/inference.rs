@@ -975,20 +975,13 @@ impl Inference {
         // Completed returns that use only bound locals survive unrelated revisions.
         let mut local_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
-        // Without input or layout inference, resolved return slots stay resolved.
-        let mut first_open_return = (!self.widened.get()
-            && self
-                .pending
-                .borrow()
-                .iter()
-                .all(|p| !p.inferred_params.contains(&true)))
-        .then_some(0);
-        // A written return can still need its body to select a concrete layout.
-        // Try those definitions first when every parameter already has a declaration.
-        let mut declared_layouts = first_open_return.is_some()
-            && self.pending.borrow().iter().zip(definitions.iter()).all(
-                |(slot, (_, function, _))| slot.returns.is_some() || function.returns.is_some(),
-            );
+        // With declared parameters, settle open returns before checking the other bodies.
+        let mut first_open_return = self
+            .pending
+            .borrow()
+            .iter()
+            .all(|p| !p.inferred_params.contains(&true))
+            .then_some(0);
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
@@ -1001,7 +994,10 @@ impl Inference {
             checked_bodies.clear();
             if widened {
                 local_returns.retain(|id, _| previous_checks.contains(id));
-                first_open_return = None;
+                // Registration can request the initial pass before any layout changes.
+                if self.revision.get() != 0 {
+                    first_open_return = None;
+                }
                 self.revisit_checked_returns();
             }
             let mut skipped = false;
@@ -1070,8 +1066,7 @@ impl Inference {
                         }
                         // Methods and generators can still supply a prepared frame.
                         // Leave ordinary physical functions to their consuming body check.
-                        if (*slot == signatures.len()
-                            || declared_layouts && signatures[signature.id].returns.is_some())
+                        if signatures[signature.id].returns.is_some()
                             && signature.physical_frame
                             && signature.method.is_none()
                             && !graph.session.is_generator_definition(*module, function)
@@ -1591,7 +1586,7 @@ impl Inference {
                 let resolved = |(slot, _): &(usize, _)| self.pending.borrow()[*slot].is_resolved();
                 // Reproduce the canonical diagnostic pass if discovery stalls.
                 if skipped && self.unresolved() {
-                    declared_layouts = false;
+                    first_open_return = None;
                     self.revisit_checked_returns();
                     continue;
                 }
