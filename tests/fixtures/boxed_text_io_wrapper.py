@@ -413,6 +413,30 @@ def current():
     raw = io.BytesIO()
     text = io.TextIOWrapper(raw)
     assert text.detach() is raw and text.__del__() is None and not raw.closed
+    class ClosingBuffer(io.BytesIO):
+        on_closed = None
+
+        @property
+        def closed(self):
+            if self.on_closed is not None:
+                action = self.on_closed
+                self.on_closed = None
+                action()
+            return super().closed
+
+    original = ClosingBuffer()
+    replacement = io.BytesIO()
+    text = io.TextIOWrapper(original)
+    original.on_closed = lambda: text.__init__(replacement)
+    text.close()
+    assert text.buffer is replacement and replacement.closed and not original.closed
+
+    original = ClosingBuffer()
+    text = io.TextIOWrapper(original)
+    original.on_closed = text.detach
+    text.close()
+    assert text.buffer is None and not original.closed
+
     class Size:
         def __init__(self, owner, replacement):
             self.owner = owner
