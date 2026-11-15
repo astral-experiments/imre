@@ -803,7 +803,10 @@ impl Initialization {
                             checkpoints.as_mut(),
                         )?;
                     } else if declarations.registered_classes.contains(&definition) {
-                        checker.require_registered_operation(statement)?;
+                        checker.require_registered_representation(
+                            statement,
+                            Kind::RegisteredClassDefinition,
+                        )?;
                     }
                     available.insert(definition);
                     continue;

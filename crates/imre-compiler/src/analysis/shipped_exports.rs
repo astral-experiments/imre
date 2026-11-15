@@ -3,7 +3,6 @@ use super::*;
 use crate::modules::Binding;
 use ruff_db::files::FileRange;
 use ruff_python_ast::name::Name;
-use ruff_source_file::{LineIndex, PositionEncoding};
 use ty_python_core::definition::{Definition, DefinitionKind, DefinitionState};
 use ty_python_semantic::types::TypeDefinition;
 
@@ -168,38 +167,6 @@ impl Session {
             self.tuple_spreads.push(spreads);
             Ok((parsed, index))
         })
-    }
-
-    /// The checked ABI uses the leading declarations of the same module that boxed callers import.
-    pub(crate) fn checked_shipped_prefix(
-        &mut self,
-        owner: &str,
-        last: &str,
-    ) -> Result<&'static str, String> {
-        let (source, file) = self.checked_shipped_file(owner, None)?;
-        let definition = self
-            .final_module_binding(file, last)
-            .ok_or_else(|| format!("missing checked definition {owner}.{last}"))?;
-        let end = definition
-            .kind(&self.db)
-            .full_range(&self.parsed(file))
-            .end();
-        Ok(self.physical_prefix(file, source, end))
-    }
-
-    /// Include the statement's immediate line ending in the physical input supplied to the loader.
-    fn physical_prefix<'a>(&self, file: File, source: &'a str, end: TextSize) -> &'a str {
-        let checked = ruff_db::source::source_text(&self.db, file);
-        let newline = checked[end.to_usize()..].starts_with('\n');
-        let end = end + TextSize::from(u32::from(newline));
-        let end = if source.len() == checked.len() {
-            end
-        } else {
-            let logical = ruff_db::source::line_index(&self.db, file);
-            let position = logical.source_location(end, &checked, PositionEncoding::Utf8);
-            LineIndex::from_source_text(source).offset(position, source, PositionEncoding::Utf8)
-        };
-        &source[..end.to_usize()]
     }
 
     /// Resolve the unannotated positional inputs of a shipped implementation in its public stub.
@@ -501,28 +468,4 @@ fn selected_declaration(db: &dyn Db, file: File, owner: Name, name: Name) -> Opt
         }
     }
     selected
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn physical_prefix_preserves_statement_ends_and_mixed_newlines() {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("sample.py");
-        let mut session = Session::new(root.path(), &[]).unwrap();
-        let source = "# λ\r\nfirst = 'é'\r\nsecond = '中'; third = 3\rfourth = 4  # α\nlast = '🐍'";
-        session.seed(&path, source).unwrap();
-        let (file, parsed, _) = session.selected_file(&path).unwrap();
-        let expected = ["'é'\r\n", "'中'", "3\r", "4", "'🐍'"];
-        assert_eq!(parsed.suite().len(), expected.len());
-        for (stmt, suffix) in parsed.suite().iter().zip(expected) {
-            let end = source.find(suffix).unwrap() + suffix.len();
-            assert_eq!(
-                session.physical_prefix(file, source, stmt.end()),
-                &source[..end]
-            );
-        }
-    }
 }
