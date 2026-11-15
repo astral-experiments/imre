@@ -474,6 +474,24 @@ mod tests {
     }
 
     #[test]
+    fn named_callback_keeps_its_checked_callable_and_argument() {
+        let text = include_str!("../../../../../tests/fixtures/callables/cache_parameters.py");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "call").count(), 1);
+        let start = TextSize::try_from(text.find("def call(").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&graph.entry][&start];
+        let sites: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
+        assert_eq!(sites, ["return fn(value)", "fn(value)", "fn", "value"]);
+    }
+
+    #[test]
     fn named_list_method_uses_the_checked_receiver_and_argument() {
         let fixture =
             include_str!("../../../../../tests/fixtures/truthiness/conditional_contexts.py");

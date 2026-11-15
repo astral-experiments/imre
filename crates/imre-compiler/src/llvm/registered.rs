@@ -182,18 +182,17 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let Some(crate::frontend::FixedAttribute::Call(target, _)) = attribute
-            && let Some(operands) = expr.named_call_arguments()
+        if let Some(attribute @ crate::frontend::FixedAttribute::Call(target, _)) = attribute
+            && let Some((receiver, args)) = attribute.call_operands(expr)
         {
-            // The placed call reads the live Python callee, then evaluates its written arguments.
-            let supported = match target {
-                None => !operands.is_empty(),
-                Some(target) => matches!(&target.without_location().kind,
-                    ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
-            };
             uses_python_protocol = true;
-            protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
-            return supported;
+            protocol_reads += args.iter().map(&protocol_parameter).sum::<usize>();
+            if target.is_none() {
+                protocol_reads += protocol_parameter(receiver);
+                return true;
+            }
+            return matches!(&receiver.without_location().kind,
+                ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty());
         }
         if let Some(crate::frontend::FixedAttribute::Load(_)) = attribute
             && let Some([receiver]) = expr.attribute_operands()
