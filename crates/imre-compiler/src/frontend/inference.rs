@@ -1188,9 +1188,10 @@ impl Inference {
                 let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
-                    checker.fixed_sites = signature
-                        .physical_frame
-                        .then(|| fixed_body_source::SourceSites::new(true));
+                    checker.fixed_sites = (signature.physical_frame
+                        || signature.method.is_none()
+                            && fixed_frame_provider(graph, owners[signature.id], function))
+                    .then(|| fixed_body_source::SourceSites::new(signature.physical_frame));
                     (Vec::new(), Vec::new())
                 });
                 let statements = checker.function_statements(function);
