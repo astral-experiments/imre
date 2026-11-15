@@ -598,14 +598,19 @@ impl Checker<'_> {
         receiver: Expr,
     ) -> Result<Expr, String> {
         if let Some(result) = self.discarded_call(Type::PythonObject) {
-            self.check_discarded_arguments(call)?;
+            self.check_discarded_arguments(call, 0)?;
             return Ok(result);
         }
         self.call_with_target(call, loaded_attribute(field, receiver))
     }
 
-    fn check_discarded_arguments(&mut self, call: &ast::ExprCall) -> Result<(), String> {
+    pub(in crate::frontend) fn check_discarded_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        checked: usize,
+    ) -> Result<(), String> {
         imre_ast::argument_values(&call.arguments)
+            .skip(checked)
             .try_for_each(|arg| self.check_discarded_operand(arg))
     }
 
@@ -695,7 +700,7 @@ impl Checker<'_> {
         let arguments = match checked {
             Some(arguments) => arguments,
             None if check_only => {
-                self.check_discarded_arguments(call)?;
+                self.check_discarded_arguments(call, 0)?;
                 Vec::new()
             }
             None => call_arguments(call, |arg| self.expr(arg))?,

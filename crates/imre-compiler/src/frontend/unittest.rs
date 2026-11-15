@@ -738,6 +738,18 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(case, receiver.clone())];
         let expected = self.unittest_expected(&args[0], &mut body, this)?;
         let mut locals = Vec::new();
+        let live_callback = |checker: &mut Self, ty| -> Result<Option<Expr>, String> {
+            if ty != Type::PythonObject {
+                return Ok(None);
+            }
+            checker.require_registered_operation(&args[1])?;
+            if let Some(result) = checker.discarded_call(Type::None) {
+                // The registered body binds the original assertion and invokes its captured callback.
+                checker.check_discarded_arguments(call, 2)?;
+                return Ok(Some(result));
+            }
+            Ok(None)
+        };
         let checked = (|| {
             let target = &args[1];
             let mut callee = target.clone();
@@ -817,6 +829,9 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
+                            if let Some(result) = live_callback(self, self.locals[slot])? {
+                                return Ok(Some(result));
+                            }
                             // Sealed native methods have no property lookup or user callback.
                             if matches!(
                                 (self.locals[slot], attr.attr.as_str()),
@@ -879,6 +894,9 @@ impl Checker<'_> {
                     _ => {
                         callee = self.unittest_argument(target, &mut body, &mut locals, false)?;
                         let ty = self.locals[locals.last().unwrap().1];
+                        if let Some(result) = live_callback(self, ty)? {
+                            return Ok(Some(result));
+                        }
                         if let Some(name) = self.stored_assertion_name(ty) {
                             name.to_owned()
                         } else {
@@ -935,7 +953,7 @@ impl Checker<'_> {
                     "assertRaises() arg 1 must be an exception type or tuple of exception types"
                 };
                 body.push(self.unittest_call_type_error(message.into()));
-                return Ok(());
+                return Ok(None);
             }
             let expected = expected.unwrap();
             let action = if let Some(message) = noncallable.or(binding_error) {
@@ -973,7 +991,7 @@ impl Checker<'_> {
                 orelse: vec![failure],
                 finalbody: vec![],
             });
-            Ok(())
+            Ok(None)
         })();
         let mut clear = vec![case];
         for (name, slot) in locals {
@@ -981,7 +999,9 @@ impl Checker<'_> {
             self.assigned.remove(&slot);
             clear.push(slot);
         }
-        checked?;
+        if let Some(result) = checked? {
+            return Ok(result);
+        }
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
