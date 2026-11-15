@@ -1667,7 +1667,10 @@ fn lower_graph(
             .map(|body| (body, Default::default()))
             .map_or_else(|| lower_body(checker, definition, signature), Ok)
         } else if physical_function
-            && (named_scalar && unavailable.is_none()
+            && (named
+                && unavailable.is_none()
+                && (named_scalar
+                    || signature.may_have_display && types.element(signature.returns).is_some())
                 || named
                     && place_procedures
                     && unavailable.is_some()
@@ -2533,7 +2536,12 @@ fn lower_function(
                 statements,
                 Some(&mut body),
                 Some(&mut |cx| {
-                    if cx.helpers.len() != helpers
+                    let ready = if cx.types.element(signature.returns).is_some() {
+                        cx.helpers.caller_list_helpers_since(helpers, cx.types)
+                    } else {
+                        cx.helpers.len() == helpers
+                    };
+                    if !ready
                         || cx.unrepresented.borrow().is_some()
                         || signature.returns == Type::None
                             && cx
