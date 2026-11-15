@@ -185,10 +185,10 @@ impl StatementLowering for Checker<'_> {
         if self.fault_enabled() {
             return None;
         }
-        self.fixed_sites
-            .as_mut()?
-            .record(range, FixedNode::Position(range));
-        Some(Statement::Position(range, None))
+        let sites = self.fixed_sites.as_mut()?;
+        let statement = Statement::Position(range, None);
+        sites.record(range, ir::Node::Statement(&statement));
+        Some(statement)
     }
 
     fn effect(&mut self, expr: &ast::Expr) -> Result<(Option<Statement>, bool), String> {

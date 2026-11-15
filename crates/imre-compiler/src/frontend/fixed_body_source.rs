@@ -80,7 +80,7 @@ pub(crate) enum FixedAttribute {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) enum FixedNode {
+pub(super) enum FixedNode {
     Position(TextRange),
     Return,
     Effect,
@@ -288,18 +288,16 @@ impl SourceSites {
         self.current.filter(|site| site.range == range)
     }
 
-    pub(super) fn record(&mut self, range: TextRange, node: FixedNode) {
-        if let Some(site) = self.site_at(range) {
+    pub(super) fn record(&mut self, range: TextRange, value: ir::Node<'_>) {
+        if let Some(site) = self.site_at(range)
+            && let Some(node) = FixedNode::checked(&value)
+        {
             self.commit(site, node);
         }
     }
 
     pub(super) fn checked_expression(&mut self, range: TextRange, value: &Expr) {
-        if let Some(site) = self.site_at(range)
-            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
-        {
-            self.commit(site, node);
-        }
+        self.record(range, ir::Node::Expression(value));
     }
 
     pub(super) fn module_read(&mut self, name: &ast::ExprName, value: &Expr) {

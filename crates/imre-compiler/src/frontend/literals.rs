@@ -1,6 +1,33 @@
 use super::*;
 use std::result::Result;
 
+pub(super) fn unsigned_scalar(
+    expression: &ast::Expr,
+    source: &str,
+) -> Result<Option<Expr>, String> {
+    let (ty, kind) = match expression {
+        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
+            value: ast::Number::Int(value),
+            ..
+        }) => (Type::Int, ExprKind::Int(value.to_string())),
+        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
+            value: ast::Number::Float(value),
+            ..
+        }) => (Type::Float, ExprKind::Float(*value)),
+        ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
+        ast::Expr::StringLiteral(value) => {
+            check_string(value, source)?;
+            (Type::Str, ExprKind::Str(value.value.to_string()))
+        }
+        ast::Expr::BytesLiteral(value) => {
+            (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
+        }
+        ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
+        _ => return Ok(None),
+    };
+    Ok(Some(Expr { ty, kind }))
+}
+
 pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     match number {
         ast::Number::Int(n) => {

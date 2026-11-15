@@ -313,33 +313,13 @@ pub(crate) fn scalar_literal(
     if let Some(literal) = literals::signed_number(expression, |ty| ty != Type::PythonObject) {
         return Ok(literal);
     }
-    let (ty, kind) = match expression {
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Int(value),
-            ..
-        }) => (Type::Int, ExprKind::Int(value.to_string())),
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Float(value),
-            ..
-        }) => (Type::Float, ExprKind::Float(*value)),
-        ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
-        ast::Expr::StringLiteral(value) => {
-            check_string(value, source)?;
-            (Type::Str, ExprKind::Str(value.value.to_string()))
-        }
-        ast::Expr::BytesLiteral(value) => {
-            (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
-        }
-        ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-        _ => {
-            return Err(diagnostic_message(
-                source,
-                expression,
-                "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
-            ));
-        }
-    };
-    Ok(Expr { ty, kind })
+    literals::unsigned_scalar(expression, source)?.ok_or_else(|| {
+        diagnostic_message(
+            source,
+            expression,
+            "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
+        )
+    })
 }
 
 pub(super) fn starred(call: &ast::ExprCall) -> bool {

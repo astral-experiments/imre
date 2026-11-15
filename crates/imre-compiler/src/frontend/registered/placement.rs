@@ -3,6 +3,7 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
     fn imported_function_keeps_its_return_site_after_the_file_entry_declines() {
