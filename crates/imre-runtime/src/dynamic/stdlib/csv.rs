@@ -64,13 +64,7 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         let value = match field {
             Field::Text(text) if !quoted && text.is_empty() && matches!(mode, 4 | 5) => Value::None,
             Field::Text(text) if numeric && !text.is_empty() => {
-                let value = crate::floats::parse(&text).ok_or_else(|| {
-                    crate::Error::new(
-                        Kind::ValueError,
-                        crate::floats::invalid_string_message(&text),
-                    )
-                })?;
-                Value::Float(value)
+                Value::Float(crate::floats::parse_str(&text)?)
             }
             Field::Surrogates(points) if numeric => {
                 return Err(crate::Error::new(

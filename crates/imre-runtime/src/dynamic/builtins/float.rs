@@ -213,7 +213,9 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
 
 /// Read native strings directly, then request a contiguous buffer from other inputs.
 fn parse_input(ctx: &mut Context, value: Id) -> Result<f64> {
-    let parsed = match ctx.heap.get(ctx.scalar_value(value)) {
+    let scalar = ctx.scalar_value(value);
+    let parsed = match ctx.heap.get(scalar) {
+        Value::Str(text) if value == scalar => return Ok(crate::floats::parse_str(text)?),
         Value::Str(text) => crate::floats::parse(text),
         Value::SurrogateStr(_) => None,
         Value::Bytes(bytes) | Value::ByteArray(bytes) => crate::floats::parse_bytes(bytes),
@@ -251,13 +253,9 @@ fn parsed_number(ctx: &mut Context, value: Id, parsed: Option<f64>) -> Result<f6
     if let Some(number) = parsed {
         return Ok(number);
     }
-    let message = if let Value::Str(text) = ctx.heap.get(value) {
-        ctx.text(crate::floats::invalid_string_message(text))
-    } else {
-        let repr = super::call(ctx, "repr", &[value], &[])?;
-        let prefix = ctx.text(crate::floats::INVALID_STRING_PREFIX);
-        ctx.concat_strings(prefix, repr)?
-    };
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let prefix = ctx.text(crate::floats::INVALID_STRING_PREFIX);
+    let message = ctx.concat_strings(prefix, repr)?;
     Err(ctx.exception("ValueError", &[message]))
 }
 
