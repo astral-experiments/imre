@@ -30,6 +30,11 @@ assert client.mock_calls[1].args == ()
 assert client.mock_calls[1].kwargs == {"size": 2}
 assert repr(client.mock_calls[1]) == "call.fetch().read(size=2)"
 
+with mock.patch("pprint.pformat", return_value="formatted history") as render:
+    assert repr(client.mock_calls) == "formatted history"
+    (items,) = render.call_args.args
+    assert type(items) is list and items[0] is client.mock_calls[0]
+
 
 class History(mock._CallList):
     def __iter__(self):
