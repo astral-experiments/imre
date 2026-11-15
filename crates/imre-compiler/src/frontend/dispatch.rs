@@ -163,19 +163,29 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::ExactRecord(class), vec![self.local(slot)]),
             };
-            value = Expr {
-                ty: value.ty,
-                kind: ExprKind::Conditional(Box::new(test), Box::new(next), Box::new(value)),
+            // A store has no result to merge. Its remaining layouts can all raise.
+            value = if value.ty == Type::None {
+                Expr::scope(
+                    vec![Statement::If(
+                        test,
+                        vec![Statement::Expr(next)],
+                        vec![Statement::Expr(value)],
+                    )],
+                    Expr::none(),
+                    Vec::new(),
+                )
+            } else {
+                Expr {
+                    ty: value.ty,
+                    kind: ExprKind::Conditional(Box::new(test), Box::new(next), Box::new(value)),
+                }
             };
         }
-        Ok(Expr {
-            ty: value.ty,
-            kind: ExprKind::Scope {
-                body: vec![Statement::Assign(slot, receiver)],
-                value: Box::new(value),
-                clear: vec![slot],
-            },
-        })
+        Ok(Expr::scope(
+            vec![Statement::Assign(slot, receiver)],
+            value,
+            vec![slot],
+        ))
     }
 
     /// Invoke the concrete slot, including overrides on a fixed-layout subclass.
