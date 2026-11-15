@@ -462,11 +462,14 @@ impl Wrapper {
         Self::stored(ctx, receiver).ok_or_else(Self::uninitialized)
     }
 
-    fn from_receiver(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
+    fn initialized(ctx: &Context, receiver: Id) -> Result<&Rc<Self>> {
         Self::stored(ctx, receiver)
             .filter(|w| w.initialized.get())
-            .cloned()
             .ok_or_else(Self::uninitialized)
+    }
+
+    fn from_receiver(ctx: &Context, receiver: Id) -> Result<Rc<Self>> {
+        Self::initialized(ctx, receiver).cloned()
     }
 
     fn clear(&self, ctx: &mut Context) {
@@ -490,7 +493,7 @@ impl Wrapper {
 
     /// Resolve the current buffer before calling a method that can reenter the wrapper.
     fn invoke_buffer(ctx: &mut Context, receiver: Id, name: &str, args: Vec<Id>) -> Result<Id> {
-        let buffer = Self::from_receiver(ctx, receiver)?.binary()?;
+        let buffer = Self::initialized(ctx, receiver)?.binary()?;
         invoke(ctx, buffer, name, args)
     }
 
@@ -517,7 +520,7 @@ impl Wrapper {
             .ok_or_else(|| Error::new("ValueError", "underlying buffer has been detached"))
     }
 
-    fn check_open(&self, ctx: &mut Context, buffer: Id) -> Result<()> {
+    fn check_open(ctx: &mut Context, buffer: Id) -> Result<()> {
         let closed = ctx.lookup_attr(buffer, "closed")?;
         if ctx.truth(closed)? {
             Err(Error::new("ValueError", "I/O operation on closed file."))
@@ -526,8 +529,8 @@ impl Wrapper {
         }
     }
 
-    fn drain(&self, ctx: &mut Context, receiver: Id) -> Result<()> {
-        let pending = self.output.take();
+    fn drain(ctx: &mut Context, receiver: Id) -> Result<()> {
+        let pending = Self::current(ctx, receiver)?.output.take();
         if !pending.is_empty() {
             let data = ctx.alloc(Value::Bytes(pending));
             Self::invoke_buffer(ctx, receiver, "write", vec![data])?;
@@ -535,11 +538,12 @@ impl Wrapper {
         Ok(())
     }
 
-    fn write(&self, ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
-        if !self.writable.get() {
+    fn write(ctx: &mut Context, receiver: Id, value: Id) -> Result<Id> {
+        let w = Self::current(ctx, receiver)?;
+        if !w.writable.get() {
             return Err(Error::new("UnsupportedOperation", "not writable"));
         }
-        let replacement = match self.newline.get() {
+        let replacement = match w.newline.get() {
             None if cfg!(windows) => Some("\r\n"),
             Some("\r") => Some("\r"),
             Some("\r\n") => Some("\r\n"),
@@ -562,8 +566,8 @@ impl Wrapper {
             }
             _ => unreachable!(),
         };
-        let write_through = self.write_through.get();
-        let flush = self.line_buffering.get() && (has_lf || has_cr);
+        let write_through = w.write_through.get();
+        let flush = w.line_buffering.get() && (has_lf || has_cr);
         let translated = if let Some(nl) = replacement
             && has_lf
         {
@@ -592,20 +596,21 @@ impl Wrapper {
         } else {
             value
         };
-        let encoder = self.encoder.get();
+        let w = Self::current(ctx, receiver)?;
+        let encoder = w.encoder.get();
         let encoded = match encoder.codec {
             StreamCodec::Wide {
                 format,
                 signature: bom,
             } => {
                 let errors = ctx.str_value(encoder.errors)?.to_owned();
-                let signature = bom && self.seekable.get() && self.write_start.get();
+                let signature = bom && w.seekable.get() && w.write_start.get();
                 let order = if signature { 0 } else { format.byte_order() };
                 codecs::encode_fixed(ctx, translated, format, &errors, order)
             }
             StreamCodec::Registered(codec) => {
                 let encoding = if matches!(codec, Codec::Utf8 { signature: true })
-                    && !self.utf8_signature_pending.replace(false)
+                    && !w.utf8_signature_pending.replace(false)
                 {
                     ctx.text("utf-8")
                 } else {
@@ -621,29 +626,32 @@ impl Wrapper {
             encoder.codec,
             StreamCodec::Registered(Codec::Utf8 { signature: true } | Codec::CodePage(_))
         ) {
-            self.write_start.set(false);
+            Self::current(ctx, receiver)?.write_start.set(false);
         }
         let encoded = encoded?;
-        if encoded.len() >= self.chunk_size.get() {
-            while !self.output.borrow().is_empty() {
-                self.drain(ctx, receiver)?;
+        // A binary write can reinitialize this same Python wrapper and queue more bytes.
+        if encoded.len() >= Self::current(ctx, receiver)?.chunk_size.get() {
+            while !Self::current(ctx, receiver)?.output.borrow().is_empty() {
+                Self::drain(ctx, receiver)?;
             }
         }
+        let w = Self::current(ctx, receiver)?;
         let length = {
-            let mut pending = self.output.borrow_mut();
+            let mut pending = w.output.borrow_mut();
             pending
                 .try_reserve(encoded.len())
                 .map_err(|_| crate::Error::allocation())?;
             pending.extend_from_slice(&encoded);
             pending.len()
         };
-        if flush || write_through || length >= self.chunk_size.get() {
-            self.drain(ctx, receiver)?;
+        if flush || write_through || length >= w.chunk_size.get() {
+            Self::drain(ctx, receiver)?;
         }
         if flush {
             Self::invoke_buffer(ctx, receiver, "flush", vec![])?;
         }
-        self.input.borrow_mut().after_write();
+        let w = Self::current(ctx, receiver)?;
+        w.input.borrow_mut().after_write();
         Ok(ctx.int(count as i64))
     }
 
@@ -653,7 +661,7 @@ impl Wrapper {
         if !w.readable.get() {
             return Err(Error::new("UnsupportedOperation", "not readable"));
         }
-        w.drain(ctx, receiver)?;
+        Wrapper::drain(ctx, receiver)?;
         let all = !line && limit.is_none();
         loop {
             let w = Self::from_receiver(ctx, receiver)?;
@@ -879,7 +887,7 @@ pub(super) fn next(
     let buffer = w.binary()?;
     w.telling.set(false);
     let line = if exact {
-        w.check_open(ctx, buffer)?;
+        Wrapper::check_open(ctx, buffer)?;
         Wrapper::read(ctx, receiver, None, true)?
     } else {
         invoke(ctx, receiver, "readline", vec![])?
@@ -954,7 +962,7 @@ pub(super) fn call(
             _ => {}
         }
     }
-    let w = Wrapper::from_receiver(ctx, receiver)?;
+    let w = Wrapper::initialized(ctx, receiver)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -962,6 +970,7 @@ pub(super) fn call(
         ));
     }
     if name == "set_chunk_size" {
+        let w = Rc::clone(w);
         w.binary()?;
         let Some(&value) = args.first() else {
             return Err(Error::new("AttributeError", "cannot delete attribute"));
@@ -995,7 +1004,7 @@ pub(super) fn call(
         "_CHUNK_SIZE" => return Ok(ctx.int(w.chunk_size.get() as i64)),
         "closed" | "name" => return ctx.lookup_attr(buffer, name),
         "fileno" => return invoke(ctx, buffer, name, vec![]),
-        "newlines" => return Ok(w.input.borrow().newlines(ctx)),
+        "newlines" => return Ok(Rc::clone(w).input.borrow().newlines(ctx)),
         "close" => {
             let closed = ctx.lookup_attr(buffer, "closed")?;
             if ctx.truth(closed)? || Wrapper::current(ctx, receiver)?.buffer.get().is_none() {
@@ -1044,18 +1053,18 @@ pub(super) fn call(
         }
         _ => {}
     }
-    w.check_open(ctx, buffer)?;
-    let w = Wrapper::from_receiver(ctx, receiver)?;
+    Wrapper::check_open(ctx, buffer)?;
+    let w = Wrapper::initialized(ctx, receiver)?;
     let buffer = w.binary()?;
     match name {
         "__enter__" => Ok(receiver),
         "flush" => {
             w.telling.set(w.seekable.get());
-            w.drain(ctx, receiver)?;
+            Wrapper::drain(ctx, receiver)?;
             Wrapper::invoke_buffer(ctx, receiver, "flush", vec![])
         }
         "readable" | "writable" | "seekable" | "isatty" => invoke(ctx, buffer, name, vec![]),
-        "write" => w.write(ctx, receiver, args[0]),
+        "write" => Wrapper::write(ctx, receiver, args[0]),
         "read" | "readline" => {
             let n = if name == "read" {
                 super::super::files::read_length(ctx, args.first().copied())?
@@ -1085,7 +1094,7 @@ pub(super) fn call(
                         "telling position disabled by next() call",
                     ));
                 }
-                w.drain(ctx, receiver)?;
+                Wrapper::drain(ctx, receiver)?;
                 invoke(ctx, receiver, "flush", vec![])?;
                 let pos = Wrapper::invoke_buffer(ctx, receiver, "tell", vec![])?;
                 return Wrapper::position(ctx, receiver, pos);

@@ -131,7 +131,27 @@ def check_split_multibyte():
                     raise AssertionError("lost pending input at EOF")
 
 
+def check_write_reinitializes_wrapper():
+    class Buffer(io.BytesIO):
+        def write(self, data):
+            count = super().write(data)
+            text.__init__(replacement, encoding="ascii")
+            text.write("M")
+            return count
+
+    original = Buffer()
+    replacement = io.BytesIO()
+    with io.TextIOWrapper(original, encoding="ascii") as text:
+        text._CHUNK_SIZE = 4
+        assert text.write("abc") == 3
+        assert text.write("BBBB") == 4
+        assert original.getvalue() == b"abc" and replacement.getvalue() == b"M"
+        text.flush()
+        assert replacement.getvalue() == b"MBBBB"
+
+
 def current():
+    check_write_reinitializes_wrapper()
     check_split_multibyte()
     check_surrogate_reads()
     check_repr()
