@@ -146,6 +146,26 @@ struct InitializerStatement<'a, 'db> {
 }
 
 impl Session {
+    /// A sole return of this function's parameter cannot produce a Python call result.
+    pub(crate) fn returns_bound_parameter(
+        &self,
+        module: usize,
+        function: &StmtFunctionDef,
+    ) -> bool {
+        function.body.len() == 1
+            && passive_function_return(function, |value| {
+                let file = self.files[module];
+                let parameter = self.parameter_read(file, &self.parsed(file), value)?;
+                function
+                    .parameters
+                    .range()
+                    .contains_range(parameter)
+                    .then_some(())
+            })
+            .flatten()
+            .is_some()
+    }
+
     /// Find the guarded statement and the start of its proven normal path.
     /// Dormant scalar checks can still inspect the statement. Reached checks
     /// require every intervening guard to be both passive and proven true.
