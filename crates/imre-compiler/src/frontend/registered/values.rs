@@ -135,8 +135,14 @@ impl<'a> RegisteredSource<'a> {
                     return Ok(None);
                 };
                 if let (Some(field), Some(FixedAttribute::Call(None, site))) = (field, placed)
-                    && let ir::RegisteredCallTarget::Method { name, attribute, name_start } = &site.target
-                    && *name == field.attr.id && *attribute == field.range() && *name_start == field.attr.start()
+                    && let ir::RegisteredCallTarget::Method {
+                        name,
+                        attribute,
+                        name_start,
+                    } = &site.target
+                    && *name == field.attr.id
+                    && *attribute == field.range()
+                    && *name_start == field.attr.start()
                 {
                     let arguments = call_arguments(call, child)?;
                     return Ok(Some(invoke_value(site, Box::new(target), arguments)));
