@@ -2,7 +2,7 @@
 use super::permanent;
 use crate::ir::{Builtin, Expr, ExprKind};
 
-pub(in crate::llvm) fn permanent_handle(value: &Expr) -> Option<u16> {
+pub(crate) fn permanent_handle(value: &Expr) -> Option<u16> {
     let handle = match &value.without_location().kind {
         ExprKind::None => permanent::NONE,
         ExprKind::Bool(true) => permanent::TRUE,
