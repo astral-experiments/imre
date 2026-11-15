@@ -58,6 +58,11 @@ impl Checker<'_> {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
             },
+            Type::List(_)
+                if let Some(text) = self.structured_display("repr", &value, argument)? =>
+            {
+                text
+            }
             _ => {
                 return Err(error(
                     self.source,
@@ -72,8 +77,7 @@ impl Checker<'_> {
         })
     }
 
-    // Descriptor traversal of container contents never invokes Python methods.
-    // Only admit shapes whose entire contents use built-in repr.
+    // These shapes can use built-in repr without retaining any Python methods.
     pub(super) fn has_builtin_repr(&self, ty: Type) -> bool {
         match ty {
             Type::None
