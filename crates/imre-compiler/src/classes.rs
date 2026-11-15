@@ -280,7 +280,8 @@ impl<'syntax> Classes<'syntax> {
         graph: &'syntax SourceGraph,
         first_layout: Option<&mut Option<Diagnostic>>,
     ) -> Result<Self, Diagnostic> {
-        let resolved = exceptions::collect(graph)?;
+        let mut resolved = exceptions::collect(graph)?;
+        let mut registered_classes = std::mem::take(&mut resolved.registered);
         let mut source_nodes = Vec::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
@@ -316,9 +317,12 @@ impl<'syntax> Classes<'syntax> {
                             Some((base, intrinsic.scoped_class_base()?))
                         })
                     {
-                        return Err(module
-                            .diagnostic(base, &format!("{name} requires object lowering"))
-                            .classified(Kind::ScopedClassLayout));
+                        if graph.entry_profile.requires_fixed_entry() {
+                            return Err(module
+                                .diagnostic(base, &format!("{name} requires object lowering"))
+                                .classified(Kind::ScopedClassLayout));
+                        }
+                        registered_classes.insert(definition);
                     }
                     ids.insert(definition, source_nodes.len());
                     let mut record = Cow::Borrowed(node);
@@ -359,9 +363,14 @@ impl<'syntax> Classes<'syntax> {
                 }
             }
         }
-        let (definitions, mut registered_classes) =
-            inheritance::resolve(graph, &source_nodes, &mut ids, &resolved, first_layout)?;
-        registered_classes.extend(resolved.registered);
+        let (definitions, registered_classes) = inheritance::resolve(
+            graph,
+            &source_nodes,
+            &mut ids,
+            &resolved,
+            registered_classes,
+            first_layout,
+        )?;
         // An inner class uses the object runtime, but every fixed class must validate first.
         if let Some(error) = graph.class_layout_error.borrow().as_ref() {
             return Err(error.clone());
@@ -1282,6 +1291,16 @@ fn collect_class<'syntax>(
                 }
                 class_bindings.insert(name.id.to_string());
                 exception_aliases.insert(name.id.to_string(), target);
+            }
+            ast::Stmt::Assign(assign)
+                if !graph.entry_profile.requires_fixed_entry()
+                    && dataclass.is_none()
+                    && !exception_layout
+                    && assign.targets.len() > 1
+                    && assign.targets.iter().all(|target| target.is_name_expr()) =>
+            {
+                // A chained class assignment publishes the same evaluated value under each name.
+                return Ok(None);
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
             ast::Stmt::ClassDef(nested) if !is_enum && dataclass.is_none() && !exception_layout => {

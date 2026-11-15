@@ -6818,12 +6818,6 @@ impl<'a> Loader<'a> {
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
             "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
-            // The checked socketserver provides the synchronous server and handler bases.
-            "http.server" => Some((
-                "http/server.py",
-                self.session
-                    .checked_shipped_prefix(name, "BaseHTTPRequestHandler")?,
-            )),
             _ => {
                 path_first = name == "ssl" && self.allow_imports;
                 registered_namespace = source_exports || matches!(name, "bisect" | "email" | "ssl");

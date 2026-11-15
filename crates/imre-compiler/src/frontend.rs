@@ -760,7 +760,11 @@ fn checked_region<T>(
         return Err(failure.terminal_in(graph, module));
     }
     capture_on_object(&failure);
-    if graph.modules[module].is_program_source() && failure.is_representation() {
+    // A selected Python class still executes in its imported module. Its layout
+    // cannot invalidate the constructor contracts of other declarations.
+    if graph.modules[module].is_program_source() && failure.is_representation()
+        || matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::RegisteredClassDefinition)
+    {
         unavailable.get_or_insert_with(|| failure.terminal_in(graph, module));
         Ok(None)
     } else {
@@ -6753,10 +6757,18 @@ impl<'a> Checker<'a> {
     }
 
     fn require_registered_operation(&self, site: &impl Ranged) -> Result<(), String> {
+        self.require_registered_representation(site, Kind::ScopedObject)
+    }
+
+    fn require_registered_representation(
+        &self,
+        site: &impl Ranged,
+        kind: Kind,
+    ) -> Result<(), String> {
         let mut missing = self.unrepresented.borrow_mut();
         let failure = missing.get_or_insert_with(|| {
             self.classified_error(
-                Kind::ScopedObject,
+                kind,
                 site,
                 "operation requires its compiled object representation",
             )

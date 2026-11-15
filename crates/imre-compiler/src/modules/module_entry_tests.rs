@@ -417,7 +417,7 @@ fn checked_function_preserves_a_user_file_at_the_sdk_path() {
 fn checked_shipped_files_reuse_equivalent_inputs_and_preserve_sdk_shadows() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = crate::analysis::Session::new(dir.path(), &[]).unwrap();
-    for owner in ["inspect", "dataclasses"] {
+    for owner in ["inspect", "dataclasses", "http.server"] {
         let (filename, shipped) = crate::modules::bundled_runtime_source(owner).unwrap();
         let sdk_path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(filename);
         let private = dir.path().join(filename);
@@ -441,29 +441,20 @@ fn checked_shipped_files_reuse_equivalent_inputs_and_preserve_sdk_shadows() {
 }
 
 #[test]
-fn checked_shipped_prefix_keeps_the_physical_source() {
-    use ruff_text_size::Ranged;
-
-    let root = tempfile::tempdir().unwrap();
-    let mut session = crate::analysis::Session::new(root.path(), &[]).unwrap();
-    let owner = "http.server";
-    let last = "BaseHTTPRequestHandler";
-    let (filename, physical) = crate::modules::bundled_runtime_source(owner).unwrap();
-    let prefix = session.checked_shipped_prefix(owner, last).unwrap();
-    let path = Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT).join(filename);
-    let (_, parsed, source) = session.selected_file(&path).unwrap();
-    let handler = parsed
-        .suite()
-        .iter()
-        .filter_map(ruff_python_ast::Stmt::as_class_def_stmt)
-        .find(|class| class.name.as_str() == last)
+fn checked_http_server_class_uses_the_complete_shipped_source() {
+    let graph =
+        SourceGraph::single_with_mode("from http.server import HTTPServer\n", true).unwrap();
+    let Some(super::Binding::Definition(id)) = graph.modules[graph.entry].export("HTTPServer")
+    else {
+        panic!("expected the checked class");
+    };
+    let module = &graph.modules[id.module];
+    let (_, physical) = crate::modules::bundled_runtime_source("http.server").unwrap();
+    assert_eq!(module.original_source(), physical);
+    let class = module.parsed.syntax().body[id.statement]
+        .as_class_def_stmt()
         .unwrap();
-    let end = handler.end().to_usize();
-    assert!(physical.starts_with(prefix));
-    assert_eq!(
-        crate::normalize_source(prefix, crate::SourceKind::File).unwrap(),
-        &source.as_str()[..end + 1]
-    );
+    assert_eq!(class.name.as_str(), "HTTPServer");
 }
 
 #[test]

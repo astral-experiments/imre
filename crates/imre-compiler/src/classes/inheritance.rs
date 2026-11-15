@@ -8,6 +8,7 @@ pub(super) fn resolve<'syntax>(
     nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
     ids: &mut HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
+    registered: HashSet<DefinitionId>,
     first_layout: Option<&mut Option<Diagnostic>>,
 ) -> Result<(Vec<Class<'syntax>>, HashSet<DefinitionId>), Diagnostic> {
     struct Layouts<'syntax> {
@@ -258,7 +259,7 @@ pub(super) fn resolve<'syntax>(
     }
     let mut layouts = Layouts {
         fixed: (0..nodes.len()).map(|_| None).collect(),
-        registered: HashSet::new(),
+        registered,
     };
     let mut path = Vec::new();
     for id in 0..nodes.len() {

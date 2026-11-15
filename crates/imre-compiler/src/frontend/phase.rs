@@ -26,6 +26,7 @@ pub(crate) enum Kind {
     ScopedObject,
     ClassLayout,
     ScopedClassLayout,
+    RegisteredClassDefinition,
 }
 
 /// The entry operand and physical source containing its checked diagnostic.
@@ -292,11 +293,17 @@ impl Kind {
     }
 
     pub(super) fn is_object(self) -> bool {
-        matches!(self, Self::Object | Self::ScopedObject) || self.is_class_layout()
+        matches!(
+            self,
+            Self::Object | Self::ScopedObject | Self::RegisteredClassDefinition
+        ) || self.is_class_layout()
     }
 
     pub(crate) fn checks_object_calls(self) -> bool {
-        matches!(self, Self::ScopedObject | Self::ScopedClassLayout)
+        matches!(
+            self,
+            Self::ScopedObject | Self::ScopedClassLayout | Self::RegisteredClassDefinition
+        )
     }
 
     pub(crate) fn is_class_layout(self) -> bool {
