@@ -1062,7 +1062,8 @@ fn execution_operands_follow_the_selected_initializer() {
     .unwrap();
     let mut compiler = crate::IncrementalCompiler::default();
     let leaf = root.join("leaf.py");
-    fs::write(&leaf, "print('enter leaf')\nraise LookupError()\n").unwrap();
+    let raising = "print('enter leaf')\nraise LookupError()\n";
+    fs::write(&leaf, raising).unwrap();
     compiler.check_file(&app, None).unwrap();
     for (source, error) in [
         ("exec(input())\nraise LookupError()\n", "leaf.py:1:6"),
@@ -1072,6 +1073,28 @@ fn execution_operands_follow_the_selected_initializer() {
         let actual = compiler.check_file(&app, None).unwrap_err();
         assert!(actual.contains(error), "{actual}");
     }
+
+    fs::write(&leaf, raising).unwrap();
+    fs::write(
+        root.join("bridge.py"),
+        "try:\n    import leaf\nexcept LookupError:\n    print('caught leaf')\n",
+    )
+    .unwrap();
+    let actual = compiler.check_file(&app, None).unwrap_err();
+    assert!(actual.contains("producer.py:2:10"), "{actual}");
+    fs::write(
+        root.join("producer.py"),
+        "def consume(value):\n    exec(\"print('producer')\")\n",
+    )
+    .unwrap();
+    compiler.check_file(&app, None).unwrap();
+
+    fs::write(
+        root.join("bridge.py"),
+        "try:\n    pass\nfinally:\n    try:\n        import leaf\n    except LookupError:\n        pass\n",
+    )
+    .unwrap();
+    compiler.check_file(&app, None).unwrap();
 }
 
 #[test]

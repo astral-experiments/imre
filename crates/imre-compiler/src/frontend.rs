@@ -3794,13 +3794,6 @@ struct CaughtException {
     fields: processes::CapturedFields,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum FinallyScope {
-    Outside,
-    Protected,
-    Cleanup,
-}
-
 struct Checker<'a> {
     frame: LexicalFrame,
     unhighlighted_call: Option<TextRange>,
@@ -3894,7 +3887,8 @@ struct Checker<'a> {
     default_reads: Option<Vec<caller_cache::DefaultId>>,
     loop_breaks: Vec<Option<LocalState>>,
     block_depth: usize,
-    finally_scope: FinallyScope,
+    in_try_body: bool,
+    in_finally: bool,
     reachable: bool,
     suite_imports: bool,
     module_scope: bool,
@@ -4020,7 +4014,8 @@ impl<'a> Checker<'a> {
             default_reads: None,
             loop_breaks: Vec::new(),
             block_depth: 0,
-            finally_scope: FinallyScope::Outside,
+            in_try_body: false,
+            in_finally: false,
             reachable: true,
             suite_imports: true,
             module_scope: false,
@@ -7508,6 +7503,11 @@ impl<'a> Checker<'a> {
                 return Err(self.object_runtime_export("a conditional or local import", statement));
             }
             ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_) if !self.suite_imports => None,
+            ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_)
+                if self.module_scope && self.in_try_body =>
+            {
+                return Err(self.scoped_builtin_error("a protected import", statement));
+            }
             ast::Stmt::TypeAlias(_) => {
                 return Err(self.scoped_builtin_error("type alias declaration", statement));
             }
@@ -8149,7 +8149,10 @@ impl<'a> Checker<'a> {
         } else {
             self.take_breaks()
         };
-        let (body, body_falls) = self.block(&try_.body)?;
+        let outer_body = std::mem::replace(&mut self.in_try_body, true);
+        let protected = self.block(&try_.body);
+        self.in_try_body = outer_body;
+        let (body, body_falls) = protected?;
         let reachable = self.reachable;
         self.reachable &= body_falls;
         let (orelse, else_falls) = self.placed_suite(&try_.orelse)?;
@@ -8369,10 +8372,9 @@ impl<'a> Checker<'a> {
         // "broken" flag before the final completion is known.
         let pending_breaks = self.take_breaks();
         let protected_returns = std::mem::replace(&mut self.explicit_return, earlier_returns);
-        let outer_finally = self.finally_scope;
-        self.finally_scope = FinallyScope::Cleanup;
+        let outer_finally = std::mem::replace(&mut self.in_finally, true);
         let final_result = self.placed_suite(&try_.finalbody);
-        self.finally_scope = outer_finally;
+        self.in_finally = outer_finally;
         let (finalbody, final_falls) = final_result?;
         self.explicit_return |= final_falls && protected_returns;
         let deleted = narrowing::deleted_names(&try_.finalbody);

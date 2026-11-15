@@ -423,14 +423,8 @@ impl StatementLowering for Checker<'_> {
                 Ok(true)
             }
             ast::Stmt::Try(try_) if !try_.is_star => {
-                let outer = self.finally_scope;
-                if outer == FinallyScope::Outside && !try_.finalbody.is_empty() {
-                    self.finally_scope = FinallyScope::Protected;
-                }
                 let start = output.len();
-                let result = self.try_statement(try_, output);
-                self.finally_scope = outer;
-                let continues = result?;
+                let continues = self.try_statement(try_, output)?;
                 if let Some(sites) = &mut self.fixed_sites
                     && let [statement] = &output[start..]
                     && let Some(first) = try_.body.first()
