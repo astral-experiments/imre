@@ -27,6 +27,7 @@ ITEM = IMPORT + "@dataclass\nclass Item:\n    value: int\n"
 FROZEN = ITEM.replace("@dataclass\n", "@dataclass(frozen=True)\n")
 METHOD = ITEM + "    @classmethod\n    def make(cls, value: int) -> \"Item\":\n        return cls(value)\n"
 PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return self.value * 2\n"
+WRONG_PROPERTY_RETURN = PROPERTY.replace("self.value * 2", '"wrong"')
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
 SLOTS = ITEM.replace("@dataclass\n", "@dataclass(slots=True)\n")
@@ -111,7 +112,8 @@ Option().updated(unknown=True)
     "cached_property_has_no_setter": "from functools import cached_property\n"
         + PROPERTY.replace("@property", "@cached_property")
         + "    @double.setter\n    def double(self, value: int) -> None:\n        self.value = value // 2\n",
-    "property_recursion": PROPERTY.replace("return self.value * 2", "return self.double"),
+    "property_wrong_return": WRONG_PROPERTY_RETURN,
+    "property_wrong_return_read": WRONG_PROPERTY_RETURN + "print(Item(3).double)\n",
     "classmethod_recursion": METHOD.replace("return cls(value)", "return cls.make(value)"),
     "classmethod_missing_receiver": METHOD.replace("def make(cls, value: int)", "def make(value: int)"),
     "classmethod_wrong_receiver": METHOD.replace("def make(cls,", "def make(self,").replace("return cls(value)", "return Item(value)"),
@@ -209,12 +211,19 @@ display((8, 1, 2), stats)
     (fixtures / "upstream_teststats.py").write_bytes(b"import dataclasses\n\n" + original + driver.encode())
 
 
+def check_property_return(name: str, stderr: str) -> None:
+    if name in {"property_wrong_return", "property_wrong_return_read"}:
+        assert "main.py:7:16" in stderr, (name, stderr)
+        assert "expected int, got str" in stderr or "invalid-return-type" in stderr, (name, stderr)
+
+
 def run_suite(fixtures: Path) -> None:
     assignments.main(
         fixtures=fixtures,
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors=ERRORS,
+        check_rejection=check_property_return,
         label="dataclass and descriptor",
         description=__doc__,
         thinlto_build_timeout=120,
