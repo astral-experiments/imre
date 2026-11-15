@@ -11,15 +11,19 @@ declare ptr @llvm.coro.begin(token, ptr)
 declare token @llvm.coro.save(ptr)
 declare i8 @llvm.coro.suspend(token, i1)
 declare i1 @llvm.coro.end(ptr, i1, token)
-declare void @llvm.coro.resume(ptr)
-declare void @llvm.coro.destroy(ptr)
 declare noalias ptr @imre_dyn_coro_alloc(ptr, i64, i32)
 declare void @imre_dyn_coro_open(ptr, ptr, ptr)
 declare void @imre_dyn_suspend_operands(ptr, i64, i64, i32)
 declare i64 @imre_dyn_resume_input(ptr)
 declare void @imre_dyn_suspend_return(ptr, i64)
+"#;
 
-define internal void @imre_boxed_drive(ptr %handle, i1 zeroext %destroy) {
+/// Resume and destroy dispatch through the frame's own LLVM coroutine entries.
+pub(crate) const DRIVE: &str = r#"
+declare void @llvm.coro.resume(ptr)
+declare void @llvm.coro.destroy(ptr)
+
+define hidden void @imre_boxed_drive(ptr %handle, i1 zeroext %destroy) {
 entry:
   br i1 %destroy, label %release, label %resume
 resume:
