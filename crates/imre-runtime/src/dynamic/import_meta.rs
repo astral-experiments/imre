@@ -144,7 +144,10 @@ impl Context {
 
     pub(super) fn bundled_source(&self, name: &str) -> Option<(PathBuf, SourceBody)> {
         let source = self.bundled_registration(name)?;
-        Some((source.path.clone(), SourceBody::Registered(source.code)))
+        Some((
+            source.path.to_path_buf(),
+            SourceBody::Registered(source.code),
+        ))
     }
 
     fn frozen_registration<'a>(&self, name: &'a str) -> Option<(&SourceModule, &'a str)> {
