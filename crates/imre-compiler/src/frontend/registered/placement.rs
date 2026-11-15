@@ -127,6 +127,40 @@ mod tests {
     }
 
     #[test]
+    fn a_python_return_preserves_the_checked_scalar_and_its_live_caller() {
+        let text = concat!(
+            "import argparse\n",
+            "def parse(args: list[str]) -> argparse.Namespace:\n",
+            "    return argparse.ArgumentParser().parse_args(args)\n",
+            "def adjusted(value: int) -> int:\n",
+            "    return value * 3 + 2\n",
+            "def through(value: int) -> int:\n",
+            "    return adjusted(value)\n",
+            "exec('print(through(7), parse([]))')\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        for (declaration, returned) in [
+            ("def adjusted", "return value * 3 + 2"),
+            ("def through", "return adjusted(value)"),
+        ] {
+            let start = TextSize::try_from(text.find(declaration).unwrap()).unwrap();
+            let body = &functions[&graph.entry][&start];
+            assert_eq!(body.function.returns, Type::Int);
+            assert!(matches!(
+                body.function.body.as_slice(),
+                [Statement::Return(_)]
+            ));
+            assert_eq!(&text[body.fixed_sites[0]], returned);
+            assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
+        }
+    }
+
+    #[test]
     fn discovery_supplies_the_checked_field_and_its_python_receiver() {
         let text = concat!(
             "import argparse, dataclasses\n",

@@ -898,7 +898,16 @@ pub(super) fn capture(
             Ok(body) => (body, HashMap::new()),
             Err(attributes) => (None, attributes),
         };
-        let placed = if prepared.is_some() || method.is_some() && !checked {
+        // A checked integer operand takes the ordinary fixed operation on exact values
+        // and invokes the Python protocol for subclasses on the same placed source range.
+        let integer = matches!(source, Capture::Solved(Some(_)))
+            && method.is_none()
+            && signature.physical_frame
+            && !checked
+            && !graph.modules[id].bundled
+            && signature.returns == Type::Int
+            && matches!(signature.params.as_slice(), [parameter] if parameter.ty == Type::Int);
+        let placed = if prepared.is_some() || method.is_some() && !checked || integer {
             let body = prepared.or_else(|| {
                 let mut fixed = checker();
                 fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
@@ -907,17 +916,22 @@ pub(super) fn capture(
                 fixed.settled_attributes = Some(&mut attributes);
                 graph.try_registered_body(id, || lower_body(fixed, function, signature).ok())
             });
-            let Some((body, _)) = body else {
-                continue;
-            };
-            body.source
-                .and_then(|source| match source.place(body.function) {
-                    Ok(placed) => Some(placed),
-                    Err(settled) => {
-                        attributes = settled;
-                        None
-                    }
-                })
+            match body {
+                Some((body, _)) => {
+                    body.source
+                        .and_then(|source| match source.place(body.function) {
+                            Ok(mut placed) => {
+                                (!integer || placed.bind_python_arguments()).then_some(placed)
+                            }
+                            Err(settled) => {
+                                attributes = settled;
+                                None
+                            }
+                        })
+                }
+                None if integer => None,
+                None => continue,
+            }
         } else {
             None
         };
@@ -6414,7 +6428,7 @@ publish(5, callback)
         for (read, argument, retained) in [
             ("value", "value", true),
             ("abs('bad')", "value", false),
-            ("value", "value + 1", false),
+            ("value", "value + 1", true),
         ] {
             let graph = checked_named_source(&format!(
                 "def run(value: int) -> int:\n    return sum((item for item in [1]), origin(lambda: {read}, {argument}))\n\n\

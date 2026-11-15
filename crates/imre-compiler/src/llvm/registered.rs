@@ -150,7 +150,10 @@ pub(crate) fn frame_inputs(
                         .flat_map(|case| &case.captures)
                         .all(|slot| uses_slot(slot, false)),
                     Statement::IterNext {
-                        kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
+                        kind:
+                            kind @ (ir::IterNextKind::Generic
+                            | ir::IterNextKind::Pair(_)
+                            | ir::IterNextKind::Async(_)),
                         iterator,
                         key,
                         value,
@@ -168,21 +171,18 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let Some(crate::frontend::FixedAttribute::Call(None, _)) = attribute
+        if let Some(crate::frontend::FixedAttribute::Call(target, _)) = attribute
             && let Some(operands) = expr.named_call_arguments()
         {
+            // The placed call reads the live Python callee, then evaluates its written arguments.
+            let supported = match target {
+                None => !operands.is_empty(),
+                Some(target) => matches!(&target.without_location().kind,
+                    ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
+            };
             uses_python_protocol = true;
-            if has_scalar {
-                protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
-            }
-            return !operands.is_empty();
-        }
-        // A closed frame can look up its written callee without a parameter or a private slot.
-        if checked.function.params.is_empty()
-            && let Some(crate::frontend::FixedAttribute::Call(Some(target), _)) = attribute
-            && matches!(&target.without_location().kind, ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty())
-        {
-            return expr.named_call_arguments().is_some();
+            protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
+            return supported;
         }
         if attribute.is_some() {
             return false;
@@ -255,10 +255,12 @@ pub(crate) fn frame_inputs(
             ExprKind::Binary(op, left, right)
                 if has_scalar
                     && op.is_plain_arithmetic()
-                    && (left.checked_operand_type(), right.checked_operand_type())
-                        == (Type::Float, Type::Float) =>
+                    && matches!(
+                        (left.checked_operand_type(), right.checked_operand_type()),
+                        (Type::Float, Type::Float) | (Type::Int, Type::Int)
+                    ) =>
             {
-                // The registered float guard receives both original handles on either edge.
+                // Both numeric guards receive the original handles for a Python override.
                 read_scalar_protocol(left);
                 read_scalar_protocol(right);
                 true
