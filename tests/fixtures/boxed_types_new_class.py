@@ -210,6 +210,13 @@ def prepared_class_statements():
     missing = object()
     old = {key: module.get(key, missing) for key in ("__module__", "__static_attributes__")}
     try:
+        module["__module__"] = "before"
+        class Plain:
+            global __module__
+            def captured(value=__module__):
+                return value
+        assert Plain.captured() == module["__name__"]
+
         class Scoped(metaclass=ScopeMeta):
             global __name__, __module__, __static_attributes__
             nonlocal x
