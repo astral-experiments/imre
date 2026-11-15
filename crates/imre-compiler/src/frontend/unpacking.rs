@@ -440,7 +440,7 @@ impl Checker<'_> {
             _ => None,
         };
         if let Some(attribute) = fixed_field
-            && let Some(field) = self.mime_attribute(attribute)
+            && let Some(field) = self.mime_attribute(attribute, self.resolve(&attribute.value))
         {
             return self.assignment_statement(&[ast::Expr::Attribute(field)], rhs, output);
         }
