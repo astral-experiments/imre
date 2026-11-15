@@ -7947,7 +7947,11 @@ mod tests {
 
     #[test]
     fn worker_bootstrap_uses_its_interpreters_gc_and_tracing_settings() {
-        let parent = Heap::new();
+        let main = crate::dynamic::ffi::new_context(
+            serde_json::json!({"python_version": "3.14"}),
+            std::iter::empty::<String>(),
+        );
+        let parent = &main.heap;
         let independent = Heap::new();
         parent.set_gc_thresholds(&[1]);
         parent.allocation_traces.start(3);
@@ -7956,17 +7960,10 @@ mod tests {
             Arc::clone(&parent.gc_settings),
             parent.allocation_traces.worker(),
         );
-        let interpreter = Arc::new(crate::dynamic::InterpreterState::default());
-        let config = Arc::new(serde_json::json!({}));
-        let worker = crate::dynamic::ffi::new_context_with_heap(
-            Arc::clone(&config),
-            std::iter::empty::<String>(),
-            heap,
-            Some(interpreter.clone()),
-        );
+        let worker = crate::dynamic::ffi::new_worker_context(main.interpreter.clone(), heap);
         assert!(worker.threads.private_context);
-        assert!(Arc::ptr_eq(&worker.config, &config));
-        assert!(Arc::ptr_eq(&interpreter, &worker.interpreter));
+        assert!(Arc::ptr_eq(&worker.config, &main.config));
+        assert!(Arc::ptr_eq(&main.interpreter, &worker.interpreter));
         assert!(worker.heap.gc_schedule.requested());
         assert!(worker.heap.allocation_traces.get(worker.argv).is_some());
         assert!(parent.allocation_traces.get(worker.argv).is_none());

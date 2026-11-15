@@ -220,8 +220,11 @@ struct ExposedClassBody {
 }
 
 /// Native state shared by the main context and its registered workers.
-#[derive(Default)]
 struct InterpreterState {
+    config: Arc<serde_json::Value>,
+    executable: PathBuf,
+    helper_executable: String,
+    layout: std::result::Result<imre_ast::layout::InterpreterLayout, stdlib::LayoutError>,
     worker_count: AtomicUsize,
     socket_default_timeout: Mutex<Option<Duration>>,
     finalizing: AtomicBool,
@@ -329,9 +332,6 @@ pub(crate) struct Context {
     heap: Heap,
     // Startup finishes applying environment overrides before any context can read this config.
     config: Arc<serde_json::Value>,
-    executable: PathBuf,
-    interpreter_layout: Result<imre_ast::layout::InterpreterLayout>,
-    helper_executable: String,
     argv: Id,
     /// Filesystem bytes of the installed startup entry. An empty entry follows the current cwd.
     startup_path0: Option<Vec<u32>>,
@@ -4699,8 +4699,12 @@ impl Context {
                     .collect();
                 let members = self.alloc(Value::Tuple(members));
                 self.bind(scope, "_installed_source_members", members);
-                let archive = self.interpreter_layout.as_ref().map_or_else(
-                    |_| self.executable.with_file_name("imre-stdlib.zip"),
+                let archive = self.interpreter.layout.as_ref().map_or_else(
+                    |_| {
+                        self.interpreter
+                            .executable
+                            .with_file_name("imre-stdlib.zip")
+                    },
                     |layout| layout.stdlib_archive.clone(),
                 );
                 let archive = self.config["stdlib_fallback"]

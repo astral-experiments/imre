@@ -937,36 +937,44 @@ pub(super) fn new_context<S: Into<crate::Str>>(
     if let Some(depth @ 1..=65535) = config["tracemalloc"].as_u64() {
         heap.allocation_traces.start_at_startup(depth as usize);
     }
-    new_context_with_heap(Arc::new(config), args, heap, None)
-}
-
-pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
-    config: Arc<serde_json::Value>,
-    args: impl IntoIterator<Item = S>,
-    heap: Heap,
-    worker_interpreter: Option<Arc<InterpreterState>>,
-) -> Context {
     let launcher = config["executable"].as_str();
-    let helper_executable =
-        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
     let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
-    let interpreter_layout = stdlib::interpreter_layout(&config, &executable);
+    let interpreter = Arc::new(InterpreterState {
+        layout: stdlib::interpreter_layout(&config, &executable),
+        executable,
+        helper_executable: launcher
+            .map_or_else(crate::objects::python_executable_text, str::to_owned),
+        config: Arc::new(config),
+        worker_count: AtomicUsize::new(0),
+        socket_default_timeout: Mutex::new(None),
+        finalizing: AtomicBool::new(false),
+    });
+    context_with_heap(interpreter, args, heap, false)
+}
+
+pub(super) fn new_worker_context(interpreter: Arc<InterpreterState>, heap: Heap) -> Context {
+    context_with_heap(interpreter, std::iter::empty::<String>(), heap, true)
+}
+
+fn context_with_heap<S: Into<crate::Str>>(
+    interpreter: Arc<InterpreterState>,
+    args: impl IntoIterator<Item = S>,
+    heap: Heap,
+    private_context: bool,
+) -> Context {
     let mut ctx = Context {
         heap,
-        interpreter_layout,
         threads: lowlevel_threads::Workers {
-            private_context: worker_interpreter.is_some(),
+            private_context,
             ..Default::default()
         },
-        interpreter: worker_interpreter.unwrap_or_default(),
+        config: Arc::clone(&interpreter.config),
+        interpreter,
         workers: Default::default(),
         sendfile_writes: Vec::new(),
-        config,
-        executable,
-        helper_executable,
         argv: NONE,
         startup_path0: None,
         saved_entry_root: None,
@@ -4188,6 +4196,35 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn workers_keep_the_interpreters_startup_prefix() {
+        let dir = std::env::temp_dir().join(format!("imre-venv-{}", getrandom::u64().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        let cfg = dir.join("pyvenv.cfg");
+        let config = serde_json::json!({"python_version": "3.14", "executable": dir.join("imre")});
+        let first = dir.join("first");
+        let second = dir.join("second");
+        std::fs::write(&cfg, format!("home = {}", first.display())).unwrap();
+        let mut main = new_context(config.clone(), ["imre"]);
+        std::fs::write(&cfg, format!("home = {}", second.display())).unwrap();
+        let base_prefix = |ctx: &mut Context| {
+            let value = stdlib::attribute(ctx, "sys", "base_prefix").unwrap();
+            PathBuf::from(ctx.str_value(value).unwrap())
+        };
+        let interpreter = main.interpreter.clone();
+        let child_prefix = std::thread::spawn(move || {
+            base_prefix(&mut new_worker_context(interpreter, Heap::new()))
+        })
+        .join()
+        .unwrap();
+        let mut next = new_context(config, ["imre"]);
+        std::fs::remove_file(&cfg).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        assert_eq!(base_prefix(&mut main), first);
+        assert_eq!(child_prefix, first);
+        assert_eq!(base_prefix(&mut next), second);
+    }
 
     #[test]
     fn compiled_pull_uses_the_current_range_iterator() {
