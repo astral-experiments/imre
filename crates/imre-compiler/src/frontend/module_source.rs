@@ -13,11 +13,11 @@ pub(crate) struct ParsedModule<'text, 'syntax> {
     pub(crate) parsed: Cow<'syntax, Parsed<ast::ModModule>>,
 }
 
-/// Only name lowering requires a mutable body. Keep the checked graph's tokens in place.
-pub(crate) fn into_body(parsed: Cow<'_, Parsed<ast::ModModule>>) -> ast::Suite {
+/// Move an owned parser's statements or borrow them from its checked source.
+pub(crate) fn into_body(parsed: Cow<'_, Parsed<ast::ModModule>>) -> Cow<'_, ast::Suite> {
     match parsed {
-        Cow::Owned(module) => module.into_syntax().body,
-        Cow::Borrowed(module) => module.syntax().body.clone(),
+        Cow::Owned(module) => Cow::Owned(module.into_syntax().body),
+        Cow::Borrowed(module) => Cow::Borrowed(&module.syntax().body),
     }
 }
 

@@ -740,7 +740,7 @@ fn scan_imports(
             Some(ScannedParser::Owned(parser)),
         )
     } else {
-        (module_source::into_body(module.parsed), None)
+        (module_source::into_body(module.parsed).into_owned(), None)
     };
     let mut imports = imports_from_body(
         &module.text,
@@ -814,7 +814,7 @@ fn retained_imports<'a, 'p>(
     }) {
         return imports_from_body(
             &module.text,
-            &mut module_source::into_body(module.parsed),
+            module_source::into_body(module.parsed).to_mut(),
             getter,
             None,
         )
@@ -1148,14 +1148,20 @@ pub(crate) fn compile(
     let mut file_source = None;
     let mut first = if let Some(file) = entry_file {
         let module = file.parsed(modules);
-        entry_imports(&module.text, module_source::into_body(module.parsed))?
+        entry_imports(
+            &module.text,
+            module_source::into_body(module.parsed).into_owned(),
+        )?
     } else {
         let module = match read_import_source(&src, kind, None) {
             Ok(ImportSource::Module(module)) => module,
             _ => return Ok(None),
         };
         if in_memory {
-            entry_imports(&module.text, module_source::into_body(module.parsed))?
+            entry_imports(
+                &module.text,
+                module_source::into_body(module.parsed).into_owned(),
+            )?
         } else {
             let imports = entry_imports(&module.text, module.parsed.syntax().body.clone())?;
             file_source = Some(module);
@@ -2762,22 +2768,16 @@ pub(crate) fn compile(
             shipped_checks.insert(unit, prepare::Shipped::Archived(symbol));
             continue;
         }
-        let check_runtime = unit >= first_runtime_unit && output.is_none();
         if let Some(parsed) = crate::analysis::check_native_syntax(
             &root,
             &mut syntax,
             (project.as_ref(), &layouts),
             module,
-            check_runtime,
+            unit >= first_runtime_unit,
             is_alternative,
             &mut module_errors,
         )? {
-            let input = ParsedModule {
-                text: Cow::Borrowed(source),
-                parsed: Cow::Borrowed(&parsed),
-            };
-            let check = prepare::check_shipped(name, path, input.into(), python_optimization);
-            shipped_checks.insert(unit, prepare::Shipped::Checked(check));
+            shipped_checks.insert(unit, prepare::Shipped::Parsed(parsed));
         }
     }
     drop(syntax);
