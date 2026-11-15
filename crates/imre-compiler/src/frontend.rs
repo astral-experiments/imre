@@ -15937,18 +15937,7 @@ impl<'a> Checker<'a> {
                     UNSUPPORTED_ARGUMENTS,
                 ));
             }
-            name if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
-                || imre_ast::providers::BUILTIN_TYPES.contains(&name))
-                && self.unshadowed_builtin(&call.func, name)
-                && registered::values::fixed_positional_arguments(call)
-                && ((name == "type" && args.len() == 1)
-                    || args
-                        .iter()
-                        .any(|value| self.types.stores_python_object(value.ty))) =>
-            {
-                return Ok(self.registered_builtin_call(call, name, args));
-            }
-            _ => return Err(error(self.source, call, UNSUPPORTED_ARGUMENTS)),
+            _ => return self.positional_builtin_fallback(call, name, args),
         };
         let value = Expr {
             ty,
@@ -15956,6 +15945,32 @@ impl<'a> Checker<'a> {
         };
         self.record_named_call(call, &value);
         Ok(value)
+    }
+
+    /// Use the live builtin when the checked operands have no fixed operation.
+    fn positional_builtin_fallback(
+        &self,
+        call: &ast::ExprCall,
+        name: &str,
+        args: Vec<Expr>,
+    ) -> Result<Expr, String> {
+        if (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&name)
+            || imre_ast::providers::BUILTIN_TYPES.contains(&name))
+            && self.unshadowed_builtin(&call.func, name)
+            && registered::values::fixed_positional_arguments(call)
+            && ((matches!(name, "type" | "str") && args.len() == 1)
+                || args
+                    .iter()
+                    .any(|value| self.types.stores_python_object(value.ty)))
+        {
+            Ok(self.registered_builtin_call(call, name, args))
+        } else {
+            Err(error(
+                self.source,
+                call,
+                "unknown function or unsupported builtin arguments",
+            ))
+        }
     }
 
     /// Retain a written global lookup for the Python entry of a checked positional call.
