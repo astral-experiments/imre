@@ -1276,10 +1276,14 @@ fn lower_graph(
             };
             // The registered frame can return a handle even when the fixed layout fails.
             // Keep the original diagnostic for callers that require the fixed contract.
+            let diagnostic = graph.modules[*module].diagnostic(annotation, mismatch);
             if is_return && ty == Type::PythonObject && graph.modules[*module].is_program_source() {
                 capture();
+                return Err(
+                    diagnostic.classified(Kind::UnresolvedLayout(*module, function.start()))
+                );
             }
-            return Err(graph.modules[*module].diagnostic(annotation, mismatch));
+            return Err(diagnostic);
         }
     }
     let entry_declarations = classes.declarations.has_class_values(graph.entry)

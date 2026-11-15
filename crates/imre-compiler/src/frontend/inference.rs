@@ -367,7 +367,7 @@ impl Pending {
                     "cannot infer parameter {name:?}; add an annotation or a concrete direct call"
                 ),
             )
-            .classified(Kind::UnresolvedParameter(module, function.start()))
+            .classified(Kind::UnresolvedLayout(module, function.start()))
         } else {
             Diagnostic::at(
                 source,
@@ -1716,7 +1716,7 @@ impl Inference {
                     };
                     if !retries_failed_layout(graph)
                         && (unresolved.kind.is_object()
-                            || matches!(unresolved.kind, Kind::UnresolvedParameter(..)))
+                            || matches!(unresolved.kind, Kind::UnresolvedLayout(..)))
                     {
                         registered::capture(
                             graph,
