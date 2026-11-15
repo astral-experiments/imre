@@ -893,6 +893,9 @@ impl<'a> Checker<'a> {
         });
         let local_callable = matches!(callable.kind, ExprKind::Local(slot)
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
+        let declaration = local
+            .and_then(|slot| self.declared_slots.get(slot))
+            .copied();
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let cold_frame = registered_site.is_none() && matches!(returns, Type::Coroutine(_));
         // Resolve the loaded callable before an argument can replace its slot.
@@ -946,15 +949,24 @@ impl<'a> Checker<'a> {
                             return inference.bind_sequence(id, slot, member, checker, value, site);
                         }
                         checker.coerce(value, expected, site).map_err(|error| {
-                            error.at_callable_argument(site.range(), || {
-                                local_callable
-                                    && checker.graph.session.calls_annotated_parameter(
-                                        checker.module,
-                                        call,
-                                        site.range(),
-                                        &checker.graph.modules[checker.module].parsed,
-                                    )
-                            })
+                            if !local_callable {
+                                return error;
+                            }
+                            let Some(parameter) = checker
+                                .graph
+                                .session
+                                .original_callee_is_annotated_parameter(
+                                    checker.module,
+                                    call,
+                                    site.range(),
+                                    &checker.graph.modules[checker.module].parsed,
+                                )
+                            else {
+                                return error;
+                            };
+                            error
+                                .at_callable_argument(site.range(), || parameter)
+                                .expected_from(declaration, site.range())
                         })
                     },
                 )?
@@ -1204,6 +1216,21 @@ mod tests {
 
         std::fs::write(&main, format!("{declarations}    return take(1)\n")).unwrap();
         crate::check_file(&main, None).unwrap();
+    }
+
+    #[test]
+    fn a_reassigned_callable_keeps_its_declared_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("callbacks.py");
+        let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\nasync def run(replacement: Callable[[int], Awaitable[int]]) -> int:\n    cb: Callable[[int], Awaitable[int]] = cold\n    cb = replacement\n    return await cb('wrong')\n";
+        std::fs::write(&path, source).unwrap();
+        let failure = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            failure.contains("callbacks.py:7:21: Imre: expected int, got str"),
+            "{failure}"
+        );
+        std::fs::write(&path, source.replace("'wrong'", "7")).unwrap();
+        crate::check_file(&path, None).unwrap();
     }
 
     #[test]
