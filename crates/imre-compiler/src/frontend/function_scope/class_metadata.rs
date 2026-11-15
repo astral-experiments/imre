@@ -157,7 +157,7 @@ impl FunctionScope {
             nonlocals: uses.walrus,
             ..ClosureNames::default()
         };
-        let mut scope = Self::new(names, None, false);
+        let mut scope = Self::new(names);
         scope.captures_class = scope.names.reads.contains("__class__");
         scope
     }

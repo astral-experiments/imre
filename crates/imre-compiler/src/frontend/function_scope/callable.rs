@@ -3,14 +3,20 @@
 use indexmap::IndexSet;
 use serde::{Serialize, Serializer, ser::SerializeMap};
 
-use super::{FunctionScope, LocalNames};
+use super::{ClosureNames, FunctionScope, LocalNames};
 use crate::frontend::{NamedBody, RegisteredBody};
 use imre_ast::code_flags;
 use ruff_python_ast as ast;
+use ruff_python_ast::visitor::Visitor as _;
 use serde_json::{Value, json};
 
-fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<String> {
+fn parameter_layout(
+    parameters: &ast::Parameters,
+    layout: &mut Value,
+    locals: &mut IndexSet<String>,
+) -> Vec<String> {
     let mut defaults = Vec::new();
+    // Frame locals and the call ABI put keyword-only parameters before variadics.
     for (group, args) in [
         ("posonly", &parameters.posonlyargs),
         ("positional", &parameters.args),
@@ -23,6 +29,7 @@ fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<Str
                 if parameter.default.is_some() {
                     defaults.push(name.to_owned());
                 }
+                locals.insert(name.to_owned());
                 names.push(Value::from(name));
             }
             layout[group] = Value::Array(names);
@@ -33,6 +40,7 @@ fn parameter_layout(parameters: &ast::Parameters, layout: &mut Value) -> Vec<Str
         ("kwargs", &parameters.kwarg),
     ] {
         if let Some(param) = param {
+            locals.insert(param.name.to_string());
             layout[key] = json!(param.name.as_str());
         }
     }
@@ -67,21 +75,32 @@ impl NamedFunction<'_> {
     pub(super) fn prepare(
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
-        lexical: &mut FunctionScope,
+        child: ClosureNames,
+        may_capture_class: bool,
         suspension_flags: u32,
         annotation_reads: Option<Box<super::ParameterReads>>,
-    ) -> Self {
-        Self {
+    ) -> (Self, ClosureNames) {
+        let parameters = Some(def.parameters.as_ref());
+        let captures_class = may_capture_class
+            && imre_ast::class_cell::function_needed(
+                &def.body,
+                parameters,
+                child.string_annotations,
+            );
+        let (metadata, mut child) =
+            CallableMetadata::new(parameters, child, suspension_flags, |_| captures_class);
+        let header = Self {
             name: names.definition(&def.name).to_owned(),
             binding: def.name.to_string(),
             body: None,
             doc: crate::frontend::docstring(&def.body),
-            metadata: CallableMetadata::new(Some(&def.parameters), lexical, suspension_flags),
-            globals: std::mem::take(&mut lexical.names.globals),
+            metadata,
+            globals: std::mem::take(&mut child.globals),
             annotation_reads,
             annotations: None,
             type_params: Vec::new(),
-        }
+        };
+        (header, child)
     }
 
     pub(crate) fn prepare_signature(
@@ -194,23 +213,28 @@ pub(crate) struct CallableMetadata {
 }
 
 impl CallableMetadata {
-    pub(crate) fn new(
+    fn new(
         parameters: Option<&ast::Parameters>,
-        scope: &mut FunctionScope,
+        mut names: ClosureNames,
         suspension_flags: u32,
-    ) -> Self {
+        captures_class: impl FnOnce(&ClosureNames) -> bool,
+    ) -> (Self, ClosureNames) {
         let mut layout = json!({});
-        let defaults =
-            parameters.map_or_else(Vec::new, |params| parameter_layout(params, &mut layout));
+        let defaults = parameters.map_or_else(Vec::new, |params| {
+            parameter_layout(params, &mut layout, &mut names.locals)
+        });
+        let mut scope = FunctionScope::new(names);
+        scope.captures_class = captures_class(&scope.names);
         if scope.captures_class {
             layout["class_cell"] = json!(true);
         }
-        Self::from_scope(
+        let metadata = Self::from_scope(
             layout,
             defaults,
-            scope,
+            &mut scope,
             code_flags::function_flags(parameters, false, false) | suspension_flags,
-        )
+        );
+        (metadata, scope.names)
     }
 
     /// Generator expressions receive the iterator acquired by their enclosing frame.
@@ -246,12 +270,21 @@ impl CallableMetadata {
     }
 
     pub(crate) fn lambda(
-        parameters: Option<&ast::Parameters>,
-        scope: &mut FunctionScope,
+        expr: &ast::ExprLambda,
+        string_annotations: bool,
         generator: bool,
     ) -> Self {
         let flags = if generator { code_flags::GENERATOR } else { 0 };
-        let mut metadata = Self::new(parameters, scope, flags);
+        let mut names = ClosureNames {
+            include_nested_reads: true,
+            implicit_class: true,
+            string_annotations,
+            ..ClosureNames::default()
+        };
+        names.visit_expr(&expr.body);
+        let (mut metadata, _) = Self::new(expr.parameters.as_deref(), names, flags, |names| {
+            names.reads.contains("__class__")
+        });
         if generator {
             metadata.layout["generator_lambda"] = json!(true);
         }

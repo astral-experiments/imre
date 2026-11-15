@@ -322,60 +322,16 @@ impl FunctionScope {
             names.reads.insert("__classdict__".into());
         }
         names.locals.insert(".format".into());
-        Self::new(names, None, false)
+        Self::new(names)
     }
 
-    fn new(
-        mut names: ClosureNames,
-        parameters: Option<&ast::Parameters>,
-        captures_class: bool,
-    ) -> Self {
-        // The frame ABI places keyword-only arguments before varargs.
-        if let Some(p) = parameters {
-            names.locals.extend(
-                p.posonlyargs
-                    .iter()
-                    .chain(&p.args)
-                    .chain(&p.kwonlyargs)
-                    .map(|arg| arg.parameter.name.to_string()),
-            );
-            names.locals.extend(
-                p.vararg
-                    .iter()
-                    .chain(p.kwarg.iter())
-                    .map(|arg| arg.name.to_string()),
-            );
-        }
+    fn new(mut names: ClosureNames) -> Self {
         names.finish_scope();
         names.cell_reads.retain(|name| names.locals.contains(name));
         Self {
             names,
-            captures_class,
+            captures_class: false,
         }
-    }
-
-    fn function(def: &ast::StmtFunctionDef, names: ClosureNames, may_capture_class: bool) -> Self {
-        let parameters = Some(def.parameters.as_ref());
-        let captures_class = may_capture_class
-            && imre_ast::class_cell::function_needed(
-                &def.body,
-                parameters,
-                names.string_annotations,
-            );
-        Self::new(names, parameters, captures_class)
-    }
-
-    pub(crate) fn lambda(expr: &ast::ExprLambda, string_annotations: bool) -> Self {
-        let mut names = ClosureNames {
-            include_nested_reads: true,
-            implicit_class: true,
-            string_annotations,
-            ..Default::default()
-        };
-        names.visit_expr(&expr.body);
-        let mut scope = Self::new(names, expr.parameters.as_deref(), false);
-        scope.captures_class = scope.names.reads.contains("__class__");
-        scope
     }
 
     pub(crate) fn write_signature(&self, signature: &mut serde_json::Value) {
@@ -494,7 +450,7 @@ impl<'p> ScopeFacts<'p> {
             names.visit_expr(value);
         }
         names.locals.insert(".format".into());
-        FunctionScope::new(names, None, false)
+        FunctionScope::new(names)
     }
 
     pub(crate) fn prepare<'a>(
@@ -625,7 +581,6 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                         Scope::Function { .. } | Scope::Lambda => true,
                     };
                 let names = std::mem::replace(&mut self.function_names, parent_names);
-                let mut lexical = FunctionScope::function(def, names, may_capture_class);
                 let mut annotations =
                     crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref())
                         .peekable();
@@ -636,12 +591,18 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                         !matches!(self.scope, Scope::Class(_)),
                     ))
                 });
-                let header =
-                    NamedFunction::prepare(def, self.names, &mut lexical, suspension_flags, reads);
+                let (header, child) = NamedFunction::prepare(
+                    def,
+                    self.names,
+                    names,
+                    may_capture_class,
+                    suspension_flags,
+                    reads,
+                );
                 if matches!(self.scope, Scope::Function { .. }) {
                     self.function_names.read_child_function(
                         def,
-                        lexical.names,
+                        child,
                         header.annotation_reads.as_deref(),
                     );
                 }
