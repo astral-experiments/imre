@@ -6888,6 +6888,9 @@ impl<'a> Checker<'a> {
                     self.names.get(name.id.as_str()).copied().filter(|&old| {
                         outer_local && self.locals[old] != ty && assign.value.is_some()
                     });
+                let new_frame_local = self.registered_local_start.is_some()
+                    && self.block_depth == 1
+                    && !self.names.contains_key(name.id.as_str());
                 let slot = if let Some(old) = replacement {
                     old
                 } else {
@@ -6906,7 +6909,7 @@ impl<'a> Checker<'a> {
                             self.expr_in_context(
                                 rhs,
                                 ty,
-                                |_, _| false,
+                                |_, actual| new_frame_local && actual == Type::PythonObject,
                                 Self::coerce_supplied_result,
                                 Some(declaration),
                             )
@@ -6924,6 +6927,10 @@ impl<'a> Checker<'a> {
                         let statements = self.replace_local(name.id.as_str(), slot, ty, value);
                         self.bind_declared_type(self.names[name.id.as_str()], declaration);
                         return Ok((statements, true));
+                    }
+                    if new_frame_local && value.ty == Type::PythonObject {
+                        // The declaration checks the source contract. The Python local owns its RHS.
+                        self.locals[slot] = value.ty;
                     }
                     self.assigned_value(slot, &value);
                     let statement = Statement::Assign(slot, value);
