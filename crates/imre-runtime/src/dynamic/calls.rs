@@ -273,6 +273,7 @@ pub(super) enum RegisteredCall {
         module: bool,
         discard: bool,
     },
+    InContext(Box<RegisteredCall>),
     Start(Box<thread_worker::Start>),
     Join(thread_worker::Join),
     ShutdownWorkers,
@@ -292,6 +293,13 @@ impl RegisteredCall {
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         match self {
             Self::Returned(value) => Ok(value),
+            Self::InContext(call) => {
+                // SAFETY: the prepared callback and the entered context belong to this execution.
+                let result = unsafe { call.run(context) };
+                // SAFETY: the callback has returned to the execution that entered the context.
+                unsafe { &mut *context }.heap.execution.contexts.pop();
+                result
+            }
             // SAFETY: the owner keeps the context and its linked code live through the call.
             Self::Native(frame) => unsafe { frame.run(context) },
             Self::Code {
@@ -8436,6 +8444,9 @@ impl Context {
                 }
                 Value::Native(ref name) => {
                     let wait = match name.as_str() {
+                        "_contextvars.Context.run" => {
+                            return self.prepare_context_run(&args, kwargs);
+                        }
                         "select.select" => {
                             return stdlib::select::prepare(args.into_owned(), &kwargs);
                         }

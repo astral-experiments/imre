@@ -2974,15 +2974,12 @@ pub(super) fn call(
             if member.starts_with("__") {
                 return builtins::builtin_slot(ctx, name, args, kwargs);
             }
-            // Context.run forwards its keywords to the callback.
-            let method_kwargs = if member == "run" { &[][..] } else { kwargs };
-            builtins::method_receiver_args(
-                ctx,
-                "_contextvars.Context",
-                member,
-                args,
-                method_kwargs,
-            )?;
+            if member == "run" {
+                let call = ctx.prepare_context_run(args, kwargs.to_vec())?;
+                // SAFETY: the synchronous caller retains the context and operands through return.
+                return unsafe { call.run(ctx) };
+            }
+            builtins::method_receiver_args(ctx, "_contextvars.Context", member, args, kwargs)?;
         }
         return contextvars::call(ctx, method, args, kwargs);
     }
