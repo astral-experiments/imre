@@ -164,18 +164,21 @@ impl Calls<'_> {
         }
     }
 
-    fn call(&mut self, call: &ast::ExprCall) -> bool {
+    fn call(&mut self, call: &ast::ExprCall) {
         if self.replaced && self.export(&call.func) {
-            return true;
+            return;
         }
         match self.selection(&call.func) {
-            Selection::Other => return false,
+            ordinary @ Selection::Other => {
+                self.read_operand(&call.func, Some(ordinary));
+                return;
+            }
             Selection::Ambiguous => {
                 self.calls.push((
                     call.func.range(),
                     "cannot prove whether the selected callable is runpy.run_path",
                 ));
-                return true;
+                return;
             }
             Selection::RunPath => (),
         }
@@ -188,7 +191,7 @@ impl Calls<'_> {
                 call.range(),
                 "cannot bind the executable filename of runpy.run_path",
             ));
-            return true;
+            return;
         };
         // An ordinarily malformed fixed call fails Python binding before entering run_path.
         if !call
@@ -200,7 +203,7 @@ impl Calls<'_> {
                 .iter()
                 .any(|b| !b.matched)
         {
-            return true;
+            return;
         }
         for (arg, binding) in call
             .arguments
@@ -222,7 +225,6 @@ impl Calls<'_> {
             self.calls.push((arg.value().range(), reason));
             break;
         }
-        true
     }
 }
 
@@ -288,6 +290,12 @@ impl<'ast> Visitor<'ast> for Calls<'_> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
+        self.read_operand(expr, None);
+    }
+}
+
+impl Calls<'_> {
+    fn read_operand(&mut self, expr: &ast::Expr, selected: Option<Selection>) {
         if let ast::Expr::Attribute(a) = expr
             && a.ctx == ast::ExprContext::Load
             && (self.cached_module(&a.value) || self.selection(&a.value) != Selection::Other)
@@ -331,15 +339,14 @@ impl<'ast> Visitor<'ast> for Calls<'_> {
             self.replaced = false;
         }
         if let ast::Expr::Call(call) = expr {
-            if self.call(call) {
-                self.visit_arguments(&call.arguments);
-            } else {
-                visitor::walk_expr(self, expr);
-            }
+            self.call(call);
+            self.visit_arguments(&call.arguments);
         } else if matches!(expr, ast::Expr::Name(n) if n.ctx == ast::ExprContext::Load)
             || matches!(expr, ast::Expr::Attribute(a) if a.ctx == ast::ExprContext::Load)
         {
-            if self.selection(expr) != Selection::Other && !(self.replaced && self.export(expr)) {
+            if selected.unwrap_or_else(|| self.selection(expr)) != Selection::Other
+                && !(self.replaced && self.export(expr))
+            {
                 self.escapes.push((
                     expr.range(),
                     "the selected runpy.run_path callable escapes a direct call",
