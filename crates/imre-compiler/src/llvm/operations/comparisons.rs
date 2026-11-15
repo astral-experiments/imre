@@ -40,8 +40,7 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
             }
             Entry::Registered(_) => false,
         };
-        let integer_pair = matches!(values, [a, b]
-            if a.checked_operand_type() == Type::Int && b.checked_operand_type() == Type::Int);
+        let integer_pair = Compare::integer_pair(values);
         let root = if matches!(self.0, Entry::Registered(_))
             && (ops.len() > 1
                 || matches!(ops, [CmpOp::Is | CmpOp::IsNot])

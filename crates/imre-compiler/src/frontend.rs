@@ -10980,7 +10980,11 @@ impl<'a> Checker<'a> {
                 } else {
                     Type::Bool
                 };
-                (result, ExprKind::Compare(values, compare.ops.to_vec()))
+                let result = Expr {
+                    ty: result,
+                    kind: ExprKind::Compare(values, compare.ops.to_vec()),
+                };
+                return Ok(self.expression_at(expression.range(), result));
             }
             ast::Expr::Subscript(subscript) => {
                 if let Some(ty) = self.environ_item_type(&subscript.value) {
