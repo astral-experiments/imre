@@ -118,6 +118,24 @@ impl NativeWait<'_> {
         }
     }
 
+    /// Park the calling execution for a native wait and resume it before handling the result.
+    ///
+    /// # Safety
+    /// The caller owns the context and the selected, rooted wait operands.
+    unsafe fn wait_parked(
+        &self,
+        context: *mut Context,
+        limit: Option<Duration>,
+        phase: WaitPhase,
+    ) -> Result<bool> {
+        if limit == Some(Duration::ZERO) {
+            return Ok(self.wait(limit, phase));
+        }
+        // SAFETY: the native wait uses its lock or join handle and never borrows the heap.
+        let _parked = unsafe { super::value::ParkedExecution::park(context)? };
+        Ok(self.wait(limit, phase))
+    }
+
     /// # Safety
     /// The caller must resume in its own context. An acquire receiver must be live at entry.
     pub(super) unsafe fn run(mut self, _context: *mut Context) -> Result<bool> {
@@ -140,8 +158,11 @@ impl NativeWait<'_> {
             let result = loop {
                 let remaining = deadline.map(Deadline::remaining);
                 let slice = remaining.map_or(interval, |left| left.min(interval));
-                if self.wait(Some(slice), phase) {
-                    break Ok(true);
+                // SAFETY: every outcome restores the interrupted frame, including on timeout.
+                match unsafe { self.wait_parked(_context, Some(slice), phase) } {
+                    Ok(true) => break Ok(true),
+                    Err(error) => break Err(error),
+                    Ok(false) => {}
                 }
                 // An expired join returns immediately. A lock wait interrupted during
                 // a positive slice dispatches first, then probes the lock once more.
@@ -180,13 +201,12 @@ impl NativeWait<'_> {
             }
             return result;
         }
-        Ok(self.wait(
-            match &self {
-                Self::Acquire(timeout, ..) => *timeout,
-                Self::Join(deadline, _) => deadline.map(Deadline::remaining),
-            },
-            WaitPhase::Initial,
-        ))
+        let limit = match &self {
+            Self::Acquire(timeout, ..) => *timeout,
+            Self::Join(deadline, _) => deadline.map(Deadline::remaining),
+        };
+        // SAFETY: the worker owns its execution until the native operation returns.
+        unsafe { self.wait_parked(_context, limit, WaitPhase::Initial) }
     }
 }
 

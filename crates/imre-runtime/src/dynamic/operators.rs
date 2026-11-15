@@ -1593,9 +1593,9 @@ impl Context {
             FormatLookup::ModuleRepr => self.module_base_repr(id).map(Some),
             FormatLookup::DictViewList => builtins::call(self, "list", &[id], &[]).map(Some),
             FormatLookup::TypingTuple(frames) => {
-                self.suspended_typing_frames += frames;
+                self.heap.execution.suspended_typing_frames += frames;
                 let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
-                self.suspended_typing_frames -= frames;
+                self.heap.execution.suspended_typing_frames -= frames;
                 result.map(Some)
             }
         };

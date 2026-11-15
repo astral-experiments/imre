@@ -336,7 +336,7 @@ struct FunctionReturn {
 
 impl Context {
     fn finish_function(&mut self, check: Option<FunctionReturn>, result: Result<Id>) -> Result<Id> {
-        self.call_depth -= 1;
+        self.heap.execution.call_depth -= 1;
         let value = result?;
         if let Some(check) = check {
             self.require_scalar(
@@ -8386,7 +8386,10 @@ impl Context {
 
     /// Include Python frames represented by native operations in the active call depth.
     pub(super) fn check_call_depth(&self, additional: usize) -> Result<()> {
-        if self.call_depth.max(self.heap.python_depth()) + self.suspended_typing_frames + additional
+        let execution = &self.heap.execution;
+        if execution.call_depth.max(self.heap.python_depth())
+            + execution.suspended_typing_frames
+            + additional
             >= crate::sys::recursion_limit() as usize
         {
             return Err(Error::new(
@@ -9562,7 +9565,7 @@ impl Context {
             frame.class_cell = class_cell;
         }
         self.check_call_depth(0)?;
-        self.call_depth += 1;
+        self.heap.execution.call_depth += 1;
         let returning = sig.return_type.map(|declared| FunctionReturn {
             callable,
             declared,
@@ -9587,14 +9590,14 @@ impl Context {
         message: &'static str,
         operation: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
-        if stacker::remaining_stack()
-            .map_or(self.slot_depth >= 128, |remaining| remaining < 64 * 1024)
-        {
+        if stacker::remaining_stack().map_or(self.heap.execution.slot_depth >= 128, |remaining| {
+            remaining < 64 * 1024
+        }) {
             return Err(Error::new("RecursionError", message));
         }
-        self.slot_depth += 1;
+        self.heap.execution.slot_depth += 1;
         let result = operation(self);
-        self.slot_depth -= 1;
+        self.heap.execution.slot_depth -= 1;
         result
     }
 

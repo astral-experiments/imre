@@ -3788,6 +3788,7 @@ pub(super) struct Heap {
     // Weak loader identities. The executable owns the initializer and any embedded bytes.
     pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
     pub(super) execution: ExecutionState,
+    parked_executions: Vec<Option<ExecutionState>>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
@@ -3883,10 +3884,16 @@ pub(super) struct Frame {
     created_finalizer: bool,
 }
 
-/// The live Python stack and error indicator of the thread executing this heap.
+/// The live Python stack, recursion accounting and error indicator of this execution.
+#[derive(Default)]
 pub(super) struct ExecutionState {
     frames: Vec<Frame>,
     pub(super) pending: Option<Error>,
+    pub(super) call_depth: usize,
+    // Python alias frames represented by a renderer suspended in a tuple argument callback.
+    pub(super) suspended_typing_frames: usize,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    pub(super) slot_depth: usize,
     // Empty storage that the next native activation can reuse.
     spare_frame_roots: Vec<Id>,
 }
@@ -3897,8 +3904,7 @@ impl ExecutionState {
         frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
         Self {
             frames,
-            pending: None,
-            spare_frame_roots: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -3923,6 +3929,63 @@ impl ExecutionState {
         let error = self.pending.take()?;
         self.current_mut().live.extend(error.roots());
         Some(error)
+    }
+}
+
+/// Park one complete execution without moving its Python objects or borrowing the heap
+/// across the native wait. The slot stays valid if other executions resume first.
+pub(super) struct ParkedExecution {
+    context: *mut super::Context,
+    slot: usize,
+}
+
+impl ParkedExecution {
+    /// # Safety
+    /// The context must outlive the guard. Park and resume under exclusive access to
+    /// its heap, with no execution selected when restoring this one.
+    pub(super) unsafe fn park(context: *mut super::Context) -> Result<Self> {
+        let slot = unsafe { &mut *context }.heap.park_execution()?;
+        Ok(Self { context, slot })
+    }
+}
+
+impl Drop for ParkedExecution {
+    fn drop(&mut self) {
+        // SAFETY: the caller has exclusive access again and no Python borrow crossed the wait.
+        unsafe { &mut *self.context }
+            .heap
+            .resume_execution(self.slot);
+    }
+}
+
+impl Heap {
+    fn executions(&self) -> impl Iterator<Item = &ExecutionState> {
+        std::iter::once(&self.execution).chain(self.parked_executions.iter().flatten())
+    }
+
+    fn park_execution(&mut self) -> Result<usize> {
+        debug_assert!(!self.execution.frames.is_empty());
+        let slots = &mut self.parked_executions;
+        let slot = if let Some(vacant) = slots.iter().position(Option::is_none) {
+            vacant
+        } else {
+            slots
+                .try_reserve_exact(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            slots.push(None);
+            slots.len() - 1
+        };
+        slots[slot] = Some(std::mem::take(&mut self.execution));
+        Ok(slot)
+    }
+
+    fn resume_execution(&mut self, slot: usize) {
+        assert!(self.execution.frames.is_empty() && self.execution.pending.is_none());
+        let slots = &mut self.parked_executions;
+        self.execution = slots[slot].take().unwrap();
+        while slots.last().is_some_and(Option::is_none) {
+            slots.pop();
+        }
     }
 }
 
@@ -4096,6 +4159,7 @@ impl Heap {
             text_position: Cell::default(),
             linked_sources: HashMap::new(),
             execution: ExecutionState::new(reserved),
+            parked_executions: Vec::new(),
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,
@@ -5453,9 +5517,8 @@ impl Heap {
         }
         if scope != NONE
             && self
-                .execution
-                .frames
-                .iter()
+                .executions()
+                .flat_map(|execution| &execution.frames)
                 .any(|frame| frame.scope == scope)
         {
             return Err(Error::new(
@@ -5763,7 +5826,7 @@ impl Heap {
                 .filter(|entry| entry.literal)
                 .map(|entry| entry.id),
         );
-        pending.extend(self.execution.roots());
+        pending.extend(self.executions().flat_map(ExecutionState::roots));
     }
 
     /// The singleton and small-integer prefix is permanently marked and has no children.
@@ -7671,6 +7734,94 @@ mod tests {
             .unwrap();
         assert_eq!(fields[1], filename);
         assert!(matches!(ctx.heap.get(filename), Value::List(_)));
+    }
+
+    #[test]
+    fn parked_bound_methods_restore_their_own_call_depth() {
+        use super::super::calls::RegisteredCall;
+
+        unsafe extern "C" fn return_self(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the registered entry runs with exclusive access to its bound scope.
+            unsafe { &mut *raw }.lookup(scope, "self").unwrap_or(NONE)
+        }
+
+        fn check_depth(ctx: &Context, depth: usize) {
+            assert_eq!(ctx.heap.python_depth(), depth);
+            let remaining = crate::sys::recursion_limit() as usize - depth;
+            ctx.check_call_depth(remaining - 1).unwrap();
+            assert_eq!(
+                ctx.check_call_depth(remaining).unwrap_err().kind,
+                "RecursionError"
+            );
+        }
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let globals = ctx.scope("methods", None);
+        let namespace = ctx.scope("methods", Some(globals));
+        let class = ctx
+            .allocate_class("Reader".into(), namespace, vec![])
+            .unwrap();
+        let mut parked = Vec::new();
+        for (method, line, depth) in [("outer", 11, 1), ("inner", 23, 2)] {
+            check_depth(&ctx, 0);
+            assert_eq!(ctx.heap.active_exception(), NONE);
+            let name = ctx.text(method);
+            let signature = ctx.text(r#"{"positional":["self"]}"#);
+            let file = ctx.text("methods.py");
+            let code = ctx.prelinked_code(
+                Body::Native(return_self, NONE),
+                globals,
+                name,
+                signature,
+                (name, NONE),
+                (file, line),
+            );
+            let function = ctx
+                .define_function(code, globals, name, NONE, name, NONE, NONE, false)
+                .unwrap();
+            ctx.set_attr(class, method, function).unwrap();
+            let receiver = ctx.instance(class, None);
+            let bound = ctx.lookup_attr(receiver, method).unwrap();
+            let inherited = ctx.alloc(Value::Raised(Error::new("LookupError", method)));
+            ctx.heap.restore_caught(inherited);
+            let mut entries = Vec::new();
+            for _ in 0..depth {
+                let call = ctx.prepare_call(bound, vec![].into(), vec![]).unwrap();
+                let RegisteredCall::Native(entry) = call else {
+                    panic!("expected a registered method");
+                };
+                entries.push(entry);
+            }
+            check_depth(&ctx, depth);
+            assert_eq!(ctx.heap.active_exception(), inherited);
+            let caught = ctx.alloc(Value::Raised(Error::new("ValueError", method)));
+            let location = Location {
+                file: "methods.py".into(),
+                line,
+                span: None,
+            };
+            ctx.heap.publish_statement(&[], location, caught);
+            let frame = ctx.active_frame(0).unwrap().unwrap();
+            let slot = ctx.heap.park_execution().unwrap();
+            parked.push((slot, entries, receiver, inherited, caught, frame));
+            ctx.heap.execution = ExecutionState::new(None);
+        }
+        // The heap must trace both parked stacks, even when the first one resumes first.
+        ctx.collect_unreachable();
+        ctx.heap.execution = ExecutionState::default();
+        for (slot, mut entries, receiver, inherited, caught, frame) in parked {
+            ctx.heap.resume_execution(slot);
+            check_depth(&ctx, entries.len());
+            assert_eq!(ctx.active_frame(0).unwrap(), Some(frame));
+            assert_eq!(ctx.heap.active_exception(), caught);
+            while let Some(entry) = entries.pop() {
+                // SAFETY: the selected bound frame stays in its owning Context through return.
+                assert_eq!(unsafe { entry.run(&raw mut ctx) }.unwrap(), receiver);
+                check_depth(&ctx, entries.len());
+                assert_eq!(ctx.heap.active_exception(), inherited);
+            }
+            ctx.heap.execution = ExecutionState::default();
+        }
     }
 
     #[test]

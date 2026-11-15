@@ -386,7 +386,7 @@ impl Context {
         }
         // Calling an async function creates a cold frame. Count it while it is executing.
         self.check_call_depth(0)?;
-        self.call_depth += 1;
+        self.heap.execution.call_depth += 1;
         let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || match method {
             "__next__" => self.send_generator_frame(frame, coroutine, NONE),
             "send" => self.send_generator_frame(frame, coroutine, args[1]),
@@ -394,7 +394,7 @@ impl Context {
             "close" => self.close_generator_frame(frame, coroutine),
             _ => unreachable!("known coroutine method"),
         });
-        self.call_depth -= 1;
+        self.heap.execution.call_depth -= 1;
         result
     }
 

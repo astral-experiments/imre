@@ -258,8 +258,6 @@ pub(crate) struct Context {
     repr_ancestors: Vec<Id>,
     repr_spare_stack: bool,
     repr_sequence_words: Option<usize>,
-    // Python alias frames represented by a renderer suspended in a tuple argument callback.
-    suspended_typing_frames: usize,
     token_missing: Id,
     // Emitted filename constants live for the program. Their display spelling belongs to this interpreter.
     native_filename_labels: HashMap<usize, std::sync::Arc<str>>,
@@ -294,10 +292,7 @@ pub(crate) struct Context {
     scope_name_slots: [std::cell::Cell<usize>; 16],
     native_type_dicts: HashMap<Id, Id>,
     sources: HashMap<String, Vec<SourceModule>>,
-    call_depth: usize,
     deque_comparison_repeats: usize,
-    // Fallback for targets whose native stack bounds cannot be queried.
-    slot_depth: usize,
 }
 
 /// Copy a runtime name without aborting on allocation failure.

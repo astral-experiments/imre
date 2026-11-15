@@ -618,7 +618,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     }
 
     ctx.check_call_depth(0)?;
-    ctx.call_depth += 1;
+    ctx.heap.execution.call_depth += 1;
     let roots = ctx.heap.temporary_mark();
     let previous_repeats = ctx.deque_comparison_repeats;
     let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
@@ -767,7 +767,7 @@ pub(super) fn compare(ctx: &mut Context, op: &str, left: Id, right: Id) -> Resul
     });
     ctx.heap.release_temporaries_since(roots);
     ctx.deque_comparison_repeats = previous_repeats;
-    ctx.call_depth -= 1;
+    ctx.heap.execution.call_depth -= 1;
     result
 }
 

@@ -5,7 +5,7 @@ use crate::dynamic::{copy_ids, copy_label};
 
 fn dispatch(ctx: &mut Context, event: Id, args: &[Id]) -> Result<Id> {
     let args = ctx.heap.packed_tuple(copy_ids(args)?, false);
-    ctx.check_call_depth(ctx.slot_depth)?;
+    ctx.check_call_depth(ctx.heap.execution.slot_depth)?;
     ctx.with_slot_depth("maximum recursion depth exceeded", |ctx| {
         stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
             let temporaries = ctx.heap.temporary_mark();
