@@ -43,13 +43,18 @@ mod tests {
         let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
         let (_, lowered) =
             caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
-        let start = TextSize::try_from(text.find("@classmethod").unwrap()).unwrap();
+        let source = &graph.modules[graph.entry].source;
+        let start = TextSize::try_from(source.find("@classmethod").unwrap()).unwrap();
         let functions = graph.registered_functions();
         let method = &functions[&graph.entry][&start];
         assert!(matches!(method.inputs, FrameInputs::Protocol { .. }));
         assert_eq!(method.local_names[&method.function.params[0]].name, "cls");
         assert_eq!(method.local_names[&method.function.params[1]].name, "n");
-        let sites: Vec<_> = method.fixed_sites.iter().map(|site| &text[*site]).collect();
+        let sites: Vec<_> = method
+            .fixed_sites
+            .iter()
+            .map(|site| &source[*site])
+            .collect();
         assert_eq!(sites, ["return n + 1", "n + 1", "n", "1"]);
         assert_eq!(lowered.iter().filter(|name| *name == "pick").count(), 1);
     }
