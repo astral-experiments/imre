@@ -520,16 +520,21 @@ pub(super) fn place_checked_definition(
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
 ) -> Result<Option<LoweredBody>, String> {
-    Ok(
-        prepare_checked_definition(original, definition, signature, inference, callable_inputs)?
-            .map(|(mut body, placement)| {
-                let frame = &placement.frame.function;
-                body.function.params = frame.params.clone();
-                body.function.locals = frame.locals.clone();
-                placement.place(original.graph, &inference.source_checks);
-                body
-            }),
-    )
+    Ok(prepare_checked_definition(
+        original,
+        definition,
+        signature,
+        inference,
+        callable_inputs,
+        false,
+    )?
+    .map(|(mut body, placement)| {
+        let frame = &placement.frame.function;
+        body.function.params = frame.params.clone();
+        body.function.locals = frame.locals.clone();
+        placement.place(original.graph, &inference.source_checks);
+        body
+    }))
 }
 
 pub(super) struct CheckedPlacement {
@@ -564,6 +569,7 @@ pub(super) fn prepare_checked_definition(
     signature: &Signature,
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
+    infer_result: bool,
 ) -> Result<Option<(LoweredBody, CheckedPlacement)>, String> {
     let graph = original.graph;
     let module = original.module;
@@ -586,6 +592,7 @@ pub(super) fn prepare_checked_definition(
         &values,
     );
     checker.nonreturning_functions = original.nonreturning_functions;
+    checker.infer_python_call_result = infer_result;
     checker.checked_call_contracts = true;
     checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;

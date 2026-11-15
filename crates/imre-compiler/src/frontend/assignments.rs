@@ -262,6 +262,8 @@ pub(super) struct Assigned {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ValueSource {
+    /// The selected invoke produces a live Python handle and has no alternative fixed layout.
+    PythonCall,
     Declaration(TypeDeclaration),
     InferredList(DefinitionId),
     LiteralStrings(Type),

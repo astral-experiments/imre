@@ -1103,24 +1103,6 @@ impl Inference {
                 if !ready {
                     continue;
                 }
-                if infer_return
-                    && physical
-                    && !function.is_async
-                    && graph.modules[*module].is_program_source()
-                    && function.returns.as_deref().is_some_and(|value| {
-                        graph.resolve(*module, value)
-                            == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
-                    })
-                    && !graph.session.is_generator_definition(*module, function)
-                    && classes
-                        .parsers
-                        .returns_python_namespace(graph, *module, function)
-                    && self.source_checks.accepts(graph, *module, function.range())
-                {
-                    self.pending.borrow_mut()[signature.id].returns = Some(Type::PythonObject);
-                    self.revision.set(self.revision.get() + 1);
-                    continue;
-                }
                 if (before == self.revision.get() && previous_checks.contains(&signature.id))
                     || (!self.widened.get() && local_returns.contains_key(&signature.id))
                     || suspended_bodies.contains(&signature.id)
@@ -1236,7 +1218,7 @@ impl Inference {
                     })
                     && !graph.session.is_generator_definition(*module, function)
                     && let Ok(Some((body, placement))) = registered::prepare_checked_definition(
-                        &checker, function, signature, self, None,
+                        &checker, function, signature, self, None, false,
                     )
                     && !body.cannot_return
                     && self.revision.get() == before
@@ -1254,7 +1236,7 @@ impl Inference {
                 // iterator protocol. Keep its checked placement across diagnostic discovery.
                 let place_suspended = |checker: &Checker<'_>| -> Result<_, String> {
                     Ok(registered::prepare_checked_definition(
-                        checker, function, signature, self, None,
+                        checker, function, signature, self, None, false,
                     )?
                     .map(|(_, placement)| placement.place(graph, &self.source_checks)))
                 };
@@ -1266,6 +1248,30 @@ impl Inference {
                         .session
                         .coroutine_uses_async_iteration(*module, function))
                 .then(|| place_suspended(&checker));
+                if physical
+                    && infer_return
+                    && !function.is_async
+                    && signature.method.is_none()
+                    && graph.modules[*module].is_program_source()
+                    && function.returns.as_deref().is_some_and(|annotation| {
+                        graph.resolve(*module, annotation)
+                            == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
+                    })
+                    && self.source_checks.accepts(graph, *module, function.range())
+                {
+                    let mut candidate = signature.clone();
+                    candidate.returns = Type::PythonObject;
+                    placement = Some(
+                        registered::prepare_checked_definition(
+                            &checker, function, &candidate, self, None, true,
+                        )
+                        .map(|placed| {
+                            placed
+                                .filter(|(body, _)| body.calls.is_empty() && !body.cannot_return)
+                                .map(|(_, placement)| placement.place(graph, &self.source_checks))
+                        }),
+                    );
+                }
                 let mut retained = matches!(placement, Some(Ok(Some(_))));
                 let result = (|| {
                     if retained {

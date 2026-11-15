@@ -316,6 +316,16 @@ impl StatementLowering for Checker<'_> {
         };
         let terminates = self.terminating_call(&value);
         self.explicit_return |= !terminates;
+        if !terminates
+            && self.infer_python_call_result
+            && !matches!(self.value_source(&value), Some(ValueSource::PythonCall))
+        {
+            return Err(self.classified_error(
+                Kind::ScopedObject,
+                ret,
+                "the return requires its fixed source layout",
+            ));
+        }
         let operand = if let Some(types) = &mut self.inferred_returns {
             if !terminates {
                 types.push(value.ty);
