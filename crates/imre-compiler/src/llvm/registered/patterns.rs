@@ -90,6 +90,14 @@ impl CheckedBody<'_, '_, '_, '_> {
         let frame = self.python();
         let mark = frame.temporary_mark();
         let subject = frame.pattern_value(expr);
+        let tuple_len = match &expr.without_location().kind {
+            crate::ir::ExprKind::Tuple(items)
+                if items.iter().all(|item| item.spread_operand().is_none()) =>
+            {
+                Some(items.len())
+            }
+            _ => None,
+        };
         let done = frame.name("b");
         // Cases are tested one at a time. Their temporary captures share these
         // frame slots until the pattern succeeds and installs its lexical bindings.
@@ -118,7 +126,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 };
                 frame.test_pattern(
                     &pattern.test,
-                    &subject,
+                    (&subject, tuple_len),
                     &next,
                     &mut bindings,
                     Some(&case.captures),
@@ -237,7 +245,7 @@ impl Frame<'_, '_, '_> {
             }
             let mismatch = self.name("b");
             let release = self.name("b");
-            self.test_pattern(child, item, &mismatch, captures, None, None);
+            self.test_pattern(child, (item, None), &mismatch, captures, None, None);
             let accepted = self.current_block().to_owned();
             self.jump(&release);
             self.label(&mismatch);
@@ -264,16 +272,17 @@ impl Frame<'_, '_, '_> {
     fn test_pattern(
         &mut self,
         test: &MatchTest,
-        value: &str,
+        subject: (&str, Option<usize>),
         failed: &str,
         captures: &mut PatternCaptures,
         targets: Option<&[usize]>,
         last_use: Option<&str>,
     ) {
+        let (value, _) = subject;
         match test {
             MatchTest::Always => {}
             MatchTest::Capture(inner, index) => {
-                self.test_pattern(inner, value, failed, captures, None, None);
+                self.test_pattern(inner, subject, failed, captures, None, None);
                 captures.bind(self.code, *index, value);
             }
             MatchTest::Equal(expr) => self.pattern_equal(value, expr, failed, last_use),
@@ -300,7 +309,7 @@ impl Frame<'_, '_, '_> {
                     } else {
                         self.name("b")
                     };
-                    self.test_pattern(child, value, &next, captures, None, None);
+                    self.test_pattern(child, subject, &next, captures, None, None);
                     let f = &mut *self.code;
                     if i == 0 {
                         matched_names.extend_from_slice(&captures.names[first..]);
@@ -320,7 +329,7 @@ impl Frame<'_, '_, '_> {
                 self.label(&done);
             }
             MatchTest::Sequence { star, items } => {
-                self.sequence_test(*star, items, value, failed, captures, targets)
+                self.sequence_test(*star, items, subject, failed, captures, targets)
             }
             MatchTest::Mapping(items, rest) => {
                 let f = &mut *self.code;
@@ -398,24 +407,29 @@ impl Frame<'_, '_, '_> {
         &mut self,
         star: Option<usize>,
         items: &[MatchTest],
-        value: &str,
+        (value, tuple_len): (&str, Option<usize>),
         failed: &str,
         captures: &mut PatternCaptures,
         targets: Option<&[usize]>,
     ) {
         let f = &mut *self.code;
-        let sequence = f.op("match_sequence", &[value]);
-        let condition = f.truth(&sequence);
-        f.pattern_check(&condition, failed);
-        // A sole star tests the sequence protocol without calling len.
-        let required_items = items.len() - usize::from(star.is_some());
-        if star.is_none() || required_items != 0 {
-            let len = f.op("match_sequence_length", &[value]);
-            let required = f.integer(required_items);
-            let op = if star.is_some() { ">=" } else { "==" };
-            let valid = f.op(op, &[&len, &required]);
-            let cond = f.truth(&valid);
-            f.pattern_check(&cond, failed);
+        if tuple_len.is_none() {
+            let sequence = f.op("match_sequence", &[value]);
+            let condition = f.truth(&sequence);
+            f.pattern_check(&condition, failed);
+        }
+        if let Some(length) = crate::ir::pattern_length(items.len(), star) {
+            if let Some(known) = tuple_len {
+                if !length.accepts(known) {
+                    f.pattern_check("false", failed);
+                }
+            } else {
+                let len = f.op("match_sequence_length", &[value]);
+                let required = f.integer(length.required);
+                let valid = f.op(length.op.operator().as_str(), &[&len, &required]);
+                let condition = f.truth(&valid);
+                f.pattern_check(&condition, failed);
+            }
         }
         if let Some(star) = star.filter(|&index| matches!(items[index], MatchTest::Always)) {
             for (i, child) in items
@@ -432,7 +446,7 @@ impl Frame<'_, '_, '_> {
                     f.op("-", &[&size, &offset])
                 };
                 let item = f.op("get", &[value, &index]);
-                self.test_pattern(child, &item, failed, captures, None, None);
+                self.test_pattern(child, (&item, None), failed, captures, None, None);
             }
         } else if items.iter().any(|item| !matches!(item, MatchTest::Always)) {
             let count = f.integer(items.len());

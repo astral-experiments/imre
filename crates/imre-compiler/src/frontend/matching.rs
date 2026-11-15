@@ -80,13 +80,6 @@ fn builtin(ty: Type, operation: Builtin, args: Vec<Expr>) -> Expr {
     }
 }
 
-fn compare(left: Expr, operation: Compare, right: Expr) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![operation.operator()]),
-    }
-}
-
 impl Checker<'_> {
     /// Keep the evaluated subject alive across failed guards, without introducing
     /// a synthetic loop that could intercept a user's break or continue.
@@ -410,9 +403,9 @@ impl Checker<'_> {
             }
             ast::Pattern::MatchSingleton(singleton) => {
                 let test = if value.ty == Type::Bool {
-                    compare(
-                        value,
+                    pipelines::compare(
                         Compare::Equal,
+                        value,
                         Expr::boolean(singleton.value == ast::Singleton::True),
                     )
                 } else {
@@ -456,7 +449,7 @@ impl Checker<'_> {
             || (matches!(value.ty, Type::Int | Type::Float)
                 && matches!(literal.ty, Type::Int | Type::Float))
         {
-            compare(value, Compare::Equal, literal)
+            pipelines::compare(Compare::Equal, value, literal)
         } else {
             Expr::boolean(false)
         }
@@ -605,27 +598,26 @@ impl Checker<'_> {
             .patterns
             .iter()
             .position(|pattern| matches!(pattern, ast::Pattern::MatchStar(_)));
-        let fixed = sequence.patterns.len() - usize::from(star.is_some());
-        if fields.as_ref().is_some_and(|fields| fields.len() < fixed) {
-            return Err(error(
-                self.source,
-                sequence,
-                "sequence pattern exceeds the fixed tuple's declared shape",
-            ));
-        }
         let mut pattern = Pattern::new(value.clone());
-        pattern.body.push(Statement::Assign(
-            success,
-            compare(
-                builtin(Type::Int, Builtin::Len, vec![value.clone()]),
-                if star.is_some() {
-                    Compare::GreaterEqual
-                } else {
-                    Compare::Equal
-                },
-                Expr::integer(fixed),
-            ),
-        ));
+        if let Some(length) = ir::pattern_length(sequence.patterns.len(), star) {
+            let matches = if let Some(fields) = &fields {
+                if fields.len() < length.required {
+                    return Err(error(
+                        self.source,
+                        sequence,
+                        "sequence pattern exceeds the fixed tuple's declared shape",
+                    ));
+                }
+                Expr::boolean(length.accepts(fields.len()))
+            } else {
+                pipelines::compare(
+                    length.op,
+                    builtin(Type::Int, Builtin::Len, vec![value.clone()]),
+                    Expr::integer(length.required),
+                )
+            };
+            pattern.body.push(Statement::Assign(success, matches));
+        }
         for (index, child) in sequence.patterns.iter().enumerate() {
             if let ast::Pattern::MatchStar(starred) = child {
                 if let Some(name) = &starred.name {
