@@ -30,6 +30,27 @@ assert client.mock_calls[1].args == ()
 assert client.mock_calls[1].kwargs == {"size": 2}
 assert repr(client.mock_calls[1]) == "call.fetch().read(size=2)"
 
+
+class History(mock._CallList):
+    def __iter__(self):
+        raise AssertionError("membership called __iter__")
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            raise stopped
+        return super().__getitem__(key)
+
+
+stopped = StopIteration()
+history = History(client.mock_calls)
+assert history[0] in history
+try:
+    [history[0]] in history
+except StopIteration as error:
+    assert error is stopped
+else:
+    raise AssertionError("membership swallowed StopIteration")
+
 client.assert_has_calls(expected.call_list())
 client.assert_has_calls([call.fetch(3), call.fetch(1)], any_order=True)
 for sequence, unordered in (

@@ -1407,7 +1407,7 @@ impl Session {
             ),
             (
                 project.join("_imre_mock.pyi"),
-                "def mark_call_list(values: list, /) -> bool: ...\ndef is_call_list(values: list, /) -> bool: ...\n",
+                "def mark_call_list(values: list, /) -> bool: ...\n",
             ),
             (
                 project.join("_imre_doctest.pyi"),

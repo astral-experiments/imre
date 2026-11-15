@@ -12068,7 +12068,7 @@ impl<'a> Checker<'a> {
         if let Some(value) = self.cache_control(call, receiver.as_ref())? {
             return Ok(value);
         }
-        if let Some(Binding::Intrinsic(Intrinsic::MockCallList { mark })) = binding {
+        if let Some(Binding::Intrinsic(Intrinsic::MarkMockCallList)) = binding {
             self.reject_builtin_keywords(call)?;
             let [values] = call.arguments.args.as_ref() else {
                 return Err(error(self.source, call, "expected a mock call list"));
@@ -12080,7 +12080,7 @@ impl<'a> Checker<'a> {
             }
             return Ok(Expr {
                 ty: Type::Bool,
-                kind: ExprKind::Builtin(Builtin::MockCallList { mark }, vec![values]),
+                kind: ExprKind::Builtin(Builtin::MarkMockCallList, vec![values]),
             });
         }
         if let Some(suite) = self.doctest_suite(call, binding)? {
@@ -15259,12 +15259,6 @@ impl<'a> Checker<'a> {
             } else {
                 text
             });
-        }
-        if let [value] = args.as_slice()
-            && name == "repr"
-            && let Some(rendered) = self.mock_call_repr(value, call)?
-        {
-            return Ok(rendered);
         }
         if args.len() == 1
             && matches!(

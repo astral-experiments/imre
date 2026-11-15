@@ -1,4 +1,4 @@
-from _imre_mock import is_call_list, mark_call_list
+from _imre_mock import mark_call_list
 
 
 @dataclass(repr=False)
@@ -11,19 +11,6 @@ class _Call:
         self._args = args
         self._kwargs = kwargs
         self._text = _format_call_signature("call", args, kwargs)
-
-    @staticmethod
-    def _represent(value: _Call | None) -> str:
-        if value is None:
-            return "None"
-        return _format_recorded_call(value, "call")
-
-    @staticmethod
-    def _represent_list(values: list[_Call]) -> str:
-        parts: list[str] = []
-        for value in values:
-            parts.append(_format_recorded_call(value, "call"))
-        return _format_list(parts, is_call_list(values))
 
 
 def _format_recorded_call(value: _Call, name: str) -> str:

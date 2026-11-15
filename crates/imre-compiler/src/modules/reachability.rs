@@ -771,7 +771,6 @@ impl Reachable {
                                             | "_assert_called_with"
                                             | "_assert_called_once_with"
                                     ),
-                                    "_Call" => matches!(name, "_represent" | "_represent_list"),
                                     "_PatchFactory" => name == "_dictionary",
                                     "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
                                     _ => false,

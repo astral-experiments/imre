@@ -965,8 +965,8 @@ impl Checker<'_> {
                 vec![value],
             ));
         }
-        if let Some(text) = self.mock_call_repr(&value, at)? {
-            return Ok(text);
+        if self.mock_call_record(ty) {
+            return self.record_text(value, at);
         }
         let op = match ty {
             Type::Enum(_) => Builtin::EnumString,

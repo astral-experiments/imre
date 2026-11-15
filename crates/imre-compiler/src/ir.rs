@@ -2011,9 +2011,7 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     AsciiEscape,
-    MockCallList {
-        mark: bool,
-    },
+    MarkMockCallList,
     SystemExitNew {
         omit_none: bool,
     },
