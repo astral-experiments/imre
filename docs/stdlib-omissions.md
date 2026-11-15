@@ -188,6 +188,25 @@ Stock passed the original. Both native runs reported its upstream CPython-specif
 | --- | ---: | --- | --- |
 | `test.test_pathlib.test_pathlib.LazyImportTest.test_lazy_import` | 1 | A fresh interpreter started with `-S` must keep shutil out of `sys.modules` before and after importing pathlib. That assertion fixes CPython’s startup import order. Imre may load shutil earlier while providing the same path and file operations. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_pathlib/test_pathlib.py#L86-L87) | `PathSubclassTest.test_copy_error_handling` |
 
+Omit the 12 methods below from the AOT target. Each runs six path strings. `test_repr_common` calls `eval` on the quoted substring produced by `repr(path)`. `test_repr_roundtrips` calls `eval` on the whole representation in the live `pathlib` namespace. The original methods require executing text computed at runtime. [Quoted path assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_pathlib/test_pathlib.py#L302-L312) · [Constructor assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_pathlib/test_pathlib.py#L441-L449)
+
+On #8588, stock passed all 12 original methods. Native named unittest at O0 entered all 12 and raised `NotImplementedError` in their 72 subtests. With each constructor written directly in the source, FILE and named mode matched CPython on the exact representation, `as_posix()`, equality and result type for all 72 inputs, including the subclasses. The raw suite retains all 12 errors. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/f097cdcdd504704fd742e73cfd3143daa1e73417)
+
+| CPython test in `test.test_pathlib.test_pathlib` | Occurrence |
+| --- | ---: |
+| `PathSubclassTest.test_repr_common` | 1 |
+| `PathTest.test_repr_common` | 1 |
+| `PathTest.test_repr_roundtrips` | 1 |
+| `PosixPathTest.test_repr_common` | 1 |
+| `PosixPathTest.test_repr_roundtrips` | 1 |
+| `PurePathSubclassTest.test_repr_common` | 1 |
+| `PurePathTest.test_repr_common` | 1 |
+| `PurePathTest.test_repr_roundtrips` | 1 |
+| `PurePosixPathTest.test_repr_common` | 1 |
+| `PurePosixPathTest.test_repr_roundtrips` | 1 |
+| `PureWindowsPathTest.test_repr_common` | 1 |
+| `PureWindowsPathTest.test_repr_roundtrips` | 1 |
+
 ### `re`
 
 These seven originals inspect CPython’s regex implementation. Their paired counterparts exercise the public matching, search, limit and replacement behavior. All seven passed on stock CPython. At native O0 and O3, five skipped behind an implementation guard and two raised an error when they accessed the private compiler. All seven remain in the denominator. [Callbacks and counterpart results](../benchmarks/cpython_stdlib/full/re/omission-review-linux.md)
@@ -307,6 +326,10 @@ Both originals passed on stock and skipped at both native levels in the unchange
 | --- | ---: | --- | --- |
 | `test.test_ordered_dict.CPythonOrderedDictSubclassTests.test_weakref_list_is_not_traversed` | 1 | A subclass, a self-referential list and a weak reference go out of scope before collection. A crash would affect ordinary subclass users. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictSubclassTests.test_reference_loop` |
 | `test.test_ordered_dict.CPythonOrderedDictTests.test_weakref_list_is_not_traversed` | 1 | The body creates a reference cycle containing a weak reference and calls the public collector. A crash in that sequence is observable in an ordinary program. [Upstream assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_ordered_dict.py#L954-L971) | `CPythonOrderedDictTests.test_reference_loop` |
+
+### `dataclasses` generated class docstring
+
+Keep `test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init`, occurrence 1, in scope. The original creates class `C` with `exec(textwrap.dedent(...), ns)` and checks the docstring derived from its `__init__(self, x: X, num: int) -> None: ...`. On #8588, named unittest reached `exec` and raised `NotImplementedError`. Compiling the same 108-byte class definition ahead of time produced the stock docstring `C(x: X, num: int)` in named mode. Ordinary FILE rejected the ellipsis in the constructor. The constructor and docstring remain a compatibility issue independently of dynamic source execution. [Original assertion](https://github.com/python/cpython/blob/5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_dataclasses/__init__.py#L2371-L2387) · [Tested Imre revision](https://github.com/astral-experiments/imre/commit/f097cdcdd504704fd742e73cfd3143daa1e73417)
 
 ### `dataclasses` subclass hooks
 
