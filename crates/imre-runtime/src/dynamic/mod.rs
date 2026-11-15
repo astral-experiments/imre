@@ -4571,10 +4571,8 @@ impl Context {
         let result = handler(self);
         self.heap.replace_active(previous);
         result.map_err(|mut error| {
-            if error.context == NONE
-                && error.trace.as_ref().and_then(|t| t.instance) != Some(exception)
-            {
-                error.context = exception;
+            if error.instance() != Some(exception) && error.owner(&self.heap).context == NONE {
+                error.owner_mut(&mut self.heap).context = exception;
             }
             error
         })

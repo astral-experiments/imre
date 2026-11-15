@@ -142,7 +142,8 @@ impl Context {
             }
             Err(error) => error,
         };
-        error.context = self.raised_instance(self.invalid_enum_value(class, value));
+        error.owner_mut(&mut self.heap).context =
+            self.raised_instance(self.invalid_enum_value(class, value));
         Err(error)
     }
 

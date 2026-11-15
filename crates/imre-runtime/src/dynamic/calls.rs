@@ -2608,18 +2608,20 @@ impl Context {
         key: AttributeName<'_>,
         original: Option<Id>,
     ) -> Result<Id> {
-        if !self.is_attribute_error(&error)
-            || error
+        let owner = error.owner(&self.heap);
+        if !self.is_attribute_error(owner)
+            || owner
                 .trace
                 .as_ref()
                 .is_some_and(|trace| trace.attribute_fields.iter().any(Option::is_some))
         {
             return Err(error);
         }
+        let builtin = owner.class().is_none();
         let name = self.attribute_lookup_key(key, original);
-        if error.class().is_none() {
+        if builtin {
             let mut error = error;
-            error.tracing().attribute_fields = [Some(name), Some(obj)];
+            error.owner_mut(&mut self.heap).tracing().attribute_fields = [Some(name), Some(obj)];
             return Err(error);
         }
         let mark = self.heap.temporary_mark();
@@ -10166,17 +10168,12 @@ impl Context {
             self.add_exception_note(exception, note)
         });
         if let Err(mut error) = result {
-            if error.trace.as_ref().and_then(|trace| trace.instance) != Some(exception) {
-                error.context = exception;
+            if error.instance() != Some(exception) {
+                error.owner_mut(&mut self.heap).context = exception;
             }
             return error;
         }
-        let Value::Raised(error) = self.heap.get(exception) else {
-            unreachable!()
-        };
-        let mut error = error.clone();
-        error.tracing().instance = Some(exception);
-        error
+        self.error_from_instance(exception)
     }
 
     /// Bind ABCMeta.__new__'s positional-only parameters for direct and cooperating calls.

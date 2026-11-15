@@ -1086,8 +1086,8 @@ impl BufferedFd {
         self.buffer.borrow_mut().take();
         match (pending, self.handle.close(), ctx) {
             (Err(mut flush), Err(mut close), Some(ctx)) => {
-                if flush.context == NONE {
-                    flush.context = ctx.heap.active_exception();
+                if flush.owner(&ctx.heap).context == NONE {
+                    flush.owner_mut(&mut ctx.heap).context = ctx.heap.active_exception();
                 }
                 close.context = ctx.raised_instance(flush);
                 Err(close)

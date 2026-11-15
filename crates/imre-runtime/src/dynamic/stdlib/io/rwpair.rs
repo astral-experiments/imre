@@ -235,7 +235,7 @@ pub(super) fn call(
             let reader = state(ctx, receiver).reader;
             match (writer, forward(ctx, reader, "close", &[])) {
                 (Err(first), Err(mut second)) => {
-                    second.context = ctx.raised_instance(first);
+                    second.owner_mut(&mut ctx.heap).context = ctx.raised_instance(first);
                     Err(second)
                 }
                 (Err(first), _) => Err(first),

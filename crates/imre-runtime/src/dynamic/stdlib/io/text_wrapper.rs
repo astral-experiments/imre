@@ -1037,7 +1037,7 @@ pub(super) fn call(
             let closed = Wrapper::invoke_buffer(ctx, receiver, "close", vec![]);
             return match (flushed, closed) {
                 (Err(flush), Err(mut close)) => {
-                    close.context = ctx.raised_instance(flush);
+                    close.owner_mut(&mut ctx.heap).context = ctx.raised_instance(flush);
                     Err(close)
                 }
                 (Err(flush), _) => Err(flush),

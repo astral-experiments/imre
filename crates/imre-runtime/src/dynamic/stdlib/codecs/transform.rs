@@ -46,15 +46,10 @@ fn codec_error(ctx: &mut Context, error: Error, operation: &str, encoding: &str)
     };
     let note = ctx.text(format!("{action} with '{encoding}' codec failed"));
     if let Err(mut failure) = ctx.add_exception_note(id, note) {
-        failure.context = id;
+        failure.owner_mut(&mut ctx.heap).context = id;
         return failure;
     }
-    let Value::Raised(error) = ctx.heap.get(id) else {
-        unreachable!("annotated codec error")
-    };
-    let mut error = error.clone();
-    error.tracing().instance = Some(id);
-    error
+    ctx.error_from_instance(id)
 }
 
 /// Resolve tuple slots directly; a tuple subclass may expose different attributes.

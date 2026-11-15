@@ -21,7 +21,7 @@ pub(super) fn flush_and_close(
     }
     match (flushed, close_raw(ctx)) {
         (Err(flush), Err(mut close)) => {
-            close.context = ctx.raised_instance(flush);
+            close.owner_mut(&mut ctx.heap).context = ctx.raised_instance(flush);
             Err(close)
         }
         (Err(flush), _) => Err(flush),

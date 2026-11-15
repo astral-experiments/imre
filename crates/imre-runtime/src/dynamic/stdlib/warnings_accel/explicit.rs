@@ -317,12 +317,7 @@ fn raise_warning(ctx: &mut Context, category: Id, message: Id) -> Result<Id> {
             let name = ctx.class_name(category);
             let note = ctx.text(format!("Normalization failed: type={name} args={args}"));
             let _ = ctx.add_exception_note(exception, note);
-            let Value::Raised(error) = ctx.heap.get(exception) else {
-                unreachable!("normalization error")
-            };
-            let mut error = error.clone();
-            error.tracing().instance = Some(exception);
-            Err(error)
+            Err(ctx.error_from_instance(exception))
         }
     }
 }

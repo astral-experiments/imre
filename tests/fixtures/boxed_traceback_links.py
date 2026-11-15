@@ -95,6 +95,35 @@ def check_context_cycle(backlink):
             assert inner.__context__ is (None if backlink else active)
 
 
+def check_unwind():
+    error = capture([])
+    tail = error.__traceback__
+    seen = []
+
+    class Operand:
+        def __del__(self):
+            seen.append(error.__traceback__)
+            error.__traceback__ = None
+            error.args = ("during unwind",)
+
+    def fail_again():
+        raise error
+
+    def dispatch():
+        print(Operand(), fail_again())
+
+    try:
+        dispatch()
+    except LookupError as caught:
+        assert caught is error and caught.args == ("during unwind",)
+        assert caught.__traceback__.tb_next is None
+        head, = seen
+        assert head.tb_frame.f_code.co_name == "dispatch"
+        assert head.tb_next.tb_frame.f_code.co_name == "fail_again"
+        assert head.tb_next.tb_next is tail
+
+
 check()
+check_unwind()
 check_context_cycle(True)
 check_context_cycle(False)

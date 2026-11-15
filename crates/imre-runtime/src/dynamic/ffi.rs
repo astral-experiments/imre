@@ -117,20 +117,10 @@ impl Context {
         })
     }
 
-    pub(super) fn error_from_instance(&self, instance: Id) -> Error {
-        let Value::Raised(error) = self.heap.get(instance) else {
-            unreachable!("expected a normalized exception instance")
-        };
-        let mut error = error.clone();
-        error.tracing().instance = Some(instance);
-        error
-    }
-
     /// Propagate an already normalized instance with the active exception as context.
     pub(super) fn raise_normalized(&mut self, instance: Id) -> Result<Id> {
-        let mut error = self.error_from_instance(instance);
-        self.chain_raised_instance(&mut error);
-        Err(error)
+        self.chain_raised_instance(instance);
+        Err(self.error_from_instance(instance))
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -1440,31 +1430,20 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             status
         }
         // Startup can fail before the interpreter has created its sys module.
-        Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
-            if stdlib::traceback::chain_link(&error).is_some() {
+        Err(error) if ctx.is_os_error(&error) && error.owner(&ctx.heap).args.is_some() => {
+            if stdlib::traceback::chain_link(error.owner(&ctx.heap)).is_some() {
                 stdlib::traceback::report_chain(&mut ctx, error);
             } else {
                 ctx.report_os_error(error);
             }
             1
         }
-        Err(error) if stdlib::traceback::chain_link(&error).is_some() => {
+        Err(error) if stdlib::traceback::chain_link(error.owner(&ctx.heap)).is_some() => {
             stdlib::traceback::report_chain(&mut ctx, error);
             1
         }
         Err(mut error) => {
-            let current = error
-                .trace
-                .as_ref()
-                .and_then(|trace| trace.instance)
-                .and_then(|id| {
-                    if let Value::Raised(saved) = ctx.heap.get(id) {
-                        Some(saved)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(&error);
+            let current = error.owner(&ctx.heap);
             if current.args.is_some() {
                 error.message = ctx.exception_message(current);
             }
@@ -1543,11 +1522,7 @@ pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     use std::io::Write;
 
     let mark = ctx.heap.temporary_mark();
-    let instance = error
-        .trace
-        .as_ref()
-        .and_then(|trace| trace.instance)
-        .unwrap_or_else(|| ctx.alloc(Value::Raised(error)));
+    let instance = ctx.raised_instance(error);
     ctx.heap.keep(instance);
     let before_code = ctx.heap.temporary_mark();
     let code = ctx.lookup_attr(instance, "code").unwrap_or(instance);
