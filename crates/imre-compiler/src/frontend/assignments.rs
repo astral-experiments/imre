@@ -908,13 +908,26 @@ impl Checker<'_> {
             ast::Expr::Subscript(subscript) => &*subscript.value,
             _ => return None,
         };
-        // A local Python object supplies no fixed field or item type to its RHS.
-        if let Some(name) = receiver.as_name_expr()
+        // A bound Python method returns a live object. Neither the local nor that
+        // call supplies a fixed field or item type for the assignment's RHS.
+        let object = if self.checked_call_contracts
+            && let Some(module) = self.registered
+            && let Some(call) = receiver.as_call_expr()
+            && stdlib::registered_string_method(call).is_none()
+            && let Some(method) = module
+                .operands(self.source, self.graph.python_optimization())
+                .direct_method(call)
+        {
+            method.value.as_ref()
+        } else {
+            receiver
+        };
+        if let Some(name) = object.as_name_expr()
             && let Some(&slot) = self.names.get(name.id.as_str())
             && self.locals[slot] == Type::PythonObject
             && !self.narrowed.contains_key(&slot)
-            && !self.is_class_receiver(receiver)
-            && self.graph.resolve(self.module, receiver).is_none()
+            && !self.is_class_receiver(object)
+            && self.graph.resolve(self.module, object).is_none()
         {
             return None;
         }
