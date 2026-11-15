@@ -733,6 +733,7 @@ impl Checker<'_> {
                 parameter,
                 layout.ty,
                 signature.parameter_declaration(index),
+                layout.default.as_ref(),
             )?;
             params.push(slot);
         }

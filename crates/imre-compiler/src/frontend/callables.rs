@@ -599,11 +599,11 @@ impl Checker<'_> {
             .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
-            let slot = helper.bind_parameter(&parameter.parameter, ty, None)?;
+            let slot = helper.bind_parameter(&parameter.parameter, ty, None, None)?;
             params.push(slot);
         }
         for (parameter, ty) in variadics {
-            params.push(helper.bind_parameter(parameter, ty, None)?);
+            params.push(helper.bind_parameter(parameter, ty, None, None)?);
         }
         let mut args = Vec::with_capacity(captures.len());
         captures.sort_unstable_by_key(|(slot, _)| *slot);
@@ -617,7 +617,7 @@ impl Checker<'_> {
             }
             // A later pull may see a different optional or union arm.
             let value = self.local(source);
-            let slot = helper.declare_binding(&name, value.ty, lambda, true)?;
+            let slot = helper.declare_binding(&name, value.ty, lambda, true, None)?;
             helper.assigned.insert(slot);
             // An escaping lambda reads the later cell value. Only its lexical annotation survives.
             let origin = if pull {

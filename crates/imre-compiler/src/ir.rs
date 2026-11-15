@@ -861,6 +861,10 @@ impl Expr {
         }
     }
 
+    pub(crate) fn is_unrepresented(&self) -> bool {
+        matches!(self.kind, ExprKind::Builtin(Builtin::Unrepresented, _))
+    }
+
     /// Read a local slot with its type at the use site.
     pub(crate) fn local(slot: usize, ty: Type) -> Self {
         Self {

@@ -228,7 +228,9 @@ impl Signature {
             && self
                 .params
                 .iter()
-                .any(|param| param.ty == Type::PythonObject)
+                // A definition-time Python default belongs to the enclosing header.
+                // It does not select the checker for the rest of the function.
+                .any(|param| param.ty == Type::PythonObject && !param.has_python_default())
     }
 }
 
@@ -816,6 +818,7 @@ fn lower_graph(
     dataclass_values::validate(&classes, graph, &types)?;
     let mut signatures = HashMap::new();
     let mut definitions = Vec::new();
+    let mut entry_has_live_default = false;
     let mut callable_definitions = Vec::new();
     // A source method needs its original binder and operand sites if its
     // callable layout requires a registered frame.
@@ -981,6 +984,12 @@ fn lower_graph(
                     }
                     if let Some(element) = element {
                         classes.producer_items.insert(signature.id, element);
+                    }
+                    if module_id == graph.entry {
+                        entry_has_live_default |= signature
+                            .params
+                            .iter()
+                            .any(calls::Parameter::has_python_default);
                     }
                     signatures.insert(owner, signature.clone());
                     definitions.push((module_id, function, signature));
@@ -1329,7 +1338,7 @@ fn lower_graph(
             return Err(diagnostic);
         }
     }
-    let entry_declarations = classes.declarations.has_class_values(graph.entry)
+    let entry_declarations = entry_has_live_default || classes.declarations.has_class_values(graph.entry)
         || graph.modules[graph.entry].parsed.syntax().body.iter().any(|stmt| {
             matches!(stmt, ast::Stmt::FunctionDef(def) if inspect::marks_function(graph, graph.entry, def))
         });
@@ -2802,6 +2811,15 @@ fn signature(
             Some(Binding::Intrinsic(Intrinsic::WrapperAttributes(fields))) => {
                 Some(functools::wrapper_attributes(fields, types))
             }
+            // A lambda object belongs to the function's executed header. A fixed
+            // call must not construct it again when the argument is omitted.
+            _ if method.is_none()
+                && origin.is_none()
+                && parameter.annotation().is_none()
+                && default.is_some_and(ast::Expr::is_lambda_expr) =>
+            {
+                Some(Expr::unrepresented())
+            }
             _ => capture,
         };
         let annotation = parameter.annotation().filter(|value| {
@@ -4137,7 +4155,8 @@ impl<'a> Checker<'a> {
     }
 
     fn parameter_shadows_binding(&self, name: &str, ty: Type, bound: bool) -> bool {
-        self.mapping_class_import(name)
+        bound && ty == Type::PythonObject && !self.module_scope && self.names.contains_key(name)
+            || self.mapping_class_import(name)
             || match self.graph.modules[self.module].bindings.get(name) {
                 Some(Binding::Value(definition))
                     if self.graph.modules[definition.module]
@@ -4224,7 +4243,12 @@ impl<'a> Checker<'a> {
             let slot = if self.class_receiver.as_deref() == Some(parameter.name().as_str()) {
                 self.hidden(layout.ty)
             } else {
-                self.bind_parameter(parameter, layout.ty, signature.parameter_declaration(index))?
+                self.bind_parameter(
+                    parameter,
+                    layout.ty,
+                    signature.parameter_declaration(index),
+                    layout.default.as_ref(),
+                )?
             };
             bound(slot);
         }
@@ -4236,8 +4260,9 @@ impl<'a> Checker<'a> {
         parameter: &ast::Parameter,
         ty: Type,
         declaration: Option<TypeDeclaration>,
+        default: Option<&Expr>,
     ) -> Result<usize, String> {
-        let slot = self.declare_binding(parameter.name().as_str(), ty, parameter, true)?;
+        let slot = self.declare_binding(parameter.name().as_str(), ty, parameter, true, default)?;
         self.assigned.insert(slot);
         if let Some(declaration) = declaration {
             self.bind_declared_type(slot, declaration);
@@ -4247,7 +4272,7 @@ impl<'a> Checker<'a> {
 
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
-        self.declare_binding(name, ty, node, self.names.contains_key(name))
+        self.declare_binding(name, ty, node, self.names.contains_key(name), None)
     }
 
     fn declare_binding(
@@ -4256,13 +4281,18 @@ impl<'a> Checker<'a> {
         ty: Type,
         node: &impl Ranged,
         bound: bool,
+        default: Option<&Expr>,
     ) -> Result<usize, String> {
+        let shadows = || {
+            self.parameter_shadows_binding(name, ty, bound)
+                || default.is_some_and(Expr::is_unrepresented)
+        };
         if reserved(name)
             || (self.graph.modules[self.module].bindings.get(name).is_some_and(|binding| {
                     !matches!(binding, Binding::Value(def) if self.graph.modules[def.module].implicit_value_name(def.statement).is_some())
                 })
                 && (self.module_scope
-                    || !self.parameter_shadows_binding(name, ty, bound)
+                    || !shadows()
                     || (self.block_depth != 0 && !self.names.contains_key(name))))
             || self.local_functions.contains_key(name)
             || self.local_classes.contains_key(name)
@@ -8782,7 +8812,8 @@ impl<'a> Checker<'a> {
         } else {
             Self::inferred_stream(value)
         };
-        let slot = self.declare_binding(name.id.as_str(), value.ty, target, existing.is_some())?;
+        let slot =
+            self.declare_binding(name.id.as_str(), value.ty, target, existing.is_some(), None)?;
         if existing.is_none() {
             self.remember_inferred_container(slot);
         }

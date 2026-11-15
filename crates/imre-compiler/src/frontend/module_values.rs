@@ -825,6 +825,20 @@ impl Initialization {
                 }
                 ast::Stmt::FunctionDef(function) => {
                     available.insert(definition);
+                    if let Some(signature) = checker.functions.get(&definition) {
+                        for (source, layout) in function
+                            .parameters
+                            .iter_non_variadic_params()
+                            .zip(&signature.params)
+                        {
+                            if let Some(default) = source.default.as_deref()
+                                && layout.has_python_default()
+                            {
+                                checker.typed_expr(default)?;
+                                checker.require_registered_operation(default)?;
+                            }
+                        }
+                    }
                     if let Some(first) = module.function_binding(checker.module, function) {
                         let Some(signature) = checker.functions.get(&definition) else {
                             continue;
