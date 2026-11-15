@@ -288,6 +288,45 @@ pub(super) struct AccumulateArgs {
     pub(super) element: Type,
 }
 
+pub(super) enum CallbackPipeline<'e> {
+    Filter,
+    Map,
+    MapBuiltin {
+        callee: &'e ast::ExprName,
+        converter: &'e ast::ExprName,
+        source: &'e ast::Expr,
+    },
+}
+
+enum ItemCallback<'e, 's> {
+    Value(Expr),
+    Function(&'e ast::Expr, &'s Signature),
+    Lambda(&'e ast::ExprLambda),
+}
+
+impl ItemCallback<'_, '_> {
+    /// A static function or lambda learns its argument from the pulled item.
+    fn bind(
+        self,
+        checker: &mut Checker<'_>,
+        item: Type,
+        returns: Option<Type>,
+    ) -> Result<Expr, String> {
+        match self {
+            Self::Value(value) => Ok(value),
+            Self::Lambda(lambda) => checker.lambda_value(lambda, Some(vec![item]), returns),
+            Self::Function(expression, signature) => {
+                if signature.params.len() == 1
+                    && let Some(inference) = checker.inference
+                {
+                    inference.learn_parameter(signature.id, 0, item);
+                }
+                checker.callable_value(signature, None, None, expression)
+            }
+        }
+    }
+}
+
 impl Checker<'_> {
     /// Generator creation captures arguments now. The first pull runs the body
     /// and acquires the list yielded from; later pulls observe that same list.
@@ -494,7 +533,7 @@ pub(super) fn check_range_step(step: Expr) -> Statement {
     )
 }
 
-impl Checker<'_> {
+impl<'s> Checker<'s> {
     pub(super) fn is_builtin_iter(&self, call: &ast::ExprCall) -> bool {
         self.unshadowed_builtin(&call.func, "iter")
             && !self.is_class_receiver(&call.func)
@@ -774,30 +813,29 @@ impl Checker<'_> {
         })
     }
 
-    /// A namespace store can replace either callable before this pipeline starts.
-    pub(super) fn fixed_map(&self, call: &ast::ExprCall) -> bool {
-        self.unshadowed_builtin(&call.func, "map")
-            && !self.live_module_name("map")
-            && !call
-                .arguments
-                .args
-                .first()
-                .and_then(ast::Expr::as_name_expr)
-                .is_some_and(|name| self.live_module_name(name.id.as_str()))
-    }
-
-    /// Select a converter and its input at a consumer that accepts this builtin.
-    pub(super) fn map_converter_input<'e>(
-        &self,
-        call: &'e ast::ExprCall,
-        accepts: impl FnOnce(&str) -> bool,
-    ) -> Option<(&'e ast::ExprName, &'e ast::Expr)> {
-        let [converter @ ast::Expr::Name(name), source] = call.arguments.args.as_ref() else {
+    /// Select both written callables before the consuming operation chooses a representation.
+    pub(super) fn bound_map<'e>(&self, call: &'e ast::ExprCall) -> Option<CallbackPipeline<'e>> {
+        let callee = call.func.as_name_expr()?;
+        if !self.unshadowed_builtin(&call.func, "map") || self.live_module_name("map") {
             return None;
-        };
-        let spelling = name.id.as_str();
-        (accepts(spelling) && self.unshadowed_builtin(converter, spelling))
-            .then_some((name, source))
+        }
+        if let [first @ ast::Expr::Name(converter), rest @ ..] = call.arguments.args.as_ref() {
+            let spelling = converter.id.as_str();
+            if self.live_module_name(spelling) {
+                return None;
+            }
+            if let [source] = rest
+                && matches!(spelling, "tuple" | "int" | "str" | "ord")
+                && self.unshadowed_builtin(first, spelling)
+            {
+                return Some(CallbackPipeline::MapBuiltin {
+                    callee,
+                    converter,
+                    source,
+                });
+            }
+        }
+        Some(CallbackPipeline::Map)
     }
 
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
@@ -931,70 +969,10 @@ impl Checker<'_> {
                 input.evaluate.append(&mut input.acquire);
                 input
             }
-            "map" if self.fixed_map(call) => {
-                let Some((name, source)) = self.map_converter_input(call, |name| {
-                    matches!(name, "tuple" | "int" | "str" | "ord")
-                }) else {
-                    return Ok(Some(Iteration::Prepared(
-                        self.callback_input(call, element, false)?,
-                    )));
-                };
-                let name = name.id.as_str();
-                self.reject_builtin_keywords(call)?;
-                let source = self.expansion_input(source, None)?;
-                let mut input = self.prepare_iteration(source, call, false)?;
-                let item = self.local(input.value);
-                let converted = if name == "tuple" {
-                    self.iterable_tuple(&item).ok_or_else(|| {
-                        error(
-                            self.source,
-                            call,
-                            "map(tuple, ...) requires concrete iterable elements",
-                        )
-                    })?
-                } else if name == "ord" {
-                    self.ordinal(item, call)?
-                } else if name == "int" {
-                    self.consumer_value(item, true, call)?
-                } else {
-                    match item.ty {
-                        Type::Path => {
-                            paths::operation(ir::PathOperation::Text, Type::Str, vec![item])
-                        }
-                        Type::Str => item,
-                        Type::Class(_) | Type::CompletedProcess(..) => {
-                            self.record_text(item, call)?
-                        }
-                        Type::Int | Type::Bool | Type::Float | Type::None | Type::Bytes => Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Builtin(Builtin::Str, vec![item]),
-                        },
-                        _ => {
-                            return Err(error(
-                                self.source,
-                                call,
-                                "map(str, ...) requires values with a supported string conversion",
-                            ));
-                        }
-                    }
-                };
-                let value = self.hidden(converted.ty);
-                input.next.push(Statement::If(
-                    self.local(input.ready),
-                    vec![
-                        Statement::Assign(value, converted),
-                        Statement::Clear(input.value),
-                    ],
-                    Vec::new(),
-                ));
-                input.next.insert(0, Statement::Clear(value));
-                input.value = value;
-                input.elementless = false;
-                input.clear.push(value);
-                input.evaluate.append(&mut input.acquire);
-                input
+            "map" if let Some(mapped) = self.bound_map(call) => {
+                self.callback_input(call, element, mapped)?
             }
-            "filter" => self.callback_input(call, element, true)?,
+            "filter" => self.callback_input(call, element, CallbackPipeline::Filter)?,
             "enumerate" => {
                 if !call.arguments.keywords.is_empty()
                     || !(1..=2).contains(&call.arguments.args.len())
@@ -2618,88 +2596,127 @@ impl Checker<'_> {
 
     /// Captures the callable before its source, then invokes it only after each
     /// pull has independently rooted an item and released runtime storage access.
-    fn callback_input(
+    pub(super) fn callback_input(
         &mut self,
         call: &ast::ExprCall,
         element: Option<Type>,
-        filter: bool,
+        pipeline: CallbackPipeline<'_>,
     ) -> Result<Prepared, String> {
-        let [callback, source] = call.arguments.args.as_ref() else {
-            return Err(error(
-                self.source,
-                call,
-                "map/filter require a callback and one concrete iterable",
-            ));
-        };
-        if !call.arguments.keywords.is_empty() {
-            return Err(error(
-                self.source,
-                call,
-                "map/filter do not accept keyword arguments",
-            ));
+        let filter = matches!(pipeline, CallbackPipeline::Filter);
+        enum Callback<'e, 's> {
+            Builtin(&'e ast::ExprName),
+            Written(ItemCallback<'e, 's>),
         }
-        let definition = match self.resolve(callback) {
-            Some(Binding::Definition(definition)) => self.functions.get(&definition).cloned(),
-            _ => None,
-        };
-        // Fixed function names and noncapturing lambdas have no enclosing-slot
-        // effects. Their input type can therefore be learned from the source;
-        // emitted creation still precedes that source's evaluation.
-        let checked = if definition.is_some() || matches!(callback, ast::Expr::Lambda(_)) {
-            None
-        } else if let Some(binding) = self.local_function_binding(callback) {
-            Some(self.local_callback(binding, callback)?)
+        let (callback, source, input_hint) = if let CallbackPipeline::MapBuiltin {
+            converter,
+            source,
+            ..
+        } = pipeline
+        {
+            self.reject_builtin_keywords(call)?;
+            (Callback::Builtin(converter), source, None)
         } else {
-            Some(self.expr(callback)?)
-        };
-        let callback_input = checked
-            .as_ref()
-            .filter(|value| self.types.index_callable_signature(value.ty).is_none())
-            .and_then(|value| self.types.signature(value.ty))
-            .and_then(|(params, _)| (params.len() == 1).then(|| params[0]))
-            .or_else(|| {
-                definition.as_ref().and_then(|signature| {
-                    if signature.params.len() != 1 {
-                        return None;
-                    }
-                    self.inference
-                        .map_or(Some(signature.params[0].ty), |inference| {
-                            inference.parameter(signature.id, 0)
-                        })
-                })
-            });
-        // The destination describes surviving values. The truth predicate may
-        // still receive None from a generator, list display, or nested pipeline.
-        // The internal len argument frame belongs to the call, not the source iterable.
-        let input_hint = callback_input
-            .filter(|ty| !self.types.is_len_argument(*ty))
-            .or_else(|| {
-                if filter
-                    && checked
-                        .as_ref()
-                        .is_some_and(|callback| callback.ty == Type::None)
+            let [callback, source] = call.arguments.args.as_ref() else {
+                return Err(error(
+                    self.source,
+                    call,
+                    "map/filter require a callback and one concrete iterable",
+                ));
+            };
+            if !call.arguments.keywords.is_empty() {
+                return Err(error(
+                    self.source,
+                    call,
+                    "map/filter do not accept keyword arguments",
+                ));
+            }
+            let callback = self.item_callback(callback)?;
+            let callback_input = match &callback {
+                ItemCallback::Value(value)
+                    if self.types.index_callable_signature(value.ty).is_none() =>
                 {
-                    element.map(|ty| self.types.optional(ty))
-                } else {
-                    filter.then_some(element).flatten()
+                    self.types
+                        .signature(value.ty)
+                        .and_then(|(params, _)| match params.as_slice() {
+                            [item] => Some(*item),
+                            _ => None,
+                        })
                 }
-            });
+                ItemCallback::Function(_, signature) if signature.params.len() == 1 => self
+                    .inference
+                    .map_or(Some(signature.params[0].ty), |inference| {
+                        inference.parameter(signature.id, 0)
+                    }),
+                _ => None,
+            };
+            // The destination describes surviving values. The truth predicate may
+            // still receive None from a generator, list display, or nested pipeline.
+            // The internal len argument frame belongs to the call, not the source iterable.
+            let input_hint = callback_input
+                .filter(|ty| !self.types.is_len_argument(*ty))
+                .or_else(|| {
+                    if filter && matches!(&callback, ItemCallback::Value(callback) if callback.ty == Type::None) {
+                        element.map(|ty| self.types.optional(ty))
+                    } else {
+                        filter.then_some(element).flatten()
+                    }
+                });
+            (Callback::Written(callback), source, input_hint)
+        };
         let source = self.expansion_input(source, input_hint)?;
         let mut input = self.prepare_iteration(source, call, false)?;
         let input_type = self.locals[input.value];
-        let callback = self.item_callback(
-            callback,
-            input_type,
-            if filter { None } else { element },
-            checked,
-        )?;
-        let truth_filter = filter && callback.ty == Type::None;
-        let operation = if truth_filter {
-            input.evaluate.insert(0, Statement::Expr(callback));
-            self.local(input.value)
-        } else {
-            self.apply_item_callback(&mut input, callback, 0, "map/filter", call)?
-                .0
+        let (operation, truth_filter) = match callback {
+            Callback::Builtin(name) => {
+                let item = self.local(input.value);
+                let operation = match name.id.as_str() {
+                    "tuple" => self.iterable_tuple(&item).ok_or_else(|| {
+                        error(
+                            self.source,
+                            call,
+                            "map(tuple, ...) requires concrete iterable elements",
+                        )
+                    })?,
+                    "ord" => self.ordinal(item, call)?,
+                    "int" => self.consumer_value(item, true, call)?,
+                    _ if item.ty == Type::Str => item,
+                    _ if matches!(
+                        item.ty,
+                        Type::Path
+                            | Type::Class(_)
+                            | Type::CompletedProcess(..)
+                            | Type::Int
+                            | Type::Bool
+                            | Type::Float
+                            | Type::None
+                            | Type::Bytes
+                    ) =>
+                    {
+                        self.checked_string(item, call, false)?
+                    }
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "map(str, ...) requires values with a supported string conversion",
+                        ));
+                    }
+                };
+                (operation, false)
+            }
+            Callback::Written(callback) => {
+                let callback =
+                    callback.bind(self, input_type, if filter { None } else { element })?;
+                let truth_filter = filter && callback.ty == Type::None;
+                let operation = if truth_filter {
+                    input.evaluate.insert(0, Statement::Expr(callback));
+                    self.local(input.value)
+                } else {
+                    self.apply_item_callback(&mut input, callback, 0, "map/filter", call)?
+                        .0
+                };
+                (operation, truth_filter)
+            }
         };
         input.evaluate.append(&mut input.acquire);
         if filter {
@@ -2747,61 +2764,68 @@ impl Checker<'_> {
                 input.clear.push(value);
             }
         } else {
+            // These converters receive an already pulled item. A direct call, a
+            // descriptor, or a conversion with user callbacks can end map.__next__.
+            let catches_stop = match &operation.kind {
+                ExprKind::Local(_) => false,
+                ExprKind::Builtin(builtin, values)
+                    if values
+                        .iter()
+                        .all(|value| matches!(value.kind, ExprKind::Local(_))) =>
+                {
+                    !builtin.contract(values).preserves_owners()
+                }
+                _ => true,
+            };
             let value = self.hidden(operation.ty);
-            // The source can use its ready slot to latch exhaustion. A failed
-            // callback ends this map pull without changing the source cursor.
-            let ready = self.hidden(Type::Bool);
+            let mut store = vec![Statement::Assign(value, operation)];
+            let ready = catches_stop.then(|| {
+                let ready = self.hidden(Type::Bool);
+                input
+                    .next
+                    .push(Statement::Assign(ready, self.local(input.ready)));
+                ready
+            });
+            if let Some(ready) = ready {
+                store = catch_stop_iteration(
+                    self.types,
+                    store,
+                    vec![Statement::Assign(ready, Expr::boolean(false))],
+                );
+                input.ready = ready;
+            }
+            store.push(Statement::Clear(input.value));
             input
                 .next
-                .push(Statement::Assign(ready, self.local(input.ready)));
-            let mut mapped = catch_stop_iteration(
-                self.types,
-                vec![Statement::Assign(value, operation)],
-                vec![Statement::Assign(ready, Expr::boolean(false))],
-            );
-            mapped.push(Statement::Clear(input.value));
-            input
-                .next
-                .push(Statement::If(self.local(ready), mapped, Vec::new()));
+                .push(Statement::If(self.local(input.ready), store, Vec::new()));
             input.next.insert(0, Statement::Clear(value));
             input.value = value;
-            input.ready = ready;
             input.elementless = false;
-            input.clear.extend([value, ready]);
+            input.clear.push(value);
+            input.clear.extend(ready);
         }
         Ok(input)
     }
 
-    /// Infer the parameter of a fixed unary function or noncapturing lambda from the
-    /// pulled item. A caller may already have checked a dynamic callback to preserve
-    /// its position among the constructor arguments.
-    fn item_callback(
+    /// Select the written callback before a later argument can replace it.
+    fn item_callback<'e>(
         &mut self,
-        expression: &ast::Expr,
-        item: Type,
-        returns: Option<Type>,
-        checked: Option<Expr>,
-    ) -> Result<Expr, String> {
-        if let Some(value) = checked {
-            return Ok(value);
-        }
+        expression: &'e ast::Expr,
+    ) -> Result<ItemCallback<'e, 's>, String> {
         if let ast::Expr::Lambda(lambda) = expression {
-            return self.lambda_value(lambda, Some(vec![item]), returns);
+            return Ok(ItemCallback::Lambda(lambda));
         }
         if let Some(Binding::Definition(definition)) = self.resolve(expression)
             && let Some(signature) = self.functions.get(&definition)
         {
-            if signature.params.len() == 1
-                && let Some(inference) = self.inference
-            {
-                inference.learn_parameter(signature.id, 0, item);
-            }
-            return self.callable_value(signature, None, None, expression);
+            return Ok(ItemCallback::Function(expression, signature));
         }
-        if let Some(binding) = self.local_function_binding(expression) {
-            return self.local_callback(binding, expression);
-        }
-        self.expr(expression)
+        let value = if let Some(binding) = self.local_function_binding(expression) {
+            self.local_callback(binding, expression)?
+        } else {
+            self.expr(expression)?
+        };
+        Ok(ItemCallback::Value(value))
     }
 
     /// Invokes fixed functions directly and captures a dynamic or bound callable

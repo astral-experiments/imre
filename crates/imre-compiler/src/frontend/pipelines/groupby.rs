@@ -103,7 +103,7 @@ impl Checker<'_> {
         let item = input.value;
         let item_type = self.locals[item];
         let (key_value, retained_callback) = if let Some(callback) = callback {
-            let callback = self.item_callback(callback, item_type, None, None)?;
+            let callback = self.item_callback(callback)?.bind(self, item_type, None)?;
             if callback.ty == Type::None {
                 input.evaluate.push(Statement::Expr(callback));
                 (self.local(item), None)

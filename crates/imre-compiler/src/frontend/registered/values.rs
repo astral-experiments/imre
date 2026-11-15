@@ -579,17 +579,32 @@ impl CheckedCall {
     ) -> Option<Self> {
         let field = call.func.as_attribute_expr()?;
         let name = field.value.as_name_expr()?;
-        let ExprKind::Local(slot) = receiver.kind else {
+        Self::with_parameter(name, receiver, |value| {
+            bound_call(
+                call,
+                method_target(field),
+                located(name.range(), name.start(), value),
+                written,
+            )
+        })
+    }
+
+    /// Transfer the original operand. Its native alternative reads the same checked formal.
+    pub(in crate::frontend) fn with_parameter(
+        name: &ast::ExprName,
+        value: &mut Expr,
+        bind: impl FnOnce(Expr) -> Expr,
+    ) -> Option<Self> {
+        let ExprKind::Local(slot) = value.kind else {
             return None;
         };
-        let ty = receiver.ty;
-        let original = std::mem::replace(receiver, Expr::local(slot, ty));
-        let receiver = located(name.range(), name.start(), original);
+        let ty = value.ty;
+        let original = std::mem::replace(value, Expr::local(slot, ty));
         Some(Self {
             parameter: name.id.clone(),
             slot,
             ty,
-            call: bound_call(call, method_target(field), receiver, written),
+            call: bind(original),
         })
     }
 }
