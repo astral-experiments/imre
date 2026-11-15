@@ -2,7 +2,7 @@
 
 use super::thread_callback::Callback;
 use super::thread_lock::NativeWait;
-use super::value::Heap;
+use super::value::{Heap, ParkedExecution};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak, atomic::Ordering, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -636,17 +636,32 @@ struct Started {
 }
 
 impl Started {
-    fn publish(self) -> Result<()> {
-        self.handle
-            .ident
-            .set(Some(self.ident))
-            .expect("unstarted handle");
-        if let Some(released) = &self.released
-            && let Ok(Err(reason)) = released.recv()
-        {
-            return Err(Error::new("RuntimeError", reason));
+    /// Publish the worker identity and wait for any promised release on the parked caller.
+    ///
+    /// # Safety
+    /// The calling thread owns the active context through publication.
+    unsafe fn publish(self, context: *mut Context) -> Result<()> {
+        let waits_for_release = self.released.is_some();
+        let publish = move || {
+            self.handle
+                .ident
+                .set(Some(self.ident))
+                .expect("unstarted handle");
+            if let Some(released) = &self.released
+                && let Ok(Err(reason)) = released.recv()
+            {
+                return Err(Error::new("RuntimeError", reason));
+            }
+            Ok(())
+        };
+        if waits_for_release {
+            // Opening the gate after parking lets Drop cancel an unpublished worker
+            // if reserving a parked slot fails.
+            // SAFETY: the owned gate and its acknowledgement carry only native data.
+            unsafe { ParkedExecution::wait(context, publish)? }
+        } else {
+            publish()
         }
-        Ok(())
     }
 }
 
@@ -894,13 +909,17 @@ impl Start {
                 return Err(super::stdlib::io::qualify_error(ctx, error, None));
             }
         };
-        let ready = ready.wait();
+        // The registry owns the selected Python operands before the creator
+        // yields. A failed park drops Ready and cancels any queued publication.
+        // SAFETY: readiness and its failure join use only native handles.
+        let ready = unsafe { ParkedExecution::wait(context, move || ready.wait()) }.flatten();
         let Some((owner, handle)) = receiver else {
             let started = ready?;
             let ident = started.ident;
             // Detached callers receive only the ident. Actual exit still owns the roots.
             started.handle.set_done()?;
-            started.publish()?;
+            // SAFETY: the creator is active again and owns the detached publication.
+            unsafe { started.publish(context) }?;
             // SAFETY: publication has returned to the caller on its own thread.
             return Ok(unsafe { &mut *context }.int(ident as i64));
         };
@@ -919,7 +938,8 @@ impl Start {
         };
         // Ordinary writes attach the IDs to the receiver. Allocation temporaries in the
         // current frame also keep them live if an attribute hook redirects a write.
-        started.publish()?;
+        // SAFETY: the receiver owns both identity fields before any release acknowledgement.
+        unsafe { started.publish(context) }?;
         // SAFETY: native publication has finished and the caller again owns the context.
         Ok(unsafe { &mut *context }.alloc(Value::Tuple(vec![handle, ident, tid])))
     }

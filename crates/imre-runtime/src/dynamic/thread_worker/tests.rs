@@ -213,7 +213,8 @@ fn launch(
     ctx.workers.entries.push(entry);
     let started = ready.wait()?;
     let identity = (started.ident, started.native_id);
-    started.publish()?;
+    // SAFETY: the test owns the creating context through publication.
+    unsafe { started.publish(ctx) }?;
     Ok(identity)
 }
 
@@ -304,7 +305,8 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         if cancel {
             drop(started);
         } else {
-            started.publish().unwrap();
+            // SAFETY: the creating test owns the context and the rooted receiver.
+            unsafe { started.publish(&raw mut ctx) }.unwrap();
         }
         assert!(handle.wait(Some(Duration::from_secs(5)), State::worker_pending));
         handle.join(Some(Duration::ZERO)).unwrap();
