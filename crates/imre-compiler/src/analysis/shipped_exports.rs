@@ -99,24 +99,22 @@ impl Session {
     ) -> Result<(&'static str, File), String> {
         let (filename, source) = crate::modules::bundled_runtime_source(owner)
             .ok_or_else(|| format!("no checked runtime provider selected for {owner:?}"))?;
-        let normalized = crate::normalize_source(source, crate::SourceKind::File)?;
-        let input = imre_ast::indentation::prepare(&normalized);
+        let input = shipped_parser_input(source)?;
         let file = self.prepare_shipped_file(
             Path::new(crate::dynamic::BUNDLED_SOURCE_ROOT),
             owner,
             filename,
-            |session, path| session.seed_parser_input(path, &input.text),
+            |session, path| session.seed_parser_input(path, &input),
         )?;
         // A user file at the SDK spelling still owns its declarations. Select the
         // immutable provider in a separate file before using offsets in its bytes.
-        let file = if self.file_matches_parser_input(file, &input.text) {
+        let file = if self.file_matches_parser_input(file, &input) {
             file
         } else if let Some(path) = private_path {
             let path = path.to_str().ok_or("module paths must be valid UTF-8")?;
-            self.write_file(path, &input.text)?
+            self.write_file(path, &input)?
         } else {
-            self.db
-                .virtual_source(&format!("imre/stdlib/{filename}"), &input.text)
+            self.virtual_shipped_file(filename, || Ok(input))?
         };
         Ok((source, file))
     }
@@ -266,6 +264,59 @@ impl Session {
         crate::frontend::docstring(self.parsed(file).suite())
     }
 
+    fn virtual_shipped_file<'a>(
+        &self,
+        filename: &str,
+        input: impl FnOnce() -> Result<Cow<'a, str>, String>,
+    ) -> Result<File, String> {
+        let key = format!("imre/stdlib/{filename}");
+        let path = ruff_db::system::SystemVirtualPath::new(&key);
+        if let Some(file) = self.db.files.try_virtual_file(path) {
+            return Ok(file.file());
+        }
+        Ok(self.db.virtual_source(&key, &input()?))
+    }
+
+    /// Only a unique unconditional module class supplies a fixed declaration site.
+    pub(crate) fn shipped_runtime_export(
+        &self,
+        filename: &str,
+        source: &str,
+        name: &str,
+    ) -> Option<Binding> {
+        let file = self
+            .virtual_shipped_file(filename, || shipped_parser_input(source))
+            .ok()?;
+        let db = &self.db;
+        let mut reaching = None;
+        let mut definite = true;
+        for state in bindings(db, file, name) {
+            if let Some(definition) = state.definition() {
+                definite &= reaching.replace(definition).is_none();
+            } else {
+                definite = false;
+            }
+        }
+        let definition = reaching?;
+        if !definite || !matches!(definition.kind(db), DefinitionKind::Class(_)) {
+            return Some(Binding::ConditionalValue);
+        }
+        let parsed = self.parsed(file);
+        let site = definition.focus_range(db, &parsed);
+        let suite = parsed.suite();
+        let stmt = suite.get(suite.partition_point(|stmt| stmt.end() <= site.range().start()))?;
+        Some(
+            if stmt
+                .as_class_def_stmt()
+                .is_some_and(|class| class.name.range() == site.range())
+            {
+                Binding::RegisteredClass(site)
+            } else {
+                Binding::ConditionalValue
+            },
+        )
+    }
+
     pub(crate) fn shipped_declaration(&self, owner: &str, name: &str) -> Option<Binding> {
         let (filename, _) = crate::dynamic::bundled_module_source(owner, false)?;
         let file = shipped_file(&self.db, filename)?;
@@ -280,6 +331,15 @@ impl Session {
     ) -> Option<Binding> {
         *selected_declaration(&self.db, file, Name::new(owner), Name::new(name))
     }
+}
+
+fn shipped_parser_input(source: &str) -> Result<Cow<'_, str>, String> {
+    Ok(
+        match crate::normalize_source(source, crate::SourceKind::File)? {
+            Cow::Borrowed(text) => imre_ast::indentation::prepare(text).text,
+            Cow::Owned(text) => Cow::Owned(imre_ast::indentation::prepare(&text).text.into_owned()),
+        },
+    )
 }
 
 fn shipped_file(db: &dyn Db, filename: &str) -> Option<File> {

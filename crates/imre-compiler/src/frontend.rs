@@ -14031,8 +14031,10 @@ impl<'a> Checker<'a> {
             if binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint) {
                 return self.named_builtin_call(call, "print");
             }
-            if matches!(binding, Binding::Value(_) | Binding::ImportedValue(..))
-                || binding == Binding::Intrinsic(Intrinsic::DefaultDict)
+            if matches!(
+                binding,
+                Binding::Value(_) | Binding::ImportedValue(..) | Binding::ConditionalValue
+            ) || binding == Binding::Intrinsic(Intrinsic::DefaultDict)
             {
                 let callable = self.expr(&call.func)?;
                 return self.invoke(call, callable);

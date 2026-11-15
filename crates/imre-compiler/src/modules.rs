@@ -133,6 +133,26 @@ fn sealed_package_child(name: &str) -> bool {
     })
 }
 
+/// A fixed interface and the Python initializer supplying its remaining bindings.
+struct ShippedInterface {
+    filename: &'static str,
+    fixed: &'static str,
+    runtime: &'static str,
+}
+
+fn shipped_interface(name: &str) -> Option<ShippedInterface> {
+    match name {
+        "socketserver" => Some(ShippedInterface {
+            filename: "socketserver.py",
+            fixed: include_str!("../stdlib/socketserver.py"),
+            runtime: include_str!(
+                "../../../benchmarks/cpython_stdlib/full/socketserver/upstream/Lib/socketserver.py"
+            ),
+        }),
+        _ => None,
+    }
+}
+
 /// Python source modules bundled for runtime imports.
 pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'static str)> {
     match name {
@@ -459,12 +479,9 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/mimetypes/upstream/Lib/mimetypes.py"
             ),
         )),
-        "socketserver" => Some((
-            "socketserver.py",
-            include_str!(
-                "../../../benchmarks/cpython_stdlib/full/socketserver/upstream/Lib/socketserver.py"
-            ),
-        )),
+        name if let Some(source) = shipped_interface(name) => {
+            Some((source.filename, source.runtime))
+        }
         // CPython 3.14.5 Lib/string/__init__.py, blob eab5067c9b133ea1210efacd92eb5f69c2336236.
         "string" => Some((
             "string/__init__.py",
@@ -1144,7 +1161,6 @@ impl Intrinsic {
 
     pub(crate) fn scoped_class_base(self) -> Option<&'static str> {
         match self {
-            Self::SOCKETSERVER_CLASS => Some("socketserver base class"),
             Self::ScopedObjectExport(
                 name @ ("enum.Flag"
                 | "unittest.IsolatedAsyncioTestCase"
@@ -1156,7 +1172,6 @@ impl Intrinsic {
 
     pub(crate) const SYS_IMPORT_REGISTRY: Self = Self::ScopedObjectExport("sys import registry");
     pub(crate) const SOCKET_MSG_PEEK: Self = Self::ScopedObjectExport("socket.MSG_PEEK");
-    pub(crate) const SOCKETSERVER_CLASS: Self = Self::ScopedObjectExport("socketserver classes");
     pub(crate) const PICKLER: Self = Self::ObjectRuntimeExport("pickle.Pickler");
     pub(crate) const IO_BASE: Self = Self::ObjectRuntimeExport("io.IOBase");
     pub(crate) const RAW_IO_BASE: Self = Self::ObjectRuntimeExport("io.RawIOBase");
@@ -3118,23 +3133,35 @@ impl SourceModule {
         &self,
         source: &SourceModule,
         attr: &ast::ExprAttribute,
+        session: Option<&Session>,
     ) -> Option<Binding> {
         let name = attr.attr.as_str();
-        source.export(name).or_else(|| {
-            if !source.bundled || !source.is_package {
-                return None;
-            }
-            let root = IntrinsicModule::named(&source.name)?;
-            let child = if root == IntrinsicModule::Importlib {
-                importlib_child(name)?
-            } else {
-                let Binding::IntrinsicModule(child) = root.symbol(name)? else {
+        source
+            .export(name)
+            .or_else(|| {
+                if !source.bundled || !source.is_package {
                     return None;
+                }
+                let root = IntrinsicModule::named(&source.name)?;
+                let child = if root == IntrinsicModule::Importlib {
+                    importlib_child(name)?
+                } else {
+                    let Binding::IntrinsicModule(child) = root.symbol(name)? else {
+                        return None;
+                    };
+                    child
                 };
-                child
-            };
-            self.imported_child(child, attr.start())
-        })
+                self.imported_child(child, attr.start())
+            })
+            .or_else(|| source.runtime_export(session?, name))
+    }
+
+    fn runtime_export(&self, session: &Session, name: &str) -> Option<Binding> {
+        if !self.bundled || self.bindings.contains_key(name) {
+            return None;
+        }
+        let source = shipped_interface(&self.name)?;
+        session.shipped_runtime_export(source.filename, source.runtime, name)
     }
 
     /// A type-only import in a native stub does not add a member to the C module.
@@ -3184,18 +3211,6 @@ impl SourceModule {
             if let Some(export) = export {
                 return Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(export)));
             }
-        }
-        if self.is_bundled("socketserver")
-            && matches!(
-                name,
-                "DatagramRequestHandler"
-                    | "UDPServer"
-                    | "ThreadingMixIn"
-                    | "ThreadingTCPServer"
-                    | "ThreadingUDPServer"
-            )
-        {
-            return Some(Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS));
         }
         if self.is_bundled("unittest") {
             if name == "IsolatedAsyncioTestCase" {
@@ -4563,9 +4578,11 @@ impl SourceGraph {
                 .copied()
                 .or_else(|| self.resolve(module, expression)),
             ast::Expr::Attribute(attribute) => match self.resolve_type(module, &attribute.value)? {
-                Binding::Module(target) => {
-                    self.modules[module].source_attribute(&self.modules[target], attribute)
-                }
+                Binding::Module(target) => self.modules[module].source_attribute(
+                    &self.modules[target],
+                    attribute,
+                    Some(&self.session),
+                ),
                 Binding::IntrinsicModule(target) => {
                     stdlib_attribute(&self.modules, module, target, attribute).ok()
                 }
@@ -4709,7 +4726,7 @@ fn resolve_binding_in(
         ast::Expr::Attribute(attribute) => {
             match resolve_binding(modules, module, &attribute.value)? {
                 Binding::Module(target) => {
-                    modules[module].source_attribute(&modules[target], attribute)
+                    modules[module].source_attribute(&modules[target], attribute, session)
                 }
                 Binding::IntrinsicModule(target) => {
                     match stdlib_attribute(modules, module, target, attribute) {
@@ -6277,6 +6294,18 @@ impl<'a> Loader<'a> {
                             ));
                         }
                         binding
+                    } else if let Some(binding) =
+                        self.modules[target].runtime_export(&self.session, alias.name.as_str())
+                    {
+                        if matches!(binding, Binding::RegisteredClass(_)) {
+                            self.checked_builtin_imports.push((id, alias.range()));
+                        }
+                        // IMPORT_FROM reads the live attribute even when the alias is unused.
+                        self.modules[id]
+                            .registered_imports
+                            .entry(index)
+                            .or_insert(alias.range());
+                        binding
                     } else if self.modules[target].is_bundled("zoneinfo")
                         || self.modules[target].is_bundled("pyexpat")
                         || self.modules[target].is_bundled("xml.parsers.expat")
@@ -6341,9 +6370,6 @@ impl<'a> Loader<'a> {
                     } else {
                         binding
                     };
-                    if binding == Binding::Intrinsic(Intrinsic::SOCKETSERVER_CLASS) {
-                        self.checked_builtin_imports.push((id, alias.range()));
-                    }
                     self.needs_object_imports |= binding == Binding::ConditionalValue;
                     self.imports_runtime_class |= binding == Binding::RuntimeClass;
                     let local = alias.asname.as_ref().unwrap_or(&alias.name);
@@ -6749,7 +6775,9 @@ impl<'a> Loader<'a> {
                 }
                 Some((filename, source))
             }
-            "socketserver" => Some(("socketserver.py", include_str!("../stdlib/socketserver.py"))),
+            name if let Some(source) = shipped_interface(name) => {
+                Some((source.filename, source.fixed))
+            }
             "_imre_socketserver_reader" => Some((
                 "_imre_socketserver_reader.py",
                 include_str!("../stdlib/_socketserver_reader_typed.py"),
