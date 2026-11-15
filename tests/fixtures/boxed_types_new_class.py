@@ -1,3 +1,4 @@
+import gc
 import types
 from types import get_original_bases
 
@@ -187,6 +188,9 @@ def prepared_class_statements():
             if key == "answer":
                 observed.append(value)
             super().__setitem__(key, value)
+            if key == "matched" and value is None:
+                gc.collect()
+                observed.append("cleared")
 
     class Prepared(type):
         @classmethod
@@ -197,6 +201,18 @@ def prepared_class_statements():
         answer = supplied
         answer += 1
     assert FromMapping.answer == 43 and observed == [42, 43]
+
+    try:
+        class Abandoned(metaclass=Prepared):
+            try:
+                raise ExceptionGroup("original", [ValueError()])
+            except* ValueError as matched:
+                raise LookupError("replacement")
+    except LookupError as replacement:
+        assert replacement.args == ("replacement",)
+        assert observed == [42, 43, "cleared"]
+    else:
+        raise AssertionError("except* lost its replacement")
 
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"
