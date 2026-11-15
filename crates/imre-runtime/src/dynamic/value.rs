@@ -1234,6 +1234,19 @@ impl From<IndexSet<String>> for DeclaredLocals {
     }
 }
 
+impl TryFrom<Vec<String>> for DeclaredLocals {
+    type Error = Error;
+
+    fn try_from(names: Vec<String>) -> Result<Self> {
+        let mut declared = IndexSet::new();
+        declared
+            .try_reserve_exact(names.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        declared.extend(names);
+        Ok(declared.into())
+    }
+}
+
 impl std::ops::Deref for DeclaredLocals {
     type Target = IndexSet<String>;
 
@@ -1256,7 +1269,7 @@ pub(super) struct ClosureScope {
     pub environment: bool,
     pub declared: DeclaredLocals,
     pub declared_complete: bool,
-    pub nonlocals: HashSet<String>,
+    pub nonlocals: DeclaredLocals,
     pub cells: indexmap::IndexMap<String, Id>,
     /// Keys added by frame introspection that are not lexical variables.
     pub extra_locals: Option<Id>,

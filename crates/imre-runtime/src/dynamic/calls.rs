@@ -9494,15 +9494,8 @@ impl Context {
             unreachable!()
         };
         frame.closure.declared = sig.locals.clone();
-        frame
-            .closure
-            .nonlocals
-            .try_reserve(sig.nonlocals.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
+        frame.closure.nonlocals = sig.nonlocals.clone();
         frame.closure.declared_complete = sig.locals_complete;
-        for name in &sig.nonlocals {
-            frame.closure.nonlocals.insert(copy_label(name)?);
-        }
 
         let shape = sig.shape();
         let omitted = match arguments {
@@ -10267,7 +10260,7 @@ impl Context {
             #[serde(default)]
             class_globals: std::collections::HashSet<String>,
             #[serde(default)]
-            scope_nonlocals: std::collections::HashSet<String>,
+            scope_nonlocals: Vec<String>,
             #[serde(default)]
             needs_class_cell: bool,
             #[serde(default)]
@@ -10289,7 +10282,7 @@ impl Context {
             unreachable!()
         };
         body_scope.in_class_body = true;
-        body_scope.closure.nonlocals = bindings.scope_nonlocals;
+        body_scope.closure.nonlocals = bindings.scope_nonlocals.try_into()?;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
         if let Some((_, mapping)) = prepared {
@@ -10417,7 +10410,7 @@ impl Context {
             // The type keeps the namespace after the body returns. Its readers own their cells.
             frame.parent = Some(globals);
             frame.globals.clear();
-            frame.closure.nonlocals.clear();
+            frame.closure.nonlocals = Default::default();
         }
         if self.scope_name(scope, "__qualname__").is_none() {
             let qualname = self.text(&name);
