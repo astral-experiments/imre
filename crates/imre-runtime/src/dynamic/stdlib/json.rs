@@ -619,7 +619,7 @@ impl Encoder {
             })
         };
         Self::release_encoded(ctx, roots, encoded, outcome)
-            .map_err(|exc| notes::live_error(ctx, exc))
+            .map_err(|exc| ctx.error_from_instance(exc))
     }
 
     fn value(&mut self, ctx: &mut Context, id: Id, depth: usize) -> Result<()> {
@@ -660,7 +660,7 @@ impl Encoder {
                     let snapshot = Self::snapshot(ctx, id, None)?;
                     let result = self.write_nested(ctx, id, depth, sequence, snapshot);
                     return Self::release_encoded(ctx, roots, snapshot, result)
-                        .map_err(|exc| notes::live_error(ctx, exc));
+                        .map_err(|exc| ctx.error_from_instance(exc));
                 }
                 self.write_nested(ctx, id, depth, sequence, id)?;
                 ctx.heap.release_temporaries_since(roots);
@@ -901,7 +901,7 @@ impl Encoder {
         ctx.heap.keep(items);
         let result = self.write_pairs(ctx, id, depth, items);
         // The C encoder releases the mapping's items while its marker is still set.
-        Self::release_encoded(ctx, mark, items, result).map_err(|exc| notes::live_error(ctx, exc))
+        Self::release_encoded(ctx, mark, items, result).map_err(|exc| ctx.error_from_instance(exc))
     }
 
     fn write_pairs(&mut self, ctx: &mut Context, id: Id, depth: usize, items: Id) -> Result<()> {

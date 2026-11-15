@@ -656,11 +656,7 @@ fn pattern_error_at(
     let position = position.map_or(NONE, |pos| ctx.int(pos as i64));
     match ctx.call(class, vec![message, source, position], Vec::new()) {
         Ok(id) => match ctx.heap.get(id) {
-            Value::Raised(error) => {
-                let mut error = error.clone();
-                error.tracing().instance = Some(id);
-                error
-            }
+            Value::Raised(_) => ctx.error_from_instance(id),
             _ => Error::new("TypeError", "exceptions must derive from BaseException"),
         },
         Err(error) => error,

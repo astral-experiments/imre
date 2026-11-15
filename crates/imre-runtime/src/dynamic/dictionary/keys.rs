@@ -447,10 +447,8 @@ impl Context {
                 self.exception("KeyError", &args)
             }
             Value::Raised(error) if self.is_builtin_error(error, "KeyError") => {
-                let mut error = error.clone();
-                error.tracing().instance = Some(key);
-                self.chain_raised_instance(&mut error);
-                error
+                self.chain_raised_instance(key);
+                self.error_from_instance(key)
             }
             _ => self.exception("KeyError", &[key]),
         }

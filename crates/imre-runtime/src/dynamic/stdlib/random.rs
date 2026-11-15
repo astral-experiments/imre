@@ -170,7 +170,7 @@ fn cumulative_weights(ctx: &mut Context, weights: Id) -> Result<Id> {
 
 /// Run the integer-weights diagnostic with the original iteration exception active.
 fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
-    let original = ctx.raised_instance(error.clone());
+    let original = ctx.raised_instance(error);
     let previous = ctx.heap.replace_active(original);
     ctx.heap.keep(previous);
     let diagnostic = (|| -> Result<Error> {
@@ -179,8 +179,10 @@ fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
             // isinstance also recognizes an unrelated object's reported __class__.
             match ctx.lookup_attr(weights, "__class__") {
                 Ok(class) if ctx.direct_subclass(class, int) => {}
-                Ok(_) => return Ok(error),
-                Err(missing) if ctx.is_attribute_error(&missing) => return Ok(error),
+                Ok(_) => return Ok(ctx.error_from_instance(original)),
+                Err(missing) if ctx.is_attribute_error(&missing) => {
+                    return Ok(ctx.error_from_instance(original));
+                }
                 Err(failure) => return Err(failure),
             }
         }
@@ -195,7 +197,7 @@ fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
     })();
     ctx.heap.replace_active(previous);
     diagnostic.unwrap_or_else(|mut failure| {
-        failure.context = original;
+        failure.owner_mut(&mut ctx.heap).context = original;
         failure
     })
 }

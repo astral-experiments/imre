@@ -615,16 +615,16 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
 
 /// Close the last successfully constructed layer and preserve a secondary close failure.
 fn close_on_error(ctx: &mut Context, layer: Id, error: Error) -> Error {
-    let original = ctx.raised_instance(error.clone());
+    let original = ctx.raised_instance(error);
     ctx.heap.keep(original);
     let result = ctx
         .lookup_attr(layer, "close")
         .and_then(|close| ctx.call(close, Vec::new(), Vec::new()));
     if let Err(mut closing) = result {
-        closing.context = original;
+        closing.owner_mut(&mut ctx.heap).context = original;
         closing
     } else {
-        error
+        ctx.error_from_instance(original)
     }
 }
 

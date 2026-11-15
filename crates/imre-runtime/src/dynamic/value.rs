@@ -238,14 +238,19 @@ impl Error {
     }
 
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
+        let kind = if kind == "MemoryError" {
+            std::borrow::Cow::Borrowed("MemoryError")
+        } else {
+            std::borrow::Cow::Owned(kind.to_owned())
+        };
+        Self::with_kind(kind, message.into())
+    }
+
+    fn with_kind(kind: std::borrow::Cow<'static, str>, message: String) -> Self {
         Self {
-            kind: if kind == "MemoryError" {
-                std::borrow::Cow::Borrowed("MemoryError")
-            } else {
-                std::borrow::Cow::Owned(kind.to_owned())
-            },
+            kind,
             class: NONE,
-            message: message.into(),
+            message,
             args: None,
             decode: None,
             os_args: None,
@@ -276,9 +281,31 @@ impl Error {
 
     /// Construct an error without copying a static exception name.
     pub fn new_static(kind: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            kind: std::borrow::Cow::Borrowed(kind),
-            ..Self::new("", message)
+        Self::with_kind(std::borrow::Cow::Borrowed(kind), message.into())
+    }
+
+    pub(super) fn instance(&self) -> Option<Id> {
+        self.trace.as_ref()?.instance
+    }
+
+    /// A normalized exception owns its Python members and traceback while it unwinds.
+    pub(super) fn owner<'a>(&'a self, heap: &'a Heap) -> &'a Self {
+        match self.instance() {
+            Some(id) => match heap.get(id) {
+                Value::Raised(owner) => owner,
+                _ => unreachable!("normalized exception"),
+            },
+            None => self,
+        }
+    }
+
+    pub(super) fn owner_mut<'a>(&'a mut self, heap: &'a mut Heap) -> &'a mut Self {
+        match self.instance() {
+            Some(id) => match heap.get_mut(id) {
+                Value::Raised(owner) => owner,
+                _ => unreachable!("normalized exception"),
+            },
+            None => self,
         }
     }
 
@@ -393,26 +420,31 @@ impl Error {
 }
 
 impl Context {
-    /// Reuse the Python exception object when an already observed error is raised again.
-    pub(super) fn raised_instance(&mut self, mut error: Error) -> Id {
-        if let Some(id) = error.trace.as_mut().and_then(|trace| trace.instance.take()) {
-            *self.heap.get_mut(id) = Value::Raised(error);
-            id
-        } else {
-            self.alloc(Value::Raised(error))
-        }
+    pub(super) fn error_from_instance(&self, instance: Id) -> Error {
+        let Value::Raised(error) = self.heap.get(instance) else {
+            unreachable!("expected a normalized exception instance")
+        };
+        // Unwinding needs the exception class and diagnostic text. The instance
+        // retains the traceback and the Python values that handlers can change.
+        let mut pending = Error::with_kind(error.kind.clone(), error.message.clone());
+        pending.class = error.class;
+        pending.tracing().instance = Some(instance);
+        pending
+    }
+
+    /// Expose a native error once, or return the Python instance already propagating.
+    pub(super) fn raised_instance(&mut self, error: Error) -> Id {
+        error
+            .instance()
+            .unwrap_or_else(|| self.alloc(Value::Raised(error)))
     }
 
     /// A resumed frame chains to its own handled exception, regardless of the caller's handler.
     pub(super) fn chain_generator_input(&mut self, error: &mut Error) {
         let frame = self.heap.execution.current();
         if frame.has_local_exception && frame.active != NONE {
-            if error
-                .trace
-                .as_ref()
-                .is_some_and(|trace| trace.instance.is_some())
-            {
-                self.chain_raised_instance(error);
+            if let Some(instance) = error.instance() {
+                self.chain_raised_instance(instance);
             } else {
                 error.context = frame.active;
             }
@@ -420,16 +452,9 @@ impl Context {
     }
 
     /// Chain an explicitly raised instance to the exception currently being handled.
-    pub(super) fn chain_raised_instance(&mut self, error: &mut Error) {
+    pub(super) fn chain_raised_instance(&mut self, raised: Id) {
         let active = self.heap.active_exception();
-        if active == NONE {
-            return;
-        }
-        let raised = error
-            .tracing()
-            .instance
-            .expect("explicitly raised exception instance");
-        if active == raised {
+        if active == NONE || active == raised {
             return;
         }
         let mut current = active;
@@ -454,13 +479,8 @@ impl Context {
         let Value::Raised(instance) = self.heap.get_mut(raised) else {
             unreachable!("normalized exception")
         };
-        let previous = [instance.context, error.context];
-        instance.context = active;
-        error.context = active;
-        if previous
-            .into_iter()
-            .any(|context| context != NONE && context != active)
-        {
+        let previous = std::mem::replace(&mut instance.context, active);
+        if previous != NONE && previous != active {
             self.heap.collect_next_statement = true;
         }
     }
@@ -696,18 +716,20 @@ impl Context {
                     .trace
                     .as_mut()
                     .is_some_and(|trace| std::mem::take(&mut trace.generator_input));
+                let instance = error.instance();
+                let owner = error.owner_mut(&mut self.heap);
                 if !generator_input
-                    && error.context == NONE
                     && active != NONE
-                    && error.trace.as_ref().is_none_or(|trace| {
-                        trace.head == NONE
-                            && trace.pending_frames.is_empty()
-                            && trace.instance != Some(active)
-                    })
+                    && instance != Some(active)
+                    && owner.context == NONE
+                    && owner
+                        .trace
+                        .as_ref()
+                        .is_none_or(|trace| trace.head == NONE && trace.pending_frames.is_empty())
                 {
-                    error.context = active;
+                    owner.context = active;
                 }
-                if let Some(trace) = error.try_tracing()
+                if let Some(trace) = owner.try_tracing()
                     && trace.pending_frames.try_reserve(1).is_ok()
                 {
                     trace.pending_frames.push((loc, frame));
@@ -759,12 +781,13 @@ impl Context {
             return error;
         };
         let trim_all = self.is_builtin_error(&error, "ImportError");
-        let Some(trace) = error.trace.as_mut() else {
+        let Some(trace) = error.owner_mut(&mut self.heap).trace.as_mut() else {
             return error;
         };
         let pending = std::mem::take(&mut trace.pending_frames);
-        trace.head = self.prepend_traceback_frames(pending, trace.head);
-        let mut node = trace.head;
+        let tail = trace.head;
+        let mut head = self.prepend_traceback_frames(pending, tail);
+        let mut node = head;
         let mut previous = NONE;
         let mut before_chunk = NONE;
         let mut in_loader = false;
@@ -790,7 +813,7 @@ impl Context {
                         .is_some_and(|entry| std::ptr::fn_addr_eq(entry, importlib.remove_frames)))
             {
                 if before_chunk == NONE {
-                    trace.head = next;
+                    head = next;
                 } else if let Value::Traceback { next: link, .. } = self.heap.get_mut(before_chunk)
                 {
                     *link = next;
@@ -802,6 +825,7 @@ impl Context {
             }
             node = next;
         }
+        error.owner_mut(&mut self.heap).tracing().head = head;
         error
     }
 
@@ -1077,7 +1101,8 @@ impl Error {
     }
 
     fn fmt_trace(&self, f: &mut fmt::Formatter<'_>, heap: Option<&Heap>) -> fmt::Result {
-        if let Some(trace) = &self.trace
+        let owner = heap.map_or(self, |heap| self.owner(heap));
+        if let Some(trace) = &owner.trace
             && (!trace.pending_frames.is_empty() || (heap.is_some() && trace.head != NONE))
         {
             writeln!(f, "Traceback (most recent call last):")?;

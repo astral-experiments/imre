@@ -214,11 +214,7 @@ impl Context {
 
     /// Render Python-owned fields only when printing an uncaught exception.
     pub(super) fn report_os_error(&mut self, error: Error) {
-        let current = error
-            .trace
-            .as_ref()
-            .and_then(|trace| trace.instance)
-            .filter(|&id| matches!(self.heap.get(id), Value::Raised(_)));
+        let current = error.instance();
         let (id, mut traced) = match current {
             Some(id) => (id, Some(error)),
             None => (self.raised_instance(error), None),
@@ -250,7 +246,7 @@ impl Context {
     /// Test the stored OSError errno without invoking a Python attribute hook.
     pub(super) fn has_errno(&self, error: &Error, errno: i32) -> bool {
         let errno = i64::from(errno);
-        match error.os_args.as_deref() {
+        match error.owner(&self.heap).os_args.as_deref() {
             Some(Args::Native { source, .. }) => source.errno == errno,
             Some(Args::Python(fields)) => fields.errno.is_some_and(|id| {
                 matches!(self.heap.get(id), Value::Int(value) if value.to_i64() == Some(errno))
@@ -267,7 +263,7 @@ impl Context {
     }
 
     pub(super) fn is_os_error(&self, error: &Error) -> bool {
-        if error.os_args.is_some() {
+        if error.owner(&self.heap).os_args.is_some() {
             return true;
         }
         match error.class() {

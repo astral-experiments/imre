@@ -443,16 +443,14 @@ impl Context {
         if traceback != NONE {
             self.set_traceback(instance, traceback)?;
         }
-        let Value::Raised(error) = self.heap.get(instance) else {
+        if !matches!(self.heap.get(instance), Value::Raised(_)) {
             return Err(Error::new(
                 "TypeError",
                 "calling exception class did not return a BaseException",
             ));
-        };
-        let mut error = error.clone();
-        let trace = error.tracing();
-        trace.instance = Some(instance);
-        trace.generator_input = true;
+        }
+        let mut error = self.error_from_instance(instance);
+        error.tracing().generator_input = true;
         Ok(error)
     }
 
@@ -499,7 +497,7 @@ impl Context {
             Ok(Some(value)) => Ok(DelegateOutcome::Yield(value)),
             Ok(None) => Ok(DelegateOutcome::Done(NONE)),
             Err(error) if self.is_stop_iteration(&error) => {
-                Ok(DelegateOutcome::Done(error.stop_value()))
+                Ok(DelegateOutcome::Done(error.owner(&self.heap).stop_value()))
             }
             Err(error) => Err(error),
         }
@@ -624,7 +622,9 @@ impl Context {
                 },
             )),
             Err(error) if self.is_builtin_error(&error, "GeneratorExit") => Ok(NONE),
-            Err(error) if self.is_stop_iteration(&error) => Ok(error.stop_value()),
+            Err(error) if self.is_stop_iteration(&error) => {
+                Ok(error.owner(&self.heap).stop_value())
+            }
             Err(error) => Err(error),
         }
     }

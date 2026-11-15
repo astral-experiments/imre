@@ -146,11 +146,7 @@ pub(super) fn scan_error(ctx: &mut Context, input: Id, pos: i64, message: &str) 
     })();
     match result {
         Ok(id) => match ctx.heap.get(id) {
-            Value::Raised(error) => {
-                let mut error = error.clone();
-                error.tracing().instance = Some(id);
-                error
-            }
+            Value::Raised(_) => ctx.error_from_instance(id),
             _ => Error::new("TypeError", "exceptions must derive from BaseException"),
         },
         Err(error) => error,

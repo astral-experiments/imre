@@ -1,4 +1,4 @@
-use super::{Context, Error, Id, Result, Value};
+use super::{Context, Error, Id, Result};
 use crate::dynamic::builtins;
 
 pub(super) enum Location {
@@ -30,7 +30,7 @@ pub(super) fn noted_instance(
     let raised = if let Err(mut failure) = add_location(ctx, exception, owner, location) {
         // The C encoder chains a formatting failure to the original even
         // when a repr hook raises that same exception again.
-        failure.context = exception;
+        failure.owner_mut(&mut ctx.heap).context = exception;
         ctx.raised_instance(failure)
     } else {
         exception
@@ -42,17 +42,7 @@ pub(super) fn noted_instance(
     if raised != exception {
         ctx.heap.keep(raised);
     }
-    live_error(ctx, raised)
-}
-
-/// Propagate the exception's current state after running user callbacks.
-pub(super) fn live_error(ctx: &Context, raised: Id) -> Error {
-    let Value::Raised(error) = ctx.heap.get(raised) else {
-        unreachable!("annotated exception")
-    };
-    let mut error = error.clone();
-    error.tracing().instance = Some(raised);
-    error
+    ctx.error_from_instance(raised)
 }
 
 fn add_location(ctx: &mut Context, exception: Id, owner: Id, location: Location) -> Result<()> {
