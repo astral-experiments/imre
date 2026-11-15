@@ -164,6 +164,44 @@ mod tests {
     }
 
     #[test]
+    fn free_function_places_its_checked_field_store() {
+        let text = concat!(
+            "class Crate:\n",
+            "    name: str\n",
+            "    def __init__(self, name: str) -> None: self.name = name\n",
+            "def rename(box: Crate, name: str) -> None:\n",
+            "    box.name = name\n",
+            "crate = Crate('old')\n",
+            "rename(crate, 'first')\n",
+            "print(crate.name)\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let (functions, _) = graph.take_registered_functions();
+        let start = TextSize::try_from(text.find("def rename").unwrap()).unwrap();
+        let body = functions
+            .get(&graph.entry)
+            .unwrap()
+            .get(&start)
+            .expect("checked store");
+        assert!(matches!(body.function.body.as_slice(),
+            [Statement::SetField(receiver, _, value)]
+            if matches!(receiver.kind, ExprKind::Local(0)) && matches!(value.kind, ExprKind::Local(1))));
+        assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
+        assert_eq!(
+            body.fixed_sites
+                .iter()
+                .map(|site| &text[*site])
+                .collect::<Vec<_>>(),
+            ["box.name = name", "name", "box"]
+        );
+    }
+
+    #[test]
     fn discovery_supplies_the_checked_field_and_its_python_receiver() {
         let text = concat!(
             "import argparse, dataclasses\n",

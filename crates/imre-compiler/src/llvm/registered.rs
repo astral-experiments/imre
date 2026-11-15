@@ -86,6 +86,18 @@ pub(crate) fn frame_inputs(
             ir::Node::Statement(stmt) => {
                 return match stmt {
                     Statement::Assign(slot, _) => uses_slot(slot, false),
+                    Statement::SetField(..)
+                        if matches!(attribute,
+                            Some(crate::frontend::FixedAttribute::Operation { operation, .. })
+                                if matches!(&**operation, Builtin::RegisteredAttribute {
+                                    action: ir::AttributeAction::Store, ..
+                                })
+                        ) =>
+                    {
+                        uses_python_protocol = true;
+                        stmt.operands(|input| protocol_reads += protocol_parameter(input));
+                        true
+                    }
                     Statement::Raise(value) => {
                         uses_python_protocol = true;
                         value.as_ref().is_none_or(|raised| raised.origin.is_none())
@@ -1132,19 +1144,6 @@ impl<'f> Frame<'f, '_, '_> {
         } else if matches!(
             expr.kind,
             ExprKind::Builtin(
-                Builtin::RegisteredAttribute {
-                    action: ir::AttributeAction::Store,
-                    ..
-                },
-                _
-            )
-        ) {
-            self.evaluate(expr);
-            self.release_target();
-            true
-        } else if matches!(
-            expr.kind,
-            ExprKind::Builtin(
                 Builtin::GlobalSet(_)
                     | Builtin::RegisteredImport(_)
                     | Builtin::RegisteredDeleteName(..)
@@ -1153,7 +1152,9 @@ impl<'f> Frame<'f, '_, '_> {
                     | Builtin::RegisteredDisplayHook
                     | Builtin::RegisteredAnnotationFormat
                     | Builtin::RegisteredAttribute {
-                        action: ir::AttributeAction::Delete | ir::AttributeAction::InPlace(_),
+                        action: ir::AttributeAction::Store
+                            | ir::AttributeAction::Delete
+                            | ir::AttributeAction::InPlace(_),
                         ..
                     }
                     | Builtin::DeleteItem,
