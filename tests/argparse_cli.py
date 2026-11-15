@@ -10,6 +10,11 @@ from pathlib import Path
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
     "guarded_constructor": [[], ["--name", "explicit"]],
+    "computed_options": [
+        [], ["--key", "explicit"], ["--number", "1+2j"], ["--number", "bad"],
+        ["--letter", "a"], ["--letter", "c"], ["--a-b", "first", "--a_b", "last"],
+        ["--a_b", "first", "--a-b", "last"],
+    ],
     "evaluated_default": [[], ["--repository", "explicit"], ["--repository="], ["--repository"]],
     "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
                             ["nested-group"], ["nested-child"], ["nested-child-group"],
@@ -184,13 +189,8 @@ CASES = {
                   ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
-    "computed_default_bad_converter": 'parser.add_argument("--key", default="name".upper())\n    parser.add_argument("--number", type=complex)',
-    "foreign_converter": 'parser.add_argument("--number", type=complex)',
-    "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
     "metavar_element": 'parser.add_argument("--key", nargs="*", metavar=("A", 2))',
     "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
-    "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
-    "escaped_builder": "copy = parser",
 }
 
 
