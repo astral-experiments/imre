@@ -253,6 +253,13 @@ impl LiteralImports {
 }
 
 impl Imports {
+    fn invalid(error: Box<ModuleSyntaxError>) -> Self {
+        Self {
+            invalid_executable: Some(error),
+            ..Self::default()
+        }
+    }
+
     fn uses_machinery_export(&self, export: &str) -> bool {
         self.machinery_attributes
             .iter()
@@ -717,15 +724,7 @@ fn scan_imports(
 ) -> Result<(Imports, Option<ScannedModule>), String> {
     let module = match read_import_source(source, kind, existing)? {
         ImportSource::Module(module) => module,
-        ImportSource::Invalid(error) => {
-            return Ok((
-                Imports {
-                    invalid_executable: Some(error),
-                    ..Imports::default()
-                },
-                None,
-            ));
-        }
+        ImportSource::Invalid(error) => return Ok((Imports::invalid(error), None)),
     };
     if let Some((path, keep_docstrings)) = file_alternative {
         module_source::validate_file(path, &module.text, &module.parsed, keep_docstrings)?;
@@ -734,17 +733,18 @@ fn scan_imports(
     let (mut body, parsed) = if original && file_alternative.is_some() {
         let parser = module.parsed.into_owned();
         (
-            parser.syntax().body.clone(),
+            Cow::Owned(parser.syntax().body.clone()),
             Some(ScannedParser::Owned(parser)),
         )
     } else {
-        (module_source::into_body(module.parsed).into_owned(), None)
+        (module_source::into_body(module.parsed), None)
     };
     let mut imports = imports_from_body(
         &module.text,
         &mut body,
         getter,
         file_alternative.map(|(path, _)| path),
+        None,
     )?;
     let scanned = (original
         && (shipped || parsed.is_some() && !imports.private_names.rewritten)
@@ -752,7 +752,7 @@ fn scan_imports(
     .then(|| {
         let names = std::mem::take(&mut imports.private_names);
         let lowered = if names.rewritten {
-            LoweredRoot::Complete(body, names)
+            LoweredRoot::Complete(body.into_owned(), names)
         } else {
             LoweredRoot::Unchanged(names)
         };
@@ -800,6 +800,7 @@ fn retained_imports<'a, 'p>(
     module: ParsedModule<'a, 'p>,
     getter: Option<&mut Imports>,
     prepared_text: Option<&str>,
+    checked: Option<crate::analysis::OperandTypes<'_>>,
 ) -> Result<(Imports, Option<emit::ParsedInput<'a, 'p>>), String> {
     // File discovery normalizes newlines. A caller preparing the original bytes
     // needs its own parser so diagnostics keep the executable source offsets.
@@ -808,18 +809,22 @@ fn retained_imports<'a, 'p>(
     }) {
         return imports_from_body(
             &module.text,
-            module_source::into_body(module.parsed).to_mut(),
+            &mut module_source::into_body(module.parsed),
             getter,
+            None,
             None,
         )
         .map(|imports| (imports, None));
     }
-    let mut body = module.parsed.syntax().body.clone();
-    let mut imports = imports_from_body(&module.text, &mut body, getter, None)?;
-    let lowered = imports
-        .invalid_executable
-        .is_none()
-        .then(|| LoweredRoot::Complete(body, std::mem::take(&mut imports.private_names)));
+    let mut body = Cow::Borrowed(&module.parsed.syntax().body);
+    let mut imports = imports_from_body(&module.text, &mut body, getter, None, checked)?;
+    let lowered = imports.invalid_executable.is_none().then(|| {
+        let names = std::mem::take(&mut imports.private_names);
+        match body {
+            Cow::Borrowed(_) => LoweredRoot::Unchanged(names),
+            Cow::Owned(body) => LoweredRoot::Complete(body, names),
+        }
+    });
     Ok((imports, Some((module, lowered))))
 }
 
@@ -831,39 +836,34 @@ fn scan_imports_for_preparation<'s, 'p>(
     prepared_text: Option<&str>,
 ) -> Result<(Imports, Option<emit::ParsedInput<'s, 'p>>), String> {
     match read_import_source(source, kind, existing)? {
-        ImportSource::Module(module) => retained_imports(module, getter, prepared_text),
-        ImportSource::Invalid(error) => Ok((
-            Imports {
-                invalid_executable: Some(error),
-                ..Imports::default()
-            },
-            None,
-        )),
+        ImportSource::Module(module) => retained_imports(module, getter, prepared_text, None),
+        ImportSource::Invalid(error) => Ok((Imports::invalid(error), None)),
     }
 }
 
 fn imports_from_body(
     normalized: &str,
-    body: &mut [Stmt],
+    body: &mut Cow<'_, ast::Suite>,
     getter: Option<&mut Imports>,
     file_alternative: Option<&Path>,
+    checked: Option<crate::analysis::OperandTypes<'_>>,
 ) -> Result<Imports, String> {
     let error = ModuleSyntaxError::in_body(normalized, body);
     let module_flags = imre_ast::future_flags(body);
-    let names = imre_ast::lower_in(
-        body,
-        "",
-        module_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
-    );
+    let string_annotations = module_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+    let names = if checked.is_some_and(|types| !types.has_name_scopes()) {
+        let mut names = imre_ast::Names::default();
+        names.string_annotations = string_annotations;
+        names
+    } else {
+        imre_ast::lower_in(body.to_mut(), "", string_annotations)
+    };
     // An optional file must pass the emitter's name checks before registration.
     if let Some(path) = file_alternative {
         module_source::validate_names(path, normalized, body, &names)?;
     }
     if let Some(diagnostic) = error {
-        return Ok(Imports {
-            invalid_executable: Some(Box::new(diagnostic)),
-            ..Imports::default()
-        });
+        return Ok(Imports::invalid(Box::new(diagnostic)));
     }
     let mut imports = Imports {
         module_flags,
@@ -872,7 +872,7 @@ fn imports_from_body(
     };
     let mut getter_bodies = Vec::new();
     if getter.is_some() {
-        for (index, stmt) in body.iter_mut().enumerate() {
+        for (index, stmt) in body.to_mut().iter_mut().enumerate() {
             if let Stmt::FunctionDef(function) = stmt
                 && function.name.as_str() == "__getattr__"
                 && !function.body.is_empty()
@@ -892,7 +892,7 @@ fn imports_from_body(
         getter.machinery_names.clone_from(&imports.machinery_names);
         for (index, statements) in getter_bodies {
             getter.visit_body(&statements);
-            let Stmt::FunctionDef(function) = &mut body[index] else {
+            let Stmt::FunctionDef(function) = &mut body.to_mut()[index] else {
                 unreachable!("saved a module-level __getattr__ declaration");
             };
             function.body = statements;
@@ -1102,8 +1102,9 @@ pub(crate) fn compile(
         file_entry.and_then(|graph| CheckedFile::entry(graph, entry_identity.unwrap_or(path)));
     let checked_entry = matches!(operation, Some(ObjectOperation::CheckedEntry));
     let mut scanned_modules = HashMap::new();
-    let mut entry_imports = |text: &str, mut body: ast::Suite| -> Result<Imports, String> {
-        let mut imports = imports_from_body(text, &mut body, None, None)?;
+    let mut entry_imports = |text: &str, body: ast::Suite| -> Result<Imports, String> {
+        let mut body = Cow::Owned(body);
+        let mut imports = imports_from_body(text, &mut body, None, None, None)?;
         // Generic functions can admit an unresolved entry. A runtime-class import
         // also needs the entry's own request when checking its first-party callers.
         if module_entry.is_none()
@@ -1131,7 +1132,7 @@ pub(crate) fn compile(
                 ScannedModule {
                     parsed,
                     lowered: LoweredRoot::Complete(
-                        body,
+                        body.into_owned(),
                         std::mem::take(&mut imports.private_names),
                     ),
                 },
@@ -2222,7 +2223,9 @@ pub(crate) fn compile(
                         .and_then(|(graph, id)| CheckedFile::select(graph, id));
                     let mut declaration = None;
                     let imports = if let Some(file) = parsed {
-                        retained_imports(file.parsed(modules), None, None).map(
+                        let types =
+                            checked_package.map(|(graph, id)| graph.session.operand_types(id));
+                        retained_imports(file.parsed(modules), None, None, types).map(
                             |(imports, input)| (imports, input.and_then(ScannedModule::from_input)),
                         )
                     } else if winner && alternative.is_none() && !file_alternate {
