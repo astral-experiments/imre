@@ -8061,10 +8061,18 @@ impl<'a> Checker<'a> {
     }
 
     fn exception_category(&self, expression: &ast::Expr) -> Option<u32> {
+        self.exception_category_with_binding(expression, || self.resolve(expression))
+    }
+
+    fn exception_category_with_binding(
+        &self,
+        expression: &ast::Expr,
+        binding: impl FnOnce() -> Option<Binding>,
+    ) -> Option<u32> {
         if self.is_class_receiver(expression) {
             return None;
         }
-        match self.resolve(expression) {
+        match binding() {
             Some(Binding::Definition(def))
                 if self.classes.declarations.exceptions.contains_key(&def) =>
             {
@@ -12168,7 +12176,7 @@ impl<'a> Checker<'a> {
             && !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
         {
             // An import exception binds each display before initializing its fields.
-            if let Some(kind) = self.exception_category(&call.func)
+            if let Some(kind) = self.exception_category_with_binding(&call.func, || binding)
                 && self.is_import_error(kind)
                 && self
                     .class_reference_with_binding(&call.func, || binding)
@@ -13725,7 +13733,7 @@ impl<'a> Checker<'a> {
         if self.unshadowed_builtin(&call.func, "issubclass") {
             return self.issubclass(call);
         }
-        if let Some(kind) = self.exception_category(&call.func) {
+        if let Some(kind) = self.exception_category_with_binding(&call.func, || binding) {
             return self.simple_exception(call, kind);
         }
         if let Some(binding) = binding {
