@@ -1394,6 +1394,9 @@ fn lower_graph(
         if recover_completed.get() {
             register(std::mem::take(completed), owners);
             capture();
+        } else {
+            // A later registered launch can use these imports after its own source checks.
+            std::mem::take(completed).retain_imported(graph, owners);
         }
     };
     let checker_for = |module| {
@@ -1516,9 +1519,13 @@ fn lower_graph(
         // A later entry refusal can still place the provider's original definition.
         let provider_frame = !needs_registered_entry
             && cache.is_none()
-            && module.bundled
             && signature.method.is_none()
             && matches!(source, Cow::Borrowed(_))
+            && (module.bundled
+                || *module_id != graph.entry
+                    && module.is_program_source()
+                    && module.bindings.get(definition.name.as_str())
+                        == Some(&Binding::Definition(callable_definitions[signature.id])))
             && fixed_frame_entry(definition);
         checker.fixed_sites = ((prepare_sites || provider_frame) && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method || live));
