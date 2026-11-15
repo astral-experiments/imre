@@ -77,7 +77,6 @@ impl RegisteredBodies<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
 pub(super) enum ModuleOrigin<'a, 'syntax> {
     Program(Option<&'a super::CheckedFunctions>),
     ExecLiteral {
@@ -85,18 +84,18 @@ pub(super) enum ModuleOrigin<'a, 'syntax> {
         inherited_flags: u32,
         python_annotations: bool,
     },
-    Interactive(u32),
+    Interactive(u32, &'syntax mut HashSet<TextRange>),
     Provider,
     Bundled(Option<&'a super::CheckedFunctions>),
 }
 
 impl ModuleOrigin<'_, '_> {
-    pub(super) fn python_annotations(self, name: &str) -> bool {
+    pub(super) fn python_annotations(&self, name: &str) -> bool {
         match self {
             Self::Provider => true,
             Self::ExecLiteral {
                 python_annotations, ..
-            } => python_annotations,
+            } => *python_annotations,
             Self::Bundled(_) => matches!(name, "_py_warnings" | "tomllib._parser" | "typing"),
             _ => false,
         }
@@ -250,8 +249,11 @@ impl Prompt {
         filename: PathBuf,
         module: ParsedModule<'static, '_>,
         python_optimization: i32,
-    ) -> Option<Self> {
-        PreparedBody::interactive(filename, module, python_optimization, 0).map(Self)
+    ) -> Option<(Self, HashSet<TextRange>)> {
+        let mut unreachable = HashSet::new();
+        let body =
+            PreparedBody::interactive(filename, module, python_optimization, 0, &mut unreachable)?;
+        Some((Self(body), unreachable))
     }
 }
 
@@ -373,6 +375,7 @@ impl<'a> PreparedBody<'a> {
         module: ParsedModule<'a, '_>,
         python_optimization: i32,
         inherited_flags: u32,
+        unreachable_imports: &mut HashSet<TextRange>,
     ) -> Option<Self> {
         let path = path.into();
         imre_ast::check_single_input(&module.parsed.syntax().body, module.parsed.tokens()).ok()?;
@@ -381,7 +384,7 @@ impl<'a> PreparedBody<'a> {
             path,
             module,
             python_optimization,
-            ModuleOrigin::Interactive(inherited_flags),
+            ModuleOrigin::Interactive(inherited_flags, unreachable_imports),
             LiteralSites::default(),
             Default::default(),
         )
@@ -452,7 +455,7 @@ impl<'a> PreparedBody<'a> {
         // Layouts can parse the same physical bytes in another session.
         let checked_source =
             checked_source.filter(|source| std::ptr::eq(source.source.as_str(), text.as_ref()));
-        let interactive = matches!(origin, ModuleOrigin::Interactive(_));
+        let interactive = matches!(origin, ModuleOrigin::Interactive(..));
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled(_));
@@ -460,7 +463,7 @@ impl<'a> PreparedBody<'a> {
             ModuleOrigin::ExecLiteral {
                 inherited_flags, ..
             }
-            | ModuleOrigin::Interactive(inherited_flags) => inherited_flags,
+            | ModuleOrigin::Interactive(inherited_flags, _) => inherited_flags,
             _ => 0,
         };
         let checked_bodies = match origin {
@@ -607,6 +610,9 @@ impl<'a> PreparedBody<'a> {
         }
         let mut prepare =
             crate::frontend::SuitePreparation::new(&operations, values, python_optimization == 0);
+        if let ModuleOrigin::Interactive(_, imports) = origin {
+            prepare.unreachable_imports = Some(imports);
+        }
         prepare.literal_refusals = exec_literals.has_refusals().then_some(&exec_literals);
         prepare.sites.expressions = expressions.unwrap_or_default();
         // Preparing inner declarations first lets their binding sites consume
@@ -1718,7 +1724,7 @@ mod tests {
 
     fn interactive<'a>(path: &'a Path, text: &'a str) -> Option<PreparedBody<'a>> {
         let module = ParsedModule::parse(path, text.into()).ok()?;
-        PreparedBody::interactive(path, module, 0, 0)
+        PreparedBody::interactive(path, module, 0, 0, &mut HashSet::new())
     }
 
     #[test]

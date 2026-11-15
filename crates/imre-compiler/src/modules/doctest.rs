@@ -341,13 +341,14 @@ impl Dependencies {
 struct PromptImports<'a, 'fs> {
     loader: &'a Loader<'fs>,
     origin: Option<ModuleId>,
-    dependencies: Dependencies,
+    targets: Vec<(TextRange, String)>,
+    needs_runtime: bool,
 }
 
 impl PromptImports<'_, '_> {
-    fn module(&mut self, name: &str) {
-        self.dependencies.needs_runtime |= IntrinsicModule::named(name).is_none();
-        self.dependencies.targets.insert(name.to_owned());
+    fn module(&mut self, site: TextRange, name: &str) {
+        self.needs_runtime |= IntrinsicModule::named(name).is_none();
+        self.targets.push((site, name.to_owned()));
     }
 }
 
@@ -356,26 +357,26 @@ impl<'a> ruff_python_ast::statement_visitor::StatementVisitor<'a> for PromptImpo
         match stmt {
             ast::Stmt::Import(import) => {
                 for alias in &import.names {
-                    self.module(alias.name.as_str());
+                    self.module(stmt.range(), alias.name.as_str());
                 }
             }
             ast::Stmt::ImportFrom(import) => {
                 let module = if import.level == 0 {
                     import.module.as_ref().map(ToString::to_string)
                 } else {
-                    self.dependencies.needs_runtime = true;
+                    self.needs_runtime = true;
                     self.origin
                         .and_then(|id| self.loader.import_name(id, import).ok())
                 };
                 if let Some(module) = module {
-                    self.module(&module);
+                    self.module(stmt.range(), &module);
                     // A from-list may bind an existing attribute or load a child module.
-                    self.dependencies.targets.extend(
+                    self.targets.extend(
                         import
                             .names
                             .iter()
                             .filter(|a| a.name.as_str() != "*")
-                            .map(|a| format!("{module}.{}", a.name)),
+                            .map(|a| (stmt.range(), format!("{module}.{}", a.name))),
                     );
                 }
             }
@@ -685,10 +686,12 @@ impl Loader<'_> {
                 let mut recorded = HashSet::new();
                 let mut prepared = Vec::new();
                 let mut record = |name: &str, sources: &[String], emit: bool| {
+                    let mut dependencies = Dependencies::default();
                     let mut imports = PromptImports {
                         loader: self,
                         origin: module,
-                        dependencies: Dependencies::default(),
+                        targets: Vec::new(),
+                        needs_runtime: false,
                     };
                     for (index, source) in sources.iter().enumerate() {
                         let inspect = source.contains("import");
@@ -708,10 +711,22 @@ impl Loader<'_> {
                                 text: Cow::Owned(source.clone()),
                                 parsed: Cow::Owned(parsed),
                             };
-                            prepared.extend(Prompt::from_parsed(path, module, optimization));
+                            if let Some((prompt, unreachable)) =
+                                Prompt::from_parsed(path, module, optimization)
+                            {
+                                imports
+                                    .targets
+                                    .retain(|(site, _)| !unreachable.contains(site));
+                                prepared.push(prompt);
+                            }
                         }
+                        dependencies
+                            .targets
+                            .extend(imports.targets.drain(..).map(|(_, name)| name));
                     }
-                    imports.dependencies
+                    // Runner selection also accounts for imports in the written fixed case.
+                    dependencies.needs_runtime = imports.needs_runtime;
+                    dependencies
                 };
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
@@ -815,6 +830,33 @@ mod tests {
         let subject = graph.modules.iter().find(|m| m.name == "subject").unwrap();
         assert_eq!(subject.doctest_prompts.len(), 1);
         assert_eq!(graph.doctest_imports, ["kept"]);
+    }
+
+    #[test]
+    fn a_prepared_prompt_enrolls_imports_on_its_returning_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(
+            &entry,
+            "import doctest, subject\ndoctest.DocTestSuite(subject).debug()\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("subject.py"),
+            r#"'''>>> def f(stop):
+...     if stop: return 42
+...     import live
+...     return live.VALUE
+...     from discarded import VALUE
+>>> f(False)
+37
+'''
+"#,
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("live.py"), "VALUE = 37\n").unwrap();
+        let graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+        assert_eq!(graph.doctest_imports, ["live"]);
     }
 
     #[test]

@@ -1821,6 +1821,8 @@ enum SuiteSelection {
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
 pub(crate) struct SuitePreparation<'a> {
+    /// Import occurrences whose binding is lexical but whose instruction has no incoming edge.
+    pub(crate) unreachable_imports: Option<&'a mut HashSet<TextRange>>,
     operations: &'a HashMap<TextRange, Expr>,
     source: values::RegisteredSource<'a>,
     pub(crate) declaration_refusals: HashMap<TextSize, PreparedRefusal>,
@@ -1836,6 +1838,7 @@ impl<'a> SuitePreparation<'a> {
         assertions_enabled: bool,
     ) -> Self {
         Self {
+            unreachable_imports: None,
             operations,
             source,
             sites: StatementSites {
@@ -2566,6 +2569,12 @@ impl<'a> SuitePreparation<'a> {
                 scope.statement(stmt, &mut body.statements)
             };
             if let Ok(continues) = lowered {
+                if !body.falls_through
+                    && let Some(imports) = &mut self.unreachable_imports
+                    && matches!(stmt, ast::Stmt::Import(_) | ast::Stmt::ImportFrom(_))
+                {
+                    imports.insert(stmt.range());
+                }
                 if !continues {
                     body.falls_through = false;
                     // A checked raise retains the surrounding declaration diagnostics.
