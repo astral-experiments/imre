@@ -665,9 +665,8 @@ impl Session {
                 {
                     return None;
                 }
-                return Some(Err(
-                    Diagnostic::plain(error.rendered.clone()).classified(Kind::RegisteredInitializer)
-                ));
+                return Some(Err(Diagnostic::plain(error.rendered.clone())
+                    .classified(Kind::RegisteredInitializer)));
             }
             return None;
         }

@@ -589,7 +589,10 @@ fn a_dormant_module_call_keeps_its_required_imported_argument() {
         let error = compiler.check_file(&entry, None).unwrap_err();
         assert_eq!(
             error,
-            format!("{}:3:5: Imre: missing required argument \"n\"", scores.display())
+            format!(
+                "{}:3:5: Imre: missing required argument \"n\"",
+                scores.display()
+            )
         );
     }
     let prior = project.path().join("prior.py");
