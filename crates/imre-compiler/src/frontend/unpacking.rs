@@ -368,7 +368,13 @@ impl Checker<'_> {
             self.expr_in_context(
                 value,
                 expected,
-                |_, _| false,
+                |checker, ty| {
+                    ty == Type::PythonObject
+                        && target
+                            .as_name_expr()
+                            .and_then(|name| checker.names.get(name.id.as_str()))
+                            .is_some_and(|&slot| checker.can_widen_unbound_python_local(slot))
+                },
                 Self::coerce_supplied_result,
                 declaration,
             )

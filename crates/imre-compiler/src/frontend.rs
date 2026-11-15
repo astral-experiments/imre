@@ -8870,6 +8870,17 @@ impl<'a> Checker<'a> {
         vec![Statement::Assign(slot, value), Statement::Clear(old)]
     }
 
+    /// An unannotated local without a definite binding can hold either branch’s Python value.
+    fn can_widen_unbound_python_local(&self, slot: usize) -> bool {
+        self.frame_arguments == FrameArguments::Python
+            && self
+                .registered_local_start
+                .is_some_and(|first| slot >= first)
+            && !self.declared_slots.contains_key(&slot)
+            && !self.assigned.contains(&slot)
+            && self.loop_breaks.is_empty()
+    }
+
     fn assign(
         &mut self,
         target: &ast::Expr,
@@ -8897,7 +8908,10 @@ impl<'a> Checker<'a> {
                 && self.registered_local_start.map_or_else(
                     || self.graph.modules[self.module].is_program_source(),
                     // On a backedge earlier fixed-layout reads can execute again.
-                    |first| slot >= first && self.block_depth == 1,
+                    |first| {
+                        slot >= first && self.block_depth == 1
+                            || self.can_widen_unbound_python_local(slot)
+                    },
                 )
             {
                 if self.registered_local_start.is_none() {
