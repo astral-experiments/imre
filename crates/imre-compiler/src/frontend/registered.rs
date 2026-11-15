@@ -1027,9 +1027,8 @@ pub(super) fn capture(
                     }
                     FrameArguments::Python
                 }
-                Capture::Solved(_) if deferred.is_some() && method.is_none() => {
-                    FrameArguments::Pending
-                }
+                Capture::Solved(_) if method.is_some() => FrameArguments::Python,
+                Capture::Solved(_) if deferred.is_some() => FrameArguments::Pending,
                 Capture::Solved(_) => FrameArguments::Checked,
             };
             let mut body = graph

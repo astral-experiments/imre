@@ -82,6 +82,33 @@ mod tests {
     }
 
     #[test]
+    fn named_classmethod_factory_keeps_its_checked_arguments() {
+        let text = concat!(
+            "from dataclasses import dataclass\n",
+            "from typing import Any, Self\n",
+            "@dataclass\n",
+            "class Message:\n",
+            "    text: str\n",
+            "    @classmethod\n",
+            "    def from_mapping(cls, row: dict[str, Any]) -> Self:\n",
+            "        return cls(text=row['name'])\n",
+            "print(Message.from_mapping({'name': 'example'}).text)\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("example.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+
+        let start = TextSize::try_from(text.find("@classmethod").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let method = &functions[&graph.entry][&start];
+        assert!(matches!(&method.inputs, FrameInputs::Protocol { sites }
+            if sites.iter().any(|site| matches!(site, FrameSite::Method(_)))));
+    }
+
+    #[test]
     fn class_method_keeps_its_checked_return_after_the_factory_needs_a_python_frame() {
         let text = concat!(
             include_str!("../../../../../tests/fixtures/callables/escaping_bound_method.py"),
