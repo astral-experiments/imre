@@ -826,9 +826,7 @@ unsafe fn replace_string(
 ) -> *const Str {
     // SAFETY: all input strings stay rooted until replacement completes.
     let (text, old, new) = unsafe { (&*value, &*old, &*new) };
-    match replace_text(text, old, new, limit, old == new, |len| {
-        Str::try_with_capacity(len).ok()
-    }) {
+    match replace_text(text, old, new, limit, old == new) {
         Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
         Ok(None) => {
             // SAFETY: transfer one additional strong count from the original allocation.
@@ -844,14 +842,13 @@ unsafe fn replace_string(
 
 /// Reserve the complete replacement once, counting empty matches at Unicode boundaries.
 /// An unchanged result lets the caller retain its original string.
-pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
-    value: &'a str,
+pub(crate) fn replace_text(
+    value: &str,
     old: &str,
-    new: &'a str,
+    new: &str,
     limit: usize,
     same_pattern: bool,
-    buffer: impl FnOnce(usize) -> Option<T>,
-) -> crate::Result<Option<T>> {
+) -> crate::Result<Option<Str>> {
     let matches = || value.match_indices(old).take(limit);
     if same_pattern || (old.is_empty() && new.is_empty()) {
         return Ok(None);
@@ -861,18 +858,19 @@ pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
         return Ok(None);
     }
     let retained = value.len() - count * old.len();
-    let mut result = new
+    let len = new
         .len()
         .checked_mul(count)
         .and_then(|extra| retained.checked_add(extra))
-        .and_then(buffer)
         .ok_or_else(Error::memory_error)?;
+    let mut result = Str::try_with_capacity(len).map_err(|_| Error::memory_error())?;
     let mut copied = 0;
     for (index, _) in matches() {
-        result.extend([&value[copied..index], new]);
+        result.push_str(&value[copied..index]);
+        result.push_str(new);
         copied = index + old.len();
     }
-    result.extend([&value[copied..]]);
+    result.push_str(&value[copied..]);
     Ok(Some(result))
 }
 

@@ -3256,11 +3256,6 @@ pub(super) fn method(
             ctx.str_value(args[1])?,
             limit,
             args[0] == args[1],
-            |length| {
-                let mut text = String::new();
-                text.try_reserve_exact(length).ok()?;
-                Some(text)
-            },
         )?;
         return Ok(match value {
             Some(text) => ctx.text(text),
