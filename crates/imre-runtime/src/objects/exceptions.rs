@@ -18,7 +18,6 @@ use std::io::{self, Write};
 use std::rc::Rc;
 
 pub(crate) use imre_ast::exceptions::Kind;
-use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use allocator_api2::boxed::Box;
@@ -2675,7 +2674,7 @@ fn report_unhandled() -> UnhandledExit {
         Some(code) if code.kind == WordKind::new(2) => {
             // SAFETY: the snapshot owns the exact integer. CPython uses -1 on overflow.
             let integer = unsafe { crate::Int::borrow(code.word) };
-            (integer.big().to_i64().unwrap_or(-1) as i32, None)
+            (integer.exit_status(), None)
         }
         Some(code) => {
             let message = if code.kind == WordKind::new(3) {
