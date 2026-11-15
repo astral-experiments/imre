@@ -3093,7 +3093,7 @@ impl Context {
         &mut self,
         class: Id,
         owner: &'static str,
-        methods: &[&str],
+        mut entries: Vec<(Id, Id)>,
         fields: [&'static str; N],
     ) {
         for field in fields {
@@ -3106,19 +3106,14 @@ impl Context {
             });
             self.builtins.insert(format!("{owner}.{field}"), descriptor);
         }
-        let members = methods
-            .iter()
-            .chain(builtins::real_methods(owner))
-            .copied()
-            .chain(["__new__"])
+        for member in ["__new__"]
+            .into_iter()
             .chain((owner == "int").then_some("__sizeof__"))
-            .chain(fields);
-        let mut entries: Vec<_> = members
-            .map(|member| {
-                let key = self.heap.code_name(member);
-                (key, self.builtin(&format!("{owner}.{member}")))
-            })
-            .collect();
+            .chain(fields)
+        {
+            let key = self.heap.code_name(member);
+            entries.push((key, self.builtin(&format!("{owner}.{member}"))));
+        }
         if owner == "int" {
             let doc = self.text(concat!(
                 "int([x]) -> integer\nint(x, base=10) -> integer\n\n",
@@ -3583,10 +3578,10 @@ impl Context {
             "int" => self.install_numeric_dictionary(
                 value,
                 "int",
-                methods,
+                entries,
                 ["real", "imag", "numerator", "denominator"],
             ),
-            "float" => self.install_numeric_dictionary(value, "float", methods, ["real", "imag"]),
+            "float" => self.install_numeric_dictionary(value, "float", entries, ["real", "imag"]),
             _ if !entries.is_empty() && !self.native_type_dicts.contains_key(&value) => {
                 if let Some(field) = match name {
                     "function" => Some("__code__"),
