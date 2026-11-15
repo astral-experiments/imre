@@ -7858,7 +7858,10 @@ mod native_tests {
         let source = runtime.join("typing.py");
         fs::write(&source, "def proof() -> int: return 17\n").unwrap();
         let graph = SourceGraph::load(&entry, None, &[stubs, runtime]).unwrap();
-        assert_eq!(graph.modules[graph.by_name["typing"]].path, source);
+        assert_eq!(
+            graph.modules[graph.by_name["typing"]].path,
+            source.canonicalize().unwrap()
+        );
     }
 
     #[test]
