@@ -249,11 +249,11 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         } else {
             0
         };
+        // The defining Code owns the filename. Preserve its reserved ABI slot without a relocation.
         let offset = self.output.constants.len();
         writeln!(
             self.output.constants,
-            "{site} = private constant %code_site {{ ptr {entry}, ptr {}, i32 {}, i32 {tag} }}",
-            self.positions.file,
+            "{site} = private constant %code_site {{ ptr {entry}, ptr null, i32 {}, i32 {tag} }}",
             self.positions.line(start)
         )
         .unwrap();
