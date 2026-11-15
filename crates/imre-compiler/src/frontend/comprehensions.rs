@@ -85,6 +85,14 @@ impl Helpers {
     }
 }
 
+/// Frame slots and the Python namespace use the same ordered declaration for each target.
+pub(super) fn namespace_targets(plan: &Plan<'_>) -> Vec<String> {
+    let mut names = plan.collect_target_names::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
 /// The creating frame acquires the outer iterator before the target names shadow it.
 pub(super) fn acquire_in_namespace(
     input: &mut pipelines::Prepared,
@@ -884,7 +892,7 @@ impl Checker<'_> {
         .then(|| mapping.clone())
     }
 
-    pub(super) fn enter_comprehension(&mut self, targets: HashSet<String>) -> ComprehensionScope {
+    pub(super) fn enter_comprehension(&mut self, targets: Vec<String>) -> ComprehensionScope {
         let scope = ComprehensionScope {
             state: self.local_state(),
             names: self.names.clone(),
@@ -892,17 +900,13 @@ impl Checker<'_> {
             targets: self.comprehension_targets.clone(),
             outer_exports: self.comprehension_exports.replace(HashMap::new()),
         };
-        for name in &targets {
-            self.names.remove(name);
+        for name in targets {
+            self.names.remove(&name);
+            if self.class_receiver.as_ref() == Some(&name) {
+                self.class_receiver = None;
+            }
+            self.comprehension_targets.insert(name);
         }
-        if self
-            .class_receiver
-            .as_ref()
-            .is_some_and(|name| targets.contains(name))
-        {
-            self.class_receiver = None;
-        }
-        self.comprehension_targets.extend(targets);
         scope
     }
 
@@ -941,19 +945,19 @@ impl Checker<'_> {
         let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
         // Acquire the outer iterator before declaring the comprehension's shadowing names.
         let mut input = input;
-        let mut prefix = Vec::new();
         let enclosing = self.namespace;
-        let targets = display.target_names();
-        if self.registered.is_some() {
+        let (mut prefix, targets) = if self.registered.is_some() {
             let Iteration::Prepared(cursor) = &mut input else {
                 unreachable!("Python iterables have an explicit acquisition")
             };
             let slot = self.hidden(Type::PythonObject);
-            let mut declared: Vec<_> = targets.iter().cloned().collect();
-            declared.sort();
-            prefix = acquire_in_namespace(cursor, slot, enclosing, declared);
+            let targets = namespace_targets(display);
+            let prefix = acquire_in_namespace(cursor, slot, enclosing, targets.clone());
             self.namespace = Some(slot);
-        }
+            (prefix, targets)
+        } else {
+            (Vec::new(), display.collect_target_names())
+        };
         let scope = self.enter_comprehension(targets);
         let result = self.hidden(Type::None);
         // The outer loop can only invalidate a narrowing when the display writes a name.
