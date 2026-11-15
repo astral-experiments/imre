@@ -100,8 +100,11 @@ impl Context {
         Ok(launched)
     }
 
-    /// Enter the selected module in the startup __main__ namespace via the selected runpy.
-    pub(super) fn run_module_as_main(&mut self, name: String) -> Result<Id> {
+    /// Prepare the selected runpy call in the startup __main__ namespace.
+    pub(super) fn prepare_module_as_main(
+        &mut self,
+        name: String,
+    ) -> Result<super::calls::RegisteredCall> {
         let mark = self.heap.temporary_mark();
         let requested = self.text(&name);
         stdlib::audit::event(self, "cpython.run_module", &[requested])?;
@@ -117,7 +120,7 @@ impl Context {
         } else {
             TRUE
         };
-        self.call(run, vec![name, alter_argv], Vec::new())
+        self.prepare_call(run, vec![name, alter_argv].into(), Vec::new())
     }
 
     /// Infer the package from import globals, following the CPython fallback order.

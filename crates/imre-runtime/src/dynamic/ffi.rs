@@ -1405,7 +1405,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     };
     let result = main.and_then(|main| {
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
-            ctx.run_module_as_main(name)
+            let call = ctx.prepare_module_as_main(name)?;
+            // SAFETY: finish owns the context. Preparation ended before the named entry runs.
+            unsafe { call.run(&raw mut *ctx) }
         } else {
             Ok(main)
         }
