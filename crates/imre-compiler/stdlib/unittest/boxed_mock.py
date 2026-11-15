@@ -96,16 +96,31 @@ class _Call(tuple):
             size = len(other)
         except TypeError:
             return NotImplemented
-        if (self._mock_parent and getattr(other, "_mock_parent", None)
+        self_name = ""
+        if len(self) == 2:
+            self_args, self_kwargs = self
+        else:
+            self_name, self_args, self_kwargs = self
+        if (getattr(self, "_mock_parent", None) and getattr(other, "_mock_parent", None)
                 and self._mock_parent != other._mock_parent):
             return False
         if size > 3:
             return False
-        name, args, kwargs = _call_parts(other, size)
-        if len(self) == 3 and self[0] and self[0] != name:
+        if size == 1:
+            # Equality tests for an argument tuple before a name. __new__ tests for a name first.
+            item, = other
+            if isinstance(item, tuple):
+                name, args, kwargs = "", item, {}
+            elif isinstance(item, str):
+                name, args, kwargs = item, (), {}
+            else:
+                name, args, kwargs = "", (), item
+        else:
+            name, args, kwargs = _call_parts(other, size)
+        if self_name and name != self_name:
             return False
         # Let the expected arguments' comparison hooks run first.
-        return (args, kwargs) == (self.args, self.kwargs)
+        return (args, kwargs) == (self_args, self_kwargs)
 
     __ne__ = object.__ne__
 

@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, _Call
 
 
 class Mismatch:
@@ -88,3 +88,31 @@ except ValueError as error:
 else:
     raise AssertionError("call_args setter was skipped")
 assert reject.call_args is None and reject.call_args_list == [] and reject.mock_calls == []
+
+
+class YieldingCall(_Call):
+    def __iter__(self):
+        yield from ("child", (1,), {})
+
+
+assert YieldingCall(()) == ("child", (1,), {})
+
+
+class Name(str):
+    def __ne__(self, other):
+        if self is expected_name:
+            raise name_error
+        return False
+
+
+name_error = LookupError("expected name compared first")
+expected_name = Name("child")
+expected = _Call((expected_name, (), {}))
+recorded = _Call((Name("child"), (), {}))
+assert expected == recorded
+try:
+    recorded == expected
+except LookupError as error:
+    assert error is name_error
+else:
+    raise AssertionError("expected name comparison was skipped")
