@@ -2855,7 +2855,7 @@ mod tests {
             "def capture(rows):\n",
             "    for item in rows:\n",
             "        rows[item]: object\n",
-            "        return t'pre{(yield item)}'\n",
+            "        return (lambda value: value)(t'pre{(yield item)}')\n",
             "    else:\n",
             "        return 42\n",
         );
@@ -2871,12 +2871,12 @@ mod tests {
             .as_function_def_stmt()
             .unwrap();
         let start = def.start();
-        // Withhold template spelling from the suite planner. The physical child can
-        // still read the real prepared template, even after its enclosing loop is erased.
+        // Withhold the lambda from the suite planner. The physical child can
+        // still use its prepared binding after the enclosing loop is erased.
         let lexical = module.source.statement_sites.expressions.take_lexical();
         let missing = HashMap::new();
         let source = crate::frontend::RegisteredSource {
-            template_fields: Some(&missing),
+            lambdas: Some(&missing),
             ..module.source.registered_source()
         };
         let mut physical = crate::frontend::SuitePreparation::new(
