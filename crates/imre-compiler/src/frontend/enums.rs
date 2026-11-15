@@ -18,10 +18,10 @@ impl Checker<'_> {
         };
         let val = self.expr(arg)?;
         let enum_local = matches!(arg, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
-            && matches!(
+            && (matches!(
                 self.types.payload(val.ty).unwrap_or(val.ty),
                 Type::StrEnum(_)
-            );
+            ) || self.registered.is_some() && val.ty == Type::PythonObject);
         if !call.arguments.keywords.is_empty() || !(enum_local || exhausted_pair) {
             return Err(error(
                 self.source,
@@ -44,6 +44,14 @@ impl Checker<'_> {
                 arg,
                 "assert_never requires an exhausted StrEnum domain",
             ));
+        }
+        if self.registered.is_some() {
+            let function = self.expr(&call.func)?;
+            return Ok(Statement::Expr(self.call_with_values(
+                call,
+                function,
+                vec![val],
+            )));
         }
         // Keep the defensive Python exception even when the checker proves the
         // argument uninhabited. typing truncates repr at 100 Unicode code points.

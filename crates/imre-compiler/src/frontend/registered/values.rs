@@ -709,7 +709,12 @@ impl Checker<'_> {
         Ok(self.scoped_call(value))
     }
 
-    fn call_with_values(&self, call: &ast::ExprCall, target: Expr, arguments: Vec<Expr>) -> Expr {
+    pub(in crate::frontend) fn call_with_values(
+        &self,
+        call: &ast::ExprCall,
+        target: Expr,
+        arguments: Vec<Expr>,
+    ) -> Expr {
         self.scoped_call(bound_call(call, callable_target(call), target, arguments))
     }
 
