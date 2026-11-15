@@ -82,7 +82,7 @@ fn detached_start_dispatches_its_audit_hooks_when_invoked() {
     let error = unsafe { call.run(&raw mut ctx) }.unwrap_err();
     assert_eq!(error.kind, "TypeError");
     assert!(error.message.contains("len"));
-    assert!(!ctx.workers.has_unreaped_workers());
+    assert!(!ctx.heap.workers.has_unreaped_workers());
 }
 
 #[test]
@@ -223,7 +223,7 @@ fn launch(
 ) -> Result<(usize, Option<u64>)> {
     let request = super::Start::new(ctx, operation, registration, roots);
     let (ready, entry) = super::launch(request)?;
-    ctx.workers.entries.push(entry);
+    ctx.heap.workers.entries.push(entry);
     let started = ready.wait()?;
     let identity = (started.ident, started.native_id);
     // SAFETY: the test owns the creating context through publication.
@@ -258,7 +258,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         .unwrap();
         handle.join(Some(Duration::ZERO)).unwrap();
         assert!(handle.alive());
-        assert!(ctx.workers.entries[0].handle.awaiting_exit());
+        assert!(ctx.heap.workers.entries[0].handle.awaiting_exit());
         assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 1);
         assert_eq!(ident, handle.ident());
         assert_ne!(ident, thread_ident());
@@ -273,7 +273,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     handle.join(None).unwrap();
     handle.join(None).unwrap();
     assert!(!handle.alive());
-    assert!(!ctx.workers.entries[0].handle.awaiting_exit());
+    assert!(!ctx.heap.workers.entries[0].handle.awaiting_exit());
     assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
 
@@ -308,10 +308,10 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
             vec![target],
         );
         let (ready, entry) = super::launch(request).unwrap();
-        ctx.workers.entries.push(entry);
+        ctx.heap.workers.entries.push(entry);
         let started = ready.wait().unwrap();
         assert_ne!(started.ident, thread_ident());
-        assert!(ctx.workers.roots().any(|id| *id == owner));
+        assert!(ctx.heap.workers.roots().any(|id| *id == owner));
         assert!(prefix.locked());
         assert!(!body.locked());
         let ident = started.ident;
@@ -324,7 +324,7 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
         assert!(handle.wait(Some(Duration::from_secs(5)), State::worker_pending));
         handle.join(Some(Duration::ZERO)).unwrap();
         ctx.reap_thread_operands();
-        assert!(ctx.workers.entries.is_empty());
+        assert!(ctx.heap.workers.entries.is_empty());
         assert_eq!(prefix.locked(), cancel);
         assert_eq!(body.locked(), !cancel);
         if cancel {
@@ -418,7 +418,7 @@ fn python_worker_owns_its_bound_frame_before_publication() {
         let handle = Arc::<Handle>::default();
         let request = Start::new(&ctx, operation, registered(&handle, false, owner), roots);
         let (ready, registration) = super::launch(request).unwrap();
-        ctx.workers.entries.push(registration);
+        ctx.heap.workers.entries.push(registration);
         let started = ready.wait().unwrap();
         let ident = started.ident;
         let creator_lock = held.then(|| (thread_ident(), 1));
@@ -460,7 +460,7 @@ fn python_worker_owns_its_bound_frame_before_publication() {
         assert!(!traceback().contains(frame));
         assert_eq!(Arc::strong_count(&lock), 2); // The creator's wrapper and test observer.
         ctx.reap_thread_operands();
-        assert!(ctx.workers.entries.is_empty());
+        assert!(ctx.heap.workers.entries.is_empty());
     }
 }
 
@@ -533,7 +533,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     drop(held);
     handle.join(None).unwrap();
     ctx.reap_thread_operands();
-    assert!(ctx.workers.entries.is_empty());
+    assert!(ctx.heap.workers.entries.is_empty());
     ctx.collect_unreachable();
     assert!(matches!(ctx.heap.get(weak_owner), Value::Weak(wr) if wr.target.is_none()));
     let hexdigest = ctx.lookup_attr(digest, "hexdigest").unwrap();
@@ -547,12 +547,14 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
 #[test]
 fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     let mut ctx = context();
-    assert!(!ctx.workers.has_unreaped_workers());
+    assert!(!ctx.heap.workers.has_unreaped_workers());
     let mark = ctx.heap.temporary_mark();
     let object = ctx.builtin("object");
     let operand = ctx.instance(object, None);
     let weak = ctx.heap.native_weak_reference(operand).unwrap();
 
+    // External roots can be enumerated before the worker is registered.
+    let globals: Vec<_> = ctx.heap_and_roots().1.collect();
     let active = while_lock_held(|gate| {
         let start = prepare_detached(
             &mut ctx,
@@ -568,9 +570,9 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         let ident = unsafe { start.run(&raw mut ctx) }.unwrap();
         let main = ctx.int(thread_ident() as i64);
         assert!(!ctx.equal(ident, main));
-        assert!(ctx.workers.has_unreaped_workers());
-        assert!(ctx.workers.shutdown_handles().next().is_none());
-        assert!(ctx.workers.live_threads().next().is_none());
+        assert!(ctx.heap.workers.has_unreaped_workers());
+        assert!(ctx.heap.workers.shutdown_handles().next().is_none());
+        assert!(ctx.heap.workers.live_threads().next().is_none());
         assert!(ctx.check_thread_reporter_mutable().is_err());
 
         let owner = ctx.instance(object, None);
@@ -585,12 +587,12 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         joined.join(Some(Duration::from_secs(5))).unwrap();
         assert!(!joined.alive());
         ctx.reap_thread_operands();
-        assert!(!ctx.workers.roots().any(|&id| id == owner));
+        assert!(!ctx.heap.workers.roots().any(|&id| id == owner));
         ctx.heap.release_temporaries_since(mark);
         ctx.heap.keep(weak);
-        ctx.collect_unreachable();
+        ctx.heap.collect(globals.iter().copied());
         assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target == Some(operand)));
-        Arc::clone(&ctx.workers.entries[0].handle)
+        Arc::clone(&ctx.heap.workers.entries[0].handle)
     });
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -601,11 +603,10 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
     assert!(ctx.check_thread_reporter_mutable().is_ok());
     // A low-level worker can exit between reaping and enumerating GC roots.
     ctx.reap_thread_operands();
-    assert!(ctx.workers.has_unreaped_workers());
-    assert!(ctx.workers.roots().any(|&id| id == operand));
-    assert!(!ctx.heap_and_roots().1.any(|id| id == operand));
-    assert!(!ctx.workers.has_unreaped_workers());
+    assert!(ctx.heap.workers.has_unreaped_workers());
+    assert!(ctx.heap.workers.roots().any(|&id| id == operand));
     ctx.collect_unreachable();
+    assert!(!ctx.heap.workers.has_unreaped_workers());
     assert!(matches!(ctx.heap.get(weak), Value::Weak(wr) if wr.target.is_none()));
 }
 
@@ -741,14 +742,14 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         assert!(handle.is_done());
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();
-        assert_eq!(ctx.workers.entries.len(), 1);
-        Arc::clone(&ctx.workers.entries[0].handle)
+        assert_eq!(ctx.heap.workers.entries.len(), 1);
+        Arc::clone(&ctx.heap.workers.entries[0].handle)
     });
     let shutdown = ctx.builtin("_thread._shutdown");
     assert_eq!(ctx.call(shutdown, vec![], vec![]).unwrap(), NONE);
     assert!(!active.awaiting_exit());
     assert!(!handle.awaiting_exit());
-    assert!(ctx.workers.entries.is_empty());
+    assert!(ctx.heap.workers.entries.is_empty());
 }
 
 #[test]

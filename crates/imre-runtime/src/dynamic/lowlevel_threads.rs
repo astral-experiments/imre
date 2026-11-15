@@ -52,7 +52,7 @@ impl Workers {
 impl Context {
     /// The worker cannot route an error through an object on the caller's heap.
     pub(super) fn check_thread_reporter_mutable(&self) -> Result<()> {
-        if self.workers.detached_active() {
+        if self.heap.workers.detached_active() {
             return Err(Error::new(
                 "NotImplementedError",
                 "changing thread exception reporting while a worker runs requires the boxed Python heap",
@@ -100,7 +100,7 @@ pub(super) fn call(
         "_thread.exit" | "_thread.exit_thread" => Err(ctx.exception("SystemExit", &[])),
         "_thread._count" => {
             let count = ctx.interpreter.worker_count.load(Ordering::SeqCst);
-            ctx.workers.reap_finished(&mut ctx.heap);
+            ctx.heap.reap_finished_workers();
             Ok(ctx.int(count as i64))
         }
         _ => unreachable!("thread startup is prepared by the registered caller"),

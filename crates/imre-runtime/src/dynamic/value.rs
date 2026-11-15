@@ -3813,6 +3813,8 @@ enum FinalizerBindingSlot {
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
+    // Join non-daemon workers before dropping the slots that own their operands.
+    pub(super) workers: super::thread_worker::Registry,
     root_trace: RootTrace,
     slots: Vec<Slot>,
     pub(super) allocation_traces: AllocationTraces,
@@ -4031,6 +4033,14 @@ impl Heap {
         std::iter::once(&self.execution).chain(self.parked_executions.iter().flatten())
     }
 
+    /// Roots held by active calls, parked frames, and native worker registrations on this heap.
+    fn execution_roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.workers
+            .roots()
+            .copied()
+            .chain(self.executions().flat_map(ExecutionState::roots))
+    }
+
     pub(super) fn buffer_exports(&self) -> impl Iterator<Item = Id> + '_ {
         self.executions()
             .flat_map(|state| state.buffer_exports.iter().copied())
@@ -4208,6 +4218,7 @@ impl Heap {
             slots.push(Slot::new(Value::Int(crate::Int::from(n))));
         }
         let mut heap = Self {
+            workers: Default::default(),
             root_trace: RootTrace::default(),
             traces: vec![Cell::new(END); slots.len()],
             generator_owners: GeneratorOwners::default(),
@@ -5904,7 +5915,7 @@ impl Heap {
                 .filter(|entry| entry.literal)
                 .map(|entry| entry.id),
         );
-        pending.extend(self.executions().flat_map(ExecutionState::roots));
+        pending.extend(self.execution_roots());
     }
 
     /// The singleton and small-integer prefix is permanently marked and has no children.

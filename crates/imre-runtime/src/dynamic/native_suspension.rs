@@ -287,7 +287,7 @@ impl Context {
         // the generator running until its remaining frame is ready to suspend.
         let result = self.heap.publish_to_resumer(result);
         if let (Some(delegate), Ok(value)) = (saved.0.delegate_root.get(), &result)
-            && !self.workers.has_unreaped_workers()
+            && !self.heap.workers.has_unreaped_workers()
             && self.heap.forwarded_roots_survive(delegate, mark, *value)
         {
             self.heap.release_temporaries_since(mark);
