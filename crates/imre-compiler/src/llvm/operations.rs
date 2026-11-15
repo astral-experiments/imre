@@ -284,7 +284,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     /// Capture the callable before evaluating each argument. A native operand keeps
     /// its checked borrow or owner; a Python argument must already have its rooted
     /// handle before the next argument can call back into the frame.
-    fn invoke(&mut self, callable: &Expr, args: &CallArgs, returns: Type) -> CheckedValue {
+    fn invoke(
+        &mut self,
+        callable: &Expr,
+        args: &CallArgs,
+        returns: Type,
+        usage: ValueUse<'_>,
+    ) -> CheckedValue {
         let Some(site) = args.site.python() else {
             let native = self.fixed();
             let target = NativeCallTarget::Callable(native.operand(callable));
@@ -297,6 +303,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 site.scope.as_deref(),
                 callable,
                 &args.values,
+                usage,
                 CheckedFrame::kept_call_value,
             )
         };
@@ -314,6 +321,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         scope: Option<&Expr>,
         target: &Expr,
         args: &[Expr],
+        usage: ValueUse<'_>,
         load_callable: fn(&mut CheckedFrame<'f, 'a, 'p>, &Expr, &mut String) -> String,
     ) -> CheckedValue {
         use super::registered::CallArguments;
@@ -321,7 +329,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
 
         let frame = self.python();
         let exec = frame.exec_literal_at(call.range);
-        let mark = frame.temporary_mark();
+        let mark = usage.operand_mark(frame);
         let edge = frame.begin_operand_scope();
         if frame.native_suspension
             && let RegisteredCallTarget::Callable {
@@ -331,7 +339,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             frame.call_position(*name);
         }
-        let mut next = mark.clone();
+        let mut next = mark.to_string();
         let packed = matches!(call.arguments, RegisteredArguments::Packed(_));
         let scope = scope.map(|scope| {
             if packed {
@@ -968,7 +976,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         CheckedFrame::kept_call_value
                     };
                     return CheckedBody::registered(frame.reborrow())
-                        .python_call(site, None, callee, args, load);
+                        .python_call(site, None, callee, args, usage, load);
                 }
                 if let Some(FixedAttribute::Load(name)) = attribute {
                     let operands = expr
@@ -1150,7 +1158,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             ExprKind::Binary(op, left, right) => {
                 self.binary_expression(*op, left, right, expr, site, usage)
             }
-            ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty),
+            ExprKind::Invoke { callable, args } => self.invoke(callable, args, expr.ty, usage),
             ExprKind::Unary(op, value) => self.unary_expression(*op, value, expr),
             ExprKind::Scope { body, value, clear } => self.scoped_expression(body, value, clear),
             ExprKind::Dict(entries) => self.dictionary(expr.ty, entries),
