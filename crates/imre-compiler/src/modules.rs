@@ -4222,7 +4222,7 @@ impl SourceGraph {
             loader.inputs.directories.push((spelling, root));
         }
         loader.module_operand = Some(name.to_owned());
-        if loader.has_project_source("runpy") {
+        if loader.project_provider("runpy")?.is_some() {
             return Ok(None);
         }
         let entry = match loader.load_module_entry(name) {
@@ -4896,6 +4896,11 @@ impl SiteProbes {
 
 /// Import path, canonical identity, package flag, search-root index and native archive.
 type ModuleFile = (PathBuf, PathBuf, bool, usize, Option<NativeArchive>);
+
+enum ProjectProvider {
+    File(ModuleFile),
+    Zip(usize),
+}
 
 enum ModuleText<'a> {
     ShippedDeclaration(&'a str, ruff_db::files::FileRange),
@@ -6404,13 +6409,7 @@ impl<'a> Loader<'a> {
         name: &str,
         imports: Option<&[ast::Alias]>,
     ) -> Result<Option<IntrinsicModule>, String> {
-        if self.project_shadows_native_package(name) {
-            return Ok(None);
-        }
-        if self.allow_imports
-            && imre_ast::providers::is_native_fallback(name)
-            && self.has_project_source(name)
-        {
+        if self.native_project_provider(name)?.is_some() {
             return Ok(None);
         }
         let module = IntrinsicModule::named(name).filter(|module| {
@@ -6590,36 +6589,36 @@ impl<'a> Loader<'a> {
         Ok(path)
     }
 
-    /// Whether a physical application package or module owns this top-level import.
-    fn project_shadows_native_package(&mut self, name: &str) -> bool {
+    /// Application paths precede these native providers. A package owns its dotted imports.
+    fn native_project_provider(&mut self, name: &str) -> Result<Option<ProjectProvider>, String> {
         let root = name.split('.').next().unwrap_or(name);
-        self.allow_imports
-            && imre_ast::providers::is_native_package(root)
-            && !imre_ast::providers::is_frozen(root, || self.frozen_modules)
-            && self.has_project_source(root)
+        if self.allow_imports
+            && (imre_ast::providers::is_native_fallback(name)
+                || imre_ast::providers::is_native_package(root)
+                    && !imre_ast::providers::is_frozen(root, || self.frozen_modules))
+        {
+            self.project_provider(root)
+        } else {
+            Ok(None)
+        }
     }
 
-    /// Look for a source file on the project search path before using a bundled fallback.
-    fn has_project_source(&mut self, name: &str) -> bool {
-        let roots = std::iter::once(&self.root)
-            .skip(usize::from(self.skip_current_root))
-            .chain(&self.search_roots[..self.archive_roots]);
-        for root in roots {
+    /// Resolve earlier search roots before selecting a bundled fallback.
+    fn project_provider(&mut self, name: &str) -> Result<Option<ProjectProvider>, String> {
+        for index in usize::from(self.skip_current_root)..=self.archive_roots {
+            let root = Self::root_at(&self.root, &self.search_roots, index);
             if let Some(archive) = self.zip_sources.get(root) {
                 if archive.package(name).is_some() {
-                    return true;
+                    return Ok(Some(ProjectProvider::Zip(index)));
                 }
-                continue;
-            }
-            let base = root.join(name);
-            for path in [base.join("__init__.py"), base.with_extension("py")] {
-                if self.fs.is_file(&path) {
-                    return true;
+            } else {
+                let base = root.join(name);
+                if let Some(file) = self.module_file(name, index, &base, false)? {
+                    return Ok(Some(ProjectProvider::File(file)));
                 }
-                self.inputs.missing.push(path);
             }
         }
-        false
+        Ok(None)
     }
 
     fn reject_stdlib_shadow(&mut self, name: &str) -> Result<(), String> {
@@ -6730,18 +6729,18 @@ impl<'a> Loader<'a> {
         let mut path_first = false;
         let mut checked_declaration = None;
         let mut registered_namespace = false;
+        let project = self.native_project_provider(name)?;
         let bundled = match name {
-            _ if self.project_shadows_native_package(name) => None,
+            _ if project.is_some() => None,
             _ if !self.frozen_modules
                 && imre_ast::providers::is_optional_frozen(name)
-                && self.has_project_source(name) =>
+                && self.project_provider(name)?.is_some() =>
             {
                 None
             }
             _ if self.allow_imports
-                && (matches!(name, "_pyio" | "quopri")
-                    || imre_ast::providers::is_native_fallback(name))
-                && self.has_project_source(name) =>
+                && matches!(name, "_pyio" | "quopri")
+                && self.project_provider(name)?.is_some() =>
             {
                 None
             }
@@ -6861,7 +6860,10 @@ impl<'a> Loader<'a> {
                 return Err("first-party import nesting exceeds 96 levels".into());
             }
             self.import_depth += 1;
-            let result = self.load_new_module(name, path_first);
+            // Only a top-level match selects this file. Dotted children search the
+            // initialized parent's path, which may contain multiple namespace portions.
+            let selected = project.filter(|_| !name.contains('.'));
+            let result = self.load_new_module(name, path_first, selected);
             self.import_depth -= 1;
             if let Some(id) = result? {
                 return Ok(id);
@@ -6986,11 +6988,10 @@ impl<'a> Loader<'a> {
             };
             Some(file)
         };
-        if self.project_shadows_native_package(first)
+        if self.native_project_provider(first)?.is_some()
             || (first == "quopri"
-                || imre_ast::providers::is_native_fallback(first)
                 || (!self.frozen_modules && imre_ast::providers::is_optional_frozen(first)))
-                && self.has_project_source(first)
+                && self.project_provider(first)?.is_some()
         {
             return Ok(None);
         }
@@ -7056,7 +7057,8 @@ impl<'a> Loader<'a> {
         let (path, identity) = if let Some(path) = stub {
             let identity = self.fs.canonicalize(&path).unwrap_or_else(|_| path.clone());
             (path, identity)
-        } else if let Ok(Some((path, identity, _, _, None))) = self.module_file(name, index, &base)
+        } else if let Ok(Some((path, identity, _, _, None))) =
+            self.module_file(name, index, &base, true)
         {
             (path, identity)
         } else {
@@ -7095,6 +7097,7 @@ impl<'a> Loader<'a> {
         name: &str,
         root_index: usize,
         base: &Path,
+        require_archive: bool,
     ) -> Result<Option<ModuleFile>, String> {
         let root = Self::root_at(&self.root, &self.search_roots, root_index);
         let package = base.join("__init__.py");
@@ -7148,6 +7151,11 @@ impl<'a> Loader<'a> {
             } else if self.fs.is_file(&source) {
                 (source, false, None)
             } else if installed && self.fs.is_file(&stub) {
+                // A declaration alone does not displace an available runtime provider.
+                if !require_archive {
+                    self.inputs.missing.push(source);
+                    return Ok(None);
+                }
                 return Err(format!(
                     "native module {name:?} requires a rebuilt archive at {}",
                     base.with_extension(crate::NATIVE_ARCHIVE_EXTENSION)
@@ -7182,10 +7190,11 @@ impl<'a> Loader<'a> {
         &mut self,
         name: &str,
         path_fallback: bool,
+        selected: Option<ProjectProvider>,
     ) -> Result<Option<ModuleId>, String> {
         let first = name.split('.').next().unwrap_or("");
         let directory_main = name == "__main__" && self.module_operand.as_deref() == Some(name);
-        let declaration = if directory_main || path_fallback {
+        let declaration = if directory_main || path_fallback || selected.is_some() {
             // A path entry or an available source fallback supplies its own declaration.
             None
         } else {
@@ -7201,12 +7210,16 @@ impl<'a> Loader<'a> {
         }
         // A regular package owns its subtree. A namespace searches its portions in path order.
         let relative = name.replace('.', "/");
-        let mut resolved = None;
+        let (mut resolved, roots) = match selected {
+            Some(ProjectProvider::File(file)) => (Some(file), 0..0),
+            Some(ProjectProvider::Zip(root)) => (None, root..root + 1),
+            None => (None, 0..self.search_roots.len() + 1),
+        };
         let mut filesystem_roots = Vec::new();
         let mut zip_member = false;
         let mut zip_namespace = false;
         let mut member_source = None;
-        for root_index in 0..=self.search_roots.len() {
+        for root_index in roots {
             if (root_index == 0 && self.skip_current_root)
                 || parent.is_some_and(|(id, _)| !self.modules[id].search_roots.contains(root_index))
             {
@@ -7238,7 +7251,7 @@ impl<'a> Loader<'a> {
                 continue;
             }
             let base = root.join(&relative);
-            resolved = self.module_file(name, root_index, &base)?;
+            resolved = self.module_file(name, root_index, &base, true)?;
             if resolved.is_some() {
                 break;
             }
@@ -7809,6 +7822,64 @@ mod native_tests {
             assert_eq!(ssl.registered_namespace, !physical);
             assert!(graph.modules.iter().any(|m| m.name == "cmd" && m.bundled));
         }
+    }
+
+    #[test]
+    fn installed_archive_precedes_a_native_fallback_without_a_competing_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let site = directory.path().join("site");
+        fs::create_dir(&site).unwrap();
+        let entry = directory.path().join("main.py");
+        fs::write(&entry, "from typing import proof\nprint(proof() * 3)\n").unwrap();
+        fs::write(site.join("typing.pyi"), "def proof() -> int: ...\n").unwrap();
+        let archive = site.join("typing.imre.a");
+        fs::write(&archive, []).unwrap();
+        let options = crate::CompileOptions {
+            extension_paths: vec![site],
+            ..crate::CompileOptions::default()
+        };
+        let program = crate::compile_file(&entry, None, &options).unwrap();
+        assert_eq!(
+            program.extension_archives,
+            [archive.canonicalize().unwrap()]
+        );
+    }
+
+    #[test]
+    fn an_earlier_declaration_allows_the_selected_runtime_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let stubs = directory.path().join("stubs");
+        let runtime = directory.path().join("runtime");
+        fs::create_dir(&stubs).unwrap();
+        fs::create_dir(&runtime).unwrap();
+        let entry = directory.path().join("main.py");
+        fs::write(&entry, "from typing import proof\nprint(proof() * 3)\n").unwrap();
+        fs::write(stubs.join("typing.pyi"), "def proof() -> int: ...\n").unwrap();
+        let source = runtime.join("typing.py");
+        fs::write(&source, "def proof() -> int: return 17\n").unwrap();
+        let graph = SourceGraph::load(&entry, None, &[stubs, runtime]).unwrap();
+        assert_eq!(graph.modules[graph.by_name["typing"]].path, source);
+    }
+
+    #[test]
+    fn adding_source_beside_a_lone_stub_invalidates_the_fallback() {
+        let directory = tempfile::tempdir().unwrap();
+        let site = directory.path().join("site");
+        fs::create_dir(&site).unwrap();
+        let entry = directory.path().join("main.py");
+        fs::write(&entry, "from typing import Union\n").unwrap();
+        fs::write(site.join("typing.pyi"), "class Marker: ...\n").unwrap();
+        let source = site.join("typing.py");
+        let options = crate::CompileOptions {
+            extension_paths: vec![site],
+            ..crate::CompileOptions::default()
+        };
+        let inputs = crate::compile_file(&entry, None, &options)
+            .unwrap()
+            .source_inputs;
+        assert!(inputs.fresh());
+        fs::write(source, "Union = 37\n").unwrap();
+        assert!(!inputs.fresh());
     }
 
     #[test]
