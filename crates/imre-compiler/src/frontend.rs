@@ -1279,6 +1279,12 @@ fn lower_graph(
                     .map(|value| (value, signature.returns, true)),
             );
         for (annotation, ty, is_return) in annotated {
+            if is_return
+                && graph.layout_hint.get() == crate::modules::LayoutHint::Available
+                && callables::invalid_aggregate(ty, &types)
+            {
+                graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
+            }
             let mismatch = if let Some(definition) =
                 namedtuples::annotation(graph, *module, annotation, &types)
                 && types.namedtuple_definition(ty) != Some(definition)
