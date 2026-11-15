@@ -55,7 +55,7 @@ enum ScalarAnnotation {
 }
 
 #[derive(PartialEq, Eq)]
-enum AttributeLookup<'a> {
+pub(super) enum AttributeLookup<'a> {
     Value,
     Method(Option<&'a mut Id>),
     ListedClassMember,
@@ -560,21 +560,6 @@ impl Context {
                 self.classes
                     .get("typing._Final")
                     .and_then(|&base| self.own_class_attr(base, name))
-            }
-            Value::Native(kind) if kind == "type" && name == "__text_signature__" => {
-                self.builtins.get("type.__text_signature__").copied()
-            }
-            Value::Native(kind) if kind == "type" && name == "__call__" => {
-                self.builtins.get("type.__call__").copied()
-            }
-            Value::Native(kind) if kind == "type" && name == "__prepare__" => {
-                self.builtins.get("type.__prepare__").copied()
-            }
-            Value::Native(kind) if kind == "type" && name == "__subclasses__" => {
-                self.builtins.get("type.__subclasses__").copied()
-            }
-            Value::Native(kind) if kind == "type" && name == "mro" => {
-                self.builtins.get("type.mro").copied()
             }
             Value::Native(kind) if kind == "object" => match name {
                 "__hash__" => self.builtins.get("object.__hash__").copied(),
@@ -3163,7 +3148,7 @@ impl Context {
     }
 
     /// Keep non-data wrapper receiver checks at call time for direct method calls.
-    fn default_attr(
+    pub(super) fn default_attr(
         &mut self,
         obj: Id,
         attr: AttributeName<'_>,
@@ -3321,7 +3306,7 @@ impl Context {
             None
         } else if self.is_type_object(obj) {
             self.allocation_base(obj)
-                .filter(|&base| matches!(self.heap.get(base), Value::Native(kind) if inherits_reader(kind)))
+                .filter(|&base| self.own_class_attr(base, name).is_some() || matches!(self.heap.get(base), Value::Native(kind) if inherits_reader(kind)))
                 .map(|_| (obj, NONE))
         } else if self
             .heap
@@ -8925,6 +8910,7 @@ impl Context {
                             | "method.__reduce__"
                             | "method-wrapper.__reduce__"
                             | "type.__init__"
+                            | "type.__getattribute__"
                             | "type.__setattr__"
                             | "type.__delattr__"
                             | "BaseException.add_note"

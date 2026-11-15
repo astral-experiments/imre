@@ -1,6 +1,9 @@
 //! Built-ins used by native Python code whose values are known at runtime.
 
-use super::{attribute_name::AttributeName, calls::ObjectAttribute};
+use super::{
+    attribute_name::AttributeName,
+    calls::{AttributeLookup, ObjectAttribute},
+};
 use imre_ast::providers::{BUILTIN_FUNCTIONS, BUILTIN_TYPES};
 
 use super::Context;
@@ -1863,15 +1866,15 @@ pub(super) fn call(
         let bound = ctx.lookup_attr(mapping, method)?;
         return ctx.call(bound, forwarded, Vec::new());
     }
-    if let Some(owner @ ("object" | "super")) = name.strip_suffix(".__getattribute__") {
+    if let Some(owner @ ("object" | "super" | "type")) = name.strip_suffix(".__getattribute__") {
         let Some((&object, values)) = args.split_first() else {
             return Err(type_error(format!(
                 "descriptor '__getattribute__' of '{owner}' object needs an argument"
             )));
         };
-        if owner == "super" && !ctx.builtin_slot_accepts(object, owner) {
+        if owner != "object" && !ctx.builtin_slot_accepts(object, owner) {
             return Err(type_error(format!(
-                "descriptor '__getattribute__' requires a 'super' object but received a '{}'",
+                "descriptor '__getattribute__' requires a '{owner}' object but received a '{}'",
                 ctx.type_name(object)
             )));
         }
@@ -1886,15 +1889,12 @@ pub(super) fn call(
                 values.len()
             )));
         };
-        let attr = attribute_name(ctx, *key)?;
-        return if owner == "super" {
-            ctx.super_getattribute(object, &attr)
-        } else {
-            ctx.default_object_attribute(
-                object,
-                AttributeName::from_lookup(&attr, Some(*key)),
-                ObjectAttribute::Get,
-            )
+        let text = attribute_name(ctx, *key)?;
+        let attr = AttributeName::from_lookup(&text, Some(*key));
+        return match owner {
+            "super" => ctx.super_getattribute(object, &text),
+            "type" => ctx.default_attr(object, attr, AttributeLookup::Value),
+            _ => ctx.default_object_attribute(object, attr, ObjectAttribute::Get),
         };
     }
     if matches!(
