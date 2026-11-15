@@ -23,7 +23,11 @@ impl FixedBodySource {
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
         let mut python_arguments = self.arguments == FrameArguments::Python;
+        let mut condition = None;
         let complete = ir::all_nodes(&function.body, &mut |node, parent| {
+            if let ir::Node::Statement(Statement::If(test, ..)) = node {
+                condition = Some(test);
+            }
             if parent.is_some_and(|expr| expr.coroutine_arguments().is_some())
                 || !node.has_fixed_site()
             {
@@ -53,7 +57,7 @@ impl FixedBodySource {
                     return false;
                 }
                 python_arguments = true;
-            } else if !expected.matches(&node) {
+            } else if !expected.matches_in(&node, condition) {
                 return false;
             }
             fixed_sites.push(range);
@@ -172,6 +176,10 @@ impl FixedNode {
 
     /// Compare owned payloads against the final instruction without copying them.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
+        self.matches_in(node, None)
+    }
+
+    fn matches_in(&self, node: &ir::Node<'_>, condition: Option<&Expr>) -> bool {
         if let ir::Node::Expression(expr) = node {
             match &expr.kind {
                 ExprKind::Str(value) => {
@@ -180,7 +188,14 @@ impl FixedNode {
                 ExprKind::Bytes(value) => {
                     return matches!(self, Self::Scalar(ir::Constant::Bytes(expected)) if expected == value);
                 }
-                ExprKind::Compare(..) if expr.ty != Type::PythonObject => return false,
+                // The branch writer tests a rich comparison on the Python frame.
+                // A fixed bool used as a value still needs its own layout.
+                ExprKind::Compare(..)
+                    if expr.ty != Type::PythonObject
+                        && !condition.is_some_and(|test| std::ptr::eq(test, *expr)) =>
+                {
+                    return false;
+                }
                 ExprKind::Invoke { .. } => {
                     return if let Self::Invocation(call, ty) = self {
                         *ty == expr.ty && expr.python_call() == Some(call.as_ref())
