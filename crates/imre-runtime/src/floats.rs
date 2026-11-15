@@ -354,9 +354,14 @@ pub(crate) fn parse(source: &str) -> Option<f64> {
 
 pub(crate) const INVALID_STRING_PREFIX: &str = "could not convert string to float: ";
 
-/// Format a rejected exact string, preserving its original spelling and Python quoting.
-pub(crate) fn invalid_string_message(value: &str) -> String {
-    format!("{INVALID_STRING_PREFIX}{}", string_repr(value))
+/// Parse an exact Python string, preserving its original spelling on failure.
+pub(crate) fn parse_str(value: &str) -> Result<f64> {
+    parse(value).ok_or_else(|| {
+        Error::new(
+            Kind::ValueError,
+            format!("{INVALID_STRING_PREFIX}{}", string_repr(value)),
+        )
+    })
 }
 
 /// # Safety
@@ -365,10 +370,7 @@ pub(crate) fn invalid_string_message(value: &str) -> String {
 pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
     // SAFETY: the caller keeps this immutable string alive.
     let value = unsafe { &*value };
-    finish(
-        parse(value).ok_or_else(|| Error::new(Kind::ValueError, invalid_string_message(value))),
-        0.0,
-    )
+    finish(parse_str(value), 0.0)
 }
 
 /// Apply the float grammar to ASCII buffer contents.
