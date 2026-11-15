@@ -31,6 +31,7 @@ struct ClosureNames {
     implicit_class: bool,
     // The enclosing statement contains a lexical site or a subtree the binder skips.
     needs_discovery: bool,
+    discover_attribute_stores: bool,
     cell_reads: BTreeSet<String>,
     local_annotations: Option<Box<class_metadata::Uses>>,
     string_annotations: bool,
@@ -262,6 +263,12 @@ impl<'a> Visitor<'a> for ClosureNames {
                 }
                 _ => {}
             },
+            ast::Expr::Attribute(attr)
+                if self.discover_attribute_stores && attr.ctx == ast::ExprContext::Store =>
+            {
+                self.needs_discovery = true;
+                self.visit_expr(&attr.value);
+            }
             ast::Expr::Lambda(lambda) => {
                 self.needs_discovery = true;
                 if self.include_nested_reads {
@@ -713,11 +720,10 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
         }
         let parent_yields = std::mem::take(&mut self.yields);
         if matches!(scope, Scope::Function { .. }) {
+            self.function_names.discover_attribute_stores = self.attribute_class.is_some();
             for stmt in body {
                 self.function_names.visit_stmt(stmt);
-                if std::mem::take(&mut self.function_names.needs_discovery)
-                    || self.attribute_class.is_some()
-                {
+                if std::mem::take(&mut self.function_names.needs_discovery) {
                     self.visit_stmt(stmt);
                 }
             }
