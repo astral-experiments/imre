@@ -602,6 +602,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn plain_enum_layout_depends_on_its_member_values() {
+        let graph = SourceGraph::single(
+            r#"from enum import Enum
+class Text(Enum):
+    word = "word"
+class Mixed(Enum):
+    word = "word"
+    count = 0
+    empty = None
+"#,
+        )
+        .unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert!(classes.ids.contains_key(&id(1)));
+        assert!(classes.registered_classes.contains(&id(2)));
+    }
+
+    #[test]
     fn object_fields_keep_native_and_python_bases_distinct() {
         let source = r#"class Open:
     def __init__(self, value):

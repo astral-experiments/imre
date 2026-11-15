@@ -41,7 +41,7 @@ impl Members {
         module_id: usize,
         member: &ast::StmtAssign,
         bindings: &HashSet<String>,
-    ) -> Result<String, String> {
+    ) -> Result<Option<String>, String> {
         let [ast::Expr::Name(target)] = member.targets.as_slice() else {
             return Err(module.error(member, "a StrEnum member requires one name"));
         };
@@ -114,6 +114,8 @@ impl Members {
                 }
                 name.to_ascii_lowercase()
             }
+            // The fixed enum layout stores strings. Enum can also store arbitrary Python values.
+            _ if self.plain => return Ok(None),
             _ => {
                 return Err(module.error(
                     &*member.value,
@@ -128,7 +130,7 @@ impl Members {
         });
         self.names.insert(name.to_owned(), index);
         self.declared.push(name.to_owned());
-        Ok(name.to_owned())
+        Ok(Some(name.to_owned()))
     }
 }
 
