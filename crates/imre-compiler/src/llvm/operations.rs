@@ -1169,6 +1169,14 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             {
                 self.operand_for(value, usage)
             }
+            // A narrowed float already carries the box required by the result.
+            ExprKind::Present(value)
+                if value.ty == Type::Float
+                    && let ExprKind::Unwrap(owner) = &value.kind
+                    && owner.ty == expr.ty =>
+            {
+                self.evaluate_for(owner, usage)
+            }
             ExprKind::Present(value) => {
                 let emitter = self.fixed();
                 let value = emitter.operand(value);
