@@ -86,20 +86,13 @@ impl Checker<'_> {
 
     fn test_truth_at(
         &mut self,
-        mut value: Expr,
+        value: Expr,
         at: &impl Ranged,
         site: Option<ast::ExprRef<'_>>,
     ) -> Result<Expr, String> {
         if self.registered.is_some() {
             // A recorded parameter type does not replace the object's live truth protocol.
             return Ok(registered::truth(value));
-        }
-        if self.placement_only
-            && self.fixed_sites.is_some()
-            && let ExprKind::Compare(operands, _) = &value.kind
-            && ir::Compare::integer_pair(operands)
-        {
-            value.ty = Type::PythonObject;
         }
         let value = Self::weak_target(value);
         if !self.needs_truth_dispatch(value.ty) {
