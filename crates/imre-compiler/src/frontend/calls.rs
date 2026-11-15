@@ -1148,9 +1148,10 @@ impl Checker<'_> {
         values.reserve_exact(order.len() - values.len());
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
-                let default = parameter.default.as_ref().ok_or_else(|| {
-                    missing_required_argument(self.source, call, &parameter.name)
-                })?;
+                let default = parameter
+                    .default
+                    .as_ref()
+                    .ok_or_else(|| missing_required_argument(self.source, call, &parameter.name))?;
                 order[index + offset] = values.len();
                 self.record_default_read(default, default_owner, index);
                 values.push(self.default_value(default, parameter.ty, &call.func)?);
