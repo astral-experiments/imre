@@ -2478,18 +2478,23 @@ impl<'a> SuitePreparation<'a> {
             let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
             let manager = values::located(site.range, site.anchor, manager);
             scope.report_child_refusals = true;
-            let binding = match scope.with_binding(item) {
-                Ok(binding) => {
-                    self.refusal = self.refusal.or_else(|| {
-                        self.literal_refusal(RegionRoot::Suite(&binding.as_ref()?.body))
-                    });
-                    binding
+            let binding = item.optional_vars.as_deref().and_then(|target| {
+                match contexts::python_binding(&mut scope, target) {
+                    Ok(binding) => {
+                        self.refusal = self
+                            .refusal
+                            .or_else(|| self.literal_refusal(RegionRoot::Suite(&binding.body)));
+                        Some(binding)
+                    }
+                    Err(()) => {
+                        refused_binding = Some(scope.refusal.unwrap_or((
+                            target.range(),
+                            "cannot compile this assignment target ahead of time",
+                        )));
+                        None
+                    }
                 }
-                Err(fault) => {
-                    refused_binding = Some(fault);
-                    None
-                }
-            };
+            });
             scope.report_child_refusals = false;
             protected = contexts::enter_python(protected, site, manager, binding);
             if refused_binding.is_some() {
@@ -3261,10 +3266,15 @@ impl statements::StatementLowering for SourceScope<'_> {
                 let finalbody = self.block(&region.finalbody)?;
                 return Ok(registered_try(output, body, handlers, orelse, finalbody));
             }
-            ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => Ok((
-                self.with_items(&stmt.items, stmt.is_async, &stmt.body)?,
-                true,
-            )),
+            ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => {
+                contexts::python_with(
+                    self,
+                    self.source.text,
+                    stmt,
+                    |scope, expr| scope.frame_value(expr).ok_or(()),
+                    Self::block_into,
+                )
+            }
             ast::Stmt::While(loop_) => {
                 let condition = self.condition_operand(&loop_.test).ok_or(())?;
                 let disabled = ir::control::boolean_literal(&condition) == Some(false);
@@ -3846,41 +3856,6 @@ impl SourceScope<'_> {
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
         self.block(stmts).map(|(body, _)| body)
-    }
-
-    fn with_binding(
-        &mut self,
-        item: &ast::WithItem,
-    ) -> StdResult<Option<ir::ContextBinding>, OperandRefusal> {
-        let Some(target) = item.optional_vars.as_deref() else {
-            return Ok(None);
-        };
-        contexts::python_binding(self, target)
-            .map(Some)
-            .map_err(|()| {
-                self.refusal.unwrap_or((
-                    target.range(),
-                    "cannot compile this assignment target ahead of time",
-                ))
-            })
-    }
-
-    fn with_items(
-        &mut self,
-        items: &[ast::WithItem],
-        is_async: bool,
-        suite: &[ast::Stmt],
-    ) -> StdResult<Vec<Statement>, ()> {
-        let mut statements = Vec::new();
-        let mut protected = &mut statements;
-        for item in items {
-            let manager = self.frame_value(&item.context_expr).ok_or(())?;
-            let binding = self.with_binding(item).map_err(|_| ())?;
-            let site = context_site(self.source.text, &item.context_expr, is_async);
-            protected = contexts::enter_python(protected, site, manager, binding);
-        }
-        *protected = self.suite(suite)?;
-        Ok(statements)
     }
 
     fn in_loop<T>(&mut self, kind: LoopScope, lower: impl FnOnce(&mut Self) -> T) -> T {

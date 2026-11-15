@@ -190,31 +190,38 @@ pub(super) fn enter_python(
     )
 }
 
-impl Checker<'_> {
-    pub(super) fn checked_python_with(
-        &mut self,
-        stmt: &ast::StmtWith,
-    ) -> Result<(Vec<Statement>, bool), String> {
-        let mut statements = Vec::new();
-        let mut protected = &mut statements;
-        for item in &stmt.items {
-            let manager = self.expr(&item.context_expr)?;
-            if manager.ty != Type::PythonObject {
-                self.require_registered_operation(&item.context_expr)?;
-            }
+/// Enter the written Python managers in order and give their innermost region its checked suite.
+pub(super) fn python_with<B: unpacking::PatternBinder>(
+    binder: &mut B,
+    source: &str,
+    stmt: &ast::StmtWith,
+    mut manager: impl FnMut(&mut B, &ast::Expr) -> StdResult<Expr, B::Error>,
+    suite: impl FnOnce(&mut B, &[ast::Stmt], &mut Vec<Statement>) -> StdResult<bool, B::Error>,
+) -> StdResult<statements::Block, B::Error> {
+    with_items(
+        binder,
+        &stmt.items,
+        |scope, item, protected| {
+            let value = manager(scope, &item.context_expr)?;
             let binding = item
                 .optional_vars
                 .as_deref()
-                .map(|target| python_binding(self, target))
+                .map(|target| python_binding(scope, target))
                 .transpose()?;
-            let site = registered::context_site(self.source, &item.context_expr, false);
-            protected = enter_python(protected, site, manager, binding);
-        }
-        *protected = self.block(&stmt.body)?.0;
-        // A manager can suppress an exception from its protected suite.
-        Ok((statements, true))
-    }
+            let site = registered::context_site(source, &item.context_expr, stmt.is_async);
+            Ok(Protected::Continue(enter_python(
+                protected, site, value, binding,
+            )))
+        },
+        |scope, protected| {
+            suite(scope, &stmt.body, protected)?;
+            // A manager can suppress an exception from its protected suite.
+            Ok(true)
+        },
+    )
+}
 
+impl Checker<'_> {
     pub(super) fn enter_generator_context<'s>(
         &mut self,
         out: &'s mut Vec<Statement>,
