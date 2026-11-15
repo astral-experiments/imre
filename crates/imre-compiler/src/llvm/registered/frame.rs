@@ -1648,16 +1648,24 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         &mut self,
         name: &str,
         range: ruff_text_size::TextRange,
-        value: &str,
+        rhs: &Expr,
         receiver: impl FnOnce(&mut Self) -> String,
     ) {
-        // The RHS is already owned and must outlive evaluation and disposal of the receiver.
-        let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |code| {
+        let value = self.evaluate_handle(rhs);
+        let write = |code: &mut Self| {
             let receiver = receiver(code);
-            code.write_attribute(&receiver, name, range, Some(value));
-            code.discard_truth(&mark);
-        });
+            code.write_attribute(&receiver, name, range, Some(&value));
+        };
+        // A permanent RHS adds no roots. The enclosing mutation already unwinds the receiver.
+        if permanent_handle(rhs).is_some() {
+            write(self);
+        } else {
+            let mark = self.temporary_mark();
+            self.unwind_operands(&mark, |code| {
+                write(code);
+                code.discard_truth(&mark);
+            });
+        }
     }
 
     fn unwind_with<T>(
@@ -1882,8 +1890,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         self.unwind_operands(&mark, |code| {
             match action {
                 AttributeAction::Store => {
-                    let value = code.evaluate_handle(first);
-                    code.store_attribute(name, range, &value, |code| {
+                    code.store_attribute(name, range, first, |code| {
                         code.evaluate_handle(operands.next().expect("attribute receiver"))
                     });
                 }
