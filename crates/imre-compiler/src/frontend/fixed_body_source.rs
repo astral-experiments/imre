@@ -94,6 +94,7 @@ pub(crate) enum FixedNode {
     Store(usize),
     StoreField(usize),
     Branch(usize, usize),
+    TryFinally(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
@@ -139,6 +140,14 @@ impl FixedNode {
         Some(match node {
             ir::Node::Statement(Statement::Position(range, None)) => Self::Position(*range),
             ir::Node::Statement(Statement::If(_, yes, no)) => Self::Branch(yes.len(), no.len()),
+            ir::Node::Statement(Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            }) if handlers.is_empty() && orelse.is_empty() && !finalbody.is_empty() => {
+                Self::TryFinally(body.len(), finalbody.len())
+            }
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
             ir::Node::Statement(Statement::Raise(Some(raised))) => Self::Raise {

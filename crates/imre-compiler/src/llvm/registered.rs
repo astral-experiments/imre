@@ -75,13 +75,12 @@ pub(crate) fn frame_inputs(
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
     let mut positions = checked.fixed_sites.iter();
     let private = checked.region().frame_layout(|node| {
-        let attribute = if !checked.fixed_sites.is_empty() && node.has_fixed_site() {
-            positions
-                .next()
-                .and_then(|&range| checked.fixed_attribute(range))
+        let source = if !checked.fixed_sites.is_empty() && node.has_fixed_site() {
+            positions.next().copied()
         } else {
             None
         };
+        let attribute = source.and_then(|range| checked.fixed_attribute(range));
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 return match stmt {
@@ -100,7 +99,9 @@ pub(crate) fn frame_inputs(
                     }
                     Statement::Raise(value) => {
                         uses_python_protocol = true;
-                        value.as_ref().is_none_or(|raised| raised.origin.is_none())
+                        // A placed raise uses its Python statement range for the traceback.
+                        source.is_some()
+                            || value.as_ref().is_none_or(|raised| raised.origin.is_none())
                     }
                     Statement::Return(value) => {
                         protocol_reads += protocol_parameter(value);
