@@ -87,6 +87,21 @@ impl Helpers {
             })
     }
 
+    pub(super) fn only_direct_locals_since(
+        &self,
+        start: usize,
+        locals: &HashMap<String, local_functions::Binding>,
+    ) -> bool {
+        let ids = self.first + start..self.first + self.len();
+        ids.is_empty()
+            || locals
+                .values()
+                .filter_map(|local| local.direct_definition())
+                .filter(|id| ids.contains(id))
+                .count()
+                == ids.len()
+    }
+
     pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
         let functions = self.functions.take();
         assert_eq!(functions.len(), self.reserved.replace(0));
