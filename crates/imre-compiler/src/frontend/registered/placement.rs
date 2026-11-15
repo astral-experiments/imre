@@ -66,6 +66,61 @@ mod tests {
     }
 
     #[test]
+    fn placed_module_calls_the_current_binding_without_native_defaults() {
+        let source = "from provider import render\nprint(render())\nprint(render(\"four\"))\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(
+            dir.path().join("provider.py"),
+            concat!(
+                "import sys\nimport changed_provider\n",
+                "def render(indent: str | None = None) -> int: return 3\n",
+                "sys.modules[__name__] = changed_provider\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("changed_provider.py"),
+            concat!(
+                "import sys\ndef second(value): return 91\n",
+                "def first(value=None):\n    sys.modules['__main__'].render = second\n    return 37\n",
+                "def __getattr__(name):\n    if name == 'render': return first\n    raise AttributeError(name)\n",
+            ),
+        )
+        .unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let module = &graph.modules[graph.entry];
+        let (_, mut initializers) = graph.take_registered_functions();
+        let entry = initializers.remove(&graph.entry).unwrap();
+        let original = entry.function.body.as_ptr();
+        let operations = HashMap::new();
+        let mut prepare = SuitePreparation::new(
+            &operations,
+            module.registered_values().context(source),
+            true,
+        );
+        let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
+        assert_eq!(suite.checked.function.body.as_ptr(), original);
+        let mut calls = Vec::new();
+        ir::walk_nodes(
+            &suite.checked.function.body[suite.placed_from..],
+            &mut |node, _| {
+                if let ir::Node::Expression(Expr {
+                    kind: ExprKind::Invoke { args, .. },
+                    ..
+                }) = node
+                {
+                    let site = args.site.python().unwrap();
+                    calls.push((&source[site.call.range], args.values.len()));
+                }
+            },
+        );
+        assert_eq!(calls, [("render()", 0)]);
+    }
+
+    #[test]
     fn recovered_function_keeps_its_checked_module_caller() {
         let text = include_str!("../../../../../tests/fixtures/callables/map_escaping.py");
         let project = tempfile::tempdir().unwrap();

@@ -445,6 +445,10 @@ impl SourceSites {
         let Some(site) = self.site_at(call.range()) else {
             return false;
         };
+        if call.arguments.is_empty() {
+            // The pending call site may not have been allocated yet.
+            return self.sites.len() <= site.index + 1;
+        }
         let Some(sites) = self.sites.get(site.index + 1..) else {
             return false;
         };
@@ -534,6 +538,7 @@ impl SourceSites {
         let ExprKind::Invoke { callable, .. } = &value.kind else {
             unreachable!()
         };
+        self.checked_expression(call.range(), value);
         let end = self.sites.len();
         Self::operand_sites(callable, call.func.range(), |node, _, range| {
             self.sites.push((range, FixedNode::checked(node)));
@@ -542,7 +547,6 @@ impl SourceSites {
         let count = self.sites.len() - end;
         self.sites[site.index + 1..].rotate_right(count);
         self.next_index += count;
-        self.checked_expression(call.range(), value);
     }
 
     /// Place the Python callee beside the native operation. Both entries use its written operands.

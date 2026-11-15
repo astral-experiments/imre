@@ -13999,7 +13999,29 @@ impl<'a> Checker<'a> {
                     "generator functions require direct iteration",
                 ));
             }
-            let value = self.source_call(call, signature, None, 0)?;
+            let mut value = self.source_call(call, signature, None, 0)?;
+            if self.module_scope
+                && self.placement_only
+                && let ExprKind::Call(_, args) = &mut value.kind
+                && args.values.len() > call.arguments.len()
+                && !calls::has_unpacking(call)
+                && let Some(name) = self.placed_call_name(call)
+                && let Some(sites) = &mut self.fixed_sites
+                && sites.has_written_arguments(call, &args.values)
+            {
+                // Fixed calls append defaults after the source operands. A rebound callable
+                // supplies its own defaults, while the checker retains the declared result.
+                args.values.truncate(call.arguments.len());
+                let mut placed = registered::values::bound_call(
+                    call,
+                    registered::values::callable_target(call),
+                    registered::values::located_name(name),
+                    std::mem::take(&mut args.values),
+                );
+                placed.ty = value.ty;
+                sites.invoked(call, &placed);
+                return Ok(placed);
+            }
             self.record_named_call(call, &value);
             return Ok(value);
         }
@@ -16000,10 +16022,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Retain a written global lookup for the Python entry of a checked positional call.
-    fn record_named_call(&mut self, call: &ast::ExprCall, value: &Expr) {
-        if let Some(sites) = &mut self.fixed_sites
-            && let Some(name) = call.func.as_name_expr()
+    /// Only a written, unshadowed bare name can use its module binding for the placed call.
+    fn placed_call_name<'call>(&self, call: &'call ast::ExprCall) -> Option<&'call ast::ExprName> {
+        let name = call.func.as_name_expr()?;
+        (self.fixed_sites.is_some()
             && self.namespace.is_none()
             && !self.names.contains_key(name.id.as_str())
             && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
@@ -16012,15 +16034,16 @@ impl<'a> Checker<'a> {
                 .graph
                 .session
                 .operand_types(self.module)
-                .is_original_operand(&call.func)
+                .is_original_operand(&call.func))
+        .then_some(name)
+    }
+
+    /// Retain a written global lookup for the Python entry of a checked positional call.
+    fn record_named_call(&mut self, call: &ast::ExprCall, value: &Expr) {
+        if let Some(name) = self.placed_call_name(call)
+            && let Some(sites) = &mut self.fixed_sites
         {
-            sites.positional_call(call, value, || {
-                Some(registered::values::located(
-                    name.range(),
-                    name.start(),
-                    registered::values::name_binding(name.id.clone()),
-                ))
-            });
+            sites.positional_call(call, value, || Some(registered::values::located_name(name)));
         }
     }
 

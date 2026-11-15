@@ -286,6 +286,10 @@ impl RegisteredSource<'_> {
     }
 }
 
+pub(in crate::frontend) fn located_name(name: &ast::ExprName) -> Expr {
+    located(name.range(), name.start(), name_binding(name.id.clone()))
+}
+
 pub(in crate::frontend) fn name_binding(id: impl Into<ast::name::Name>) -> Expr {
     Expr {
         ty: Type::PythonObject,
