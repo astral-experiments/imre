@@ -1409,8 +1409,8 @@ fn lower_graph(
             register(std::mem::take(completed), owners);
             capture();
         } else {
-            // A later registered launch can use these imports after its own source checks.
-            std::mem::take(completed).retain_imported(graph, owners);
+            // The lexical writer binds these frames after its own source checks.
+            std::mem::take(completed).retain_lexical(graph, owners, defer_capture);
         }
     };
     let checker_for = |module| {

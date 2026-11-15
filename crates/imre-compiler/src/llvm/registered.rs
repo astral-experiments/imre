@@ -99,7 +99,9 @@ pub(crate) fn frame_inputs(
                             || value.as_ref().is_none_or(|raised| raised.origin.is_none())
                     }
                     Statement::Return(value) => {
-                        protocol_reads += protocol_parameter(value);
+                        let reads = protocol_parameter(value);
+                        uses_scalar_protocol |= reads != 0 && source.is_some();
+                        protocol_reads += reads;
                         true
                     }
                     Statement::Position(..)
