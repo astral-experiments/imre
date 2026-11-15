@@ -128,6 +128,10 @@ impl<M> Diagnostic<M> {
         (self.kind == Kind::ExactType).then_some(self.position.as_ref()?.range)
     }
 
+    pub(super) fn operand_declaration(&self) -> Option<TypeDeclaration> {
+        self.position.as_ref()?.expected_from
+    }
+
     /// Attach the original declaration to a refused operand in its synchronous body.
     pub(super) fn in_function(
         &mut self,
@@ -198,9 +202,7 @@ impl<M> Diagnostic<M> {
         if !matches!(site, Some(CheckedSite::Function(_, _, BodyCheck::Lowering)))
             && self.kind == Kind::ExactType
             && self
-                .position
-                .as_ref()
-                .and_then(|position| position.expected_from)
+                .operand_declaration()
                 .is_some_and(|owner| selected.clone().any(|(id, _)| id == owner.module))
             && selected.any(|(_, path)| self.path.as_deref() == Some(path))
         {

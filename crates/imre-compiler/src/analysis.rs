@@ -967,6 +967,18 @@ impl Session {
             })
     }
 
+    pub(crate) fn unreachable_range(
+        &self,
+        module: usize,
+        range: TextRange,
+    ) -> Option<ty_python_semantic::types::ide_support::UnreachableKind> {
+        let file = self.db.program_file(self.files[module]);
+        ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file)
+            .iter()
+            .find(|dead| dead.range.contains_range(range))
+            .map(|dead| dead.kind)
+    }
+
     /// A module operand follows the statement's normal continuation if they have
     /// the same use-def condition. Calls before the statement may themselves raise.
     pub(crate) fn unconditional_module_operand(
@@ -1054,10 +1066,7 @@ impl Session {
             ty_python_core::reachability_constraints::ScopedReachabilityConstraintId::ALWAYS_TRUE,
             |start| condition(TextRange::at(start, 1.into())),
         );
-        condition(operand) == required
-            && !ty_python_semantic::types::ide_support::unreachable_ranges(&self.db, file)
-                .iter()
-                .any(|excluded| excluded.range.contains_range(operand))
+        condition(operand) == required && self.unreachable_range(module, operand).is_none()
     }
 
     /// Check both execution boundaries against the winners of the same registered program.
