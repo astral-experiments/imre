@@ -111,7 +111,7 @@ impl<'a> RegisteredSource<'a> {
     fn object_operation<E>(
         self,
         node: &ast::Expr,
-        attribute: Option<Box<Builtin>>,
+        placed: Option<FixedAttribute>,
         allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -134,13 +134,20 @@ impl<'a> RegisteredSource<'a> {
                 let Some(target) = receiver(target, method.is_some(), method)? else {
                     return Ok(None);
                 };
-                Ok(Some(selection.prepare(call, target, child)?))
+                let site = match placed {
+                    Some(FixedAttribute::Call(None, site)) if site.target == selection => Some(site),
+                    _ => None,
+                };
+                Ok(Some(selection.prepare(call, target, site, child)?))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
-                let op = attribute.map_or_else(
-                    || super::attribute_opcode(ir::AttributeAction::Load, field),
-                    |op| *op,
-                );
+                let op = match placed {
+                    Some(FixedAttribute::Operation { operation, position })
+                        if position == field.attr.start() && matches!(&*operation,
+                            Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, .. }
+                            if name == field.attr.as_str()) => *operation,
+                    _ => super::attribute_opcode(ir::AttributeAction::Load, field),
+                };
                 super::operation(op, Type::PythonObject, vec![value])
             })),
             _ => Ok(None),
@@ -515,10 +522,16 @@ impl ir::RegisteredCallTarget {
         self,
         call: &ast::ExprCall,
         target: Expr,
+        placed: Option<Box<ir::RegisteredCall>>,
         child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Expr, E> {
         if matches!(self, Self::Method { .. }) {
-            return Ok(bound_call(call, self, target, call_arguments(call, child)?));
+            let arguments = call_arguments(call, child)?;
+            let (site, target) = match placed {
+                Some(site) => (site, Box::new(target)),
+                None => self.bind(call, target, None),
+            };
+            return Ok(invoke_value(site, target, arguments));
         }
         let (layout, arguments) = prepared_arguments(call, child)?;
         let (site, target) = self.bind(call, target, Some(layout));
@@ -649,7 +662,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let value = callable_target(call).prepare(call, target, |arg| self.expr(arg))?;
+        let value = callable_target(call).prepare(call, target, None, |arg| self.expr(arg))?;
         Ok(self.scoped_call(value))
     }
 
@@ -1049,7 +1062,7 @@ pub(in crate::frontend) fn comparison(
 pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
-    attribute: Option<Box<Builtin>>,
+    placed: Option<FixedAttribute>,
     allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
@@ -1165,7 +1178,7 @@ pub(super) fn operation<E>(
         _ => {
             return source.object_operation(
                 node,
-                attribute,
+                placed,
                 allow_typed_receiver,
                 dynamic_receiver,
                 child,
@@ -1495,7 +1508,7 @@ impl Checker<'_> {
             let mut fixed_result = true;
             // Positional calls use their written order. Keyword calls already have a slot per operand.
             let mut indices = indices.into_iter().chain(0..call.arguments.len());
-            let value = callable_target(call).prepare(call, target, |arg| {
+            let value = callable_target(call).prepare(call, target, None, |arg| {
                 let index = indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
@@ -1620,30 +1633,23 @@ impl Checker<'_> {
                 source.located_operation(node, invoke_value(site, target, args)),
             ));
         }
-        let attribute = self.settled_attributes.as_deref_mut().and_then(|sites| {
-            let field = node.as_attribute_expr()?;
-            let FixedAttribute::Operation {
-                operation,
-                position,
-            } = sites.remove(&node.range())?
-            else {
-                return None;
-            };
-            // A rewritten operand can inherit a physical range under a different name.
-            let Builtin::RegisteredAttribute {
-                action: ir::AttributeAction::Load,
-                name,
-                ..
-            } = &*operation
-            else {
-                return None;
-            };
-            (position == field.attr.start() && name == field.attr.as_str()).then_some(operation)
+        // Rewritten syntax can share a physical range with another name.
+        let placed = self.settled_attributes.as_deref_mut().and_then(|sites| {
+            let range = node.range();
+            if node.is_attribute_expr()
+                || node.is_call_expr()
+                    && matches!(sites.get(&range), Some(FixedAttribute::Call(None, _)))
+                    && operands.is_original_operand(node)
+            {
+                sites.remove(&range)
+            } else {
+                None
+            }
         });
         let Some(mut value) = operation(
             node,
             source,
-            attribute,
+            placed,
             |method, receiver, operand| {
                 let Some(first) = first_local else {
                     return false;

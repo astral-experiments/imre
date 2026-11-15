@@ -553,9 +553,12 @@ pub(super) struct CheckedPlacement {
 }
 
 impl CheckedPlacement {
-    pub(super) fn retain_for_launch(self, graph: &SourceGraph, checks: &SourceChecks) {
+    pub(super) fn retain_for_launch(self, graph: &SourceGraph, checks: &SourceChecks) -> bool {
         if !self.check_source || checks.accepts(graph, self.module, self.range) {
             graph.retain_lexical_function(self.module, self.range.start(), self.frame);
+            true
+        } else {
+            false
         }
     }
 
