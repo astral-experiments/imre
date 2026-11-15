@@ -5754,44 +5754,6 @@ impl<'a> Checker<'a> {
         self.iteration_value(value, false, call)
     }
 
-    /// Recognizes items views only at a loop boundary; no view value escapes.
-    fn iteration_source(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
-        if let ast::Expr::Call(call) = expression
-            && let ast::Expr::Attribute(attribute) = &*call.func
-            && attribute.attr.as_str() == "items"
-            && self.class_reference(&attribute.value).is_none()
-        {
-            let receiver = self.expr(&attribute.value)?;
-            if receiver.ty == Type::PythonObject
-                || (receiver.ty == Type::JsonObject && call.arguments.is_empty())
-            {
-                return self.object_method_iteration(call, attribute, receiver);
-            }
-            if let Type::Class(class) = receiver.ty {
-                let value = self.iteration_method_call(call, attribute, class, receiver)?;
-                return self.iteration_value(value, false, expression);
-            }
-            if self.dict_or_record(receiver.ty).is_some() {
-                return self
-                    .dict_or_record_items(receiver, attribute, call)
-                    .map(Iteration::Prepared);
-            }
-            let receiver = if matches!(receiver.ty, Type::Document(_)) {
-                self.document_map(receiver)
-            } else {
-                receiver
-            };
-            if self.types.mapping(receiver.ty).is_some() {
-                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
-                    return Err(error(self.source, call, "dict.items() takes no arguments"));
-                }
-                return self.iteration_value(receiver, true, expression);
-            }
-        }
-        let value = self.iteration_expression(expression, None)?;
-        self.iteration_value(self.json_iteration(value), false, expression)
-    }
-
     /// Raise a statically known range binding error after evaluating its operands.
     fn range_argument_error(
         &mut self,
