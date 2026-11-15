@@ -24,7 +24,7 @@ impl InitializerCheck {
     pub(crate) fn fixed_error(&self) -> Option<&Diagnostic> {
         self.error
             .as_ref()
-            .filter(|error| error.kind != Kind::RegisteredExecution)
+            .filter(|error| error.kind != Kind::RegisteredInitializer)
     }
 }
 
@@ -620,8 +620,11 @@ impl Session {
         if iterated && (owner == file || function.is_async || !generator()?) {
             return None;
         }
-        let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        let bound = crate::frontend::bind_source_arguments(call, &function.parameters)?;
         if !source.declares_signatures {
+            if bound.missing.is_some() {
+                return None;
+            }
             if !iterated
                 && !function.is_async
                 && function.returns.is_some()
@@ -663,22 +666,38 @@ impl Session {
                     return None;
                 }
                 return Some(Err(
-                    Diagnostic::plain(error.rendered.clone()).classified(Kind::RegisteredExecution)
+                    Diagnostic::plain(error.rendered.clone()).classified(Kind::RegisteredInitializer)
                 ));
             }
             return None;
         }
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
-        let supplied = bound.iter().zip(actuals.iter().copied());
+        let supplied = bound.supplied.iter().zip(actuals.iter().copied());
+        // Fixed lowering already checks an incomplete call in operand order. Leave its
+        // earlier diagnostics in place before reporting that call on a registered entry.
+        let kind = if bound.missing.is_some() {
+            Kind::RegisteredInitializer
+        } else {
+            Kind::DeclaredArgument
+        };
         for ((p, value), actual) in supplied.clone() {
             if p.parameter.annotation.is_some()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
                 && let Some(error) = Session::scalar_contract_error(model, expected, value, actual)
             {
-                return Some(Err(error
-                    .classified(Kind::DeclaredArgument)
-                    .with_path(path)));
+                return Some(Err(error.classified(kind).with_path(path)));
             }
+        }
+        if let Some(parameter) = bound.missing {
+            if function.returns.is_none()
+                && !function.parameters.iter().any(|p| p.annotation().is_some())
+            {
+                return None;
+            }
+            let text = ruff_db::source::source_text(&self.db, file);
+            let error =
+                crate::frontend::missing_required_argument(text.as_str(), call, parameter.name());
+            return Some(Err(error.classified(kind).with_path(path)));
         }
         if !iterated
             && !function.is_async
@@ -758,7 +777,7 @@ impl Session {
             }
             _ => return None,
         };
-        Some(Err(error.classified(Kind::RegisteredExecution)))
+        Some(Err(error.classified(Kind::RegisteredInitializer)))
     }
 
     fn initialized_member(

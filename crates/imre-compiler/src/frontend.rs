@@ -188,7 +188,10 @@ mod zipfile;
 use assignments::{LocalState, ValueSource};
 pub(crate) use caller_cache::CallerCache;
 use calls::{Parameter, ParameterKind, parameter};
-pub(crate) use calls::{fixed_call_arguments, known_declared_argument, scalar_literal};
+pub(crate) use calls::{
+    bind_source_arguments, fixed_call_arguments, known_declared_argument, missing_required_argument,
+    scalar_literal,
+};
 use comprehensions::Helpers;
 pub(crate) use function_text::{docstring, docstring_literal};
 use module_values::{Initialization, ModuleValues};

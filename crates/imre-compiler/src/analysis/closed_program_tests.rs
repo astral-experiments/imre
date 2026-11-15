@@ -572,6 +572,38 @@ fn a_cold_call_keeps_its_first_party_argument_shape_across_layouts() {
 }
 
 #[test]
+fn a_dormant_module_call_keeps_its_required_imported_argument() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let scores = project.path().join("scores.py");
+    let provider = project.path().join("provider.py");
+    fs::write(&provider, "def take(n: int) -> int:\n    return n\n").unwrap();
+    fs::write(&scores, "import provider\nif False:\n    provider.take()\n").unwrap();
+    let mut compiler = crate::IncrementalCompiler::default();
+    for neighbor in ["", "def f(): return locals()\n"] {
+        fs::write(
+            &entry,
+            format!("import scores\n{neighbor}print(set([1,2]))\nprint(42)\n"),
+        )
+        .unwrap();
+        let error = compiler.check_file(&entry, None).unwrap_err();
+        assert_eq!(
+            error,
+            format!("{}:3:5: Imre: missing required argument \"n\"", scores.display())
+        );
+    }
+    let prior = project.path().join("prior.py");
+    fs::write(&prior, "def wrong() -> int:\n    return 'wrong'\n").unwrap();
+    let main = fs::read_to_string(&entry).unwrap();
+    fs::write(&entry, format!("import prior\n{main}")).unwrap();
+    let error = compiler.check_file(&entry, None).unwrap_err();
+    assert!(error.contains("prior.py:2:12"), "{error}");
+    fs::write(prior, "def wrong() -> int:\n    return 0\n").unwrap();
+    fs::write(provider, "def take(n: int = 37) -> int:\n    return n\n").unwrap();
+    compiler.check_file(&entry, None).unwrap();
+}
+
+#[test]
 fn computed_factory_preserves_dormant_declared_calls() {
     let tmp = tempdir().unwrap();
     let source = tmp.path().join("main.py");
