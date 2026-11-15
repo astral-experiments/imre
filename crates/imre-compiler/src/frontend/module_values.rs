@@ -978,7 +978,7 @@ impl Initialization {
                     .fixed_sites
                     .as_mut()
                     .and_then(|sites| sites.enter(statement.range()));
-                let falls_through = checker.statement(statement, Some(&mut body))?;
+                let falls_through = checker.statement(statement, Some(&mut body), None)?;
                 checker.leave_fixed_site(parent);
                 // An imported module's __main__ block must type-check, but it
                 // cannot read definitions that are still being initialized.

@@ -4192,6 +4192,23 @@ invoke(publish, True)
             assert result.returncode == 0 and not result.stderr, result
             assert result.stdout == b'first 7\n8\nTrue\nfirst 6\npublish argument "a" requires int\nfirst 2\n'
 
+        (root / "matched_parameter.py").write_text("""
+def label(change: float, neutral: bool) -> str:
+    value = change > 0
+    quiet = not neutral
+    match (value, quiet):
+        case (True, True):
+            return "yes"
+        case _:
+            return "no"
+
+label.__annotations__["change"] = str
+print(globals()["label"](2.0, True))
+""")
+        error = run(imre, "-B", "-m", "matched_parameter")
+        assert error.returncode == 1 and not error.stdout, error
+        assert error.stderr.endswith(b'TypeError: label argument "change" requires str\n'), error
+
         served = root / "served"
         served.mkdir()
         (served / "a&b").touch()

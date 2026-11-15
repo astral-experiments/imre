@@ -6799,7 +6799,10 @@ impl<'a> Checker<'a> {
                 };
                 let output =
                     (emitting || self.fixed_sites.is_some() || scratch).then_some(&mut *body);
-                let result = self.statement(statement, output);
+                // A source-owned function with no earlier instructions already has one writer.
+                let tail =
+                    function.filter(|_| emitting && start != 0 && index + 1 == statements.len());
+                let result = self.statement(statement, output, tail);
                 self.present_fields.truncate(depth);
                 result?
             };
@@ -6943,7 +6946,8 @@ impl<'a> Checker<'a> {
     fn statement(
         &mut self,
         statement: &ast::Stmt,
-        output: Option<&mut Vec<Statement>>,
+        mut output: Option<&mut Vec<Statement>>,
+        tail: Option<&ast::StmtFunctionDef>,
     ) -> Result<bool, String> {
         if self.bound_function_imports
             && self.graph.session.sole_local_import(self.module, statement)
@@ -7000,6 +7004,15 @@ impl<'a> Checker<'a> {
                 _ => false,
             };
             if !supported {
+                if let Some(function) = tail
+                    && self.returns == Type::PythonObject
+                    && let Some(body) = output.as_deref_mut()
+                    && let Some(falls) =
+                        registered::finish_source_statement(self, function, statement, body)
+                {
+                    self.frame_arguments = FrameArguments::Python;
+                    return Ok(falls);
+                }
                 self.require_registered_operation(statement)?;
             }
         }

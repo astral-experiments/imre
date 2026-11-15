@@ -480,23 +480,27 @@ pub(super) fn finish_source_checks(
     retry_fixed
 }
 
+fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
+    let module = &graph.modules[id];
+    RegisteredSource {
+        operand_types: Some(graph.session.operand_types(id)),
+        ..module
+            .registered_values()
+            .operands(&module.source, graph.python_optimization())
+    }
+}
+
 fn retain_generator_body(
     graph: &SourceGraph,
     id: ModuleId,
     physical: &ast::StmtFunctionDef,
 ) -> bool {
-    let module = &graph.modules[id];
     let Some(body) = RegisteredFunction::from_suite(
         &physical.body,
         RegisteredScope::Function {
             is_async: physical.is_async,
         },
-        RegisteredSource {
-            operand_types: Some(graph.session.operand_types(id)),
-            ..module
-                .registered_values()
-                .operands(&module.source, graph.python_optimization())
-        },
+        function_source(graph, id),
         &HashMap::new(),
         graph.python_optimization() == 0,
     ) else {
@@ -652,6 +656,36 @@ pub(super) fn prepare_checked_definition(
             check_source: deferred.is_some(),
         },
     )))
+}
+
+/// The selected Python return has no later checked statements that depend on
+/// narrowing or assignment facts. Keep its prefix and finish in the same slots.
+pub(super) fn finish_source_statement(
+    checker: &mut Checker<'_>,
+    function: &ast::StmtFunctionDef,
+    statement: &ast::Stmt,
+    body: &mut Vec<Statement>,
+) -> Option<bool> {
+    let mut scope = SourceScope::new(
+        RegisteredScope::Function {
+            is_async: function.is_async,
+        },
+        function_source(checker.graph, checker.module),
+        None,
+        checker.graph.python_optimization() != 0,
+    );
+    scope.locals = std::mem::take(&mut checker.locals);
+    scope.names = std::mem::take(&mut checker.names);
+    let locals = scope.locals.len();
+    let start = body.len();
+    let result = scope.source_operation(statement, body).ok();
+    if result.is_none() {
+        body.truncate(start);
+        scope.truncate_locals(locals);
+    }
+    checker.locals = scope.locals;
+    checker.names = scope.names;
+    result
 }
 
 fn checked_definition(
@@ -3799,6 +3833,15 @@ impl SourceScope<'_> {
         }
         let start = body.len();
         push_checkpoint(body, stmt);
+        self.source_operation(stmt, body)
+            .inspect_err(|_| body.truncate(start))
+    }
+
+    fn source_operation(
+        &mut self,
+        stmt: &ast::Stmt,
+        body: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
         let mut lower = |scope: &mut Self| {
             statements::StatementLowering::source_statement(
                 scope,
@@ -3807,15 +3850,11 @@ impl SourceScope<'_> {
                 body,
             )
         };
-        let result = if stmt.is_aug_assign_stmt() {
+        if stmt.is_aug_assign_stmt() {
             self.with_suspending_operands(lower)
         } else {
             lower(self)
-        };
-        if result.is_err() {
-            body.truncate(start);
         }
-        result
     }
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
