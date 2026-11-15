@@ -685,28 +685,7 @@ impl BuiltinDescriptor {
             "__doc__" if self.owner == "typing.Generic" => ctx.text("Function to initialize subclasses."),
             "__text_signature__" if self.owner == "typing.Generic" => NONE,
             "__name__" => ctx.text(self.name),
-            "__qualname__" => {
-                let owner = if self.class() != "wrapper_descriptor"
-                    && let Some(receiver) = receiver
-                {
-                    match ctx.heap.get(receiver) {
-                        _ if self.owner == "type" || self.class() == "classmethod_descriptor" => ctx.class_qualname(receiver),
-                        _ if matches!(self.owner, value::REGEX_PATTERN_TYPE | value::REGEX_MATCH_TYPE | value::ZSTD_COMPRESS_TYPE | value::ZSTD_DECOMPRESS_TYPE | value::BZ2_COMPRESS_TYPE | value::BZ2_DECOMPRESS_TYPE | value::LZMA_COMPRESS_TYPE | value::LZMA_DECOMPRESS_TYPE) => self.owner.rsplit('.').next()?,
-                        _ if matches!(self.owner, "builtin_function_or_method" | "method" | "method-wrapper") => self.owner,
-                        Value::Deque(_) if self.owner == deque::CLASS => "deque",
-                        Value::DefaultDict { .. } if self.owner == defaultdict::CLASS => "defaultdict",
-                        Value::NamedTuple { class: Some(owner), .. } if let Some(layout) = stdlib::structseq::layout(owner) => layout.name(),
-                        value if let Some(class) = value.instance_class() => ctx
-                            .class_attr(class, "__qualname__")
-                            .and_then(|name| ctx.str_value(name).ok())
-                            .unwrap_or_else(|| ctx.type_name(receiver)),
-                        _ => ctx.type_name(receiver),
-                    }
-                } else {
-                    self.owner.rsplit('.').next()?
-                };
-                ctx.text(format!("{owner}.{}", self.name))
-            }
+            "__qualname__" => ctx.text(format!("{}.{}", self.owner.rsplit('.').next()?, self.name)),
             "__objclass__" if receiver.is_none() && self.owner == "typing.Generic" => {
                 typing::named_class(ctx, "typing", "Generic")
             }

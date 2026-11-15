@@ -4693,6 +4693,31 @@ impl Context {
                 if name == "__self__" {
                     return Ok(receiver);
                 }
+                if name == "__qualname__" && slot.class() != "wrapper_descriptor" {
+                    if matches!(self.heap.get(receiver), Value::Module { .. }) {
+                        return Ok(self.text(slot.name));
+                    }
+                    let owner = if self.is_type_object(receiver) {
+                        receiver
+                    } else {
+                        self.exact_type(receiver)?
+                    };
+                    let name = self.lookup_attr(owner, "__qualname__")?;
+                    let Some(storage) = self.string_storage(name) else {
+                        return Err(Error::new(
+                            "TypeError",
+                            "<method>.__class__.__qualname__ is not a unicode object",
+                        ));
+                    };
+                    let prefix = if storage == name {
+                        name
+                    } else {
+                        let string = self.builtin("str");
+                        self.call(string, vec![name], Vec::new())?
+                    };
+                    let suffix = self.text(format!(".{}", slot.name));
+                    return self.concat_str(prefix, suffix);
+                }
                 if let Some(value) = slot.attribute(self, name, Some(receiver)) {
                     return Ok(value);
                 }
