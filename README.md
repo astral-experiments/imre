@@ -97,8 +97,8 @@ for field in ["name", "score"]:
     print(getattr(results[0], field))
 ```
 
-A function with a fixed signature cannot currently call itself. An async
-generator can feed an async comprehension. See the [language subset](docs/subset.md)
+Imre compiles direct and mutual recursion when it can resolve the argument and
+return types. An async generator can feed an async comprehension. See the [language subset](docs/subset.md)
 for details on supported operations, and [module coverage](docs/stdlib.md) for
 the standard library.
 
