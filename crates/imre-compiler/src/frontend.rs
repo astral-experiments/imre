@@ -1766,17 +1766,23 @@ fn lower_graph(
                 break;
             }
         };
-        if !body_reports.is_empty() {
-            continue;
-        }
-        if cannot_return && completed_calls.insert(signature.id) && !needs_registered_entry {
+        let after_refusal = !body_reports.is_empty();
+        if !after_refusal
+            && cannot_return
+            && completed_calls.insert(signature.id)
+            && !needs_registered_entry
+        {
             body_checks = None;
         }
-        let Some((body, sums)) = placed else { continue };
-        has_wrapper_link |= body.wrapper_link;
-        if live {
-            let mut body = body;
-            if let Some(source) = &mut body.source
+        let Some((mut body, sums)) = placed else {
+            continue;
+        };
+        has_wrapper_link |= !after_refusal && body.wrapper_link;
+        if live || after_refusal {
+            // A prior refusal skips native placement, but the checked sibling still
+            // belongs to its original signature slot when the Python frame takes it.
+            if signature.physical_frame
+                && let Some(source) = &mut body.source
                 && let Some(prepared) = pending_capture.borrow_mut().as_mut()
             {
                 source.arguments = FrameArguments::Python;
