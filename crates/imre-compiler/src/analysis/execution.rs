@@ -53,10 +53,10 @@ impl ExecutionIntrinsic {
     }
 
     fn from_type<'db>(model: &SemanticModel<'db>, ty: Type<'db>) -> Option<Self> {
-        super::select_stdlib_function(model, ty, "builtins", |name| {
+        super::select_stdlib_function(model, ty, "builtins", |function| {
             [Self::Exec, Self::Eval]
                 .into_iter()
-                .find(|kind| kind.name() == name)
+                .find(|kind| kind.name() == function.name.as_str())
         })
     }
 

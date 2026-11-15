@@ -65,19 +65,6 @@ pub(super) fn arity_error(
     }) {
         return None;
     }
-    let params = &function.parameters;
-    let names: Vec<_> = params
-        .iter_non_variadic_params()
-        .map(|p| p.name().as_str())
-        .collect();
-    let (positional, keyword_only) = names.split_at(names.len() - params.kwonlyargs.len());
-    let shape = imre_ast::source_arguments::Shape {
-        positional,
-        positional_only: params.posonlyargs.len(),
-        keyword_only,
-        varargs: params.vararg.is_some(),
-        kwargs: params.kwarg.is_some(),
-    };
     let name = owner.map_or_else(
         || function.name.to_string(),
         |c| format!("{c}.{}", function.name),
@@ -91,24 +78,47 @@ pub(super) fn arity_error(
     let keys = keywords[..explicit]
         .iter()
         .map(|kw| kw.arg.as_deref().unwrap());
-    let defaults = params
-        .posonlyargs
-        .iter()
-        .chain(&params.args)
-        .filter(|p| p.default.is_some())
-        .count();
-    match shape.bind(
-        &name,
-        supplied,
-        keys,
-        defaults,
-        |slot, _| params.kwonlyargs[slot].default.is_some(),
-        |_, _| None,
-    ) {
+    match bind_source(function, &name, supplied, keys) {
         Err(imre_ast::source_arguments::Error::Duplicate(message)) => Some(message),
         Err(imre_ast::source_arguments::Error::Arity(message)) if explicit == keywords.len() => {
             Some(message)
         }
         _ => None,
     }
+}
+
+/// Bind named operands to the selected source declaration using the Python frame binder.
+pub(crate) fn bind_source<'a>(
+    function: &ast::StmtFunctionDef,
+    name: &str,
+    supplied: usize,
+    keys: impl ExactSizeIterator<Item = &'a str> + Clone,
+) -> std::result::Result<imre_ast::source_arguments::Binding, imre_ast::source_arguments::Error> {
+    let params = &function.parameters;
+    let names: Vec<_> = params
+        .iter_non_variadic_params()
+        .map(|p| p.name().as_str())
+        .collect();
+    let (positional, keyword_only) = names.split_at(names.len() - params.kwonlyargs.len());
+    let shape = imre_ast::source_arguments::Shape {
+        positional,
+        positional_only: params.posonlyargs.len(),
+        keyword_only,
+        varargs: params.vararg.is_some(),
+        kwargs: params.kwarg.is_some(),
+    };
+    let defaults = params
+        .posonlyargs
+        .iter()
+        .chain(&params.args)
+        .filter(|p| p.default.is_some())
+        .count();
+    shape.bind(
+        name,
+        supplied,
+        keys,
+        defaults,
+        |slot, _| params.kwonlyargs[slot].default.is_some(),
+        |_, _| None,
+    )
 }

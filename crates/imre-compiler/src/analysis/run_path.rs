@@ -106,9 +106,9 @@ struct Calls<'a> {
 }
 
 #[derive(PartialEq)]
-enum Selection {
+enum Selection<T = ()> {
     Other,
-    RunPath,
+    RunPath(T),
     Ambiguous,
 }
 
@@ -152,6 +152,14 @@ impl Calls<'_> {
     }
 
     fn selection(&self, expr: &ast::Expr) -> Selection {
+        self.select(expr, |_| ())
+    }
+
+    fn select<T>(
+        &self,
+        expr: &ast::Expr,
+        selected: impl FnOnce(&ast::StmtFunctionDef) -> T,
+    ) -> Selection<T> {
         let genuine = |ty| is_stdlib_function_type(&self.model, ty, "runpy", "run_path");
         match expr.inferred_type(&self.model) {
             Some(Type::Union(union))
@@ -159,7 +167,11 @@ impl Calls<'_> {
             {
                 Selection::Ambiguous
             }
-            Some(ty) if genuine(ty) => Selection::RunPath,
+            Some(ty) => super::select_stdlib_function(&self.model, ty, "runpy", |function| {
+                (function.name.as_str() == "run_path")
+                    .then(|| Selection::RunPath(selected(function)))
+            })
+            .unwrap_or(Selection::Other),
             _ => Selection::Other,
         }
     }
@@ -168,63 +180,84 @@ impl Calls<'_> {
         if self.replaced && self.export(&call.func) {
             return;
         }
-        match self.selection(&call.func) {
-            ordinary @ Selection::Other => {
-                self.read_operand(&call.func, Some(ordinary));
-                return;
+        match self.select(&call.func, |declaration| {
+            self.filename_error(call, declaration)
+        }) {
+            Selection::Other => {
+                self.read_operand(&call.func, Some(Selection::Other));
             }
             Selection::Ambiguous => {
                 self.calls.push((
                     call.func.range(),
                     "cannot prove whether the selected callable is runpy.run_path",
                 ));
-                return;
             }
-            Selection::RunPath => (),
+            Selection::RunPath(error) => self.calls.extend(error),
         }
-        // Consume the frontend's mapping of supplied arguments to formal parameters.
-        // The emitted call still evaluates the callable and its arguments exactly once.
-        let Some(signature) =
-            ty_python_semantic::types::ide_support::resolved_call_signature(&self.model, call)
-        else {
-            self.calls.push((
+    }
+
+    fn filename_error(
+        &self,
+        call: &ast::ExprCall,
+        declaration: &ast::StmtFunctionDef,
+    ) -> Option<(TextRange, &'static str)> {
+        let invalid = || {
+            (
                 call.range(),
                 "cannot bind the executable filename of runpy.run_path",
-            ));
-            return;
+            )
         };
-        // An ordinarily malformed fixed call fails Python binding before entering run_path.
-        if !call
-            .arguments
-            .iter_source_order()
-            .any(|arg| arg.is_variadic())
-            && signature
-                .argument_to_parameter_mapping
-                .iter()
-                .any(|b| !b.matched)
-        {
-            return;
-        }
-        for (arg, binding) in call
-            .arguments
-            .iter_source_order()
-            .zip(signature.argument_to_parameter_mapping)
-        {
-            if !binding.parameters.iter().any(|p| p.index == 0) {
-                continue;
-            }
+        let check = |arg: ast::ArgOrKeyword<'_>| {
             let reason = match arg.value() {
                 ast::Expr::StringLiteral(s) if !arg.is_variadic() => {
                     if (self.has_file_body)(s.value.to_str()) {
-                        continue;
+                        return None;
                     }
                     "runpy.run_path requires a declared file at this exact filename"
                 }
                 _ => "runpy.run_path has an open executable filename",
             };
-            self.calls.push((arg.value().range(), reason));
-            break;
+            Some((arg.value().range(), reason))
+        };
+        let args = &call.arguments;
+        if !args.iter_source_order().any(|arg| arg.is_variadic()) {
+            let keys = args.keywords.iter().map(|kw| kw.arg.as_deref().unwrap());
+            let binding = match crate::frontend::bind_source(
+                declaration,
+                declaration.name.as_str(),
+                args.args.len(),
+                keys,
+            ) {
+                Ok(binding) => binding,
+                Err(imre_ast::source_arguments::Error::Memory) => return Some(invalid()),
+                // Python binding fails before entering this function.
+                Err(_) => return None,
+            };
+            if let Some(first) = args.args.first() {
+                return check(first.into());
+            }
+            return binding
+                .keywords
+                .iter()
+                .position(|slot| *slot == Some(0))
+                .and_then(|i| check((&args.keywords[i]).into()));
         }
+        // Unpacked operands need ty's possible parameter matches.
+        let Some(signature) =
+            ty_python_semantic::types::ide_support::resolved_call_signature(&self.model, call)
+        else {
+            return Some(invalid());
+        };
+        args.iter_source_order()
+            .zip(signature.argument_to_parameter_mapping)
+            .find_map(|(arg, binding)| {
+                binding
+                    .parameters
+                    .iter()
+                    .any(|p| p.index == 0)
+                    .then(|| check(arg))
+                    .flatten()
+            })
     }
 }
 
@@ -256,7 +289,7 @@ impl<'ast> Visitor<'ast> for Calls<'_> {
             }
             if target.is_name_expr()
                 && (a.value.is_name_expr() || a.value.is_attribute_expr())
-                && (self.selection(&a.value) == Selection::RunPath
+                && (self.selection(&a.value) == Selection::RunPath(())
                     || self.module(&a.value, "runpy"))
             {
                 // ty resolves the alias where it is called or handed to another function.

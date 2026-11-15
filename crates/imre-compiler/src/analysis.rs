@@ -4960,14 +4960,17 @@ fn is_stdlib_function_type<'db>(
     owner: &str,
     name: &str,
 ) -> bool {
-    select_stdlib_function(model, ty, owner, |actual| (actual == name).then_some(())).is_some()
+    select_stdlib_function(model, ty, owner, |f| {
+        (f.name.as_str() == name).then_some(())
+    })
+    .is_some()
 }
 
 fn select_stdlib_function<'db, T>(
     model: &SemanticModel<'db>,
     ty: ty_python_semantic::types::Type<'db>,
     owner: &str,
-    select: impl FnOnce(&str) -> Option<T>,
+    select: impl FnOnce(&ruff_python_ast::StmtFunctionDef) -> Option<T>,
 ) -> Option<T> {
     use ty_python_core::definition::DefinitionKind;
     use ty_python_semantic::types::{Type, TypeDefinition};
@@ -4986,8 +4989,8 @@ fn select_stdlib_function<'db, T>(
         return None;
     };
     let parsed = ruff_db::parsed::parsed_module(db, def.python_file(db)).load(db);
-    let selected = select(function.node(&parsed).name.as_str())?;
-    (model.resolve_module(Some(owner), 0)?.file(db) == Some(file)).then_some(selected)
+    (model.resolve_module(Some(owner), 0)?.file(db) == Some(file))
+        .then(|| select(function.node(&parsed)))?
 }
 
 /// An unannotated local function in a generator binds its arguments when iteration reaches the call.
