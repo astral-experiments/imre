@@ -41,6 +41,45 @@ def check_reassigned_callable_operand(imre, root, run):
     ), result
 
 
+def check_imported_call_arguments(imre, root, run):
+    project = root / "imported_arguments"
+    project.mkdir()
+    (project / "provider.py").write_text(
+        "import sys, changed_provider\n"
+        "def render(indent: str | None = None) -> int: return 3\n"
+        "sys.modules[__name__] = changed_provider\n"
+    )
+    (project / "changed_provider.py").write_text(
+        "import sys\n"
+        "def again(value): return value\n"
+        "def first():\n"
+        "    sys.modules['__main__'].render = again\n"
+        "    return 'ab'\n"
+        "def __getattr__(name):\n"
+        "    if name == 'render':\n"
+        "        print('member', name)\n"
+        "        return first\n"
+        "    raise AttributeError(name)\n"
+    )
+    entry = project / "main.py"
+    script = 'from provider import render\nprint(render())\nprint(render("four"))\n'
+    for source, first in [(script, b"ab"), (script.replace("render())", "render() * 2)"), b"abab")]:
+        entry.write_text(source)
+        result = run(imre, "-B", entry, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"member render\n" + first + b"\nfour\n", b""), result
+    entry.write_text(script + "\ndef fixed(n: int) -> int: return n\nif False:\n    fixed('wrong')\n")
+    rejected = run(imre, "-B", entry)
+    assert rejected.returncode == 1 and not rejected.stdout, rejected
+    assert b"main.py:7:11: Imre: expected int, got str" in rejected.stderr, rejected
+
+    entry.write_text(
+        "def number(left: int = 6, right: int = 7) -> int: return left * 10 + right\n"
+        "print(number(right=number(), left=2))\n"
+    )
+    fixed = run(imre, "-B", entry)
+    assert (fixed.returncode, fixed.stdout, fixed.stderr) == (0, b"87\n", b""), fixed
+
+
 def check_registered_entry_operand(imre, root, run):
     entry = root / "checked_operand.py"
     guard = (
@@ -2359,6 +2398,7 @@ def main():
         check_module_search_root(imre, root, run)
         check_reassigned_callable_operand(imre, root, run)
         check_registered_entry_operand(imre, root, run)
+        check_imported_call_arguments(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)
         check_frozen_modules_startup(imre, root, run)
