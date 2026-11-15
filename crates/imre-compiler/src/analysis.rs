@@ -678,15 +678,12 @@ pub(crate) fn check_registered_project<'a>(
         };
         let source = crate::normalize_source(source, kind)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        let original = winner.checked_module.and_then(|id| {
+        let checked_source = winner.checked_module.and_then(|id| {
             let module = &checked?.modules[id];
-            (winner.declares_signatures
-                && is_program
-                && module.checks_source_contracts()
-                && module.original_source() == winner.source)
+            (module.checks_source_contracts() && module.original_source() == winner.source)
                 .then_some((id, module.path.as_path()))
         });
-        if let Some((graph, (id, _))) = checked.zip(original)
+        if let Some((graph, (id, _))) = checked.zip(checked_source)
             && (kind == crate::SourceKind::Command) == (graph.virtual_command && id == graph.entry)
         {
             // The loader checked these original bytes under the same form-feed rules.
@@ -700,6 +697,7 @@ pub(crate) fn check_registered_project<'a>(
         } else {
             session.register_file(&path, &source, kind)?;
         }
+        let original = checked_source.filter(|_| winner.declares_signatures && is_program);
         paths.push((path, is_program, original));
     }
     if let Some((cache, true)) = cache {
