@@ -5546,8 +5546,11 @@ impl<'a> Checker<'a> {
             checker.apply_facts(&value.test, truth);
             let expression = if truth { &*value.body } else { &*value.orelse };
             let guards = checker.present_fields.len();
-            if narrowing::expression_assignments(expression).is_empty() {
-                checker.enter_namespace_guards(&value.test, truth, &[]);
+            checker.enter_namespace_guards(&value.test, truth, &[]);
+            if checker.present_fields.len() > guards
+                && !narrowing::expression_assignments(expression).is_empty()
+            {
+                checker.present_fields.truncate(guards);
             }
             checker.guard_field_read(expression, records::present_field(&test, truth));
             let result = check(checker, expression);
