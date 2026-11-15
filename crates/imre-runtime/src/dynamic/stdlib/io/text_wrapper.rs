@@ -656,7 +656,7 @@ impl Wrapper {
     }
 
     fn read(ctx: &mut Context, receiver: Id, limit: Option<usize>, line: bool) -> Result<Id> {
-        let w = Self::from_receiver(ctx, receiver)?;
+        let w = Self::initialized(ctx, receiver)?;
         w.binary()?;
         if !w.readable.get() {
             return Err(Error::new("UnsupportedOperation", "not readable"));
@@ -705,6 +705,9 @@ impl Wrapper {
                     w.telling.get(),
                 )?
             };
+            // A Python buffer can block or replace the wrapper. Only the snapshot and buffer
+            // are needed across its call. Resolve the receiver's current decoder on return.
+            drop(w);
             let data = invoke(ctx, buffer, method, args)?;
             if all && data == NONE {
                 return Err(Error::new("BlockingIOError", "Read returned None."));
