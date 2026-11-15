@@ -502,6 +502,17 @@ print(down(2))",
         std::fs::write(&path, format!("{source}\n{caller}\n")).unwrap();
         check_file(&path, None).unwrap();
     }
+    let mut graph = modules::SourceGraph::load(&path, None, &[]).unwrap();
+    graph.registered_startup = true;
+    checked_lower(&mut graph).unwrap();
+    let start = ruff_text_size::TextSize::try_from(source.find("def invoke").unwrap()).unwrap();
+    let functions = graph.registered_functions();
+    let closure = &functions[&graph.entry][&start];
+    assert!(closure.function.body.windows(2).any(|statements| {
+        matches!(statements, [ir::Statement::Position(range, _), ir::Statement::Return(value)]
+            if &source[*range] == "return saved(3)"
+                && value.python_call().is_some_and(|site| &source[site.range] == "saved(3)"))
+    }));
 }
 
 #[test]
