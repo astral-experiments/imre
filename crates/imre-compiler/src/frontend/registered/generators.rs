@@ -41,11 +41,6 @@ impl LexicalOperands {
                 }
                 self.lambdas.insert(lambda.start(), plan);
             }
-            LexicalSite::Template(template, owner) => {
-                if let Some(expressions) = &mut self.expressions {
-                    expressions.prepare_template(template, source, owner);
-                }
-            }
         }
     }
 }

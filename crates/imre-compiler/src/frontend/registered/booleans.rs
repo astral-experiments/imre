@@ -76,34 +76,6 @@ impl ExpressionSites {
         self.lexical.insert((node.range(), node.kind()), selected);
     }
 
-    /// A template owns its lexical operand and any refusal in its interpolation.
-    pub(super) fn prepare_template(
-        &mut self,
-        node: &ast::Expr,
-        source: RegisteredSource<'_>,
-        owner: super::RegisteredScope,
-    ) {
-        let operand = super::RegisteredOperand::prepare_required(
-            node,
-            source,
-            owner,
-            "cannot compile this template ahead of time",
-            |scope| scope.report_child_refusals = true,
-        );
-        let selection = match operand {
-            Ok(operand) => Selection::Operand(Box::new(operand)),
-            Err((range, reason)) => Selection::Refused(range, reason),
-        };
-        self.register_lexical(node.into(), Rc::new(selection));
-    }
-
-    #[cfg(test)]
-    pub(crate) fn templates(&self) -> impl Iterator<Item = (TextRange, &Selection)> {
-        self.lexical.iter().filter_map(|(&(range, kind), value)| {
-            (kind == ast::NodeKind::ExprTString).then_some((range, value.as_ref()))
-        })
-    }
-
     #[cfg(test)]
     pub(crate) fn take_lexical(&mut self) -> Self {
         std::mem::take(self)
@@ -165,9 +137,9 @@ impl PhysicalPreparation<'_, '_> {
         node: &ast::Expr,
         select: fn(&mut Self, &ast::Expr) -> Option<Selection>,
     ) -> OwnedExpression {
-        // Lexical bindings and template fields have already been compiled in their own scope.
+        // Lambda bindings have already been compiled in their own scope.
         let kind = ast::AnyNodeRef::from(node).kind();
-        let lexical = if node.is_lambda_expr() || node.is_t_string_expr() {
+        let lexical = if node.is_lambda_expr() {
             self.suite
                 .sites
                 .expressions

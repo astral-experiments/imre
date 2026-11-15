@@ -1893,6 +1893,10 @@ mod tests {
     /// Plan the consuming suites without their lambda descriptors. The physical
     /// emitter still has the real, checked children when it reads a residual operand.
     fn inject_residual_child_module(prepared: &mut PreparedBody) {
+        inject_missing_lambdas(prepared, |_| true);
+    }
+
+    fn inject_missing_lambdas(prepared: &mut PreparedBody, missing: impl Fn(TextSize) -> bool) {
         use crate::frontend::{RegisteredScope, RegisteredSource, SuitePreparation};
 
         let mut classes = std::mem::take(&mut prepared.source.scopes.classes);
@@ -1902,9 +1906,10 @@ mod tests {
             prepared.syntax = Some(Cow::Owned(parsed.into_syntax().body));
         }
         let body = prepared.syntax.as_deref().unwrap();
-        let missing = HashMap::new();
+        let mut available = std::mem::take(&mut prepared.source.lambdas);
+        let omitted: Vec<_> = available.extract_if(|site, _| missing(*site)).collect();
         let source = RegisteredSource {
-            lambdas: Some(&missing),
+            lambdas: Some(&available),
             ..prepared.source.registered_source()
         };
         let mut lexical = crate::frontend::LexicalOperands::default();
@@ -1956,6 +1961,8 @@ mod tests {
             suites.class_suite(class, &prepared.source.private_names, &mut classes);
         }
         let sites = suites.sites;
+        available.extend(omitted);
+        prepared.source.lambdas = available;
         prepared.initializer = initializer;
         prepared.source.scopes.classes = classes;
         prepared.source.statement_sites = sites;
@@ -5237,21 +5244,82 @@ mod tests {
     }
 
     #[test]
+    fn template_default_and_body_suspend_in_their_defining_frames() {
+        use crate::ir::{self, Builtin, ExprKind};
+
+        let text = concat!(
+            "async def factory():\n",
+            "    def inner(p=t'{await fetch()}'):\n",
+            "        return t'pre{(yield p)!r:>{(yield from widths)}}post'\n",
+            "    return inner\n",
+        );
+        let prepared = PreparedBody::module(
+            "frames",
+            Path::new("frames.py"),
+            text,
+            0,
+            ModuleOrigin::Program(None),
+        )
+        .unwrap();
+        let mut sites: Vec<_> = prepared.source.scopes.functions.keys().copied().collect();
+        sites.sort();
+        assert_eq!(sites.len(), 2);
+        let mut captures = Vec::new();
+        let mut suspensions = Vec::new();
+        let mut formats = 0;
+        for (site, expected_suspensions) in sites.into_iter().zip([1, 3]) {
+            let body = prepared.source.definition_body(site);
+            assert!(body.fully_checked());
+            crate::verify::registered(body.checked().region()).unwrap();
+            ir::walk_expressions(
+                &body.checked().function.body,
+                &mut |node| match &node.kind {
+                    ExprKind::Builtin(
+                        Builtin::RegisteredInterpolation {
+                            expression,
+                            conversion,
+                        },
+                        _,
+                    ) => {
+                        captures.push((expression.as_str(), *conversion));
+                    }
+                    ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) => {
+                        let op = match kind {
+                            ir::SuspendValue::Await => "await",
+                            ir::SuspendValue::Yield => "yield",
+                            ir::SuspendValue::Delegate => "yield from",
+                        };
+                        suspensions.push((op, &text[*range]));
+                    }
+                    ExprKind::Builtin(Builtin::FormatField(_), _) => formats += 1,
+                    _ => {}
+                },
+            );
+            assert_eq!(suspensions.len(), expected_suspensions);
+        }
+        assert_eq!(
+            captures,
+            [("await fetch()", None), ("(yield p)", Some('r'))]
+        );
+        assert_eq!(
+            suspensions,
+            [
+                ("await", "await fetch()"),
+                ("yield", "yield p"),
+                ("yield from", "yield from widths"),
+            ]
+        );
+        assert_eq!(formats, 1);
+    }
+
+    #[test]
     fn a_mixed_suite_uses_the_entire_prepared_template() {
         let path = Path::new("field.py");
-        let original = r#"q = t"left{(lambda v: v)(xs)!r:>4}right""#;
+        let original = r#"q = (lambda data: data)(t"left{(lambda v: v)(xs)!r:>4}right")"#;
         let mut prepared =
             PreparedBody::module("field", path, original, 0, ModuleOrigin::Program(None)).unwrap();
-        assert_eq!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .templates()
-                .count(),
-            1
-        );
-        inject_residual_child_module(&mut prepared);
+        let outer = *prepared.source.lambdas.keys().min().unwrap();
+        inject_missing_lambdas(&mut prepared, |site| site == outer);
         assert!(!prepared.initializer().fully_checked());
         let emit = |prepared: &PreparedBody<'_>| {
             let mut output = Output::default();
@@ -5270,11 +5338,11 @@ mod tests {
                 .body
         };
         prepared.syntax = Some(Cow::Owned(replace_body(
-            r#"q = t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy""#,
+            r#"q = (lambda data: data)(t"xxxx{(lambda v: v)(xs)!s:^9}yyyyy")"#,
         )));
         assert_eq!(emit(&prepared), expected);
         prepared.syntax = Some(Cow::Owned(replace_body(
-            r#"q = t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy""#,
+            r#"q = (lambda data: data)(t"xxxx{(lambda v: v)(ys)!s:^9}yyyyy")"#,
         )));
         assert_eq!(emit(&prepared), expected);
     }
@@ -5419,18 +5487,18 @@ mod tests {
         assert!(initializer.fully_checked());
         assert_eq!(prepared.source.generators.len(), 1);
         let (site, generator) = prepared.source.generators.iter().next().unwrap();
-        let Some((_, crate::frontend::ExpressionSelection::Operand(template))) = prepared
-            .source
-            .statement_sites
-            .expressions
-            .templates()
-            .next()
-        else {
-            panic!("expected a fully checked template");
+        let mut templates = Vec::new();
+        crate::ir::walk_expressions(&initializer.checked.function.body, &mut |expr| {
+            if matches!(expr.kind, ExprKind::Builtin(Builtin::RegisteredTemplate, _)) {
+                templates.push(expr);
+            }
+        });
+        let [template] = templates.as_slice() else {
+            panic!("expected one template in the module assignment");
         };
         let mut references = Vec::new();
         let mut caller_names = Vec::new();
-        crate::ir::walk_operand_expressions(&template.value, &mut |expr| match &expr.kind {
+        crate::ir::walk_operand_expressions(template, &mut |expr| match &expr.kind {
             ExprKind::Builtin(Builtin::RegisteredGenerator(range, ..), _) => {
                 references.push(*range)
             }
@@ -5513,24 +5581,37 @@ mod tests {
             "query",
             Path::new("query.py"),
             "first = t'{client.lookup(*args)}{v * 2}'
-second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
+second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             0,
             ModuleOrigin::Program(None),
         )
         .unwrap();
+        let outer = *prepared.source.lambdas.keys().min().unwrap();
+        inject_missing_lambdas(&mut prepared, |site| site == outer);
+        assert!(!prepared.initializer().fully_checked());
+        let mut output = Output::default();
+        let file = output.data(b"query.py");
+        prepared.emit(&mut output, 0, &file).unwrap();
+        let template = output
+            .strings
+            .get_index_of(b"build_template".as_slice())
+            .unwrap();
         assert_eq!(
-            prepared
-                .source
-                .statement_sites
-                .expressions
-                .templates()
+            output
+                .functions
+                .matches(&format!(
+                    "call i64 @imre_dyn_op_at(ptr %ctx, ptr @str{template},"
+                ))
                 .count(),
             2
         );
-        inject_residual_child_module(&mut prepared);
-        let sites = &prepared.source.statement_sites.expressions;
-        assert_eq!(sites.templates().count(), 2);
-        assert!(!prepared.initializer().fully_checked());
+        assert_eq!(
+            output
+                .functions
+                .matches("call i64 @imre_dyn_interpolation(")
+                .count(),
+            4
+        );
     }
 
     #[test]

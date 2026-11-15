@@ -297,7 +297,7 @@ impl<'a> Visitor<'a> for ClosureNames {
                     self.locals_incomplete = true;
                 }
             }
-            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) | ast::Expr::TString(_) => {
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
                 self.needs_discovery = true;
                 visitor::walk_expr(self, expr);
             }
@@ -496,7 +496,6 @@ impl<'p> ScopeFacts<'p> {
 /// A lexical operand is ready after the scopes of its children have closed.
 pub(crate) enum LexicalSite<'a, 's> {
     Lambda(&'a ast::ExprLambda, super::RegisteredScope, bool),
-    Template(&'a ast::Expr, super::RegisteredScope),
     Generator(TextRange, &'s Plan<'a>, bool, &'s mut FunctionScope),
 }
 
@@ -777,10 +776,6 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
                 self.yields = true;
                 visitor::walk_expr(self, expr);
-            }
-            ast::Expr::TString(_) => {
-                visitor::walk_expr(self, expr);
-                (self.expression)(LexicalSite::Template(expr, self.scope.registered()));
             }
             _ => visitor::walk_expr(self, expr),
         });

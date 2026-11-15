@@ -170,91 +170,6 @@ fn template_async_comprehension_uses_its_enclosing_activation() {
 }
 
 #[test]
-fn template_default_and_body_suspend_in_their_defining_frames() {
-    let text = concat!(
-        "async def factory():\n",
-        "    def inner(p=t'{await fetch()}'):\n",
-        "        return t'pre{(yield p)!r:>{(yield from widths)}}post'\n",
-        "    return inner\n",
-    );
-    let templates = {
-        let parsed = ruff_python_parser::parse_module(text).unwrap();
-        let fields = imre_ast::strings::template_fields(text, parsed.tokens(), parsed.syntax());
-        let source = RegisteredSource {
-            python_optimization: 0,
-            operand_types: None,
-            text,
-            private_names: None,
-            replacements: &Default::default(),
-            template_fields: Some(&fields),
-            lambdas: None,
-            generators: None,
-            method_imports: &Default::default(),
-        };
-        let mut body = parsed.into_syntax().body;
-        let names = imre_ast::lower(&mut body);
-        let mut sites = LexicalOperands {
-            expressions: Some(Default::default()),
-            ..Default::default()
-        };
-        crate::frontend::function_scope::ScopeFacts::prepare(
-            &body,
-            &names,
-            |_, _| {},
-            |site| sites.prepare(site, source, names.string_annotations),
-        );
-        sites.expressions.unwrap()
-    };
-    let mut sites: Vec<_> = templates.templates().collect();
-    sites.sort_by_key(|(range, _)| range.start());
-    assert_eq!(sites.len(), 2);
-
-    let mut captures = Vec::new();
-    let mut suspensions = Vec::new();
-    let mut formats = 0;
-    for (_, operand) in sites {
-        let ExpressionSelection::Operand(operand) = operand else {
-            panic!("expected a complete template operand");
-        };
-        crate::verify::registered(operand.region()).unwrap();
-        ir::walk_operand_expressions(&operand.value, &mut |node| match &node.kind {
-            ExprKind::Builtin(
-                Builtin::RegisteredInterpolation {
-                    expression,
-                    conversion,
-                },
-                _,
-            ) => {
-                captures.push((expression.as_str(), *conversion));
-            }
-            ExprKind::Builtin(Builtin::RegisteredSuspend(kind, range), _) => {
-                let op = match kind {
-                    ir::SuspendValue::Await => "await",
-                    ir::SuspendValue::Yield => "yield",
-                    ir::SuspendValue::Delegate => "yield from",
-                };
-                suspensions.push((op, &text[*range]));
-            }
-            ExprKind::Builtin(Builtin::FormatField(_), _) => formats += 1,
-            _ => {}
-        });
-    }
-    assert_eq!(
-        captures,
-        [("await fetch()", None), ("(yield p)", Some('r'))]
-    );
-    assert_eq!(
-        suspensions,
-        [
-            ("await", "await fetch()"),
-            ("yield", "yield p"),
-            ("yield from", "yield from widths"),
-        ]
-    );
-    assert_eq!(formats, 1);
-}
-
-#[test]
 fn unavailable_template_child_is_reported_at_its_own_range() {
     let text = concat!(
         "def report(rows, fetch):\n",
@@ -285,10 +200,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
         .as_tuple_expr()
         .unwrap();
     for complete in [false, true] {
-        let mut sites = LexicalOperands {
-            expressions: Some(Default::default()),
-            ..Default::default()
-        };
+        let mut sites = LexicalOperands::default();
         crate::frontend::function_scope::ScopeFacts::prepare(
             &module.body,
             &Default::default(),
@@ -304,12 +216,14 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 }
             },
         );
-        let sites = sites.expressions.unwrap();
+        let source = source.with_children(&sites.lambdas, &sites.generators);
         for template in &templates.elts {
-            let (_, result) = sites
-                .templates()
-                .find(|(range, _)| *range == template.range())
-                .unwrap();
+            let result = inline_operand(
+                template,
+                source,
+                RegisteredScope::Function { is_async: false },
+                false,
+            );
             let tail = template
                 .as_t_string_expr()
                 .unwrap()
@@ -319,9 +233,7 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 .nth(1)
                 .unwrap();
             if complete {
-                let ExpressionSelection::Operand(operand) = result else {
-                    panic!("expected the prepared generator");
-                };
+                let operand = result.unwrap().unwrap();
                 crate::verify::registered(operand.region()).unwrap();
                 let mut captures = Vec::new();
                 ir::walk_operand_expressions(&operand.value, &mut |expr| {
@@ -335,12 +247,12 @@ fn unavailable_template_child_is_reported_at_its_own_range() {
                 });
                 assert_eq!(captures, ["mark()", &text[tail.expression.range()]]);
             } else {
-                let ExpressionSelection::Refused(range, reason) = result else {
+                let Err((range, reason)) = result else {
                     panic!("expected the unavailable generator");
                 };
-                assert_eq!(*range, tail.expression.range());
+                assert_eq!(range, tail.expression.range());
                 assert_eq!(
-                    *reason,
+                    reason,
                     "cannot compile this generator expression ahead of time"
                 );
             }
