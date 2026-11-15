@@ -1017,11 +1017,10 @@ impl<'a> Checker<'a> {
                 args,
             },
         };
-        if local_callable
-            && let Some(sites) = &mut self.fixed_sites
+        if let Some(sites) = &mut self.fixed_sites
             && registered::values::fixed_positional_arguments(call)
         {
-            sites.local_call(call, &value);
+            sites.positional_invoke(call, &value, local_callable);
         }
         Ok(value)
     }
