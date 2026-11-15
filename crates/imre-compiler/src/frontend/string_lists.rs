@@ -63,6 +63,7 @@ impl Checker<'_> {
         &mut self,
         plan: &Plan<'_>,
         expected: Option<Type>,
+        text: &mut Expr,
     ) -> Result<Option<Expr>, String> {
         let Some((name, condition)) = filtered_item(plan) else {
             return Ok(None);
@@ -70,23 +71,20 @@ impl Checker<'_> {
         let ty = self.types.set(Type::Str);
         if !same_name(plan.output.value(), name)
             || expected.is_some_and(|t| t != ty)
-            || !matches!(plan.outer, ast::Expr::Name(_))
+            || text.ty != Type::Str
         {
             return Ok(None);
         }
         let Some((keys, below)) = self.character_filter_operands(condition, name) else {
             return Ok(None);
         };
-        let text = self.expr(plan.outer)?;
-        if text.ty != Type::Str {
-            return Ok(None);
-        }
         let keys = self.expr(keys)?;
         if !matches!(keys.ty, Type::Set(_) | Type::FrozenStrings)
             || self.types.readable_set_element(keys.ty) != Some(Type::Str)
         {
             return Ok(None);
         }
+        let text = std::mem::replace(text, Expr::none());
         let source = self.hidden(Type::Str);
         let selected = Expr {
             ty,
@@ -210,9 +208,7 @@ impl Checker<'_> {
         let Some(strip) = suffix(plan.output.value(), name) else {
             return Ok(None);
         };
-        if element.is_some_and(|ty| ty != Type::Str)
-            || !matches!(plan.outer, ast::Expr::Name(_) | ast::Expr::Attribute(_))
-        {
+        if element.is_some_and(|ty| ty != Type::Str) {
             return Ok(None);
         }
         let (include, exclude) = match condition {
@@ -253,10 +249,11 @@ impl Checker<'_> {
         let mut outer;
         let list = match checked {
             Some(iterable) => iterable,
-            None => {
+            None if matches!(plan.outer, ast::Expr::Name(_) | ast::Expr::Attribute(_)) => {
                 outer = self.expr(plan.outer)?;
                 &mut outer
             }
+            None => return Ok(None),
         };
         if self.types.element(list.ty) != Some(Type::Str) {
             return Ok(None);

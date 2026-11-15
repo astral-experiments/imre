@@ -36,3 +36,21 @@ deliver(4, {"one": first, "two": second}[input()])
         expected.replace("/input.py", file.to_str().unwrap())
     );
 }
+
+#[test]
+fn eager_filters_use_the_checked_result_of_the_outer_call() {
+    let source = r#"
+def options() -> list[str]:
+    return ["alpha", "beta"]
+def text() -> str:
+    return "ab"
+def choose(prefix: str) -> list[str]:
+    return [s for s in options() if s.startswith(prefix)]
+def characters(keys: set[str]) -> set[str]:
+    return {c for c in text() if c in keys}
+"#;
+    let llvm = compile(source, &CompileOptions::default()).unwrap();
+    for kernel in ["imre_str_list_filter", "imre_filter_character_set"] {
+        assert!(llvm.contains(&format!("call ptr @{kernel}(")), "{kernel}");
+    }
+}

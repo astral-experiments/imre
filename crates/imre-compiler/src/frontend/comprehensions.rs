@@ -592,12 +592,6 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        if self.registered.is_none()
-            && matches!(display.output, Output::Set(_))
-            && let Some(filtered) = self.character_set_filter(&display, expected)?
-        {
-            return Ok(filtered);
-        }
         self.comprehension_display(expression, &display, Collector::Display(expected))
     }
 
@@ -608,20 +602,27 @@ impl Checker<'_> {
         collector: Collector,
     ) -> Result<Expr, String> {
         let mut input = self.input(&display.clauses[0])?;
-        if self.registered.is_none()
-            && let (Output::List(_), Collector::Display(expected)) = (display.output, collector)
+        // A Python iterator owns its pulls and method dispatch. Only a plain
+        // container can supply the exact operand required by a bulk filter.
+        if let Collector::Display(expected) = collector
             && let Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
             } = &mut input
-            && let Some(filtered) = self.string_list_filter(
-                display,
-                expected.and_then(|ty| self.types.element(ty)),
-                Some(iterable),
-            )?
         {
-            return Ok(filtered);
+            let filtered = match display.output {
+                Output::List(_) => self.string_list_filter(
+                    display,
+                    expected.and_then(|ty| self.types.element(ty)),
+                    Some(iterable),
+                )?,
+                Output::Set(_) => self.character_set_filter(display, expected, iterable)?,
+                _ => None,
+            };
+            if let Some(value) = filtered {
+                return Ok(value);
+            }
         }
         let prepared = matches!(input, Iteration::Prepared(_));
         // A prepared iterator stays inline and may be empty. Its writes only
