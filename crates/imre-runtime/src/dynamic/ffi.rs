@@ -983,7 +983,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
         repr_sequence_words: super::operators::remaining_repr_words(),
-        suspended_typing_frames: 0,
         token_missing: NONE,
         native_filename_labels: HashMap::new(),
         original_builtins: None,
@@ -1011,9 +1010,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         scope_name_slots: Default::default(),
         native_type_dicts: HashMap::new(),
         sources: HashMap::new(),
-        call_depth: 0,
         deque_comparison_repeats: 0,
-        slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
     let object = ctx.builtin("object");

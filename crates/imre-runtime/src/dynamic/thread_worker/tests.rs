@@ -173,7 +173,7 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
         let result = unsafe { frame.run(worker.as_ptr()) };
         let ctx = worker.borrow();
         assert_eq!(ctx.heap.python_depth(), 0);
-        assert_eq!(ctx.call_depth, 0);
+        assert_eq!(ctx.heap.execution.call_depth, 0);
         assert!(ctx.heap.execution.pending.is_none());
         if fails {
             let error = result.unwrap_err();
