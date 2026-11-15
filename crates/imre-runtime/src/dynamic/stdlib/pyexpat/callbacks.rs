@@ -1,8 +1,8 @@
 //! Dispatch synchronous Expat events to the Python parser that owns its handlers.
-use super::NativeParser;
 use super::expat::{Encoding, Handlers, ParseError};
+use super::{NativeParser, ParserExecution};
 use crate::dynamic::stdlib::codecs;
-use crate::dynamic::{Context, Error, Id, NONE, Result, Value};
+use crate::dynamic::{Error, Id, NONE, Result, Value};
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::slice;
@@ -34,7 +34,7 @@ enum CallbackError {
 }
 
 struct Feed<'a> {
-    ctx: &'a mut Context,
+    ctx: &'a mut ParserExecution,
     owner: Id,
     handle: &'a NativeParser,
     installed: Listeners,
@@ -55,13 +55,13 @@ const HANDLERS: [&str; 9] = [
 
 impl Feed<'_> {
     fn run_callback<T>(&mut self, action: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
-        let mark = self.ctx.heap.temporary_mark();
+        let mark = self.ctx.get_mut().heap.temporary_mark();
         let result = catch_unwind(AssertUnwindSafe(|| action(self)))
             .unwrap_or_else(|_| Err(Error::new("SystemError", "panic in Expat callback")));
-        self.ctx.heap.release_temporaries_since(mark);
+        self.ctx.get_mut().heap.release_temporaries_since(mark);
         if let Err(error) = &result {
             for root in error.roots() {
-                self.ctx.heap.keep(root);
+                self.ctx.get_mut().heap.keep(root);
             }
         }
         result
@@ -69,10 +69,10 @@ impl Feed<'_> {
 
     fn encoding(&mut self, name: *const c_char) -> Result<Encoding> {
         let name = self.string(name)?;
-        let bytes = self.ctx.alloc(Value::Bytes((0..=255).collect()));
-        let replace = self.ctx.text("replace");
-        let decoded = codecs::decode_named(self.ctx, bytes, Some(name), Some(replace))?;
-        let points = self.ctx.string_codepoints(decoded)?;
+        let bytes = self.ctx.get_mut().alloc(Value::Bytes((0..=255).collect()));
+        let replace = self.ctx.get_mut().text("replace");
+        let decoded = codecs::decode_named(self.ctx.get_mut(), bytes, Some(name), Some(replace))?;
+        let points = self.ctx.get_mut().string_codepoints(decoded)?;
         let points = points
             .as_ref()
             .try_into()
@@ -86,7 +86,7 @@ impl Feed<'_> {
     fn handler_flags(&mut self) -> Result<Listeners> {
         let mut flags = [false; HANDLERS.len()];
         for (flag, name) in flags.iter_mut().zip(HANDLERS) {
-            *flag = self.ctx.lookup_attr(self.owner, name)? != NONE;
+            *flag = self.ctx.get_mut().lookup_attr(self.owner, name)? != NONE;
         }
         Ok(Listeners {
             enabled: flags,
@@ -144,8 +144,8 @@ impl Feed<'_> {
     }
 
     fn flag(&mut self, name: &str) -> Result<bool> {
-        let value = self.ctx.lookup_attr(self.owner, name)?;
-        self.ctx.truth(value)
+        let value = self.ctx.get_mut().lookup_attr(self.owner, name)?;
+        self.ctx.get_mut().truth(value)
     }
 
     fn flush(&mut self) -> Result<()> {
@@ -156,8 +156,9 @@ impl Feed<'_> {
     }
 
     fn buffer_size(&mut self) -> Result<usize> {
-        let size = self.ctx.lookup_attr(self.owner, "buffer_size")?;
+        let size = self.ctx.get_mut().lookup_attr(self.owner, "buffer_size")?;
         self.ctx
+            .get_mut()
             .index_integer(size)?
             .to_i64()
             .and_then(|n| usize::try_from(n).ok())
@@ -183,7 +184,7 @@ impl Feed<'_> {
                 return Ok(());
             }
         }
-        let value = self.ctx.text(text);
+        let value = self.ctx.get_mut().text(text);
         self.call("CharacterDataHandler", vec![value])
     }
 
@@ -196,23 +197,25 @@ impl Feed<'_> {
         let text = unsafe { CStr::from_ptr(ptr) }
             .to_str()
             .map_err(|_| invalid_utf8())?;
-        Ok(self.ctx.text(text))
+        Ok(self.ctx.get_mut().text(text))
     }
 
     fn name(&mut self, ptr: *const c_char) -> Result<Id> {
         let key = self.string(ptr)?;
-        let intern = self.ctx.lookup_attr(self.owner, "intern")?;
+        let intern = self.ctx.get_mut().lookup_attr(self.owner, "intern")?;
         if intern == NONE {
             return Ok(key);
         }
         let storage = self
             .ctx
+            .get_mut()
             .dict_storage(intern)
             .ok_or_else(|| Error::new("TypeError", "intern must be a dictionary"))?;
         let name = self
             .ctx
+            .get_mut()
             .set_dictionary_key(storage, key, key, None, false)?;
-        self.ctx.heap.keep(name);
+        self.ctx.get_mut().heap.keep(name);
         Ok(name)
     }
 
@@ -226,7 +229,7 @@ impl Feed<'_> {
         let dict = if ordered {
             NONE
         } else {
-            self.ctx.dict(Vec::new())
+            self.ctx.get_mut().dict(Vec::new())
         };
         let mut names_and_values = Vec::new();
         let mut index = 0;
@@ -245,12 +248,14 @@ impl Feed<'_> {
             } else {
                 // An explicit intern dictionary can map different names to the
                 // same key, or return an object that is not hashable.
-                self.ctx.set_dictionary_key(dict, key, value, None, true)?;
+                self.ctx
+                    .get_mut()
+                    .set_dictionary_key(dict, key, value, None, true)?;
             }
             index += 2;
         }
         Ok(if ordered {
-            self.ctx.alloc(Value::List(names_and_values))
+            self.ctx.get_mut().alloc(Value::List(names_and_values))
         } else {
             dict
         })
@@ -258,12 +263,13 @@ impl Feed<'_> {
 }
 
 fn invoke(
-    ctx: &mut Context,
+    execution: &mut ParserExecution,
     owner: Id,
     handle: &NativeParser,
     name: &str,
     args: Vec<Id>,
 ) -> Result<bool> {
+    let ctx = execution.get_mut();
     let target = ctx.lookup_attr(owner, name)?;
     if target == NONE {
         return Ok(false);
@@ -274,22 +280,27 @@ fn invoke(
         was_parsing: handle.parsing.replace(true),
     };
     handle.callback_active.set(true);
-    ctx.call(target, args, vec![])?;
+    execution.call(target, args)?;
     Ok(true)
 }
 
-fn clear_handlers(ctx: &mut Context, owner: Id, error: &Error) {
+fn clear_handlers(execution: &mut ParserExecution, owner: Id, error: &Error) {
+    let ctx = execution.get_mut();
     for id in error.roots() {
         ctx.heap.keep(id);
     }
     if let Ok(clear) = ctx.lookup_attr(owner, "_clear_handlers") {
-        let _ = ctx.call(clear, vec![], vec![]);
+        let _ = execution.call(clear, vec![]);
     }
 }
 
 /// Clear on return from each flush. A setter called inside the handler can
 /// flush the same pending text; once that inner flush returns, it is consumed.
-fn deliver_buffer(ctx: &mut Context, owner: Id, handle: &NativeParser) -> Result<bool> {
+fn deliver_buffer(
+    execution: &mut ParserExecution,
+    owner: Id,
+    handle: &NativeParser,
+) -> Result<bool> {
     if handle.text.borrow().is_empty() {
         return Ok(false);
     }
@@ -308,16 +319,20 @@ fn deliver_buffer(ctx: &mut Context, owner: Id, handle: &NativeParser) -> Result
         text.push_str(&buffer);
         text
     };
-    let text = ctx.text(text);
-    invoke(ctx, owner, handle, "CharacterDataHandler", vec![text])
+    let text = execution.get_mut().text(text);
+    invoke(execution, owner, handle, "CharacterDataHandler", vec![text])
 }
 
 /// A syntax error can leave character data pending until a handler or buffer
 /// setting changes. Drain it with the old handler before applying the change.
-pub(super) fn flush_before_set(ctx: &mut Context, owner: Id, handle: &NativeParser) -> Result<()> {
-    if let Err(error) = deliver_buffer(ctx, owner, handle) {
+pub(super) fn flush_before_set(
+    execution: &mut ParserExecution,
+    owner: Id,
+    handle: &NativeParser,
+) -> Result<()> {
+    if let Err(error) = deliver_buffer(execution, owner, handle) {
         handle.parser.stop();
-        clear_handlers(ctx, owner, &error);
+        clear_handlers(execution, owner, &error);
         return Err(error);
     }
     Ok(())
@@ -329,7 +344,7 @@ fn invalid_utf8() -> Error {
 
 // Expat calls these trampolines only while Parser::parse owns the user pointer.
 // A nested Parse on the same parser is rejected before any callback can reenter
-// this Feed. A different parser creates its own Feed and reborrows the Context.
+// this Feed. A different parser has its own Feed and a nested registered call.
 fn dispatch(user: *mut c_void, action: impl FnOnce(&mut Feed<'_>) -> Result<()>) {
     // SAFETY: parse installs this live feed exclusively for synchronous callbacks.
     let feed = unsafe { &mut *user.cast::<Feed<'_>>() };
@@ -386,7 +401,7 @@ unsafe extern "C" fn start_doctype(
             feed.name(name)?,
             feed.name(system_id)?,
             feed.name(public_id)?,
-            feed.ctx.int(i64::from(has_internal_subset)),
+            feed.ctx.get_mut().int(i64::from(has_internal_subset)),
         ])
     });
 }
@@ -434,7 +449,7 @@ unsafe extern "C" fn default_expand(user: *mut c_void, ptr: *const c_char, len: 
     event(user, "DefaultHandlerExpand", |feed| {
         // SAFETY: Expat supplies a live character buffer and its nonnegative byte length.
         let bytes = unsafe { slice::from_raw_parts(ptr.cast::<u8>(), len as usize) };
-        Ok(vec![feed.ctx.text(
+        Ok(vec![feed.ctx.get_mut().text(
             std::str::from_utf8(bytes).map_err(|_| invalid_utf8())?,
         )])
     });
@@ -442,15 +457,15 @@ unsafe extern "C" fn default_expand(user: *mut c_void, ptr: *const c_char, len: 
 
 /// Give Expat a callback frame for one synchronous chunk, including its final text flush.
 pub(super) fn parse(
-    ctx: &mut Context,
+    execution: &mut ParserExecution,
     owner: Id,
     handle: &NativeParser,
     bytes: &[u8],
     final_chunk: bool,
 ) -> Result<std::result::Result<(), ParseError>> {
-    ctx.heap.keep(owner);
+    execution.get_mut().heap.keep(owner);
     let mut feed = Feed {
-        ctx,
+        ctx: execution,
         owner,
         handle,
         installed: Listeners::default(),

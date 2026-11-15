@@ -69,8 +69,63 @@ fn create(ctx: &mut Context, encoding: Id, separator: Id) -> Result<Id> {
     }))))
 }
 
+/// The generated caller keeps these operands rooted through synchronous native callbacks.
+pub(in crate::dynamic) enum Call {
+    Parse([Id; 4]),
+    Flush([Id; 2]),
+}
+
+impl Call {
+    pub(in crate::dynamic) fn prepare(
+        name: &str,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Option<Self> {
+        match (name, kwargs) {
+            ("parse", []) => args.try_into().ok().map(Self::Parse),
+            ("flush_buffer", []) => args.try_into().ok().map(Self::Flush),
+            _ => None,
+        }
+    }
+
+    /// # Safety
+    /// The caller owns the context on this thread and roots the operands until
+    /// the parser and its synchronous callbacks return.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let mut execution = ParserExecution(context);
+        match self {
+            Self::Parse([resource, owner, data, is_final]) => {
+                let parser = handle(execution.get_mut(), resource)?;
+                parse(&mut execution, parser, owner, data, is_final)
+            }
+            Self::Flush([resource, owner]) => {
+                let parser = handle(execution.get_mut(), resource)?;
+                callbacks::flush_before_set(&mut execution, owner, &parser)?;
+                Ok(NONE)
+            }
+        }
+    }
+}
+
+/// Only Call::run constructs this access to its current native thread's context.
+struct ParserExecution(*mut Context);
+
+impl ParserExecution {
+    fn get_mut(&mut self) -> &mut Context {
+        // SAFETY: the registered caller owns this live context. A reborrow
+        // ends before entering libexpat or a prepared Python listener.
+        unsafe { &mut *self.0 }
+    }
+
+    fn call(&mut self, target: Id, args: Vec<Id>) -> Result<Id> {
+        let call = self.get_mut().prepare_call(target, args.into(), vec![])?;
+        // SAFETY: preparation returned a rooted call on this same execution.
+        unsafe { call.run(self.0) }
+    }
+}
+
 fn parse(
-    ctx: &mut Context,
+    execution: &mut ParserExecution,
     handle: Rc<NativeParser>,
     owner: Id,
     data: Id,
@@ -84,7 +139,9 @@ fn parse(
             "cannot re-enter an active Expat parser",
         ));
     }
-    let result = ctx.with_buffer_export(data, |ctx| {
+    let mark = execution.get_mut().begin_buffer_export(data);
+    let result = (|| {
+        let ctx = execution.get_mut();
         let is_final = ctx.truth(is_final)?;
         let bytes = if let Some(text) = ctx.string_storage(data) {
             let bytes = match ctx.heap.get(text) {
@@ -97,9 +154,10 @@ fn parse(
             // The heap or its backing allocation may move during a Python callback.
             ctx.native_buffer_bytes(data)?.to_vec()
         };
-        match callbacks::parse(ctx, owner, &handle, &bytes, is_final)? {
+        match callbacks::parse(execution, owner, &handle, &bytes, is_final)? {
             Ok(()) => Ok(NONE),
             Err(error) => {
+                let ctx = execution.get_mut();
                 let code = ctx.int(i64::from(error.code));
                 let message = ctx.text(expat::error_message(error.code).unwrap_or("unknown error"));
                 let line = ctx.alloc(Value::Int(crate::Int::new(error.line.into())));
@@ -107,7 +165,13 @@ fn parse(
                 Ok(ctx.alloc(Value::Tuple(vec![code, message, line, column])))
             }
         }
-    });
+    })();
+    execution
+        .get_mut()
+        .heap
+        .execution
+        .buffer_exports
+        .truncate(mark);
     handle.parsing.set(false);
     result
 }
@@ -118,16 +182,12 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if let Some(call) = Call::prepare(name, args, kwargs) {
+        // SAFETY: this direct caller owns the rooted operands through the callback.
+        return unsafe { call.run(ctx) };
+    }
     match (name, args, kwargs) {
         ("create", [encoding, separator], []) => create(ctx, *encoding, *separator),
-        ("parse", [resource, owner, data, final_chunk], []) => {
-            parse(ctx, handle(ctx, *resource)?, *owner, *data, *final_chunk)
-        }
-        ("flush_buffer", [resource, owner], []) => {
-            let handle = handle(ctx, *resource)?;
-            callbacks::flush_before_set(ctx, *owner, &handle)?;
-            Ok(NONE)
-        }
         ("position", [resource], []) => {
             let handle = handle(ctx, *resource)?;
             let line = ctx.alloc(Value::Int(crate::Int::new(handle.parser.line().into())));
