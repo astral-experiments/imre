@@ -41,6 +41,7 @@ pub(crate) struct TargetCollector {
     wrapped: Vec<(Type, Target)>,
     open: HashSet<Type>,
     wrapper_owners: Vec<(usize, Type)>,
+    source_frames: Vec<bool>,
     pub(crate) constructors: BTreeMap<usize, Type>,
 }
 
@@ -103,6 +104,12 @@ impl TargetCollector {
         }
     }
 
+    pub(crate) fn keep_source_frames(&mut self, frames: Vec<bool>) {
+        if !self.wrapper_owners.is_empty() {
+            self.source_frames = frames;
+        }
+    }
+
     pub(crate) fn plain_sources(&self, ty: Type, source: impl Fn(usize) -> bool) -> bool {
         !self.open.contains(&ty)
             && !self.wrapped.iter().any(|(signature, _)| *signature == ty)
@@ -121,13 +128,25 @@ impl TargetCollector {
         }
     }
 
-    fn finish(mut self) -> Targets {
+    fn finish(mut self, link_types: &HashSet<Type>) -> Layouts {
         for (ty, target) in self.wrapped.drain(..) {
             self.constructed.entry(ty).or_default().push(target);
         }
+        // An open signature can still have a known function whose record owns a
+        // wrapper link. Only indirect calls require the complete set of targets.
+        let linked_functions = link_types
+            .iter()
+            .filter_map(|ty| self.constructed.get(ty))
+            .flatten()
+            .filter(|target| !target.bound)
+            .map(|target| target.function)
+            .collect();
         self.constructed.retain(|ty, _| !self.open.contains(ty));
         self.deduplicate();
-        Targets(self.constructed)
+        Layouts {
+            targets: Targets(self.constructed),
+            linked_functions,
+        }
     }
 
     #[cfg(test)]
@@ -138,6 +157,9 @@ impl TargetCollector {
                 collector.inspect(id, &module.types, value);
             });
         }
+        if !collector.wrapper_owners.is_empty() {
+            collector.source_frames = module.source_frames.iter().map(Option::is_some).collect();
+        }
         collector
     }
 }
@@ -145,7 +167,9 @@ impl TargetCollector {
 impl Targets {
     #[cfg(test)]
     pub(crate) fn analyze(module: &Module) -> Self {
-        TargetCollector::analyze(module).finish()
+        TargetCollector::analyze(module)
+            .finish(&HashSet::new())
+            .targets
     }
 
     /// An empty set is unknown, not proof that an invocation is unreachable.
@@ -228,7 +252,9 @@ pub(crate) fn layouts(
 ) -> Result<Layouts, LoweringDiagnostic> {
     let wrapper_owners = std::mem::take(&mut targets.wrapper_owners);
     let mut link_types: HashSet<_> = wrapper_owners.iter().map(|&(_, ty)| ty).collect();
-    let callable_targets = targets.finish();
+    let source_frames = std::mem::take(&mut targets.source_frames);
+    let layouts = targets.finish(&link_types);
+    let callable_targets = &layouts.targets;
     let cached = |id| module.types.cache_adapter(id).is_some();
     let unknown_signature = || {
         LoweringDiagnostic::plain(
@@ -238,21 +264,16 @@ pub(crate) fn layouts(
     };
     if link_types
         .iter()
-        .any(|&ty| module.types.dispatcher(ty).is_some() || callable_targets.get(ty).is_empty())
+        .any(|&ty| module.types.dispatcher(ty).is_some())
     {
         return Err(unknown_signature());
     }
-    let linked_functions = link_types
-        .iter()
-        .flat_map(|&ty| callable_targets.get(ty))
-        .filter(|target| !target.bound)
-        .map(|target| target.function)
-        .collect::<HashSet<_>>();
     link_types.retain(|ty| {
-        callable_targets
-            .get(*ty)
-            .iter()
-            .any(|target| target.bound && !cached(target.function))
+        let targets = callable_targets.get(*ty);
+        targets.is_empty()
+            || targets
+                .iter()
+                .any(|target| target.bound && !cached(target.function))
     });
     let mut link_owners = BTreeMap::<usize, Vec<&ir::Expr>>::new();
     for (id, ty) in wrapper_owners {
@@ -267,23 +288,35 @@ pub(crate) fn layouts(
         &mut link_owners,
         |value| wrapped_owner(value).filter(|owner| link_types.contains(&owner.ty)),
         |value| {
-            matches!(&value.kind, ExprKind::Builtin(ir::Builtin::StaticFunction(_), args)
-            if matches!(args[0].kind, ExprKind::Callable { function, receiver: None }
+            // A lifted def allocates a fresh record. Some builtin adapters have
+            // the same unbound call ABI, but do not own a Python source frame.
+            let entry = match &value.kind {
+                ExprKind::Builtin(ir::Builtin::StaticFunction(_), args) => &args[0],
+                ExprKind::Callable { function, .. }
+                    if source_frames.get(*function) == Some(&true) =>
+                {
+                    value
+                }
+                _ => return false,
+            };
+            matches!(entry.kind, ExprKind::Callable { function, receiver: None }
                 if !cached(function)
-                    && module.types.constructor_base(args[0].ty).is_none()
-                    && linked_functions.contains(&function)))
+                    && module.types.constructor_base(entry.ty).is_none()
+                    && layouts.linked_functions.contains(&function))
         },
         |_| true,
     );
     // Only the owner needs link storage. A plain function can wrap a bound
     // builtin, even when the two callables have the same signature.
     if link_owners.values().flatten().any(|owner| {
-        callable_targets.get(owner.ty).iter().any(|target| {
-            let function = &module.functions[target.function];
-            target.bound
-                && !cached(target.function)
-                && !matches!(function.locals[function.params[0]], Type::Class(_))
-        })
+        let targets = callable_targets.get(owner.ty);
+        targets.is_empty()
+            || targets.iter().any(|target| {
+                let function = &module.functions[target.function];
+                target.bound
+                    && !cached(target.function)
+                    && !matches!(function.locals[function.params[0]], Type::Class(_))
+            })
     }) {
         return Err(unknown_signature());
     }
@@ -293,10 +326,7 @@ pub(crate) fn layouts(
         )
         .classified(LoweringKind::ScopedObject));
     }
-    Ok(Layouts {
-        targets: callable_targets,
-        linked_functions,
-    })
+    Ok(layouts)
 }
 
 #[cfg(test)]
