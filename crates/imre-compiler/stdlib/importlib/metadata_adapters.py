@@ -2,7 +2,7 @@
 import re
 from email.message import Message as EmailMessage
 from email.parser import HeaderParser
-from _imre_metadata import dedent
+from textwrap import dedent
 
 
 class Message(EmailMessage):

@@ -4,7 +4,7 @@ use crate::objects::ZipArchive;
 
 use super::{Context, Error, Id, NONE, Result, Value, os_error};
 
-/// Supply filesystem operations and header dedenting to the shared distribution lookup.
+/// Supply filesystem operations to the shared distribution lookup.
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -50,7 +50,6 @@ pub(super) fn call(
                 .collect::<Result<_>>()?;
             Ok(ctx.alloc(Value::List(names)))
         }
-        "dedent" => Ok(ctx.text(crate::objects::dedent(text))),
         _ => unreachable!(),
     }
 }
