@@ -278,6 +278,86 @@ fn native_start_and_join_publish_the_worker_lifetime() {
 }
 
 #[test]
+fn startup_wrapper_is_a_temporary_of_the_registered_caller() {
+    use crate::dynamic::value::{Body, EMPTY_TUPLE, FrameOwner};
+
+    unsafe extern "C" fn run(_: *mut Context, _: Id) -> Id {
+        NONE
+    }
+
+    let mut ctx = context();
+    let scope = ctx.scope("thread_test", None);
+    ctx.heap.enter(scope, NONE, FrameOwner::Module(NONE));
+    let setup = ctx.heap.temporary_mark();
+    let name = ctx.text("run");
+    let signature = ctx.text(r#"{"positional":["self"],"kwonly":[]}"#);
+    let filename = ctx.text("thread_test.py");
+    let code = ctx.prelinked_code(
+        Body::Native(run, NONE),
+        scope,
+        name,
+        signature,
+        (name, NONE),
+        (filename, 1),
+    );
+    let defaults = ctx.dict(Vec::new());
+    let method = ctx
+        .define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        .unwrap();
+    let namespace = ctx.dict(vec![(name, method)]);
+    let class_name = ctx.text("Thread");
+    let metaclass = ctx.builtin("type");
+    let class = ctx
+        .call(metaclass, vec![class_name, EMPTY_TUPLE, namespace], vec![])
+        .unwrap();
+    let owner = ctx.instance(class, None);
+    ctx.register_thread_run(class, owner);
+    let handle = Arc::<Handle>::default();
+    let wrapper = ctx.alloc(Value::ThreadHandle(Arc::clone(&handle)));
+    let watch = ctx.heap.native_weak_reference(wrapper).unwrap();
+    let start = ctx.builtin("_imre_thread.start");
+    let kwargs = ctx.dict(Vec::new());
+    for (name, value) in [
+        ("_target", NONE),
+        ("_args", EMPTY_TUPLE),
+        ("_kwargs", kwargs),
+        ("_context", NONE),
+        ("_handle", NONE),
+        ("_os_thread_handle", wrapper),
+    ] {
+        ctx.set_attr(owner, name, value).unwrap();
+    }
+    ctx.bind(scope, "receiver", owner);
+    ctx.bind(scope, "watch", watch);
+    ctx.unwind_operands(setup);
+
+    let mark = ctx.heap.temporary_mark();
+    let call = ffi::OperandCall::prepare(&mut ctx, mark, start, |ctx| {
+        ctx.prepare_call(start, vec![owner, super::super::FALSE].into(), vec![])
+    })
+    .unwrap();
+    // SAFETY: the ordinary registered start and caller mark belong to this thread.
+    let result = unsafe {
+        call.run(&raw mut ctx, |ctx, mark, result| {
+            assert_eq!(*ctx.heap.temporary_root(mark), wrapper);
+            ctx.finish_call_operands(mark, result);
+        })
+    }
+    .unwrap();
+    assert!(matches!(ctx.heap.get(result), Value::Tuple(ids) if ids[0] == wrapper));
+    assert_eq!(ctx.lookup_attr(owner, "_handle").unwrap(), wrapper);
+    assert_ne!(handle.ident(), thread_ident());
+    handle.join(Some(Duration::from_secs(5))).unwrap();
+    ctx.reap_thread_operands();
+    ctx.set_attr(owner, "_os_thread_handle", NONE).unwrap();
+    ctx.set_attr(owner, "_handle", NONE).unwrap();
+    // Discard the actual startup expression, including its result tuple.
+    ctx.unwind_operands(mark);
+    ctx.collect_unreachable();
+    assert!(matches!(ctx.heap.get(watch), Value::Weak(wr) if wr.target.is_none()));
+}
+
+#[test]
 fn worker_waits_for_the_creator_to_publish_its_receiver() {
     let mut ctx = context();
     let scope = ctx.scope("worker_test", None);
