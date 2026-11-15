@@ -422,7 +422,7 @@ impl SourceSites {
         call: &ast::ExprCall,
         field: &ast::ExprAttribute,
         value: &Expr,
-    ) {
+    ) -> bool {
         if let Some(site) = self.site_at(call.range())
             && let Some(operands) = value.named_call_arguments()
             && operands.len() == 1 + call.arguments.len()
@@ -436,6 +436,9 @@ impl SourceSites {
             self.attributes
                 .insert(site.range, FixedAttribute::Call(None, invoke));
             self.commit(site, node);
+            true
+        } else {
+            false
         }
     }
 

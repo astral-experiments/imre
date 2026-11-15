@@ -1616,7 +1616,8 @@ impl Checker<'_> {
                         .is_some()
             }
         {
-            if self.python_method_frame
+            if !sites.method(call, attribute, &value)
+                && self.python_method_frame
                 && let ExprKind::Call(_, args) = &mut value.kind
                 && !args.exhaustive_enum_match
                 && args.values.len() >= written
@@ -1634,8 +1635,6 @@ impl Checker<'_> {
                 )
                 .kind;
                 sites.checked_expression(call.range(), &value);
-            } else {
-                sites.method(call, attribute, &value);
             }
         }
         Ok(self.evaluated_receiver(discarded, value))

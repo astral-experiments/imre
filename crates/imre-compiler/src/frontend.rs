@@ -1513,6 +1513,8 @@ fn lower_graph(
         checker.fixed_sites = ((prepare_sites || provider_frame) && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
+        checker.python_method_frame =
+            checker.placement_only && signature.method.is_some() && signature.physical_frame;
         let mut attributes = HashMap::new();
         if signature.method.is_none()
             && prepare_sites
@@ -3757,7 +3759,7 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// After a layout refusal the outer fixed body can only be used with its source sites.
     placement_only: bool,
-    /// This body is checked solely for an already selected registered method.
+    /// A physical method checked for Python placement can bind its written operands.
     python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
