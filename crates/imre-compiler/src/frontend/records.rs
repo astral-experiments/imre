@@ -1599,7 +1599,16 @@ impl Checker<'_> {
         if kind == MethodKind::Instance
             && skip == 1
             && let Some(sites) = &mut self.fixed_sites
-            && registered::values::fixed_positional_arguments(call)
+            && if call.arguments.keywords.is_empty() {
+                registered::values::fixed_positional_arguments(call)
+            } else {
+                self.placement_only
+                    && self.graph.modules[self.module]
+                        .registered_values()
+                        .operands(self.source, self.graph.python_optimization())
+                        .direct_method(call)
+                        .is_some()
+            }
         {
             sites.method(call, attribute, &value);
         }

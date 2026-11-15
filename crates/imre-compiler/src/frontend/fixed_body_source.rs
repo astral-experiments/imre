@@ -415,7 +415,7 @@ impl SourceSites {
         }
     }
 
-    /// Bind a method with already-checked positional arguments while the fixed
+    /// Bind a method with its already-checked written arguments while the fixed
     /// entry keeps its specialized call.
     pub(super) fn method(
         &mut self,
@@ -425,13 +425,13 @@ impl SourceSites {
     ) {
         if let Some(site) = self.site_at(call.range())
             && let Some(operands) = value.named_call_arguments()
-            && operands.len() == 1 + call.arguments.args.len()
+            && operands.len() == 1 + call.arguments.len()
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
             let invoke = ir::RegisteredCall::new(
                 call.range(),
                 registered::values::method_target(field),
-                ir::RegisteredArguments::Positional,
+                registered::values::fixed_argument_layout(&call.arguments),
             );
             self.attributes
                 .insert(site.range, FixedAttribute::Call(None, invoke));
