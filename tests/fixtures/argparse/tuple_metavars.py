@@ -19,6 +19,7 @@ def labels(words: list[str]):
     parser = argparse.ArgumentParser(prog="labels")
     parser.add_argument("--one", choices=["x", "y"], metavar=("O'Reilly",), help="%(dest)s: %(metavar)s")
     parser.add_argument("--many", nargs="*", metavar=("", "雪"), help="%(metavar)s")
+    parser.add_argument("--mixed", nargs="*", metavar=("A", 2))
     return parser.parse_args(words)
 
 

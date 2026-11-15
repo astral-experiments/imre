@@ -63,6 +63,7 @@ CASES = {
     "tuple_metavars": [
         [], ["--help"], ["--op2", "a", "b"], ["--op7", "first", "second", "third"], ["--op7", "short"],
         ["labels", "--help"], ["labels", "--one", "x", "--many", "a", "b"], ["labels", "--one", "bad"],
+        ["labels", "--mixed"], ["labels", "--mixed", "first", "second"],
     ],
     "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
@@ -188,10 +189,6 @@ CASES = {
                   ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
                   ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
-REJECTED = {
-    "metavar_element": 'parser.add_argument("--key", nargs="*", metavar=("A", 2))',
-    "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
-}
 
 
 def result(command, env):
@@ -275,38 +272,26 @@ def main():
         # An integer written in the source is already a value. A large hex
         # default/const remains usable even when decimal argv conversion is limited.
         source = Path(directory) / "literal_default.py"
-        literal = "0x" + "f" * 560
+        literal = "0x" + "f" * 600
         source.write_text(
             "import argparse\ndef read():\n    parser = argparse.ArgumentParser()\n"
             f"    parser.add_argument('-n', nargs='?', type=int, default={literal}, const={literal})\n"
-            f"    return parser.parse_args()\nprint(read().n == {literal})\n"
+            f"    parser.add_argument('--choice', type=int, choices=[{literal}], metavar='N')\n"
+            "    return parser.parse_args()\n"
+            f"try:\n    print(read().n == {literal})\n"
+            "except ValueError as error:\n    print(type(error).__name__, str(error))\n"
         )
-        native = source.with_suffix("")
+        native = Path(directory) / "bin" / source.name
+        native.parent.mkdir()
         env = {**os.environ, "PYTHONINTMAXSTRDIGITS": "640", "PYTHON_COLORS": "0"}
         for level in args.opt_levels:
             subprocess.run([args.compiler, "build", source, "-o", native, "--opt-level", level, *compile_flags], check=True)
-            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650]):
+            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650], ["--help"], ["--choice", "3"]):
                 expected = result([args.python, source, *arguments], env)
                 actual = result([native, *arguments], env)
                 if actual != expected:
                     raise AssertionError(("literal_default", arguments, level, expected, actual))
                 checks += 1
-        for name, declaration in REJECTED.items():
-            source = Path(directory) / (name + ".py")
-            source.write_text(
-                "from argparse import ArgumentParser\ndef read():\n    parser = ArgumentParser()\n"
-                f"    {declaration}\n    return parser.parse_args()\nread()\n"
-            )
-            check = subprocess.run(
-                [args.compiler, "check", source], capture_output=True, check=False
-            )
-            if (
-                check.returncode == 0
-                or name == "computed_default_bad_converter" and b"argparse type must be" not in check.stderr
-                or b"argparse" not in check.stderr.lower()
-                and b"add_argument" not in check.stderr
-            ):
-                raise AssertionError((name, check.returncode, check.stderr))
         # The successful guard relies on a stable receiver and a read-only field.
         source = Path(directory) / "bad_field.py"
         prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
@@ -369,7 +354,7 @@ def main():
         )
         subprocess.run([args.compiler, "check", source], check=True)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(invalid_field_reads) + 8} compile-time rejections"
     )
 
 
