@@ -14,6 +14,12 @@ class ChildDateTime(datetime):
 
 
 def current():
+    assert date.__base__ is object and date.__bases__ == (object,)
+    assert date.__mro__ == (date, object)
+    assert datetime.__base__ is date and datetime.__bases__ == (date,)
+    assert datetime.__mro__ == (datetime, date, object)
+    assert ChildDateTime.__mro__ == (ChildDateTime, datetime, date, object)
+
     day = date(2024, 2, 29)
     earlier = date(2024, 2, 28)
     child = ReflectedDate(2024, 2, 29)
