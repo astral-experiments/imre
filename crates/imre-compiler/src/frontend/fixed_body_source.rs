@@ -30,16 +30,23 @@ impl FixedBodySource {
             let Some((range, Some(expected))) = sites.next() else {
                 return false;
             };
-            if matches!(expected, FixedNode::StoreField) {
-                let ir::Node::Statement(Statement::SetField(
-                    _,
-                    ir::StoreField::Written(field, _),
-                    _,
-                )) = node
-                else {
-                    return false;
+            if let FixedNode::StoreField(expected_op) = expected {
+                let (op, field) = match node {
+                    ir::Node::Statement(Statement::SetField(
+                        _,
+                        ir::StoreField::Written(key, _),
+                        _,
+                    )) => (None, key),
+                    ir::Node::Statement(Statement::AugmentField(
+                        _,
+                        ir::StoreField::Written(key, _),
+                        op,
+                        _,
+                    )) => (Some(*op), key),
+                    _ => return false,
                 };
-                if !matches!(self.attributes.get(&range), Some(FixedAttribute::Store(original)) if original == field)
+                if expected_op != op
+                    || !matches!(self.attributes.get(&range), Some(FixedAttribute::Store(original)) if original == field)
                 {
                     return false;
                 }
@@ -103,7 +110,7 @@ pub(super) enum FixedNode {
         message: bool,
     },
     Store(usize),
-    StoreField,
+    StoreField(Option<Binary>),
     Branch(usize, usize),
     TryFinally(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
@@ -560,12 +567,13 @@ impl SourceSites {
     pub(super) fn store_field(
         &mut self,
         field: &ast::ExprAttribute,
-        rhs: TextRange,
+        first_operand: TextRange,
         destination: &mut ir::StoreField,
+        op: Option<Binary>,
     ) {
         if self.wrapper_fields
             && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
-            && let Some(site) = self.statement_site(rhs)
+            && let Some(site) = self.statement_site(first_operand)
             && let ir::StoreField::Native(slot) = *destination
         {
             let key = ir::FieldUse {
@@ -575,7 +583,7 @@ impl SourceSites {
             *destination = ir::StoreField::Written(key, field.attr.clone());
             self.attributes
                 .insert(site.range, FixedAttribute::Store(key));
-            self.commit(site, FixedNode::StoreField);
+            self.commit(site, FixedNode::StoreField(op));
         }
     }
 

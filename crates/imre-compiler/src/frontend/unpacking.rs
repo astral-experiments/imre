@@ -554,7 +554,7 @@ impl Checker<'_> {
                 && let ast::Expr::Attribute(attribute) = target
                 && let [Statement::SetField(_, field, _)] = &mut output[start..]
             {
-                sites.store_field(attribute, assignment.value.range(), field);
+                sites.store_field(attribute, assignment.value.range(), field, None);
             }
             return Ok(true);
         }

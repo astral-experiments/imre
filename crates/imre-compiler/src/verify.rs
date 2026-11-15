@@ -375,7 +375,7 @@ impl Verifier<'_> {
                     return Err("augmented field assignment needs a class receiver".into());
                 };
                 require(
-                    *field < self.module.class_fields[class].len(),
+                    field.slot() < self.module.class_fields[class].len(),
                     "invalid augmented field index",
                 )
             }
