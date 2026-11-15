@@ -139,13 +139,30 @@ impl Checker<'_> {
         call: &impl Ranged,
         mut convert: impl FnMut(&mut Self, Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
-        let result = self.hidden(Type::None);
-        let mut body = self.expand_items(input, call, |checker, value| {
-            let value = convert(checker, value)?;
-            checker.expansion_insert(result, &mut element, value, false, call)
-        })?;
-        let ty = self.types.list(element.unwrap_or(Type::Int));
-        self.locals[result] = ty;
+        let (body, result) = self.collect_list_body(
+            input,
+            element.unwrap_or(Type::Int),
+            call,
+            |checker, result, value| {
+                let value = convert(checker, value)?;
+                checker.expansion_insert(result, &mut element, value, false, call)
+            },
+        )?;
+        Ok(Expr::scope(body, self.local(result), vec![result]))
+    }
+
+    /// Materialize rows in a fresh list. The consumer selects how each bound row is stored.
+    pub(super) fn collect_list_body(
+        &mut self,
+        input: Iteration,
+        element: Type,
+        call: &impl Ranged,
+        mut insert: impl FnMut(&mut Self, usize, Expr) -> Result<Vec<Statement>, String>,
+    ) -> Result<(Vec<Statement>, usize), String> {
+        let result = self.hidden(self.types.list(element));
+        let mut body =
+            self.expand_items(input, call, |checker, value| insert(checker, result, value))?;
+        let ty = self.locals[result];
         body.insert(
             0,
             Statement::Assign(
@@ -156,14 +173,7 @@ impl Checker<'_> {
                 },
             ),
         );
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear: vec![result],
-            },
-        })
+        Ok((body, result))
     }
 
     /// Materializes the default line differ where the caller immediately exhausts it.

@@ -309,34 +309,21 @@ impl Checker<'_> {
             self.sortable_key(element, call)
                 .inspect_err(|_| self.forget_pull_writes(&input))?;
         }
-        let result_type = self.types.list(element);
-        let result = self.hidden(result_type);
-        clear.push(result);
-        body.push(Statement::Assign(
-            result,
-            Expr {
-                ty: result_type,
-                kind: ExprKind::List(Vec::new()),
-            },
-        ));
-        body.extend(
-            self.expand_items(Iteration::Prepared(input), call, |checker, value| {
+        let (collection, result) = self.collect_list_body(
+            Iteration::Prepared(input),
+            element,
+            call,
+            |checker, result, value| {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(result), value]),
                 })])
-            })?,
-        );
-
-        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
-        Ok(Expr {
-            ty: result_type,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear,
             },
-        })
+        )?;
+        body.extend(collection);
+        clear.push(result);
+        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
+        Ok(Expr::scope(body, self.local(result), clear))
     }
 
     /// Bind reverse on an instance or as a descriptor. The receiver and
@@ -1446,6 +1433,26 @@ fn numeric_format(specification: &str) -> Option<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sorted_accepts_the_bound_binary_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(
+            &path,
+            r#"from io import BytesIO
+from typing import BinaryIO
+
+def key(stream: BinaryIO) -> int:
+    return len(stream.read())
+
+for stream in sorted((BytesIO(data) for data in [b'ab', b'c']), key=key, reverse=True):
+    print(stream.tell())
+"#,
+        )
+        .unwrap();
+        crate::check_file(&path, None).unwrap();
+    }
 
     #[test]
     fn numeric_formats_are_literal_and_bounded() {
