@@ -346,6 +346,7 @@ impl Checker<'_> {
         if let ast::Expr::Name(name) = target {
             self.names
                 .get(name.id.as_str())
+                .filter(|slot| !self.unstored_targets.contains(slot))
                 .map(|&slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
         } else if self.registered.is_some() && target.is_attribute_expr() {
             None
@@ -391,7 +392,11 @@ impl Checker<'_> {
             if let Some(name) = target.as_name_expr()
                 && !self.names.contains_key(name.id.as_str())
             {
-                self.declare(name.id.as_str(), value.ty, target)?;
+                let slot = self.declare(name.id.as_str(), value.ty, target)?;
+                // A checked unbound read can already refer to its original slot and flag.
+                if !self.bound_flags.contains_key(name.id.as_str()) {
+                    self.unstored_targets.insert(slot);
+                }
             }
         }
         Ok(true)
