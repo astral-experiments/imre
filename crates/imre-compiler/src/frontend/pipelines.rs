@@ -2944,20 +2944,20 @@ impl Checker<'_> {
         }
     }
 
-    /// Reduce exact integers in one pass without retaining intermediate items.
+    /// Reduce fixed scalar operands in one pass, retaining the first equal item.
     pub(super) fn extremum_call(
         &mut self,
         call: &ast::ExprCall,
         minimum: bool,
     ) -> Result<Expr, String> {
         let name = if minimum { "min" } else { "max" };
-        self.reject_builtin_keywords(call)?;
         let order = if minimum {
             Compare::Less
         } else {
             Compare::Greater
         };
         if call.arguments.args.len() >= 2 {
+            self.reject_builtin_keywords(call)?;
             let args = call
                 .arguments
                 .args
@@ -2969,25 +2969,55 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::IntExtremum { minimum }, args),
             });
         }
-        let input = match call.arguments.args.as_ref() {
-            [source @ ast::Expr::Generator(_)] => Some(self.expansion_input(source, Some(Type::Int))?),
-            [source] => self.pipeline_input(source, None, None)?.filter(|input| {
+        let mut default = None;
+        let input = match (call.arguments.args.as_ref(), call.arguments.keywords.as_ref()) {
+            ([source @ ast::Expr::Generator(_)], []) => {
+                Some(self.expansion_input(source, Some(Type::Int))?)
+            }
+            ([source], []) => self.pipeline_input(source, None, None)?.filter(|input| {
                 matches!(input, Iteration::Prepared(cursor) if self.locals[cursor.value] == Type::Int)
             }),
+            ([source], [keyword])
+                if keyword.arg.as_deref() == Some("default")
+                    && !matches!(source, ast::Expr::Starred(_) | ast::Expr::Generator(_))
+                    && self.unshadowed_builtin(&call.func, name) =>
+            {
+                let iterable = self.expr(source)?;
+                let value = self.expr(&keyword.value)?;
+                if matches!(value.ty, Type::Int | Type::Str)
+                    && self.types.element(iterable.ty) == Some(value.ty)
+                {
+                    default = Some(value);
+                    Some(self.iteration_value(iterable, false, source)?)
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         let Some(input) = input else {
+            self.reject_builtin_keywords(call)?;
             return Err(error(
                 self.source,
                 call,
                 &format!("{name} requires at least two integers or one integer generator"),
             ));
         };
-        let best = self.hidden(Type::Int);
+        let element = default.as_ref().map_or(Type::Int, |value| value.ty);
+        let best = self.hidden(element);
         let empty = self.hidden(Type::Bool);
+        let mut clear = vec![empty, best];
         let mut body = vec![Statement::Assign(empty, Expr::boolean(true))];
+        let no_default = default.is_none();
+        let input = if let Some(value) = default {
+            let input = self.capture_consumer_input(input, &mut body, &mut clear);
+            body.push(Statement::Assign(best, value));
+            input
+        } else {
+            input
+        };
         body.extend(self.expand_items(input, call, |checker, item| {
-            checker.expect(Type::Int, item.ty, call)?;
+            checker.expect(element, item.ty, call)?;
             let better = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(
@@ -3007,19 +3037,21 @@ impl Checker<'_> {
                 Vec::new(),
             )])
         })?);
-        body.push(Statement::If(
-            self.local(empty),
-            vec![raise_value_error(format!(
-                "{name}() iterable argument is empty"
-            ))],
-            Vec::new(),
-        ));
+        if no_default {
+            body.push(Statement::If(
+                self.local(empty),
+                vec![raise_value_error(format!(
+                    "{name}() iterable argument is empty"
+                ))],
+                Vec::new(),
+            ));
+        }
         Ok(Expr {
-            ty: Type::Int,
+            ty: element,
             kind: ExprKind::Scope {
                 body,
                 value: Box::new(self.local(best)),
-                clear: vec![empty, best],
+                clear,
             },
         })
     }
