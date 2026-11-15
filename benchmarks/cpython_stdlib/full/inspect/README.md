@@ -45,3 +45,18 @@ python3.14 benchmarks/cpython_stdlib/full/inspect/werkzeug_cache_docs.py \
   --imre target/release/imre --runtime target/release/libimre_runtime.a --clang /usr/bin/clang-18 \
   --wheelhouse "$WHEELHOUSE" --result /tmp/inspect-werkzeug.json
 ```
+
+## Complete package on public #8570 and #8580
+
+Public [#8570](https://github.com/astral-experiments/imre/pull/8570) and [#8580](https://github.com/astral-experiments/imre/pull/8580) ran the same original CPython 3.14.5 package on Linux with `--include-module test.test_inspect.test_inspect -m unittest -v test.test_inspect`. The package selected its own tests through `load_tests`. Its 362 original IDs had identical outcomes at O0 and O3 on both releases. CPython passed 355 and skipped seven. Each native run passed 256, errored on 64 and skipped 42, including all seven stock skips. Without the explicit child module, the package initializer stopped before it ran a test. [All 362 ID comparisons](inspect-paired-8580.tsv)
+
+The historical coverage table credits 259 distinct IDs across earlier accepted runs. The two releases retained 255 of those IDs. Four previously credited originals errored at both tiers.
+
+| Original | Test | First failure |
+| ---: | --- | --- |
+| 127 | `TestGetattrStatic.test_metaclass_with_metaclass_with_dict_as_property` | Custom metaclass construction |
+| 209 | `TestPredicates.test_isabstract` | Missing `__flags__` |
+| 210 | `TestPredicates.test_isabstract_during_init_subclass` | Missing `__flags__` |
+| 318 | `TestSignatureObject.test_signature_on_class` | Custom metaclass construction |
+
+Original 168, `TestInterpreterStack.test_trace`, passed on both releases and tiers for the first time in this comparison. The historical table keeps its original credits.
