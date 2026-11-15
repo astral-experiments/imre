@@ -8,11 +8,11 @@ use crate::objects::{consume_context_token, replace_context_binding};
 impl Context {
     /// Use the entered context, creating the implicit one on its first copy or set.
     fn current_context(&mut self) -> Id {
-        if let Some(&current) = self.contexts.last() {
+        if let Some(&current) = self.heap.execution.contexts.last() {
             return current;
         }
         let current = self.alloc(Value::Context(Default::default()));
-        self.contexts.push(current);
+        self.heap.execution.contexts.push(current);
         current
     }
 
@@ -83,7 +83,7 @@ impl Context {
         };
         let same_variable = variable.is_none_or(|var| var == *key);
         if let Err((kind, reason)) = consume_context_token(used, same_variable, || {
-            Some(context) == self.contexts.last()
+            Some(context) == self.heap.execution.contexts.last()
         }) {
             let token_repr = self.checked_format(token, true)?;
             return Err(Error::new(kind.name(), format!("{token_repr} {reason}")));
@@ -152,7 +152,9 @@ pub(super) fn call(
             let Value::ContextVar { default, .. } = ctx.heap.get(*variable) else {
                 unreachable!("bound ContextVar.get");
             };
-            ctx.contexts
+            ctx.heap
+                .execution
+                .contexts
                 .last()
                 .and_then(|&current| ctx.bindings(current).get(variable))
                 .copied()
@@ -204,7 +206,7 @@ pub(super) fn call(
         ("Context.run", [context, args @ ..], kwargs) => {
             let (callable, rest) = imre_ast::context_run_arguments(args)
                 .map_err(|message| Error::new("TypeError", message))?;
-            if ctx.contexts.contains(context) {
+            if ctx.heap.context_is_entered(*context) {
                 return Err(Error::new(
                     "RuntimeError",
                     format!(
@@ -213,9 +215,9 @@ pub(super) fn call(
                     ),
                 ));
             }
-            ctx.contexts.push(*context);
+            ctx.heap.execution.contexts.push(*context);
             let result = ctx.call(*callable, rest.to_vec(), kwargs.to_vec());
-            ctx.contexts.pop();
+            ctx.heap.execution.contexts.pop();
             result
         }
         _ => Err(Error::new(
@@ -260,10 +262,10 @@ mod tests {
         let token = call(&mut ctx, "Context.run", &[explicit, set, name], &[]).unwrap();
         let error = call(&mut ctx, "ContextVar.reset", &[var, token], &[]).unwrap_err();
         assert_eq!(error.kind, "ValueError");
-        assert!(ctx.contexts.is_empty());
+        assert!(ctx.heap.execution.contexts.is_empty());
 
         let copy = call(&mut ctx, "copy_context", &[], &[]).unwrap();
-        let current = ctx.contexts[0];
+        let current = ctx.heap.execution.contexts[0];
         assert_ne!(copy, current);
         assert!(Rc::ptr_eq(ctx.bindings(copy), ctx.bindings(current)));
         call(&mut ctx, "ContextVar.set", &[var, name], &[]).unwrap();

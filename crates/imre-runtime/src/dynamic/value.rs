@@ -3901,6 +3901,7 @@ pub(super) struct Frame {
 #[derive(Default)]
 pub(super) struct ExecutionState {
     frames: Vec<Frame>,
+    pub(super) contexts: Vec<Id>,
     pub(super) pending: Option<Error>,
     pub(super) call_depth: usize,
     // Python alias frames represented by a renderer suspended in a tuple argument callback.
@@ -3930,11 +3931,15 @@ impl ExecutionState {
     }
 
     fn roots(&self) -> impl Iterator<Item = Id> + '_ {
-        self.pending.iter().flat_map(Error::roots).chain(
-            self.frames
-                .iter()
-                .flat_map(|frame| std::iter::once(frame.owner.root()).chain(frame.roots())),
-        )
+        self.contexts
+            .iter()
+            .copied()
+            .chain(self.pending.iter().flat_map(Error::roots))
+            .chain(
+                self.frames
+                    .iter()
+                    .flat_map(|frame| std::iter::once(frame.owner.root()).chain(frame.roots())),
+            )
     }
 
     /// Clear the error indicator for a callback and keep its objects in the calling frame.
@@ -3974,6 +3979,11 @@ impl Drop for ParkedExecution {
 impl Heap {
     fn executions(&self) -> impl Iterator<Item = &ExecutionState> {
         std::iter::once(&self.execution).chain(self.parked_executions.iter().flatten())
+    }
+
+    pub(super) fn context_is_entered(&self, context: Id) -> bool {
+        self.executions()
+            .any(|execution| execution.contexts.contains(&context))
     }
 
     fn park_execution(&mut self) -> Result<usize> {
@@ -7747,6 +7757,37 @@ mod tests {
             .unwrap();
         assert_eq!(fields[1], filename);
         assert!(matches!(ctx.heap.get(filename), Value::List(_)));
+    }
+
+    #[test]
+    fn parked_executions_keep_their_context_variable_bindings() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("value");
+        let var = ctx.alloc(Value::ContextVar {
+            name,
+            name_hash: 0,
+            default: Some(NONE),
+            repr_active: Default::default(),
+        });
+        let get = ctx.lookup_attr(var, "get").unwrap();
+        let set = ctx.lookup_attr(var, "set").unwrap();
+        let reset = ctx.lookup_attr(var, "reset").unwrap();
+        let token = ctx.call(set, vec![TRUE], vec![]).unwrap();
+
+        let slot = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
+        ctx.call(set, vec![FALSE], vec![]).unwrap();
+        assert_eq!(
+            ctx.call(reset, vec![token], vec![]).unwrap_err().kind,
+            "ValueError"
+        );
+        ctx.heap.execution = ExecutionState::default();
+        ctx.heap.resume_execution(slot);
+
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), TRUE);
+        ctx.call(reset, vec![token], vec![]).unwrap();
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
     }
 
     #[test]
