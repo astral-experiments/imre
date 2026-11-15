@@ -777,8 +777,11 @@ pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
 }
 
 fn fixed_frame_header(function: &ast::StmtFunctionDef) -> bool {
-    function.decorator_list.is_empty()
-        && function.type_params.is_none()
+    function.decorator_list.is_empty() && fixed_frame_parameters(function)
+}
+
+fn fixed_frame_parameters(function: &ast::StmtFunctionDef) -> bool {
+    function.type_params.is_none()
         && function.parameters.vararg.is_none()
         && function.parameters.kwarg.is_none()
 }
@@ -1086,13 +1089,18 @@ fn lower_graph(
             );
             // A synthesized initializer has the class statement's range. Only declared
             // methods have their own source site for a Python entry.
-            let physical_entry = kind == crate::classes::MethodKind::Instance
-                && class.method_origins[index] == class.definition
+            let declaration = &class.methods[index];
+            let physical_entry = match kind {
+                crate::classes::MethodKind::Instance => fixed_frame_entry(declaration),
+                crate::classes::MethodKind::Property => {
+                    !declaration.is_async && fixed_frame_parameters(declaration)
+                }
+                _ => false,
+            } && class.method_origins[index] == class.definition
                 && method.start() != class.node.start()
                 && class.forwarder.is_none()
                 && module.is_program_source()
-                && defaults.forwarded.is_none()
-                && fixed_frame_entry(&class.methods[index]);
+                && defaults.forwarded.is_none();
             let mut signature = signature(
                 &method,
                 graph,
@@ -1547,13 +1555,19 @@ fn lower_graph(
                 PreparedBody::Fixed((body, _)) if collect_sites || body.source.is_none() => {}
                 PreparedBody::Fixed((body, _))
                     if !signature.physical_frame
-                        || signature.method.is_some()
-                            && graph.session.function_uses_fixed_names(
+                        || signature.method.is_some_and(|method| {
+                            let fields = std::cell::LazyCell::new(|| {
+                                checker.checked_receiver_fields(method.class, &body.function)
+                            });
+                            graph.session.function_reads_only(
                                 *module_id,
                                 definition,
-                                false,
+                                crate::analysis::EagerDisplays::Excluded,
+                                |_| true,
                                 |_| false,
-                            ) =>
+                                |name| fields.contains(name),
+                            )
+                        }) =>
                 {
                     // Keep the instructions in the ordinary fixed method's layout.
                     body.source = None;
@@ -1605,6 +1619,7 @@ fn lower_graph(
                     crate::analysis::EagerDisplays::Required,
                     |_| true,
                     |name| module_builtin_name(module, name),
+                    |_| false,
                 ))
                 || (signature.returns == Type::None
                     && definition.returns.is_some()
@@ -14319,7 +14334,7 @@ impl<'a> Checker<'a> {
                     attribute.attr.as_str(),
                     call,
                 )?;
-                return Ok(self.bound_text_result(call, attribute, value));
+                return Ok(self.bound_builtin_result(call, attribute, value));
             }
             if attribute.attr.as_str() == "expandtabs"
                 && matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
@@ -14331,7 +14346,7 @@ impl<'a> Checker<'a> {
             {
                 let value =
                     self.text_method(Self::string_value(receiver), attribute.attr.as_str(), call)?;
-                return Ok(self.bound_text_result(call, attribute, value));
+                return Ok(self.bound_builtin_result(call, attribute, value));
             }
             if matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
                 && let Some(method) = stdlib::registered_string_method(call)
@@ -14358,12 +14373,12 @@ impl<'a> Checker<'a> {
                     "join" => return self.join_call(receiver, call),
                     "replace" => {
                         let value = self.replace_call(receiver, call)?;
-                        return Ok(self.bound_text_result(call, attribute, value));
+                        return Ok(self.bound_builtin_result(call, attribute, value));
                     }
                     "split" | "rsplit" | "strip" | "lstrip" | "rstrip" | "startswith"
                     | "endswith" | "find" | "partition" => {
                         let value = self.text_method(receiver, attribute.attr.as_str(), call)?;
-                        return Ok(self.bound_text_result(call, attribute, value));
+                        return Ok(self.bound_builtin_result(call, attribute, value));
                     }
                     _ => {}
                 }
@@ -14644,10 +14659,11 @@ impl<'a> Checker<'a> {
                 } else {
                     (optional_lookup(), optional)
                 };
-                return Ok(Expr {
+                let value = Expr {
                     ty,
                     kind: ExprKind::Builtin(builtin, args),
-                });
+                };
+                return Ok(self.bound_builtin_result(call, attribute, value));
             }
             if let Some(method) = self.boxed_set_method(attribute, Some(receiver.ty)) {
                 return Err(self.object_builtin_error(method, call));
@@ -14849,6 +14865,31 @@ impl<'a> Checker<'a> {
             ));
         };
         self.named_builtin_call(call, name.id.as_str())
+    }
+
+    /// Keep the source method binding when the Python frame can pass the original operands.
+    fn bound_builtin_result(
+        &mut self,
+        call: &ast::ExprCall,
+        field: &ast::ExprAttribute,
+        value: Expr,
+    ) -> Expr {
+        let bound = match &value.kind {
+            ExprKind::Builtin(Builtin::Text(_), args) => {
+                call.arguments.is_empty() && args.len() == 1
+            }
+            ExprKind::Builtin(Builtin::StringReplace | Builtin::DictGetDefault, _) => {
+                registered::values::fixed_positional_arguments(call)
+            }
+            _ => false,
+        };
+        if bound {
+            self.frame_arguments = FrameArguments::Python;
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.method(call, field, &value);
+            }
+        }
+        value
     }
 
     fn named_builtin_call(&mut self, call: &ast::ExprCall, name: &str) -> Result<Expr, String> {

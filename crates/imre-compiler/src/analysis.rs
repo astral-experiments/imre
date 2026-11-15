@@ -828,10 +828,17 @@ impl Session {
         } else {
             EagerDisplays::Excluded
         };
-        self.function_reads_only(module, function, displays, |_| true, fixed_global)
+        self.function_reads_only(
+            module,
+            function,
+            displays,
+            |_| true,
+            fixed_global,
+            |_| false,
+        )
     }
 
-    /// Check a fixed body with separate rules for reads of local and global names.
+    /// Check the local, global and receiver-field bindings used by a fixed body.
     pub(crate) fn function_reads_only(
         &self,
         module: usize,
@@ -839,6 +846,7 @@ impl Session {
         displays: EagerDisplays,
         allowed_local_read: impl Fn(&str) -> bool,
         fixed_global: impl Fn(&str) -> bool,
+        fixed_receiver_field: impl Fn(&str) -> bool,
     ) -> bool {
         use ty_python_core::scope::{NodeWithScopeKind, NodeWithScopeRef};
 
@@ -849,18 +857,20 @@ impl Session {
         };
         let fixed = |scope| {
             let places = index.place_table(scope);
-            places.members().next().is_none()
-                && places.symbols().all(|symbol| {
-                    if symbol.is_local() {
-                        !symbol.is_used() || allowed_local_read(symbol.name().as_str())
-                    } else {
-                        fixed_global(symbol.name().as_str())
-                    }
-                })
-                && !index
-                    .use_def_map(scope)
-                    .definitions_with_usage()
-                    .any(|(_, definition, _)| definition.kind(&self.db).is_import())
+            places.members().all(|member| {
+                member
+                    .as_instance_attribute()
+                    .is_some_and(&fixed_receiver_field)
+            }) && places.symbols().all(|symbol| {
+                if symbol.is_local() {
+                    !symbol.is_used() || allowed_local_read(symbol.name().as_str())
+                } else {
+                    fixed_global(symbol.name().as_str())
+                }
+            }) && !index
+                .use_def_map(scope)
+                .definitions_with_usage()
+                .any(|(_, definition, _)| definition.kind(&self.db).is_import())
         };
         let mut children = index.child_scopes(scope).peekable();
         !function.is_async
