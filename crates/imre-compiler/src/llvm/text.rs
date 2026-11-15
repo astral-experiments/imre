@@ -172,6 +172,7 @@ impl Emitter<'_, '_> {
                     TextPredicate::Alnum => "imre_str_isalnum",
                     TextPredicate::Ascii => "imre_str_is_ascii",
                     TextPredicate::Alpha => "imre_str_isalpha",
+                    TextPredicate::Decimal => "imre_str_isdecimal",
                     TextPredicate::Digit => "imre_str_isdigit",
                     TextPredicate::Numeric => "imre_str_isnumeric",
                     TextPredicate::Space => "imre_str_isspace",

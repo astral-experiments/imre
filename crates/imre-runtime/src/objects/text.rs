@@ -409,18 +409,23 @@ pub(crate) fn python_isprintable(text: &str) -> bool {
     })
 }
 
-pub(crate) fn python_isdigit(text: &str) -> bool {
+fn numeric_characters(text: &str, predicate: impl Fn(char) -> bool) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
     }
-    text.chars().all(crate::integer_text::is_digit)
+    text.chars().all(predicate)
+}
+
+pub(crate) fn python_isdecimal(text: &str) -> bool {
+    numeric_characters(text, |c| crate::integer_text::decimal_digit(c).is_some())
+}
+
+pub(crate) fn python_isdigit(text: &str) -> bool {
+    numeric_characters(text, crate::integer_text::is_digit)
 }
 
 pub(crate) fn python_isnumeric(text: &str) -> bool {
-    if text.is_ascii() {
-        return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
-    }
-    text.chars().all(crate::integer_text::is_numeric)
+    numeric_characters(text, crate::integer_text::is_numeric)
 }
 
 /// Tests for a nonempty string of Unicode 16 letters.
@@ -431,6 +436,16 @@ pub(crate) fn python_isnumeric(text: &str) -> bool {
 pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive for this call.
     u32::from(python_isalpha(unsafe { &*value }))
+}
+
+/// Tests for a nonempty string of Unicode 16 Decimal characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isdecimal(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isdecimal(unsafe { &*value }))
 }
 
 /// Tests for a nonempty string of Unicode 16 Decimal or Digit characters.

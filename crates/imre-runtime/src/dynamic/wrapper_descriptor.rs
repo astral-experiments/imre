@@ -906,6 +906,9 @@ impl BuiltinDescriptor {
                     ("isalpha", "__doc__") => {
                         "Return True if the string is an alphabetic string, False otherwise.\n\nA string is alphabetic if all characters in the string are alphabetic and there\nis at least one character in the string."
                     }
+                    ("isdecimal", "__doc__") => {
+                        "Return True if the string is a decimal string, False otherwise.\n\nA string is a decimal string if all characters in the string are decimal and\nthere is at least one character in the string."
+                    }
                     ("isdigit", "__doc__") => {
                         "Return True if the string is a digit string, False otherwise.\n\nA string is a digit string if all characters in the string are digits and there\nis at least one character in the string."
                     }
@@ -965,7 +968,7 @@ impl BuiltinDescriptor {
                         "Convert uppercase characters to lowercase and lowercase characters to uppercase."
                     }
                     (
-                        "isascii" | "isalpha" | "isdigit" | "isidentifier" | "islower" | "isnumeric" | "isprintable" | "istitle" | "lower" | "title"
+                        "isascii" | "isalpha" | "isdecimal" | "isdigit" | "isidentifier" | "islower" | "isnumeric" | "isprintable" | "istitle" | "lower" | "title"
                         | "swapcase" | "casefold",
                         _,
                     ) => "($self, /)",

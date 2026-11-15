@@ -3016,6 +3016,7 @@ pub(super) fn method(
         "isalnum" => Some(crate::objects::python_alnum),
         "isascii" => Some(str::is_ascii),
         "isalpha" => Some(crate::objects::python_isalpha),
+        "isdecimal" => Some(crate::objects::python_isdecimal),
         "isdigit" => Some(crate::objects::python_isdigit),
         "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
@@ -3065,6 +3066,7 @@ pub(super) fn method(
             "isalnum"
                 | "isascii"
                 | "isalpha"
+                | "isdecimal"
                 | "isdigit"
                 | "isidentifier"
                 | "isnumeric"

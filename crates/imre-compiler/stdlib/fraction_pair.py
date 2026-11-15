@@ -79,21 +79,11 @@ def _normalized(n: int, d: int) -> Fraction:
 
 
 def _digits(text: str) -> bool:
-    if text.isascii() and text.isdigit():
-        return True
-    previous_digit = False
-    for char in text:
-        if char == "_":
-            if not previous_digit:
-                return False
-            previous_digit = False
-        else:
-            try:
-                int(char)
-            except ValueError:
-                return False
-            previous_digit = True
-    return previous_digit
+    if "_" in text:
+        if text.startswith("_") or text.endswith("_") or "__" in text:
+            return False
+        text = text.replace("_", "")
+    return text.isdecimal()
 
 
 def _from_text(value: str) -> Fraction:

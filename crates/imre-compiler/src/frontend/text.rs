@@ -426,6 +426,7 @@ impl Checker<'_> {
                     "isalnum" => ir::TextPredicate::Alnum,
                     "isascii" => ir::TextPredicate::Ascii,
                     "isalpha" => ir::TextPredicate::Alpha,
+                    "isdecimal" => ir::TextPredicate::Decimal,
                     "isdigit" => ir::TextPredicate::Digit,
                     "isnumeric" => ir::TextPredicate::Numeric,
                     "isspace" => ir::TextPredicate::Space,
