@@ -1053,6 +1053,10 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def exception_name(stderr: str) -> str:
+    return stderr.rstrip().rsplit("\n", 1)[-1].partition(":")[0]
+
+
 def check_join_under_memory_limit(command: list[str]) -> None:
     import resource
 
@@ -1116,7 +1120,7 @@ def main() -> None:
             reference = run([args.python, "-I", str(path)])
             if expected_error:
                 assert (
-                    reference.returncode > 0 and expected_error in reference.stderr
+                    reference.returncode > 0 and exception_name(reference.stderr) == expected_error
                 ), (name, reference)
             else:
                 assert reference.returncode == 0 and not reference.stderr, (
@@ -1152,8 +1156,8 @@ def main() -> None:
                     actual.stderr,
                 )
                 if expected_error:
-                    assert actual.returncode > 0 and actual.stderr.startswith(
-                        expected_error + ":"
+                    assert (
+                        actual.returncode > 0 and exception_name(actual.stderr) == expected_error
                     ), (name, level, actual)
                 else:
                     assert actual.returncode == 0 and not actual.stderr, (
