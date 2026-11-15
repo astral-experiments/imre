@@ -49,12 +49,13 @@ pub(super) fn options(
         ast::Expr::Call(call) => (&*call.func, Some(&call.arguments)),
         expression => (expression, None),
     };
-    let binding = graph.resolve(module_id, target);
-    let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
+    let value_struct = module.value_structs.contains(&node.start());
     if value_struct && arguments.is_some() {
         return Err(module.error(decorator, "use bare @imre.struct without options"));
     }
-    if !value_struct && binding != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
+    if !value_struct
+        && graph.resolve(module_id, target) != Some(Binding::Intrinsic(Intrinsic::Dataclass))
+    {
         return Ok(None);
     }
     let mut options = DataclassOptions {

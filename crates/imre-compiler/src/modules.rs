@@ -2841,6 +2841,8 @@ pub(crate) struct SourceModule {
     pub(crate) aliases: Vec<TypeAlias>,
     /// Decorated declarations register their original function at module initialization.
     pub(crate) overloads: HashSet<usize>,
+    /// Class sites where the module's struct decorator requires native value storage.
+    pub(crate) value_structs: HashSet<TextSize>,
     pub(crate) type_guards: Vec<usize>,
     /// Entry bindings and guards that run during initialization, before later definitions.
     pub(crate) entry_globals: Vec<usize>,
@@ -3539,19 +3541,6 @@ impl SourceGraph {
         if matches!(self.check_fallback_calls.get(), FallbackCalls::None) {
             self.check_fallback_calls.set(FallbackCalls::All);
         }
-    }
-
-    /// The native value-struct decorator has no corresponding Python object runtime export.
-    pub(crate) fn imports_struct_decorator(&self) -> bool {
-        self.modules.iter().any(|module| {
-            module.bindings.values().any(|binding| {
-                matches!(
-                    binding,
-                    Binding::Intrinsic(Intrinsic::Struct)
-                        | Binding::IntrinsicModule(IntrinsicModule::Imre)
-                )
-            })
-        })
     }
 
     pub(crate) fn boxed_pattern_method(
@@ -5110,6 +5099,7 @@ impl<'a> Loader<'a> {
             local_static_imports: Vec::new(),
             aliases: Vec::new(),
             overloads: HashSet::new(),
+            value_structs: HashSet::new(),
             type_guards: Vec::new(),
             entry_globals: Vec::new(),
             optional_imports: HashMap::new(),
@@ -5720,6 +5710,11 @@ impl<'a> Loader<'a> {
                 .entry(name.to_owned())
                 .or_insert(Binding::RuntimeClass);
         }
+        self.modules[id].value_structs =
+            self.session.classes_with_module_decorator(id, &parsed, |target| {
+                resolve_binding(&self.modules, id, target)
+                    == Some(Binding::Intrinsic(Intrinsic::Struct))
+            });
         if !field_separators.is_empty() {
             let module = &mut self.modules[id];
             let mut source = module.source.clone();
