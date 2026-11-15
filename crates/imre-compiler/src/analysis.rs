@@ -3214,6 +3214,25 @@ impl Session {
         Ok(&cache.closed_diagnostics.as_ref().unwrap().session)
     }
 
+    pub(crate) fn guarded_signature_error(
+        &self,
+        module: usize,
+        function: TextRange,
+    ) -> Option<String> {
+        let file = self.files[module];
+        self.db.check_file(file).into_iter().find_map(|error| {
+            let range = error.primary_span()?.range()?;
+            (error.id().is_lint_named("unresolved-import")
+                && range.end() <= function.start()
+                && signature_uses_guarded_import(&self.db, file, range, |r| r == function))
+            .then(|| {
+                error
+                    .display(&self.db, &DisplayDiagnosticConfig::new("imre"))
+                    .to_string()
+            })
+        })
+    }
+
     pub(crate) fn set_closed_program_rules(&mut self) {
         // Native lowering and the ordinary fallback checker own the rest of the type
         // contract. Check the same declared signatures when lowering stops at a
@@ -4200,7 +4219,9 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                 Some(_) if is_call_shape_rule(diagnostic.id().as_str()) && range.is_some() => None,
                 Some(_)
                     if diagnostic.id().is_lint_named("unresolved-import")
-                        && signature_uses_guarded_import(db, file, range?, skipped) =>
+                        && signature_uses_guarded_import(db, file, range?, |function| {
+                            !skipped.iter().any(|r| r.contains_range(function))
+                        }) =>
                 {
                     None
                 }
@@ -4249,7 +4270,7 @@ fn signature_uses_guarded_import(
     db: &dyn Db,
     file: File,
     range: TextRange,
-    skipped: &[TextRange],
+    selected: impl Fn(TextRange) -> bool,
 ) -> bool {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_semantic::types::ide_support::{ImportAliasResolution, definitions_for_name};
@@ -4303,7 +4324,7 @@ fn signature_uses_guarded_import(
                 return false;
             };
             let f = owner.node(&parsed);
-            !skipped.iter().any(|r| r.contains_range(f.range()))
+            selected(f.range())
                 && !index.is_in_type_checking_block(scope.file_scope_id(db), f.range())
                 && f.parameters
                     .iter()

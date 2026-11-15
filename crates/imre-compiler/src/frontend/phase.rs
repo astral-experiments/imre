@@ -27,6 +27,7 @@ pub(crate) enum Kind {
     ClassLayout,
     ScopedClassLayout,
     RegisteredClassDefinition,
+    GuardedSignature(DefinitionId),
 }
 
 /// The entry operand and physical source containing its checked diagnostic.
