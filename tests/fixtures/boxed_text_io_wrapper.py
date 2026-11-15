@@ -150,7 +150,21 @@ def check_write_reinitializes_wrapper():
         assert replacement.getvalue() == b"MBBBB"
 
 
+def check_chunk_size_reinitializes_wrapper():
+    replacement = io.BytesIO(b"new")
+    with io.TextIOWrapper(io.BytesIO(b"old")) as text:
+        class Size:
+            def __index__(self):
+                io.TextIOWrapper.__init__(text, replacement, encoding="ascii")
+                return 7
+
+        text._CHUNK_SIZE = Size()
+        assert text.buffer is replacement and text._CHUNK_SIZE == 7
+        assert text.read() == "new"
+
+
 def current():
+    check_chunk_size_reinitializes_wrapper()
     check_write_reinitializes_wrapper()
     check_split_multibyte()
     check_surrogate_reads()
