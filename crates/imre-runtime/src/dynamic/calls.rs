@@ -2582,10 +2582,13 @@ impl Context {
         }
     }
     pub(super) fn missing_attribute(&self, obj: Id, name: &str) -> Error {
-        let message = if self.is_type_object(obj) {
+        if self.is_type_object(obj) {
             let class = self.class_name(obj);
             let class = &class[..class.floor_char_boundary(100)];
-            format!("type object '{class}' has no attribute '{name}'")
+            Error::new(
+                "AttributeError",
+                format!("type object '{class}' has no attribute '{name}'"),
+            )
         } else {
             let class = match self.heap.get(obj) {
                 Value::Partial { .. } => stdlib::functools::PARTIAL_CLASS,
@@ -2595,9 +2598,15 @@ impl Context {
                 Value::Method { .. } => self.builtin_type_name(obj).unwrap_or("method"),
                 _ => self.type_name(obj),
             };
-            format!("'{class}' object has no attribute '{name}'")
-        };
-        Error::new("AttributeError", message)
+            Self::missing_object_member(class, name)
+        }
+    }
+
+    fn missing_object_member(class: &str, name: &str) -> Error {
+        Error::new(
+            "AttributeError",
+            format!("'{class}' object has no attribute '{name}'"),
+        )
     }
 
     /// Preserve the original lookup operands without replacing a descriptor's own error fields.
@@ -3212,15 +3221,29 @@ impl Context {
         let meta = self.builtin("type");
         let meta_member = if receiver == NONE {
             self.class_dictionary_member(meta, key)
+                .map(|(_, _, member)| member)
         } else {
             None
         };
-        if let Some((declaring, stored, member)) = meta_member
-            && (self.readable_data_descriptor(member)
-                || *lookup == AttributeLookup::Object
-                    && self.inherited_object_member(meta, declaring, stored))
-        {
-            return self.bind_attribute(member, obj, meta);
+        // An explicit object read can inspect only the type object's own instance
+        // dictionary after metaclass lookup. A managed type namespace is not one.
+        let metaclass_only = receiver == NONE
+            && *lookup == AttributeLookup::Object
+            && self.type_instance_dictionary(obj).is_none();
+        match meta_member {
+            Some(member) if metaclass_only || self.readable_data_descriptor(member) => {
+                return self.bind_attribute(member, obj, meta);
+            }
+            None if metaclass_only => {
+                let error = Self::missing_object_member(self.class_name(meta), spelling);
+                return self.attribute_error_context(
+                    error,
+                    obj,
+                    AttributeName::Text(spelling),
+                    Some(key),
+                );
+            }
+            _ => {}
         }
         if let Some((base, stored, member)) = self.class_dictionary_member(class, key) {
             if self.inherited_object_member(class, base, stored)
@@ -3235,7 +3258,7 @@ impl Context {
             let name = self.str_value(stored)?.to_owned();
             return self.default_get_attr(obj, &name);
         }
-        if let Some((_, _, member)) = meta_member {
+        if let Some(member) = meta_member {
             return self.bind_attribute(member, obj, meta);
         }
         Err(self.missing_attribute(obj, spelling))
