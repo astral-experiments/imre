@@ -129,6 +129,37 @@ def callback_exception():
     assert seen == ["a", "b"]
 
 
+def nested_parser_exports():
+    outer = expat.ParserCreate()
+    inner = expat.ParserCreate()
+    data = bytearray(b"<outer><next/></outer>")
+    error = OSError("inner listener")
+    seen = []
+
+    def inner_start(name, attrs):
+        try:
+            data.append(0)
+        except BufferError:
+            raise error
+        raise AssertionError("outer parser lost its buffer export")
+
+    def outer_start(name, attrs):
+        seen.append(name)
+        if name == "outer":
+            try:
+                inner.Parse(b"<inner/>", True)
+            except OSError as caught:
+                assert caught is error
+            else:
+                raise AssertionError("lost the inner parser exception")
+
+    outer.StartElementHandler = outer_start
+    inner.StartElementHandler = inner_start
+    outer.Parse(data, True)
+    assert seen == ["outer", "next"]
+    data.append(0)
+
+
 def buffered_callback_exception():
     parser = expat.ParserCreate()
     parser.buffer_text = True
@@ -246,6 +277,7 @@ incremental()
 namespace_prefixes()
 unknown_encodings()
 callback_exception()
+nested_parser_exports()
 buffered_callback_exception()
 replace_buffered_handler(False)
 replace_buffered_handler(True)

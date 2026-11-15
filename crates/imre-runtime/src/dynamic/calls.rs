@@ -283,6 +283,7 @@ pub(super) enum RegisteredCall {
     /// Condition.notify has already selected the waiter's bound release method.
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
+    Expat(stdlib::pyexpat::Call),
     Select(Vec<Id>),
     Accept(Id),
     Recv(stdlib::socket::Recv),
@@ -331,6 +332,14 @@ impl RegisteredCall {
             }
             // SAFETY: the native restore owns its lock. The caller owns the active execution.
             Self::Restore(wait) => unsafe { wait.run(context) },
+            Self::Expat(call) => {
+                // SAFETY: this registered caller owns the parser and its rooted operands.
+                let result = unsafe { call.run(context) };
+                result.map_err(|error| {
+                    // SAFETY: the parse and its handlers returned to this execution.
+                    stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
+                })
+            }
             Self::Select(args) => {
                 // SAFETY: the caller owns this context and roots the arguments through the wait.
                 let result = unsafe { stdlib::select::run(context, &args) };
@@ -8636,6 +8645,11 @@ impl Context {
                     return stdlib::socket::prepare_descriptor(self, owner, name, &args, &kwargs);
                 }
                 Value::Native(ref name) => {
+                    if let Some(method) = name.strip_prefix("_imre_pyexpat.")
+                        && let Some(call) = stdlib::pyexpat::Call::prepare(method, &args, &kwargs)
+                    {
+                        return Ok(RegisteredCall::Expat(call));
+                    }
                     let wait = match name.as_str() {
                         "_contextvars.Context.run" => {
                             return self.prepare_context_run(&args, kwargs);
