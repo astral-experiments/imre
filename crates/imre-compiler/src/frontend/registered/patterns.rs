@@ -128,13 +128,17 @@ fn prepare_pattern(
                         .map(|child| self.lower(child))
                         .collect::<PatternResult<_>>()?,
                 ),
-                ast::Pattern::MatchSequence(p) => MatchTest::Sequence(
-                    imre_ast::sequence_pattern_plan(&p.patterns),
-                    p.patterns
-                        .iter()
-                        .map(|child| self.lower(child))
-                        .collect::<PatternResult<_>>()?,
-                ),
+                ast::Pattern::MatchSequence(p) => {
+                    let mut star = None;
+                    let mut items = Vec::with_capacity(p.patterns.len());
+                    for child in &p.patterns {
+                        if child.is_match_star() {
+                            star = Some(items.len());
+                        }
+                        items.push(self.lower(child)?);
+                    }
+                    MatchTest::Sequence { star, items }
+                }
                 ast::Pattern::MatchMapping(p) => MatchTest::Mapping(
                     p.keys
                         .iter()
