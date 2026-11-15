@@ -3482,19 +3482,9 @@ impl SourceGraph {
             initializers,
         } = self.registered_functions.take();
         for (module, start, mut body) in lexical {
-            use crate::frontend::FrameInputs;
-            match body.inputs {
-                FrameInputs::Deferred { sites, live: true } => {
-                    body.inputs = FrameInputs::Protocol { sites };
-                }
-                FrameInputs::Protocol { .. } => {}
-                FrameInputs::Checked { .. } => {
-                    // A subsequent registration can replace the provisional body at this site.
-                    if !body.bind_python_arguments() {
-                        continue;
-                    }
-                }
-                _ => continue,
+            // A subsequent registration can replace the provisional body at this site.
+            if !body.bind_python_arguments() {
+                continue;
             }
             admitted
                 .entry(module)

@@ -322,8 +322,16 @@ impl RegisteredFunction {
 
     /// Check that each use of a parameter can consume the caller's live Python value.
     pub(crate) fn bind_python_arguments(&mut self) -> bool {
-        if matches!(self.inputs, FrameInputs::Protocol { .. }) {
-            return true;
+        match &mut self.inputs {
+            FrameInputs::Protocol { .. } => return true,
+            FrameInputs::Deferred { live: false, .. } => return false,
+            FrameInputs::Deferred { sites, live: true } => {
+                self.inputs = FrameInputs::Protocol {
+                    sites: std::mem::take(sites),
+                };
+                return true;
+            }
+            FrameInputs::Checked { .. } => {}
         }
         let Some((inputs, slots)) =
             crate::llvm::registered::frame_inputs(self, FrameArguments::Python)
@@ -1968,10 +1976,10 @@ impl<'a> SuitePreparation<'a> {
         stmts: &[ast::Stmt],
         entry: Option<(&crate::modules::SourceModule, Box<RegisteredFunction>)>,
     ) -> RegisteredSuite {
-        if let Some((module, entry)) = entry
+        if let Some((module, mut entry)) = entry
             && let Some((_, tail)) = module.executable_suffix()
             && let Some(prefix) = stmts.strip_suffix(tail)
-            && crate::llvm::registered::frame_inputs(&entry, FrameArguments::Python).is_some()
+            && entry.bind_python_arguments()
         {
             return self.selected_suite(
                 prefix,
