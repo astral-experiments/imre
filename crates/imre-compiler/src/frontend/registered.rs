@@ -3777,10 +3777,12 @@ impl SourceScope<'_> {
         let continues = self.statement(stmt, body)?;
         let checked = &body[begin..];
         let complete = match region {
-            // A suspended conditional can prune literal arms. If every arm exits,
-            // the checked body must also stop the search for later declarations.
             PhysicalRegion::Fallthrough => {
-                preparation.check_required_sites(RegionRoot::Suite(checked), true) == Ok(continues)
+                // The declaration scan can continue after a raise even when both arms exit.
+                // A pruned literal arm still needs a block with its unconditional transfer.
+                preparation
+                    .check_required_sites(RegionRoot::Suite(checked), true)
+                    .is_ok_and(|reaches_next| !continues || reaches_next)
             }
             // A disabled loop takes the normal edge of its selected else suite.
             PhysicalRegion::Loop
@@ -4422,7 +4424,7 @@ mod tests {
 
     #[test]
     fn suspended_loops_and_exiting_branches_keep_their_checked_bodies() {
-        let text = "def stream(flag):\n    while flag:\n        yield flag\n        break\n    if flag:\n        yield 1\n        return 2\n    else:\n        return 3\n";
+        let text = "def stream(flag, data):\n    while flag:\n        yield flag\n        break\n    if flag:\n        yield 1\n        return 2\n    elif data:\n        return 3\n    else:\n        raise EOFError\n";
         let graph = SourceGraph::single(text).unwrap();
         let module = &graph.modules[graph.entry];
         let function = module.parsed.syntax().body[0]
