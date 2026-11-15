@@ -1065,11 +1065,9 @@ impl Inference {
                         while *slot < signatures.len() && signatures[*slot].returns.is_some() {
                             *slot += 1;
                         }
-                        // Methods and generators can still supply a prepared frame.
-                        // Leave ordinary physical functions to their consuming body check.
+                        // The final body check owns settled functions and methods.
                         if signatures[signature.id].returns.is_some()
                             && signature.physical_frame
-                            && signature.method.is_none()
                             && !graph.session.is_generator_definition(*module, function)
                         {
                             skipped |= *slot < signatures.len();

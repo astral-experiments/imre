@@ -1418,7 +1418,6 @@ fn lower_graph(
         let (module, _, signature) = &definitions[slot];
         needs_registered_entry
             && signature.physical_frame
-            && signature.method.is_none()
             && !checked_bodies.contains(&slot)
             && graph.modules[*module].is_program_source()
             && !graph.modules[*module].bundled
