@@ -1769,8 +1769,8 @@ pub(crate) enum NamespaceImport {
 
 #[derive(Clone)]
 pub(crate) struct ModuleImport {
-    pub(crate) name: String,
-    pub(crate) binding: String,
+    pub(crate) name: ruff_python_ast::name::Name,
+    pub(crate) asname: Option<ruff_python_ast::name::Name>,
     /// An explicit alias for a dotted name binds the leaf module.
     pub(crate) bind_leaf: bool,
 }

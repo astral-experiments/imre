@@ -6810,7 +6810,7 @@ impl<'a> Checker<'a> {
         if self.bound_function_imports
             && let Some(import) = registered::registered_import(statement, None)
         {
-            body.push(Statement::Expr(import));
+            body.push(import);
             return Ok(true);
         }
         if self.module_scope && local_functions::type_variable(self.graph, self.module, statement) {
