@@ -2460,6 +2460,25 @@ impl Session {
         )
     }
 
+    pub(crate) fn missing_module_member(
+        &self,
+        module: usize,
+        expression: &Expr,
+        attribute: &ruff_python_ast::ExprAttribute,
+    ) -> bool {
+        use ty_python_semantic::types::{
+            Type as Ty, ide_support::static_member_type_for_attribute,
+        };
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            attribute.value.inferred_type(&model),
+            Some(Ty::ModuleLiteral(_))
+        ) && expression
+            .inferred_type(&model)
+            .is_some_and(|value| value.is_unknown())
+            && static_member_type_for_attribute(&model, attribute).is_none()
+    }
+
     /// A missing descriptor on an exact builtin literal raises at the Python lookup site.
     pub(crate) fn missing_literal_attribute(
         &self,

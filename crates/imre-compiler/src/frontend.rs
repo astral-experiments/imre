@@ -9179,6 +9179,34 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn operand_binding(&self, expression: &ast::Expr) -> Result<Option<Binding>, String> {
+        let binding = self.resolve(expression);
+        if binding.is_none()
+            && self.inference.is_none()
+            && self.graph.modules[self.module].is_program_source()
+            && let ast::Expr::Attribute(attribute) = expression
+            && let ast::Expr::Name(module) = &*attribute.value
+            && matches!(
+                self.resolve(&attribute.value),
+                Some(Binding::IntrinsicModule(_))
+            )
+            && self
+                .graph
+                .session
+                .missing_module_member(self.module, expression, attribute)
+        {
+            return Err(error(
+                self.source,
+                expression,
+                &format!(
+                    "unsupported module member `{}.{}`",
+                    module.id, attribute.attr
+                ),
+            ));
+        }
+        Ok(binding)
+    }
+
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
     fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
         if let Some(name) = self.boxed_builtin_callable(expression) {
@@ -9187,7 +9215,7 @@ impl<'a> Checker<'a> {
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
-        let binding = self.resolve(expression);
+        let binding = self.operand_binding(expression)?;
         if binding == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
             return Err(self.runtime_attrgetter(expression));
         }
@@ -11871,7 +11899,7 @@ impl<'a> Checker<'a> {
             }
             return Err(self.scoped_builtin_error(name, call));
         }
-        let binding = self.resolve(&call.func);
+        let binding = self.operand_binding(&call.func)?;
         if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
