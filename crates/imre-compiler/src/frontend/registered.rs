@@ -802,13 +802,18 @@ impl FixedFunctions {
         );
     }
 
-    pub(super) fn retain_imported(self, graph: &SourceGraph, owners: &[ModuleId]) {
+    pub(super) fn retain_lexical(self, graph: &SourceGraph, owners: &[ModuleId], entry: bool) {
         self.place(
             graph,
             owners,
-            |module| module != graph.entry && graph.modules[module].is_program_source(),
+            |module| (module != graph.entry || entry) && graph.modules[module].is_program_source(),
             |module, definition, frame| {
-                graph.retain_lexical_function(module, definition.start(), frame);
+                if module != graph.entry
+                    || matches!(frame.inputs, FrameInputs::Checked { .. })
+                        && SourceChecks::cached(graph, module, definition) != Some(false)
+                {
+                    graph.retain_lexical_function(module, definition.start(), frame);
+                }
             },
         );
     }
