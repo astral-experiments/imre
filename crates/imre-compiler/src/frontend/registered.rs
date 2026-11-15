@@ -5848,8 +5848,7 @@ print(clean(CompletedProcess([], 0, " data ")))
 
     #[test]
     fn checked_frames_call_the_live_imported_member() {
-        let graph = checked_named_source(
-            r#"import argparse
+        let source = r#"import argparse
 import subprocess
 from pathlib import Path
 
@@ -5864,8 +5863,13 @@ def capture(command: list[str], *, cwd: Path) -> str:
 
 run(["echo", "run"], cwd=Path("."))
 print(capture(["echo", "capture"], cwd=Path(".")))
-"#,
-        );
+"#;
+        let graph = checked_named_source(source);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut file = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut file).unwrap();
         let bodies = graph.registered_functions();
         for definition in graph.modules[graph.entry]
             .parsed
@@ -5903,6 +5907,13 @@ print(capture(["echo", "capture"], cwd=Path(".")))
             let expected: &[&str] = if definition.name.as_str() == "run" {
                 &["run"]
             } else {
+                let returned = definition.body.last().unwrap().as_return_stmt().unwrap();
+                let range = returned.value.as_ref().unwrap().range();
+                let functions = file.registered_functions();
+                let placed = &functions[&file.entry][&definition.start()];
+                assert!(matches!(placed.fixed_attribute(range),
+                    Some(FixedAttribute::Call(None, site))
+                        if matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip")));
                 &["run", "strip"]
             };
             assert_eq!(calls, expected);

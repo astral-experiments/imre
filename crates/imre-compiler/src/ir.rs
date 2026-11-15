@@ -817,8 +817,7 @@ impl Expr {
                 && matches!(call.arguments, RegisteredArguments::Positional)
                 && args.values.len() == 1
         });
-        self.ty == Type::PythonObject
-            && valid_layout
+        valid_layout
             && valid_projection
             && call.range.start() < end
             && end < call.range.end()
