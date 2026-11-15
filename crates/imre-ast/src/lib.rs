@@ -54,6 +54,7 @@ pub mod numbers;
 pub mod posixpath;
 pub mod providers;
 pub mod python_nodes;
+pub mod source_arguments;
 pub mod source_encoding;
 pub mod startup;
 pub mod strings;

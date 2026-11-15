@@ -278,11 +278,12 @@ impl Callback {
                 pos.len() + usize::from(receiver.is_some()),
                 keys.iter().copied(),
                 num_defaults,
-                |name| ctx.dict_named_item(kwdefaults, name).is_some(),
+                |_, name| ctx.dict_named_item(kwdefaults, name).is_some(),
+                crate::objects::exceptions::keyword_suggestion,
             )
             .map_err(|error| match error {
                 crate::source_arguments::Error::Memory => Error::new("MemoryError", ""),
-                crate::source_arguments::Error::Type(_) => refused(),
+                _ => refused(),
             })?;
         let count = shape.positional.len() + shape.keyword_only.len();
         // Bind directly in the creator's root array. The worker receives only the

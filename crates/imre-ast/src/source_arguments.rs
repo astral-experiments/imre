@@ -1,7 +1,7 @@
 //! Python source function binding shared by checked calls and object frames.
 use smallvec::SmallVec;
 
-pub(crate) struct Shape<'a, N> {
+pub struct Shape<'a, N> {
     pub positional: &'a [N],
     pub positional_only: usize,
     pub keyword_only: &'a [N],
@@ -9,20 +9,22 @@ pub(crate) struct Shape<'a, N> {
     pub kwargs: bool,
 }
 
-pub(crate) struct Binding {
+pub struct Binding {
     /// Each evaluated keyword binds this numbered formal, or goes into **kwargs.
     pub keywords: SmallVec<[Option<usize>; 8]>,
     /// Omitted formals whose defaults belong to the function.
     pub defaults: SmallVec<[usize; 8]>,
 }
 
-pub(crate) enum Error {
+pub enum Error {
     Memory,
-    Type(String),
+    Duplicate(String),
+    UnmatchedKeyword(String),
+    Arity(String),
 }
 
 impl<N: AsRef<str>> Shape<'_, N> {
-    pub(crate) fn parameter(&self, slot: usize) -> &str {
+    pub fn parameter(&self, slot: usize) -> &str {
         if slot < self.positional.len() {
             self.positional[slot].as_ref()
         } else {
@@ -30,13 +32,14 @@ impl<N: AsRef<str>> Shape<'_, N> {
         }
     }
 
-    pub(crate) fn bind<'k>(
+    pub fn bind<'k>(
         &self,
         name: &str,
         positional: usize,
         mut keywords: impl ExactSizeIterator<Item = &'k str> + Clone,
         positional_defaults: usize,
-        has_keyword_default: impl Fn(&str) -> bool,
+        has_keyword_default: impl Fn(usize, &str) -> bool,
+        suggest: impl for<'a> FnOnce(&str, &[&'a str]) -> Option<&'a str>,
     ) -> Result<Binding, Error> {
         let npos = self.positional.len();
         let count = npos + self.keyword_only.len();
@@ -54,7 +57,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
             let slot = (self.positional_only..count).find(|&i| self.parameter(i) == key);
             if let Some(slot) = slot {
                 if slot < filled || std::mem::replace(&mut supplied[slot - filled], true) {
-                    return Err(Error::Type(format!(
+                    return Err(Error::Duplicate(format!(
                         "{name}() got multiple values for argument '{key}'"
                     )));
                 }
@@ -65,7 +68,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
                     .filter(|p| *p == key || keywords.clone().any(|remaining| remaining == *p))
                     .collect();
                 if !conflicts.is_empty() {
-                    return Err(Error::Type(format!(
+                    return Err(Error::UnmatchedKeyword(format!(
                         "{name}() got some positional-only arguments passed as keyword arguments: '{}'",
                         conflicts.join(", ")
                     )));
@@ -73,17 +76,17 @@ impl<N: AsRef<str>> Shape<'_, N> {
                 let candidates: Vec<_> = (self.positional_only..count)
                     .map(|i| self.parameter(i))
                     .collect();
-                return Err(Error::Type(unexpected_keyword_message(
+                return Err(Error::UnmatchedKeyword(unexpected_keyword_message(
                     name,
                     key,
-                    &candidates,
+                    suggest(key, &candidates),
                 )));
             }
             targets.push(slot);
         }
         if positional > npos && !self.varargs {
             let named = supplied.iter().filter(|v| **v).count();
-            return Err(Error::Type(excess_positional_message(
+            return Err(Error::Arity(excess_positional_message(
                 name,
                 npos,
                 positional_defaults,
@@ -99,7 +102,7 @@ impl<N: AsRef<str>> Shape<'_, N> {
                 let has_default = if slot < npos {
                     slot >= npos.saturating_sub(positional_defaults)
                 } else {
-                    has_keyword_default(formal)
+                    has_keyword_default(slot - npos, formal)
                 };
                 if has_default {
                     defaults.try_reserve(1).map_err(|_| Error::Memory)?;
@@ -110,7 +113,9 @@ impl<N: AsRef<str>> Shape<'_, N> {
                 }
             }
             if !missing.is_empty() {
-                return Err(Error::Type(missing_arguments_message(name, kind, &missing)));
+                return Err(Error::Arity(missing_arguments_message(
+                    name, kind, &missing,
+                )));
             }
         }
         Ok(Binding {
@@ -121,15 +126,15 @@ impl<N: AsRef<str>> Shape<'_, N> {
 }
 
 /// Format a Python call's unexpected keyword and any spelling suggestion.
-pub(crate) fn unexpected_keyword_message(name: &str, key: &str, params: &[&str]) -> String {
+pub fn unexpected_keyword_message(name: &str, key: &str, suggestion: Option<&str>) -> String {
     let mut message = format!("{name}() got an unexpected keyword argument '{key}'");
-    if let Some(hint) = crate::objects::exceptions::keyword_suggestion(key, params) {
+    if let Some(hint) = suggestion {
         message.push_str(&format!(". Did you mean '{hint}'?"));
     }
     message
 }
 
-pub(crate) fn excess_positional_message(
+pub fn excess_positional_message(
     name: &str,
     allowed: usize,
     defaults: usize,
@@ -165,7 +170,7 @@ pub(crate) fn excess_positional_message(
     format!("{name}() takes {limit} positional {unit} but {count} {verb} given")
 }
 
-pub(crate) fn missing_arguments_message(name: &str, kind: &str, missing: &[&str]) -> String {
+pub fn missing_arguments_message(name: &str, kind: &str, missing: &[&str]) -> String {
     let count = missing.len();
     let unit = if count == 1 { "argument" } else { "arguments" };
     let names = match missing {

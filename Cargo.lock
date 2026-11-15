@@ -749,6 +749,7 @@ dependencies = [
  "ruff_python_trivia",
  "ruff_text_size",
  "ryu",
+ "smallvec",
  "stacker",
  "unicode_names2",
 ]
