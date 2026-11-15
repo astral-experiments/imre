@@ -265,6 +265,8 @@ pub(super) enum ValueSource {
     /// The selected invoke produces a live Python handle and has no alternative fixed layout.
     PythonCall,
     Declaration(TypeDeclaration),
+    /// A single unbound target stored under an exact coroutine callback annotation.
+    CoroutineCallback(TypeDeclaration, usize),
     InferredList(DefinitionId),
     LiteralStrings(Type),
     Function(usize),

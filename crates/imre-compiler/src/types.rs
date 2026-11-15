@@ -1478,6 +1478,11 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn has_cold_callback_abi(&self, ty: Type) -> bool {
+        matches!(ty, Type::Callable(id) if matches!(self.0.borrow().shapes[id],
+            Shape::Callable(_, Type::Coroutine(_))))
+    }
+
     /// Inspect the synchronous positional signature that a Python frame can call directly.
     pub(crate) fn with_callback_signature<T>(
         &self,

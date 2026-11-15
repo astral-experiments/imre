@@ -739,6 +739,18 @@ impl Expr {
             .unwrap_or(self.ty)
     }
 
+    /// The source target of a freshly constructed unbound function or its singleton.
+    pub(crate) fn unbound_function(&self) -> Option<usize> {
+        match self.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(function),
+            _ => None,
+        }
+    }
+
     /// A direct coroutine captures its bound arguments in a private tuple.
     pub(crate) fn coroutine_arguments(&self) -> Option<&[Expr]> {
         let ExprKind::Builtin(Builtin::Process(ProcessOperation::Coroutine { .. }, _), args) =
