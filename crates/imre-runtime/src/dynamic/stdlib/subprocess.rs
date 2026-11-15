@@ -1,5 +1,5 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, io, os, posixpath};
 use crate::dynamic::gc_schedule::GcSettings;
 use crate::objects::{BoxedPopen, BoxedPreparation, ForkExec};
 use std::io::{PipeReader, Read};
@@ -21,7 +21,6 @@ pub(super) fn function(name: &str) -> bool {
             | "poll"
             | "wait"
             | "signal"
-            | "communicate"
             | "cleanup"
     )
 }
@@ -623,23 +622,6 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
 }
 
-fn timeout(ctx: &Context, value: Id) -> Result<Option<f64>> {
-    if value == NONE {
-        return Ok(None);
-    }
-    ctx.real_component(ctx.scalar_value(value))?
-        .map(Some)
-        .ok_or_else(|| Error::new("TypeError", "expected a numeric timeout"))
-}
-
-fn communication_input(ctx: &Context, input: Id) -> Result<&[u8]> {
-    if input == NONE {
-        Ok(&[])
-    } else {
-        ctx.bytes_like(input)
-    }
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -726,25 +708,6 @@ pub(super) fn call(
             let number = os::ssize_t(ctx, number)?;
             child.signal(number as libc::c_int)?;
             Ok(NONE)
-        }
-        ("communicate", &[input, seconds, use_select]) => {
-            let seconds = timeout(ctx, seconds)?;
-            let use_select = ctx.truth(use_select)?;
-            let mut pending =
-                child.begin_communication(communication_input(ctx, input)?, seconds, use_select)?;
-            while pending.interrupted() {
-                ctx.dispatch_signals()?;
-                child.resume_communication(&mut pending, communication_input(ctx, input)?)?;
-            }
-            let exchange = child.finish_communication(pending);
-            let [stdout, stderr] = exchange
-                .streams
-                .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
-            Ok(ctx.alloc(Value::Tuple(vec![
-                stdout,
-                stderr,
-                builtins::boolean(exchange.timed_out),
-            ])))
         }
         _ => Err(Error::new("TypeError", "invalid native process operation")),
     }

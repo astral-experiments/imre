@@ -17,50 +17,10 @@ pub(super) enum Exchange {
     Timeout([Option<Vec<u8>>; 2], Option<f64>),
 }
 
-pub(super) enum PipeProgress {
+enum PipeProgress {
     Drained([Vec<u8>; 2]),
     Timeout([Option<Vec<u8>>; 2]),
     Interrupted,
-}
-
-/// A boxed handler can reenter Popen. Suspend the pipe borrow before calling it
-/// and resume from the saved input offset and output, on the same deadline.
-pub(crate) struct PendingExchange {
-    progress: PipeProgress,
-    start: Instant,
-    timeout: Option<f64>,
-    select: bool,
-}
-
-/// Typed input is saved between calls. The boxed caller supplies a fresh
-/// borrow of its live Python buffer for each exchange.
-#[derive(Clone, Copy)]
-pub(super) enum Input<'a> {
-    Save(&'a [u8]),
-    Live(&'a [u8]),
-}
-
-impl PendingExchange {
-    pub(crate) fn interrupted(&self) -> bool {
-        matches!(self.progress, PipeProgress::Interrupted)
-    }
-
-    fn remaining(&self) -> Option<f64> {
-        self.timeout.map(|t| t - self.start.elapsed().as_secs_f64())
-    }
-
-    pub(super) fn resume(&mut self, process: &mut Popen, input: Input<'_>) -> Result<()> {
-        self.progress = process.exchange_pipes(input, self.remaining(), false, self.select)?;
-        Ok(())
-    }
-
-    pub(super) fn finish(self) -> Exchange {
-        match self.progress {
-            PipeProgress::Drained(streams) => Exchange::Done(streams),
-            PipeProgress::Timeout(streams) => Exchange::Timeout(streams, None),
-            PipeProgress::Interrupted => unreachable!("resume interrupted pipe exchange first"),
-        }
-    }
 }
 
 /// Decode the rooted input using the stream mode chosen at the call site.
@@ -231,35 +191,7 @@ impl Popen {
         text: bool,
         select: bool,
     ) -> Result<Exchange> {
-        let mut pending = self.begin_exchange(Input::Save(input), deadline, text, select)?;
-        while pending.interrupted() {
-            crate::objects::stdlib::check_interrupt()?;
-            pending.resume(self, Input::Save(&[]))?;
-        }
-        let budget = pending.remaining();
-        let exchange = pending.finish();
-        if matches!(exchange, Exchange::Done(_))
-            && self
-                .control
-                .wait_with(
-                    budget.map(Deadline::Float).as_ref(),
-                    crate::objects::stdlib::check_interrupt,
-                )?
-                .is_none()
-        {
-            return Ok(Exchange::Timeout([None, None], budget));
-        }
-        Ok(exchange)
-    }
-
-    pub(super) fn begin_exchange(
-        &mut self,
-        input: Input<'_>,
-        deadline: Option<&Deadline>,
-        text: bool,
-        select: bool,
-    ) -> Result<PendingExchange> {
-        if self.communication.started && matches!(input, Input::Save(bytes) if !bytes.is_empty()) {
+        if self.communication.started && !input.is_empty() {
             return Err(Error::new(
                 Kind::ValueError,
                 "Cannot send input after starting communication",
@@ -267,24 +199,39 @@ impl Popen {
         }
         let timeout = deadline.map(Deadline::seconds).transpose()?;
         let start = Instant::now();
-        Ok(PendingExchange {
-            progress: self.exchange_pipes(input, timeout, text, select)?,
-            start,
-            timeout,
-            select,
-        })
+        let remaining = || timeout.map(|seconds| seconds - start.elapsed().as_secs_f64());
+        let mut progress = self.exchange_pipes(input, timeout, text, select)?;
+        let streams = loop {
+            match progress {
+                PipeProgress::Drained(streams) => break streams,
+                PipeProgress::Timeout(streams) => return Ok(Exchange::Timeout(streams, None)),
+                PipeProgress::Interrupted => {
+                    crate::objects::stdlib::check_interrupt()?;
+                    progress = self.exchange_pipes(&[], remaining(), false, select)?;
+                }
+            }
+        };
+        let budget = remaining();
+        if self
+            .control
+            .wait_with(
+                budget.map(Deadline::Float).as_ref(),
+                crate::objects::stdlib::check_interrupt,
+            )?
+            .is_none()
+        {
+            return Ok(Exchange::Timeout([None, None], budget));
+        }
+        Ok(Exchange::Done(streams))
     }
 
-    pub(super) fn exchange_pipes(
+    fn exchange_pipes(
         &mut self,
-        input: Input<'_>,
+        bytes: &[u8],
         timeout: Option<f64>,
         text: bool,
         select: bool,
     ) -> Result<PipeProgress> {
-        let bytes = match input {
-            Input::Save(bytes) | Input::Live(bytes) => bytes,
-        };
         let data = &mut self.communication;
         let mut out = [Vec::new(), Vec::new()];
         if timeout.is_none() && !data.started && self.pipes.iter().flatten().count() <= 1 {
@@ -313,16 +260,11 @@ impl Popen {
             data.started = true;
             if let Some(stdin) = &self.pipes[0] {
                 file(stdin, |f| f.communicate_stdin(&[], bytes.is_empty()))?;
-                if let Input::Save(bytes) = input {
-                    data.input = copy(bytes)?;
-                }
+                data.input = copy(bytes)?;
             }
         }
 
-        let input = match input {
-            Input::Save(_) => &data.input[..],
-            Input::Live(bytes) => bytes,
-        };
+        let input = &data.input;
         let mut pollfds = [libc::pollfd {
             fd: -1,
             events: 0,
