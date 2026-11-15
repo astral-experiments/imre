@@ -110,7 +110,15 @@ mod tests {
         std::fs::write(&path, text).unwrap();
         let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
         graph.registered_startup = true;
-        crate::checked_lower(&mut graph).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(
+            lowered
+                .iter()
+                .filter(|name| *name == "from_mapping")
+                .count(),
+            2
+        );
 
         let start = TextSize::try_from(text.find("@classmethod").unwrap()).unwrap();
         let functions = graph.registered_functions();

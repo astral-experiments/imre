@@ -975,13 +975,14 @@ pub(super) fn capture(
         let checked = matches!(source, Capture::Solved(Some(ids)) if ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
+        let check_method =
+            method.is_some() && !checked && !matches!(prepared, Some(PreparedBody::Attributes(_)));
         let (prepared, mut attributes, lexical) = match prepared {
             Some(PreparedBody::Fixed(body)) => (Some(body), HashMap::new(), None),
             Some(PreparedBody::Attributes(attributes)) => (None, attributes, None),
             Some(PreparedBody::Python(frame)) => (None, HashMap::new(), Some(frame)),
             None => (None, HashMap::new(), None),
         };
-        let check_method = method.is_some() && !checked && attributes.is_empty();
         let placed = if prepared.is_some() || check_method {
             let body = prepared.or_else(|| {
                 let mut fixed = checker();

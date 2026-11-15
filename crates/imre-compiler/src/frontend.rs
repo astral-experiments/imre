@@ -1602,15 +1602,13 @@ fn lower_graph(
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         checker.python_method_frame =
             checker.placement_only && signature.method.is_some() && signature.physical_frame;
-        let mut attributes = HashMap::new();
-        if (signature.method.is_none() || checker.python_method_frame)
+        let mut attributes = ((signature.method.is_none() || checker.python_method_frame)
             && prepare_sites
             && checker.fixed_sites.is_some()
             && cache.is_none()
-            && pending_capture.borrow().is_some()
-        {
-            checker.settled_attributes = Some(&mut attributes);
-        }
+            && pending_capture.borrow().is_some())
+        .then(HashMap::new);
+        checker.settled_attributes = attributes.as_mut();
         let named_scalar = named
             && source_function
             && definition.returns.is_some()
@@ -1688,14 +1686,16 @@ fn lower_graph(
         };
         // Recovery can reuse a method's checked operands when its body lost native
         // placement under the same call facts, without a Python fallback.
-        if !attributes.is_empty()
-            && (signature.method.is_none()
-                || result.as_ref().is_ok_and(|(body, _)| body.source.is_none())
-                    && completed_calls.len() == classes.nonreturning_functions.len()
-                    && !graph.needs_object_runtime.get()
-                    && !graph.has_object_constructor_fallback.get()
-                    && graph.deferred_object_error.borrow().is_none())
-            && let Some(prepared) = pending_capture.borrow_mut().as_mut()
+        if let Some(attributes) = attributes.filter(|attributes| {
+            if signature.method.is_none() {
+                return !attributes.is_empty();
+            }
+            result.as_ref().is_ok_and(|(body, _)| body.source.is_none())
+                && completed_calls.len() == classes.nonreturning_functions.len()
+                && !graph.needs_object_runtime.get()
+                && !graph.has_object_constructor_fallback.get()
+                && graph.deferred_object_error.borrow().is_none()
+        }) && let Some(prepared) = pending_capture.borrow_mut().as_mut()
         {
             prepared.insert(signature.id, PreparedBody::Attributes(attributes));
         }
