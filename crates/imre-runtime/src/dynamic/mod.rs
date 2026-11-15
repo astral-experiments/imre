@@ -2,6 +2,7 @@
 //! The compiler lowers statements, branches, loops and function bodies to LLVM.
 
 use crate::dynamic::value::SlotStorage;
+pub(crate) use slice::normalize as normalize_slice_bounds;
 pub(crate) use stdlib::hashlib::digest::State as DigestState;
 pub(crate) use stdlib::provider_available;
 pub(crate) use stdlib::traceback::write_raise_origins;
