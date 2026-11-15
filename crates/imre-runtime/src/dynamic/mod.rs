@@ -227,6 +227,61 @@ struct InterpreterState {
     finalizing: AtomicBool,
 }
 
+/// Methods implemented by these native classes and object methods their native layout inherits.
+/// Other native dictionaries can omit an implementation owned by that class.
+struct NativeTypeMethods {
+    defined: &'static [&'static str],
+    from_object: &'static [&'static str],
+}
+
+impl NativeTypeMethods {
+    fn inherits_from_object(class: &str, field: &str) -> bool {
+        Self::for_type(class).is_some_and(|methods| methods.from_object.contains(&field))
+    }
+
+    fn for_type(name: &str) -> Option<Self> {
+        let defined: &'static [&'static str] = match name {
+            "type" => &[
+                "__getattribute__",
+                "__call__",
+                "mro",
+                "__subclasses__",
+                "__prepare__",
+                "__setattr__",
+                "__delattr__",
+            ],
+            "int" => &[
+                "__add__",
+                "__index__",
+                "bit_count",
+                "bit_length",
+                "from_bytes",
+                "to_bytes",
+                "__format__",
+                "__repr__",
+            ],
+            "float" => &[
+                "__format__",
+                "__getformat__",
+                "fromhex",
+                "as_integer_ratio",
+                "__repr__",
+            ],
+            "str" => {
+                return Some(Self {
+                    defined: builtins::STR_METHODS,
+                    from_object: &["__reduce_ex__"],
+                });
+            }
+            _ => return None,
+        };
+        Some(Self {
+            defined,
+            from_object: &["__str__", "__reduce_ex__"],
+        })
+    }
+}
+
 /// A native class can expose a managed namespace or own a dictionary as a type instance.
 enum NativeTypeNamespace {
     Managed(Id),
@@ -3496,17 +3551,13 @@ impl Context {
         }
         let mut additional: &[&str] = &[];
         let methods = match name {
-            "type" => {
-                additional = Self::TYPE_GETSETS;
-                &[
-                    "__getattribute__",
-                    "__call__",
-                    "mro",
-                    "__subclasses__",
-                    "__prepare__",
-                    "__setattr__",
-                    "__delattr__",
-                ][..]
+            _ if let Some(methods) = NativeTypeMethods::for_type(name) => {
+                if name == "type" {
+                    additional = Self::TYPE_GETSETS;
+                } else if name == "str" {
+                    self.builtin("str.maketrans");
+                }
+                methods.defined
             }
             "object" => &[
                 "__hash__",
@@ -3564,31 +3615,10 @@ impl Context {
                 self.builtin("int");
                 &["__repr__"]
             }
-            "int" => &[
-                "__add__",
-                "__index__",
-                "bit_count",
-                "bit_length",
-                "from_bytes",
-                "to_bytes",
-                "__format__",
-                "__repr__",
-            ],
-            "float" => &[
-                "__format__",
-                "__getformat__",
-                "fromhex",
-                "as_integer_ratio",
-                "__repr__",
-            ],
             "complex" => complex::METHODS,
             "bytes" => {
                 additional = &["__new__", "fromhex"];
                 builtins::BYTES_METHODS
-            }
-            "str" => {
-                self.builtin("str.maketrans");
-                builtins::STR_METHODS
             }
             deque::ITERATOR | deque::REVERSE_ITERATOR => {
                 deque::install_iterator_namespace(self, value, name);
