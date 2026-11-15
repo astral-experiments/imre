@@ -2725,12 +2725,7 @@ def present_after_exhaustion(value: int | None) -> int:
                 .unwrap()
                 .llvm_ir
         };
-        let uses_scoped_lookup = |ir: &str| {
-            ir.lines().any(|line| {
-                line.contains("call i64 @imre_boxed_named_op(")
-                    || line.contains("call i64 @imre_boxed_guarded_named_op(")
-            })
-        };
+        let uses_scoped_lookup = |ir: &str| ir.contains("call i64 @imre_boxed_named_op(");
         assert!(!uses_scoped_lookup(&compile("ValueError")));
         assert!(uses_scoped_lookup(&compile("Detail")));
     }

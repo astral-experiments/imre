@@ -665,24 +665,19 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     /// Load a code name and use it as the second operand of a boxed operation.
     pub(crate) fn named_op(&mut self, op: &str, receiver: &str, name: &str, value: &str) -> String {
         self.output.intern_identifier(name);
+        // Both the lookup and named operation propagate a failed operand before reading the name.
+        self.take_matching_check();
         if matches!(op, "lookup" | "lookup_local") {
-            // The runtime lookup propagates a pending exception before reading the scope.
-            self.take_matching_check();
             let data = self.output.data(name.as_bytes());
             return self.checked(&format!(
                 "call i64 @imre_dyn_{op}(ptr %ctx, i64 {receiver}, ptr {data}, i64 {})",
                 name.len()
             ));
         }
-        let operation = if self.take_matching_check() {
-            "@imre_boxed_guarded_named_op"
-        } else {
-            "@imre_boxed_named_op"
-        };
         let opcode = self.output.data(op.as_bytes());
         let data = self.output.data(name.as_bytes());
         self.checked(&format!(
-            "call i64 {operation}(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
+            "call i64 @imre_boxed_named_op(ptr %ctx, ptr {opcode}, i64 {receiver}, ptr {data}, i64 {}, i64 {value})",
             name.len()
         ))
     }
