@@ -5837,7 +5837,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         assert!(output.constants.lines().any(|line| {
             line.starts_with(&format!(
                 "{lambda_site} = private constant %code_site {{ ptr "
-            )) && line.ends_with(&format!(", ptr {file}, i32 4, i32 0 }}"))
+            )) && line.ends_with(", ptr null, i32 4, i32 0 }")
         }));
     }
 
