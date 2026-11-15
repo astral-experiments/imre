@@ -2569,7 +2569,9 @@ fn signature(
         .map(|context| classes.instance(context.class));
     if method.is_none() && function.type_params.is_some() {
         let postponed = imre_ast::future_annotations(&graph.modules[module].parsed.syntax().body);
-        if crate::dynamic::function_type_params(function, postponed, false, None).is_some() {
+        if function_scope::type_parameter_scope(function, postponed, false, None)
+            == Some(function_scope::TypeParameterScope::Function)
+        {
             graph.needs_object_runtime.set(true);
         }
     }

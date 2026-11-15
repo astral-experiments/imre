@@ -10,9 +10,7 @@ pub(super) use class_metadata::{display_bindings, expression_reads, parameter_re
 pub(crate) mod classes;
 mod type_parameters;
 
-pub(crate) use type_parameters::{
-    TypeParameterScope, boxed_function_type_params, check_nonlocals, type_parameter_scope,
-};
+pub(crate) use type_parameters::{TypeParameterScope, check_nonlocals, type_parameter_scope};
 
 use imre_ast::comprehension::Plan;
 use ruff_python_ast as ast;
