@@ -57,6 +57,15 @@ impl Checker<'_> {
     }
 }
 
+/// A sole docstring still locates the function's implicit return.
+pub(super) fn executable_body(body: &[ast::Stmt], header_owns_doc: bool) -> &[ast::Stmt] {
+    if header_owns_doc && body.len() > 1 {
+        &body[1..]
+    } else {
+        body
+    }
+}
+
 /// Return the normalized value of a namespace's leading string literal.
 pub(crate) fn docstring(body: &[ast::Stmt]) -> Option<String> {
     Some(imre_ast::strings::clean_doc(

@@ -4191,14 +4191,13 @@ impl<'a> Checker<'a> {
             }
     }
 
-    /// A fixed function header owns its leading docstring. Keep a sole statement
-    /// for the implicit return and keep instrumented bodies on their ordinary line path.
     fn function_statements<'s>(&self, definition: &'s ast::StmtFunctionDef) -> &'s [ast::Stmt] {
-        if self.fixed_sites.is_some() && definition.body.len() > 1 && !self.fault_enabled() {
-            ast::helpers::body_without_leading_docstring(&definition.body)
-        } else {
-            &definition.body
-        }
+        let header_owns_doc =
+            self.registered.is_some() || self.fixed_sites.is_some() && !self.fault_enabled();
+        function_text::executable_body(
+            &definition.body,
+            header_owns_doc && docstring_literal(&definition.body).is_some(),
+        )
     }
 
     fn fixed_body_source(
