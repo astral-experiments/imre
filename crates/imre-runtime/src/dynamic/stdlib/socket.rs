@@ -129,7 +129,7 @@ pub(in crate::dynamic) fn prepare_descriptor(
     if name == "__init__" {
         return initialize(ctx, args, kwargs).map(RegisteredCall::Returned);
     }
-    let Some(socket) = ctx.heap.get(receiver).socket_handle().cloned() else {
+    let Some(socket) = ctx.heap.get(receiver).socket_handle() else {
         if CLASS_METHODS.contains(&name) {
             return Err(Error::new(
                 "TypeError",
@@ -155,7 +155,7 @@ pub(in crate::dynamic) fn prepare_descriptor(
                 format!("socket._accept() takes no arguments ({} given)", args.len()),
             ));
         }
-        return Ok(RegisteredCall::Accept(socket));
+        return Ok(RegisteredCall::Accept(receiver));
     }
     if name == "recv" {
         check_args(name, args, kwargs, 2, &[])?;
@@ -163,28 +163,35 @@ pub(in crate::dynamic) fn prepare_descriptor(
             .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
         let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
         return Ok(RegisteredCall::Recv(Recv {
-            socket,
+            receiver,
             size,
             flags,
         }));
     }
+    let socket = socket.clone();
     call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
+}
+
+/// The registered caller keeps the receiver live, including during size conversion and signal handlers.
+fn registered_socket(ctx: &Context, receiver: Id) -> &crate::ObjectOwner {
+    ctx.heap
+        .get(receiver)
+        .socket_handle()
+        .expect("registered socket receiver")
 }
 
 /// Accept on the owned listener, then publish the descriptor and peer in the resumed frame.
 ///
 /// # Safety
 /// The registered caller owns the context through signal dispatch and return.
-pub(in crate::dynamic) unsafe fn accept(
-    socket: crate::ObjectOwner,
-    context: *mut Context,
-) -> Result<Id> {
+pub(in crate::dynamic) unsafe fn accept(receiver: Id, context: *mut Context) -> Result<Id> {
     use std::os::fd::{AsRawFd, IntoRawFd};
 
     use crate::dynamic::value::ParkedExecution;
 
     let accepted = native::read_socket(
-        &socket,
+        // SAFETY: the caller roots the receiver. Resolve it only while this execution is active.
+        || native::read_state(registered_socket(unsafe { &*context }, receiver)),
         &mut (),
         // SAFETY: each native wait has returned to the interrupted execution before delivery.
         |()| unsafe { Context::dispatch_pending_signals(context) },
@@ -209,7 +216,7 @@ pub(in crate::dynamic) unsafe fn accept(
 
 /// The requesting thread retains the native socket across the wait and any signal callbacks.
 pub(in crate::dynamic) struct Recv {
-    socket: crate::ObjectOwner,
+    receiver: Id,
     size: usize,
     flags: i32,
 }
@@ -218,7 +225,9 @@ impl Recv {
     /// # Safety
     /// The registered caller owns the context on this thread through signal dispatch and return.
     pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        let bytes = native::recv_with_signals(&self.socket, self.size, self.flags, || {
+        // SAFETY: the registered caller roots its receiver through this operation.
+        let socket = registered_socket(unsafe { &*context }, self.receiver).clone();
+        let bytes = native::recv_with_signals(&socket, self.size, self.flags, || {
             // SAFETY: only the interrupted thread reenters Python after the syscall returns.
             unsafe { Context::dispatch_pending_signals(context) }
         })?;
@@ -1313,7 +1322,7 @@ fn receive_into(
                 return Ok((0, None));
             }
             let (count, address) = native::read_socket(
-                socket,
+                || native::read_state(socket),
                 ctx,
                 Context::dispatch_signals,
                 |_, raw, end| Ok(native::poll_interruptible(raw, libc::POLLIN, Some(end))),
@@ -2012,4 +2021,44 @@ pub(super) fn send_all_exported(
         ctx.dispatch_signals()?;
         Ok(done)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_receive_keeps_its_frame_operand() {
+        fn require_send(_: &impl Send) {}
+
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("_socket");
+        let module = ctx
+            .import_module_level("_socket", name, None, None, 0)
+            .unwrap();
+        let pair = socketpair(&mut ctx, &[module], &[]).unwrap();
+        let Value::Tuple(ends) = ctx.heap.get(pair) else {
+            unreachable!()
+        };
+        let (reader, writer) = (ends[0], ends[1]);
+        let owners = |ctx: &Context| {
+            crate::ObjectOwner::strong_count(ctx.heap.get(reader).socket_handle().unwrap())
+        };
+        let recv = ctx.lookup_attr(reader, "recv").unwrap();
+        let size = ctx.int(1);
+        let original = owners(&ctx);
+        let call = ctx
+            .prepare_call(recv, vec![size].into(), Vec::new())
+            .unwrap();
+        require_send(&call);
+        assert_eq!(owners(&ctx), original);
+
+        assert!(matches!(
+            native::send(ctx.heap.get(writer).socket_handle().unwrap(), b"x", 0),
+            Ok(1)
+        ));
+        // SAFETY: the original context and its rooted socket pair own this prepared call.
+        let result = unsafe { call.run(&raw mut ctx) }.unwrap();
+        assert!(matches!(ctx.heap.get(result), Value::Bytes(bytes) if bytes.as_slice() == b"x"));
+    }
 }

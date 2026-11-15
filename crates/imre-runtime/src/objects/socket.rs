@@ -34,6 +34,16 @@ impl Socket {
         self.tls.as_ref().map_or(self.fd, |r| r.fd.as_raw_fd())
     }
 
+    fn timeout(&self) -> Option<Duration> {
+        u64::try_from(self.timeout_ns)
+            .ok()
+            .map(Duration::from_nanos)
+    }
+
+    fn finite_timeout(&self) -> Option<Duration> {
+        self.timeout().filter(|duration| !duration.is_zero())
+    }
+
     fn into_owner(self) -> Result<crate::ObjectOwner> {
         let socket =
             allocator_api2::boxed::Box::try_new(self).map_err(|_| Error::memory_error())?;
@@ -370,25 +380,39 @@ fn retry_read<T, E: From<Error>>(
     }
 }
 
+pub(crate) struct ReadState {
+    fd: RawFd,
+    timeout: Option<Duration>,
+}
+
+pub(crate) fn read_state(socket: &Object) -> ReadState {
+    state(socket, |s| ReadState {
+        fd: s.transport_fd(),
+        timeout: s.finite_timeout(),
+    })
+}
+
 /// Run the wait and data syscall separately. Only their raw fd and deadline enter a carrier;
 /// the owner dispatches Python signals and resolves the current socket for each attempt.
 pub(crate) fn read_socket<C, T, E: From<Error>>(
-    socket: &Object,
+    socket: impl Fn() -> ReadState,
     context: &mut C,
     mut check_signals: impl FnMut(&mut C) -> std::result::Result<(), E>,
     mut poll: impl FnMut(&mut C, RawFd, Deadline) -> std::result::Result<io::Result<()>, E>,
     mut read: impl FnMut(&mut C, RawFd) -> std::result::Result<io::Result<T>, E>,
 ) -> std::result::Result<T, E> {
-    let until = deadline(socket);
+    let first = socket();
+    let until = first.timeout.map(Deadline::after);
     let mut wait = until;
+    let mut raw = first.fd;
     loop {
-        let raw = fd(socket);
         let result = if let Some(end) = wait
             && raw >= 0
         {
             match poll(context, raw, end)? {
                 Ok(()) => {
                     wait = None;
+                    raw = socket().fd;
                     continue;
                 }
                 Err(error) => Err(error),
@@ -401,7 +425,7 @@ pub(crate) fn read_socket<C, T, E: From<Error>>(
             Err(error)
                 if wait.is_none()
                     && error.kind() == io::ErrorKind::WouldBlock
-                    && get_timeout(socket).is_some_and(|timeout| !timeout.is_zero()) =>
+                    && socket().timeout.is_some() =>
             {
                 // The current socket timeout decides whether to retry. The original timeout
                 // still decides whether to poll and when the operation expires.
@@ -412,6 +436,7 @@ pub(crate) fn read_socket<C, T, E: From<Error>>(
         if wait.is_some_and(|end| end.remaining().is_zero()) {
             return Err(errno_error(timed_out()).into());
         }
+        raw = socket().fd;
     }
 }
 
@@ -421,7 +446,7 @@ fn local_read<T, E: From<Error>>(
     mut read: impl FnMut(RawFd) -> io::Result<T>,
 ) -> std::result::Result<T, E> {
     read_socket(
-        socket,
+        || read_state(socket),
         &mut check_signals,
         |check| check(),
         |_, raw, end| Ok(poll_interruptible(raw, libc::POLLIN, Some(end))),
@@ -430,9 +455,7 @@ fn local_read<T, E: From<Error>>(
 }
 
 pub(crate) fn deadline(socket: &Object) -> Option<Deadline> {
-    get_timeout(socket)
-        .filter(|d| !d.is_zero())
-        .map(Deadline::after)
+    state(socket, |s| s.finite_timeout()).map(Deadline::after)
 }
 
 fn timed_out() -> io::Error {
@@ -2287,9 +2310,7 @@ pub(crate) fn set_blocking_mode(s: &Object, blocking: bool) -> Result<()> {
 }
 
 pub(crate) fn get_timeout(s: &Object) -> Option<Duration> {
-    u64::try_from(state(s, |s| s.timeout_ns))
-        .ok()
-        .map(Duration::from_nanos)
+    state(s, |s| s.timeout())
 }
 
 pub(crate) fn set_timeout(s: &Object, timeout: Option<Duration>) -> Result<()> {
