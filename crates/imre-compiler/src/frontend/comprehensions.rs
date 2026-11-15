@@ -976,7 +976,8 @@ impl Checker<'_> {
             input,
             collector,
             Some((result, &mut prefix)),
-            |_, _, _| false,
+            // A refused fixed region still needs the element checks and result type.
+            |cx, _, _| cx.registered.is_none() && cx.unrepresented.borrow().is_some(),
         );
         self.namespace = enclosing;
         let exports = self.leave_comprehension(scope);
