@@ -1025,6 +1025,32 @@ impl Checker<'_> {
         Some((field, self.classes.fields[class][field]))
     }
 
+    /// Resolve the fixed receiver's checked field loads through the current class layout.
+    pub(super) fn checked_receiver_fields(
+        &self,
+        class: usize,
+        function: &ir::Function,
+    ) -> HashSet<&str> {
+        let mut fields = HashSet::new();
+        let Some(&receiver) = function.params.first() else {
+            return fields;
+        };
+        let declarations = &self.classes.declarations.definitions[class].fields;
+        ir::walk_nodes(&function.body, &mut |node, _| {
+            if let ir::Node::Expression(Expr {
+                ty,
+                kind: ExprKind::Field(base, slot),
+            }) = node
+                && matches!(base.kind, ExprKind::Local(local) if local == receiver)
+                && base.ty == Type::Class(class)
+                && self.classes.fields[class].get(*slot) == Some(ty)
+            {
+                fields.insert(declarations[*slot].name.as_str());
+            }
+        });
+        fields
+    }
+
     /// A generated initializer fills every declared field. The checked class layout
     /// preserves inherited field types and offsets, including on subclass instances.
     pub(super) fn finite_field_getattr(

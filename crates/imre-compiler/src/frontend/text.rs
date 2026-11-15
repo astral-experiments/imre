@@ -356,31 +356,6 @@ impl Checker<'_> {
         })
     }
 
-    /// Keep the source method binding when the Python frame can pass the original operands.
-    pub(super) fn bound_text_result(
-        &mut self,
-        call: &ast::ExprCall,
-        field: &ast::ExprAttribute,
-        value: Expr,
-    ) -> Expr {
-        let bound = match &value.kind {
-            ExprKind::Builtin(Builtin::Text(_), args) => {
-                call.arguments.is_empty() && args.len() == 1
-            }
-            ExprKind::Builtin(Builtin::StringReplace, _) => {
-                registered::values::fixed_positional_arguments(call)
-            }
-            _ => false,
-        };
-        if bound {
-            self.frame_arguments = FrameArguments::Python;
-            if let Some(sites) = &mut self.fixed_sites {
-                sites.method(call, field, &value);
-            }
-        }
-        value
-    }
-
     /// Bind splitlines and no-argument string methods after evaluating the receiver; an explicit
     /// keepends uses Python truth, including its fallible source-class protocol.
     pub(super) fn splitlines_or_unary_text(

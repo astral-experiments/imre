@@ -490,6 +490,7 @@ impl Checker<'_> {
                     crate::analysis::EagerDisplays::Excluded,
                     |name| name != receiver_name.as_str(),
                     |_| false,
+                    |_| false,
                 ) {
                     return Err(
                         self.scoped_builtin_error("the declaring classmethod function", attribute)

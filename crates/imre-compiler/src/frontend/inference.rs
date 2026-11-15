@@ -1528,7 +1528,11 @@ impl Inference {
                                 FixedAttribute::Load(_) | FixedAttribute::Store(_) | FixedAttribute::UnhighlightedCall(_) => true,
                                 FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
                                     ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
-                                FixedAttribute::CallValue(_) | FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
+                                // SourceSites::method checked the receiver and every written operand.
+                                FixedAttribute::Call(None, call) => signature.method.is_some()
+                                    && matches!(call.target, ir::RegisteredCallTarget::Method { .. })
+                                    && matches!(call.arguments, ir::RegisteredArguments::Positional),
+                                FixedAttribute::CallValue(_) | FixedAttribute::ModuleName(_) => false,
                             })
                         })
                     {
