@@ -2033,28 +2033,27 @@ impl Checker<'_> {
                             checker.direct_value(value, site, expected, parameter.sign_only)
                         }
                     };
-                if dedent {
-                    let site = argument.site();
-                    let value = argument.value(checker)?;
-                    return checker.dedent_text(value, site);
-                }
-                if selector_wait && parameter.name == "timeout" {
+                let timeout = selector_wait && parameter.name == "timeout";
+                if dedent || timeout || (stat_mode && parameter.ty == Type::Int) {
                     let node = argument.site();
                     let value = argument.value(checker)?;
-                    let value = checker.selector_seconds(value);
-                    return checker.coerce(value, parameter.ty, node);
-                }
-                if stat_mode && parameter.ty == Type::Int {
-                    let node = argument.site();
-                    let value = argument.value(checker)?;
-                    return if value.ty == Type::Bool {
-                        Ok(Expr {
+                    if can_stop && checker.terminating_operand(&value) {
+                        return Ok(value);
+                    }
+                    if dedent {
+                        return checker.dedent_text(value, node);
+                    }
+                    if timeout {
+                        let seconds = checker.selector_seconds(value);
+                        return checker.coerce(seconds, parameter.ty, node);
+                    }
+                    if value.ty == Type::Bool {
+                        return Ok(Expr {
                             ty: Type::Int,
                             kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
-                        })
-                    } else {
-                        checker.direct_value(value, node, parameter.ty, parameter.sign_only)
-                    };
+                        });
+                    }
+                    return checker.direct_value(value, node, parameter.ty, parameter.sign_only);
                 }
                 let Some(inference) = inference else {
                     return argument.check_with(
