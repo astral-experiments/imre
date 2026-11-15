@@ -184,7 +184,7 @@ impl Checker<'_> {
         definition: &ast::StmtFunctionDef,
         stmts: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
-        place: Option<&mut dyn FnMut(&Self) -> bool>,
+        place: Option<&mut dyn FnMut(&mut Self) -> bool>,
     ) -> Result<bool, String> {
         self.collect_local_definitions(stmts)?;
         if self.returns != Type::Bool {

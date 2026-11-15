@@ -1611,10 +1611,44 @@ fn lower_graph(
                 {
                     let mut checker = checker_for(*module_id);
                     checker.nonreturning_functions = &completed_calls;
-                    if let Ok(Some((_, placement))) = registered::prepare_checked_definition(
+                    if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
                         &checker, definition, signature, inference, None, false,
                     ) {
-                        placement.retain_for_launch(graph, &inference.source_checks);
+                        if placement.retain_for_launch(graph, &inference.source_checks)
+                            && let Some(prior) = pending_capture.borrow_mut().as_mut()
+                        {
+                            // Earlier native callees can supply their checked operands to the
+                            // Python frame selected by this caller.
+                            for id in checked.calls {
+                                let Some((module, callee, signature)) = definitions.get(id) else {
+                                    continue;
+                                };
+                                if !signature.physical_frame
+                                    || signature.method.is_some()
+                                    || !matches!(callee, Cow::Borrowed(_))
+                                {
+                                    continue;
+                                }
+                                let Some(Err(inputs)) = prior.get_mut(&id) else {
+                                    continue;
+                                };
+                                if inputs.is_empty() {
+                                    continue;
+                                }
+                                let mut checker = checker_for(*module);
+                                checker.nonreturning_functions = &completed_calls;
+                                if let Ok(Some((_, frame))) = registered::prepare_checked_definition(
+                                    &checker,
+                                    callee,
+                                    signature,
+                                    inference,
+                                    Some(inputs),
+                                    false,
+                                ) {
+                                    frame.retain_for_launch(graph, &inference.source_checks);
+                                }
+                            }
+                        }
                     }
                 }
                 if refused(report) {
@@ -2383,11 +2417,17 @@ fn lower_function(
                     {
                         return false;
                     }
+                    let mut inputs = cx.settled_attributes.take();
                     placed = registered::place_checked_definition(
-                        cx, definition, signature, inference, None,
+                        cx,
+                        definition,
+                        signature,
+                        inference,
+                        inputs.as_deref_mut(),
                     )
                     .ok()
                     .flatten();
+                    cx.settled_attributes = inputs;
                     placed.is_some()
                 }),
             )
@@ -6425,7 +6465,7 @@ impl<'a> Checker<'a> {
         &mut self,
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
-        mut place: Option<&mut dyn FnMut(&Self) -> bool>,
+        mut place: Option<&mut dyn FnMut(&mut Self) -> bool>,
         function: Option<&ast::StmtFunctionDef>,
     ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
