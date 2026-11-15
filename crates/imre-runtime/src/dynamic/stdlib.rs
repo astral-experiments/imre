@@ -140,7 +140,9 @@ pub(super) const SYS_BOUND_FUNCTIONS: &[&str] = &[
     "addaudithook",
     "getsizeof",
     "getrecursionlimit",
+    "getprofile",
     "gettrace",
+    "setprofile",
     "get_asyncgen_hooks",
     "set_asyncgen_hooks",
     "is_finalizing",
@@ -1567,12 +1569,27 @@ pub(super) fn call(
             u32::try_from(depth).map_err(|_| Error::new("ValueError", "depth must be >= 0"))?;
         return Ok(NONE);
     }
+    if name == "sys.setprofile" {
+        let hook = builtins::one_positional_arg(name, &args[1..], kwargs)?;
+        audit::event(ctx, name, &[])?;
+        if hook != NONE {
+            return Err(Error::new(
+                "NotImplementedError",
+                "installing a profile callback is not supported",
+            ));
+        }
+        return Ok(NONE);
+    }
     if name == "sys.set_asyncgen_hooks" {
         return asyncgen_hooks::set(ctx, &args[1..], kwargs);
     }
     if matches!(
         name,
-        "sys.getrecursionlimit" | "sys.is_finalizing" | "sys.get_asyncgen_hooks" | "sys.gettrace"
+        "sys.getrecursionlimit"
+            | "sys.is_finalizing"
+            | "sys.get_asyncgen_hooks"
+            | "sys.getprofile"
+            | "sys.gettrace"
     ) {
         if !kwargs.is_empty() {
             return Err(Error::new(
@@ -1593,8 +1610,8 @@ pub(super) fn call(
                 ctx.threads.asyncgen_hooks.to_vec(),
             ));
         }
-        if name == "sys.gettrace" {
-            // Native threads have no trace callback until trace registration is supported.
+        if matches!(name, "sys.getprofile" | "sys.gettrace") {
+            // Native threads support neither profile nor trace callback registration.
             return Ok(NONE);
         }
         if name == "sys.is_finalizing" {
