@@ -140,7 +140,7 @@ struct InitializerStatement<'a, 'db> {
     model: &'a SemanticModel<'db>,
     stmt: &'a Stmt,
     guard_start: TextSize,
-    imports: &'a [(TextRange, InitializerSource<'a>)],
+    imports: &'a [(TextRange, InitializerSource<'a>, Option<Definition<'db>>)],
     progress: &'a HashMap<usize, Option<TextSize>>,
     entered_function: &'a std::cell::Cell<Option<(usize, TextRange)>>,
 }
@@ -261,33 +261,44 @@ impl Session {
             let mut member = 0;
             if let Some((owner, loaded)) = binding {
                 let stmt = &suite[start - 1];
-                let before = progress[&owner.module];
-                let mut bindings = Vec::new();
-                let capture =
-                    (owner.declares_signatures && captures.is_some()).then_some(&mut bindings);
-                if !self.passive_import_binding(stmt, owner.module, before, capture) {
-                    return None;
-                }
-                let site = if let Stmt::Import(import) = stmt {
+                if let Stmt::Import(import) = stmt {
                     if loaded + 1 < import.names.len() {
                         start -= 1;
                         member = loaded + 1;
                     }
-                    import.names[loaded].range()
+                    imports.push((import.names[loaded].range(), owner, None));
                 } else {
-                    stmt.range()
-                };
-                if owner.declares_signatures
-                    && let Some(captures) = captures.as_deref_mut()
-                    && stmt.is_import_from_stmt()
-                {
-                    self.capture_function_sources(
-                        &bindings,
-                        (owner.module, owner.path),
-                        &mut captures.entry(module).or_default().functions,
-                    );
+                    let import = stmt.as_import_from_stmt()?;
+                    let file = self.files[owner.module];
+                    let index =
+                        ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+                    // A from-import can query __path__ or a missing member during initialization.
+                    if index
+                        .place_table(FileScopeId::global())
+                        .symbol_id("__getattr__")
+                        .is_some()
+                    {
+                        return None;
+                    }
+                    let first = imports.len();
+                    for alias in &import.names {
+                        let binding = self.initialized_member(
+                            owner.module,
+                            alias.name.as_str(),
+                            progress[&owner.module],
+                        )?;
+                        imports.push((alias.range(), owner, Some(binding)));
+                    }
+                    if owner.declares_signatures
+                        && let Some(captures) = captures.as_deref_mut()
+                    {
+                        self.capture_function_sources(
+                            &imports[first..],
+                            (owner.module, owner.path),
+                            &mut captures.entry(module).or_default().functions,
+                        );
+                    }
                 }
-                imports.push((site, owner));
             }
             for (i, stmt) in suite.iter().enumerate().skip(start) {
                 progress.insert(module, Some(stmt.start()));
@@ -413,34 +424,6 @@ impl Session {
         self.reaching_binding(module, original)
     }
 
-    fn passive_import_binding<'db>(
-        &'db self,
-        stmt: &Stmt,
-        owner: usize,
-        before: Option<TextSize>,
-        mut capture: Option<&mut Vec<(TextRange, Definition<'db>)>>,
-    ) -> bool {
-        let file = self.files[owner];
-        // A from-import can query __path__ or a missing member during initialization.
-        stmt.as_import_from_stmt().is_none_or(|import| {
-            let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
-            index
-                .place_table(FileScopeId::global())
-                .symbol_id("__getattr__")
-                .is_none()
-                && import.names.iter().all(|alias| {
-                    let Some(binding) = self.initialized_member(owner, alias.name.as_str(), before)
-                    else {
-                        return false;
-                    };
-                    if let Some(capture) = capture.as_deref_mut() {
-                        capture.push((alias.range(), binding));
-                    }
-                    true
-                })
-        })
-    }
-
     fn initializer_import<'a>(
         &self,
         stmt: &Stmt,
@@ -476,14 +459,15 @@ impl Session {
 
     fn capture_function_sources(
         &self,
-        bindings: &[(TextRange, Definition<'_>)],
+        bindings: &[(TextRange, InitializerSource<'_>, Option<Definition<'_>>)],
         owner: (usize, &Path),
         captures: &mut super::execution::FunctionImports,
     ) {
         let file = self.files[owner.0];
         let parsed = self.parsed(file);
         let model = SemanticModel::new(&self.db, self.db.program_file(file));
-        for &(site, binding) in bindings {
+        for &(site, _, binding) in bindings {
+            let Some(binding) = binding else { continue };
             let DefinitionKind::Function(definition) = binding.kind(&self.db) else {
                 continue;
             };
@@ -569,25 +553,23 @@ impl Session {
         {
             binding = self.copied_name_binding(module, parsed, copy.value(parsed))?;
         }
-        let member = match (binding.kind(&self.db), attr) {
-            (DefinitionKind::Function(_), None) => None,
-            (DefinitionKind::Import(import), Some(attr)) => {
-                Some((import.alias(parsed).range(), attr))
+        let imported = |range| site.imports.iter().find(|(site, _, _)| *site == range);
+        let (def, source) = match (binding.kind(&self.db), attr) {
+            (DefinitionKind::Function(_), None) => {
+                (binding, InitializerSource::application(site.source))
             }
-            (DefinitionKind::ImportFrom(import), None) => Some((
-                import.import(parsed).range(),
-                import.alias(parsed).name.as_str(),
-            )),
+            (DefinitionKind::Import(import), Some(attr)) => {
+                let &(_, owner, _) = imported(import.alias(parsed).range())?;
+                (
+                    self.initialized_member(owner.module, attr, site.progress[&owner.module])?,
+                    owner,
+                )
+            }
+            (DefinitionKind::ImportFrom(import), None) => {
+                let &(_, owner, binding) = imported(import.alias(parsed).range())?;
+                (binding?, owner)
+            }
             _ => return None,
-        };
-        let (def, source) = if let Some((import_site, name)) = member {
-            let owner = site.imports.iter().find(|(r, _)| *r == import_site)?.1;
-            (
-                self.initialized_member(owner.module, name, site.progress[&owner.module])?,
-                owner,
-            )
-        } else {
-            (binding, InitializerSource::application(site.source))
         };
         let owner_module = source.module;
         let DefinitionKind::Function(function) = def.kind(&self.db) else {
