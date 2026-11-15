@@ -7151,7 +7151,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Repr => self.value_repr(&args[0].value),
+            Builtin::Repr | Builtin::ReprWithMethods(_) => self.value_repr(&args[0].value),
             Builtin::BaseObjectRepr => {
                 let receiver = &args[0].value;
                 let name = receiver

@@ -15057,7 +15057,7 @@ impl<'a> Checker<'a> {
                 || (args[0].ty == Type::PathInfo && matches!(name, "repr" | "print")))
         {
             let text = if self.types.payload(args[0].ty) == Some(Type::Str) {
-                self.optional_text(args.into_iter().next().unwrap())
+                self.optional_text(args.into_iter().next().unwrap(), call)?
             } else {
                 let op = if args[0].ty == Type::PathInfo {
                     ir::PathOperation::InfoRepr

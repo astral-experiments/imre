@@ -104,7 +104,7 @@ impl Builtin {
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
             Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
             Self::FunctionWrappedGet(_) => Contract::new(true, PreservesLists),
-            Self::Repr => Contract::new(true, Unknown),
+            Self::Repr | Self::ReprWithMethods(_) => Contract::new(true, Unknown),
             Self::BaseObjectRepr | Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
             Self::Str
                 if args

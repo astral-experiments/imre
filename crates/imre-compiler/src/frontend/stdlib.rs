@@ -947,8 +947,8 @@ impl Checker<'_> {
         if let Some(text) = self.patch_builtin("str", &value) {
             return Ok(text);
         }
-        if self.types.payload(ty) == Some(Type::Str) {
-            return Ok(self.optional_text(value));
+        if matches!(self.types.payload(ty), Some(Type::Str | Type::Class(_))) {
+            return self.optional_text(value, at);
         }
         if ty.is_path() || ty == Type::PathInfo {
             let op = if ty == Type::PathInfo {
@@ -964,9 +964,6 @@ impl Checker<'_> {
                 Type::Str,
                 vec![value],
             ));
-        }
-        if self.mock_call_record(ty) {
-            return self.record_text(value, at);
         }
         let op = match ty {
             Type::Enum(_) => Builtin::EnumString,
@@ -1006,6 +1003,22 @@ impl Checker<'_> {
         Ok(text)
     }
 
+    fn checked_repr(
+        &mut self,
+        ty: Type,
+        at: &impl Ranged,
+        diagnostic: &str,
+    ) -> Result<Builtin, String> {
+        if dataclass_values::can_format(ty, self.types, self.classes) {
+            return Ok(Builtin::Repr);
+        }
+        let methods = self
+            .field_repr_methods(ty)
+            .ok_or_else(|| error(self.source, at, diagnostic))?;
+        self.calls.extend(&methods);
+        Ok(Builtin::ReprWithMethods(methods))
+    }
+
     /// Preserve the checked representation and field checks of lists, tuples and records.
     pub(super) fn structured_display(
         &mut self,
@@ -1024,17 +1037,18 @@ impl Checker<'_> {
             return Ok(None);
         }
         let list = self.types.element(ty).is_some();
-        if name == "repr" || (name == "str" && list) {
-            if !dataclass_values::can_format(ty, self.types, self.classes) {
-                return Err(error(
-                    self.source,
-                    at,
-                    "generated repr cannot format resource or callable fields",
-                ));
-            }
+        if name == "repr" || (matches!(name, "str" | "print") && list) {
+            let diagnostic = if name == "print" {
+                "generated repr cannot format resource, callable, or custom-repr fields"
+            } else {
+                "generated repr cannot format resource or callable fields"
+            };
             return Ok(Some(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Repr, vec![value.clone()]),
+                kind: ExprKind::Builtin(
+                    self.checked_repr(ty, at, diagnostic)?,
+                    vec![value.clone()],
+                ),
             }));
         }
         if matches!(
@@ -1055,7 +1069,6 @@ impl Checker<'_> {
                 | Type::VarTuple(_)
                 | Type::StringIterable
         ) || self.types.payload(ty) == Some(Type::Int)
-            || (name == "print" && list)
         {
             return self.record_text(value.clone(), at).map(Some);
         }
@@ -1245,16 +1258,16 @@ impl Checker<'_> {
             || self.types.element(value.ty).is_some()
             || matches!(value.ty, Type::Set(_))
         {
-            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
-                return Err(error(
-                    self.source,
-                    field,
-                    "repr does not support resource or callable values",
-                ));
-            }
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
+                kind: ExprKind::Builtin(
+                    self.checked_repr(
+                        value.ty,
+                        field,
+                        "repr does not support resource or callable values",
+                    )?,
+                    vec![value],
+                ),
             });
         }
         if value.ty.is_path() {
