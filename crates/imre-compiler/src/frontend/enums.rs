@@ -477,13 +477,10 @@ impl Checker<'_> {
             matches!(e.ty, Type::Tuple(_))
                 || matches!(
                     e.kind,
-                    ExprKind::Builtin(
-                        Builtin::ExceptionArgs
-                            | Builtin::ImportErrorField(0)
-                            | Builtin::ExceptionTupleView,
-                        _
-                    )
+                    ExprKind::Builtin(Builtin::ExceptionArgs | Builtin::ImportErrorField(0), _)
                 )
+                || matches!(&e.kind, ExprKind::Builtin(Builtin::BoxValue, args)
+                    if matches!(args.as_slice(), [value] if matches!(value.ty, Type::Tuple(_))))
         };
         if operands.iter().any(|e| e.ty == Type::ObjectValue)
             && operands
@@ -493,21 +490,11 @@ impl Checker<'_> {
         {
             // One proven tuple rules out unsupported scalar identity, even when
             // the other operand is an alias stored through a general object view.
-            let view = |e: Expr| {
-                if e.ty == Type::ObjectValue {
-                    e
-                } else {
-                    Expr {
-                        ty: Type::ObjectValue,
-                        kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![e]),
-                    }
-                }
-            };
             let same = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(
                     Builtin::ExceptionTupleIdentity,
-                    vec![view(left), view(right)],
+                    vec![left.into_object_value(), right.into_object_value()],
                 ),
             };
             return Ok(if op == ast::CmpOp::IsNot {

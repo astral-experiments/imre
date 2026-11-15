@@ -4780,10 +4780,7 @@ impl<'a> Checker<'a> {
             });
         }
         if expected == Type::ObjectValue && self.object_value_supported(value.ty) {
-            return Ok(Expr {
-                ty: expected,
-                kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
-            });
+            return Ok(value.into_object_value());
         }
         if (expected == Type::ReadOnlyObjectMapping
             || self.types.payload(expected) == Some(Type::ReadOnlyObjectMapping))

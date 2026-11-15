@@ -7060,9 +7060,6 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitFromTuple => {
                 self.call("imre_system_exit_from_tuple", returns, &[&args[0].value])
             }
-            Builtin::ExceptionTupleView => {
-                self.call("imre_exception_tuple_view", returns, &[&args[0].value])
-            }
             Builtin::RecordFromFields => {
                 let record = self.record(returns);
                 for (i, value) in args.iter().enumerate() {
@@ -10680,7 +10677,6 @@ declare zeroext i1 @imre_record_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
-declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_formatter_result(ptr, i32)
 declare ptr @imre_exception_args(ptr)
 declare i32 @imre_exception_field_matches(ptr, i32)

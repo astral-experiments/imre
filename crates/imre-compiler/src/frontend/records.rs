@@ -2063,10 +2063,7 @@ impl Checker<'_> {
             ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
             kind: ExprKind::Tuple(values),
         };
-        let args = Expr {
-            ty: Type::ObjectValue,
-            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
-        };
+        let args = tuple.into_object_value();
         Ok(self.store_exception_arguments(class, args))
     }
 

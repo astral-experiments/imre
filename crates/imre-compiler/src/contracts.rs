@@ -166,7 +166,6 @@ impl Builtin {
                 Contract::new(true, PreservesOwners)
             }
             Self::BoxValue
-            | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
             | Self::IsExactTuple
             | Self::ObjectStreamProject
