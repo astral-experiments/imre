@@ -5158,9 +5158,10 @@ impl<'a> Checker<'a> {
             ast::Expr::ListComp(_) | ast::Expr::DictComp(_) | ast::Expr::SetComp(_) => {
                 self.comprehension(expression, Some(concrete))?
             }
-            ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => {
-                self.dictionary(dict, self.types.mapping(concrete), declaration)?
-            }
+            ast::Expr::Dict(dict) if self.types.mapping(concrete).is_some() => self
+                .with_expression_site(expression, |checker| {
+                    checker.dictionary(dict, checker.types.mapping(concrete), declaration)
+                })?,
             ast::Expr::Set(set) if self.types.set_element(concrete).is_some() => {
                 self.set_literal(set, self.types.set_element(concrete), declaration)?
             }
@@ -9152,6 +9153,7 @@ impl<'a> Checker<'a> {
                     (expression, &value.kind),
                     (ast::Expr::List(_), ExprKind::List(_))
                         | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
+                        | (ast::Expr::Dict(_), ExprKind::Dict(_))
                         | (ast::Expr::Named(_), ExprKind::Bind(_, _))
                         | (
                             ast::Expr::FString(_),

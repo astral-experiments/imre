@@ -168,6 +168,9 @@ impl FixedNode {
                 ExprKind::Tuple(ref items) if matches!(expr.ty, Type::Tuple(_)) => {
                     Self::indexed(&expr.kind, items.len(), expr.ty)
                 }
+                ExprKind::Dict(ref entries) if matches!(expr.ty, Type::Dict(_)) => {
+                    Self::indexed(&expr.kind, entries.len(), expr.ty)
+                }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
                 ExprKind::Exception { kind, ref message } => Self::Exception {
                     kind,
