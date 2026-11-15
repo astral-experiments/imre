@@ -1707,41 +1707,38 @@ fn lower_graph(
                     checker.nonreturning_functions = &completed_calls;
                     if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
                         &checker, definition, signature, inference, None, false,
-                    ) {
-                        if placement.retain_for_launch(graph, &inference.source_checks)
-                            && let Some(prior) = pending_capture.borrow_mut().as_mut()
-                        {
-                            // Earlier native callees can supply their checked operands to the
-                            // Python frame selected by this caller.
-                            for id in checked.calls {
-                                let Some((module, callee, signature)) = definitions.get(id) else {
-                                    continue;
-                                };
-                                if !signature.physical_frame
-                                    || signature.method.is_some()
-                                    || !matches!(callee, Cow::Borrowed(_))
-                                {
-                                    continue;
-                                }
-                                let Some(PreparedBody::Attributes(inputs)) = prior.get_mut(&id)
-                                else {
-                                    continue;
-                                };
-                                if inputs.is_empty() {
-                                    continue;
-                                }
-                                let mut checker = checker_for(*module);
-                                checker.nonreturning_functions = &completed_calls;
-                                if let Ok(Some((_, frame))) = registered::prepare_checked_definition(
-                                    &checker,
-                                    callee,
-                                    signature,
-                                    inference,
-                                    Some(inputs),
-                                    false,
-                                ) {
-                                    frame.retain_for_launch(graph, &inference.source_checks);
-                                }
+                    ) && placement.retain_for_launch(graph, &inference.source_checks)
+                        && let Some(prior) = pending_capture.borrow_mut().as_mut()
+                    {
+                        // Earlier native callees can supply their checked operands to the
+                        // Python frame selected by this caller.
+                        for id in checked.calls {
+                            let Some((module, callee, signature)) = definitions.get(id) else {
+                                continue;
+                            };
+                            if !signature.physical_frame
+                                || signature.method.is_some()
+                                || !matches!(callee, Cow::Borrowed(_))
+                            {
+                                continue;
+                            }
+                            let Some(PreparedBody::Attributes(inputs)) = prior.get_mut(&id) else {
+                                continue;
+                            };
+                            if inputs.is_empty() {
+                                continue;
+                            }
+                            let mut checker = checker_for(*module);
+                            checker.nonreturning_functions = &completed_calls;
+                            if let Ok(Some((_, frame))) = registered::prepare_checked_definition(
+                                &checker,
+                                callee,
+                                signature,
+                                inference,
+                                Some(inputs),
+                                false,
+                            ) {
+                                frame.retain_for_launch(graph, &inference.source_checks);
                             }
                         }
                     }
@@ -2415,6 +2412,11 @@ impl From<Failure> for BodyRefusal {
 }
 
 type BodyResult = StdResult<CompletedBody, BodyRefusal>;
+
+#[expect(
+    clippy::large_enum_variant,
+    reason = "The inference and placement maps keep fixed bodies inline to avoid a heap allocation for each one."
+)]
 enum PreparedBody {
     Fixed(CompletedBody),
     Attributes(HashMap<TextRange, FixedAttribute>),

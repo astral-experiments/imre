@@ -4013,6 +4013,8 @@ impl ParkedExecution {
         context: *mut super::Context,
         wait: impl FnOnce() -> T + Send,
     ) -> Result<T> {
+        // SAFETY: the caller exclusively owns the live context on entry. This borrow ends
+        // when park_execution returns its slot, before the native wait begins.
         let slot = unsafe { &mut *context }.heap.park_execution()?;
         let _parked = Self { context, slot };
         Ok(wait())

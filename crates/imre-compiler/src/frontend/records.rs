@@ -1626,7 +1626,8 @@ impl Checker<'_> {
         if kind == MethodKind::Instance
             && skip == 1
             && let Some(sites) = &mut self.fixed_sites
-            && if call.arguments.keywords.is_empty()
+        {
+            let can_record_call = if call.arguments.keywords.is_empty()
                 && (!self.python_method_frame
                     || value
                         .named_call_arguments()
@@ -1640,9 +1641,9 @@ impl Checker<'_> {
                         .operands(self.source, self.graph.python_optimization())
                         .direct_method(call)
                         .is_some()
-            }
-        {
-            if !sites.method(call, attribute, &value)
+            };
+            if can_record_call
+                && !sites.method(call, attribute, &value)
                 && self.python_method_frame
                 && let ExprKind::Call(_, args) = &mut value.kind
                 && !args.exhaustive_enum_match

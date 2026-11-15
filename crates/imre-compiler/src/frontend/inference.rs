@@ -1234,11 +1234,15 @@ impl Inference {
                 }
                 // A binding in the semantic index already selects this coroutine's Python
                 // iterator protocol. Keep its checked placement across diagnostic discovery.
-                let place_suspended = |checker: &Checker<'_>| -> Result<_, String> {
-                    Ok(registered::prepare_checked_definition(
+                let place_suspended = |checker: &Checker<'_>| -> Result<bool, String> {
+                    let Some((_, placement)) = registered::prepare_checked_definition(
                         checker, function, signature, self, None, false,
                     )?
-                    .map(|(_, placement)| placement.place(graph, &self.source_checks)))
+                    else {
+                        return Ok(false);
+                    };
+                    placement.place(graph, &self.source_checks);
+                    Ok(true)
                 };
                 let mut lexical = None;
                 let mut placement = (physical
@@ -1274,18 +1278,19 @@ impl Inference {
                         .map(|placed| {
                             placed
                                 .filter(|(body, _)| body.calls.is_empty() && !body.cannot_return)
-                                .and_then(|(body, placement)| {
+                                .is_some_and(|(body, placement)| {
                                     if body.python_call_result {
-                                        Some(placement.place(graph, &self.source_checks))
+                                        placement.place(graph, &self.source_checks);
+                                        true
                                     } else {
                                         lexical = Some(placement);
-                                        None
+                                        false
                                     }
                                 })
                         }),
                     );
                 }
-                let mut retained = matches!(placement, Some(Ok(Some(_))));
+                let mut retained = matches!(placement, Some(Ok(true)));
                 let result = (|| {
                     if retained {
                         return Ok(());
@@ -1405,7 +1410,7 @@ impl Inference {
                                 .take()
                                 .unwrap_or_else(|| place_suspended(&checker))
                             {
-                                Ok(placement) => placement.is_some(),
+                                Ok(retained) => retained,
                                 Err(reason) => {
                                     *diagnostic = reason;
                                     false
