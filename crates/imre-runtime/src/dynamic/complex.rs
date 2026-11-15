@@ -279,9 +279,8 @@ impl Context {
     pub(super) fn real_component(&self, value: Id) -> Result<Option<f64>> {
         match self.heap.get(value) {
             Value::Float(f) => Ok(Some(*f)),
-            Value::Int(_) | Value::Bool(_) => {
-                Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
-            }
+            Value::Int(n) => Ok(Some(crate::floats::int_to_float(n)?)),
+            Value::Bool(b) => Ok(Some(f64::from(u8::from(*b)))),
             _ => Ok(None),
         }
     }

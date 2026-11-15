@@ -826,16 +826,6 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-/// Convert a numeric formatting operand to binary64, checking large integers first.
-fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
-    Ok(match ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Float(n) => Some(*n),
-        Value::Int(n) => Some(crate::floats::int_to_float(n)?),
-        Value::Bool(b) => Some(f64::from(u8::from(*b))),
-        _ => None,
-    })
-}
-
 /// Apply the type's format method and return its string, including a string subclass.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<Id>) -> Result<Id> {
     let spec_storage = spec.and_then(|id| ctx.string_storage(id));
@@ -1211,7 +1201,8 @@ fn render_percent_number(
         .into_iter()
         .chain(star_precision.map(crate::Int::from_usize));
     if matches!(spec.format_type, CFormatType::Float(_)) {
-        let number = float_operand(ctx, value)?.ok_or_else(|| {
+        let scalar = ctx.scalar_value(value);
+        let number = ctx.real_component(scalar)?.ok_or_else(|| {
             type_error(format!("must be real number, not {}", ctx.type_name(value)))
         })?;
         return Ok(crate::objects::percent_float_field(field, stars, number)?);
