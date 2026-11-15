@@ -3690,6 +3690,29 @@ pub(crate) enum ItemUpdate {
     Protocol(&'static str),
 }
 
+/// The bound on the number of items in a checked sequence pattern.
+pub(crate) struct PatternLength {
+    pub(crate) required: usize,
+    pub(crate) op: Compare,
+}
+
+impl PatternLength {
+    pub(crate) fn accepts(&self, length: usize) -> bool {
+        length == self.required
+            || (length > self.required && matches!(self.op, Compare::GreaterEqual))
+    }
+}
+
+/// A sole star accepts any sequence length without invoking its length protocol.
+pub(crate) fn pattern_length(items: usize, star: Option<usize>) -> Option<PatternLength> {
+    let (op, required) = match star {
+        None => (Compare::Equal, items),
+        Some(_) if items > 1 => (Compare::GreaterEqual, items - 1),
+        Some(_) => return None,
+    };
+    Some(PatternLength { op, required })
+}
+
 #[derive(Clone)]
 pub(crate) enum MatchTest {
     Always,
