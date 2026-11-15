@@ -3589,53 +3589,11 @@ fn disabled_while(loop_: &ast::StmtWhile) -> bool {
     matches!(&*loop_.test, ast::Expr::BooleanLiteral(literal) if !literal.value)
 }
 
-/// Which control transfers a checked region can handle inside a physical frame.
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// The declaration and fall-through policy of a completed control statement.
 enum PhysicalRegion {
     Fallthrough,
     Loop,
     Protected,
-}
-
-impl PhysicalRegion {
-    fn accepts(self, body: &[Statement]) -> bool {
-        let mut self_contained = true;
-        ir::walk_nodes(body, &mut |node, _| match node {
-            // Named definitions in loops and protected regions still need their source headers.
-            ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredDefinition(_), _),
-                ..
-            }) if self != Self::Fallthrough => self_contained = false,
-            ir::Node::Statement(
-                Statement::Break(_) | Statement::Continue(_) | Statement::Exhaust,
-            ) if self != Self::Loop => {
-                self_contained = false;
-            }
-            ir::Node::Statement(Statement::Return(_) | Statement::Raise(_))
-                if self != Self::Protected =>
-            {
-                self_contained = false;
-            }
-            ir::Node::Statement(Statement::IterNext {
-                kind: ir::IterNextKind::Async(_),
-                ..
-            })
-            | ir::Node::Statement(Statement::With {
-                site: ir::ContextSite { is_async: true, .. },
-                ..
-            }) => self_contained = false,
-            ir::Node::Expression(Expr {
-                kind: ExprKind::Builtin(Builtin::RegisteredSuspend(kind, _), _),
-                ..
-            }) => {
-                // A checked await resumes at the error target of its enclosing try.
-                self_contained &=
-                    self == Self::Protected && matches!(kind, ir::SuspendValue::Await);
-            }
-            _ => {}
-        });
-        self_contained
-    }
 }
 
 fn class_argument_layout(class: &ast::StmtClassDef) -> ir::PackedArguments {
@@ -3798,27 +3756,24 @@ impl SourceScope<'_> {
         if complete {
             return Ok(continues);
         }
-        if !region.accepts(checked) {
-            // A disabled loop selects only its else. If every statement there uses
-            // ordinary checked lowering in both frames, keep the one prepared block.
-            if let ast::Stmt::While(loop_) = stmt
-                && disabled_while(loop_)
-                && loop_
-                    .orelse
-                    .iter()
-                    .all(|stmt| self.checked_physical_statement(stmt))
-                && let Some(Statement::While(_, _, otherwise)) = body.pop()
-            {
-                suite.check_run(preparation);
-                suite.statements.extend(otherwise);
-                suite.falls_through &= continues;
-                suite.check_run(preparation);
-                return Ok(continues);
-            }
-            body.truncate(begin);
-            return Err(());
+        // A disabled loop selects only its else. If every statement there uses
+        // ordinary checked lowering in both frames, keep the one prepared block.
+        if let ast::Stmt::While(loop_) = stmt
+            && disabled_while(loop_)
+            && loop_
+                .orelse
+                .iter()
+                .all(|stmt| self.checked_physical_statement(stmt))
+            && let Some(Statement::While(_, _, otherwise)) = body.pop()
+        {
+            suite.check_run(preparation);
+            suite.statements.extend(otherwise);
+            suite.falls_through &= continues;
+            suite.check_run(preparation);
+            return Ok(continues);
         }
-        Ok(continues)
+        body.truncate(begin);
+        Err(())
     }
 
     fn assertion(&mut self, stmt: &ast::StmtAssert) -> StdResult<[Statement; 2], ()> {
@@ -4380,6 +4335,15 @@ mod tests {
                 true,
             );
             assert_eq!(suite.falls_through, falls_through, "{ending}");
+            assert!(
+                !suite
+                    .checked
+                    .function
+                    .body
+                    .iter()
+                    .any(|stmt| matches!(stmt, Statement::While(..))),
+                "{ending}"
+            );
         }
     }
 
