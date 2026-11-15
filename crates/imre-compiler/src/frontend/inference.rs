@@ -1160,8 +1160,7 @@ impl Inference {
                     && !discover_returns
                     && !signature.registered_frame()
                     && !checker.fault_enabled()
-                    && (matches!(function.body.as_slice(), [ast::Stmt::Return(_)])
-                        && registered::physical_method(signature, function, classes).is_some()
+                    && (registered::physical_method(signature, function, classes).is_some()
                         || signature.method.is_none()
                             && physical
                             && graph.modules[*module].is_program_source()
