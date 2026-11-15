@@ -14744,17 +14744,14 @@ impl<'a> Checker<'a> {
             return Err(self.object_builtin_error("dir", call));
         }
         if let [operand] = args.as_slice()
-            && matches!(
-                operand.ty,
-                Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::ByteArray
-            )
             && self.unshadowed_builtin(&call.func, "type")
+            && let Some(class) = match operand.ty {
+                Type::StrLiteral(_) => Some("str"),
+                Type::ByteArray => Some("bytearray"),
+                Type::None => Some("NoneType"),
+                ty => ty.builtin_scalar_name(),
+            }
         {
-            let class = match operand.ty {
-                Type::Bytes => "bytes",
-                Type::ByteArray => "bytearray",
-                _ => "str",
-            };
             return Ok(partials::after(
                 operand.clone(),
                 annotations::class_value(class),

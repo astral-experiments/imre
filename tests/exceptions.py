@@ -24,6 +24,17 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "builtin_scalar_class_in_handler": """
+        def observed(n: int) -> int:
+            print("receiver", n)
+            return n
+
+        try:
+            raise ValueError("sentinel")
+        except ValueError:
+            print(type(observed(7)).__qualname__)
+            print(type(True) is bool, type(1.25).__name__, type(None).__name__)
+    """,
     "empty_exception_tuple": """
         def select(value: int) -> int:
             try:
