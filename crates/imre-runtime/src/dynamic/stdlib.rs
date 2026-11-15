@@ -373,14 +373,32 @@ fn tuple_text(ctx: &mut Context, values: &[&str]) -> Id {
     ctx.alloc(Value::Tuple(values))
 }
 
-fn language_version(config: &serde_json::Value) -> Result<(u8, u8)> {
+#[derive(Debug)]
+pub(super) enum LayoutError {
+    Version(&'static str),
+    Io(std::io::Error),
+}
+
+impl From<&LayoutError> for Error {
+    fn from(error: &LayoutError) -> Self {
+        match error {
+            LayoutError::Version(message) => Self::new("RuntimeError", *message),
+            LayoutError::Io(error) => os_error(error.raw_os_error().map_or_else(
+                || std::io::Error::new(error.kind(), error.to_string()),
+                std::io::Error::from_raw_os_error,
+            )),
+        }
+    }
+}
+
+fn language_version(config: &serde_json::Value) -> std::result::Result<(u8, u8), LayoutError> {
     let (major, minor) = config["python_version"]
         .as_str()
         .and_then(|v| v.split_once('.'))
-        .ok_or_else(|| Error::new("RuntimeError", "missing Imre language version"))?;
+        .ok_or(LayoutError::Version("missing Imre language version"))?;
     let parse = |v: &str| {
         v.parse()
-            .map_err(|_| Error::new("RuntimeError", "invalid Imre language version"))
+            .map_err(|_| LayoutError::Version("invalid Imre language version"))
     };
     Ok((parse(major)?, parse(minor)?))
 }
@@ -388,12 +406,16 @@ fn language_version(config: &serde_json::Value) -> Result<(u8, u8)> {
 pub(super) fn interpreter_layout(
     config: &serde_json::Value,
     executable: &Path,
-) -> Result<system::InterpreterLayout> {
-    system::InterpreterLayout::new(executable, language_version(config)?).map_err(os_error)
+) -> std::result::Result<system::InterpreterLayout, LayoutError> {
+    system::InterpreterLayout::new(executable, language_version(config)?).map_err(LayoutError::Io)
 }
 
 fn layout(ctx: &Context) -> Result<system::InterpreterLayout> {
-    ctx.interpreter_layout.clone()
+    ctx.interpreter
+        .layout
+        .as_ref()
+        .cloned()
+        .map_err(Error::from)
 }
 
 /// Initialize the cached site attributes before the Python-level directory helpers run.
@@ -441,7 +463,7 @@ pub(super) fn package_path(ctx: &Context, name: &str) -> Result<PathBuf> {
 }
 
 fn full_version(ctx: &Context) -> Result<String> {
-    let (major, minor) = language_version(&ctx.config)?;
+    let (major, minor) = language_version(&ctx.config).map_err(|error| Error::from(&error))?;
     Ok(format!("{major}.{minor}.0"))
 }
 
@@ -821,7 +843,9 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("sys", "_base_executable") if ctx.config["executable"].is_string() => {
             path_text(ctx, &layout(ctx)?.base_executable)?
         }
-        ("sys", "executable" | "_base_executable") => ctx.text(ctx.helper_executable.clone()),
+        ("sys", "executable" | "_base_executable") => {
+            ctx.text(ctx.interpreter.helper_executable.clone())
+        }
         ("sys", "_imre_executable_suffix") => ctx.text(std::env::consts::EXE_SUFFIX),
         ("sys", "maxsize") => ctx.int(crate::sys::MAXSIZE as i64),
         ("sys", "maxunicode") => ctx.int(0x10FFFF),

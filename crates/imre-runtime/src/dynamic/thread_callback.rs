@@ -28,7 +28,6 @@ pub(super) struct Callback {
     signature: String,
     values: Vec<Argument>,
     captured_lock: Option<Lock>,
-    config: Arc<serde_json::Value>,
     gc_settings: Arc<super::gc_schedule::GcSettings>,
     allocation_traces: super::allocation_traces::AllocationTraces,
 }
@@ -365,7 +364,6 @@ impl Callback {
             signature: copy_label(ctx.str_value(code.parameters)?)?,
             values,
             captured_lock: None,
-            config: Arc::clone(&ctx.config),
             gc_settings: ctx.heap.gc_settings.clone(),
             allocation_traces: ctx.heap.allocation_traces.worker(),
         })
@@ -396,12 +394,7 @@ impl Callback {
                 self.gc_settings,
                 self.allocation_traces,
             );
-            let mut ctx = ffi::new_context_with_heap(
-                self.config,
-                std::iter::empty::<String>(),
-                heap,
-                Some(interpreter),
-            );
+            let mut ctx = ffi::new_worker_context(interpreter, heap);
             let mark = ctx.heap.temporary_mark();
             let globals = ctx.scope(&self.module, None);
             let cell = self.captured_lock.map(|lock| {

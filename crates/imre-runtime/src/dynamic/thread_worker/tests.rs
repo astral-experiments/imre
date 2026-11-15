@@ -43,19 +43,13 @@ fn each_execution_traces_its_pending_error_until_it_is_consumed() {
     }
 
     let mut creator = context();
-    let config = creator.config.clone();
     let interpreter = creator.interpreter.clone();
     let (ready, started) = mpsc::channel();
     let (release, released) = mpsc::channel();
     let timeout = Duration::from_secs(3);
     thread::scope(|scope| {
         let child = scope.spawn(move || {
-            let mut child = ffi::new_context_with_heap(
-                config,
-                std::iter::empty::<String>(),
-                Heap::new(),
-                Some(interpreter),
-            );
+            let mut child = ffi::new_worker_context(interpreter, Heap::new());
             check(&mut child, || {
                 ready.send(thread_ident()).unwrap();
                 released.recv_timeout(timeout).unwrap();
