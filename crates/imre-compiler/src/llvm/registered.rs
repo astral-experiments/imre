@@ -301,10 +301,7 @@ pub(crate) fn frame_inputs(
             ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => {
                 expr.ty == Type::None && args.len() <= 1
             }
-            ExprKind::Builtin(
-                Builtin::RegisteredDefinition(ir::DefinitionSite::Function { .. }),
-                _,
-            ) => {
+            ExprKind::Builtin(Builtin::RegisteredDefinition(_), _) => {
                 uses_python_protocol = true;
                 true
             }

@@ -4269,6 +4269,16 @@ impl<'a> Checker<'a> {
         Ok(slot)
     }
 
+    fn bind_local_definition(
+        &mut self,
+        name: &ast::Identifier,
+        value: Expr,
+    ) -> Result<Statement, String> {
+        let slot = self.declare(name.as_str(), Type::PythonObject, name)?;
+        self.assigned_value(slot, &value);
+        Ok(Statement::Assign(slot, value))
+    }
+
     /// Reuses a slot only at its original type and prevents rebinding fixed call targets.
     fn declare(&mut self, name: &str, ty: Type, node: &impl Ranged) -> Result<usize, String> {
         self.declare_binding(name, ty, node, self.names.contains_key(name), None)
@@ -6996,7 +7006,7 @@ impl<'a> Checker<'a> {
                     }
                     _ => false,
                 },
-                ast::Stmt::Assert(_) | ast::Stmt::FunctionDef(_) => {
+                ast::Stmt::Assert(_) | ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => {
                     self.registered_local_start.is_some()
                 }
                 ast::Stmt::With(scope) => !scope.is_async,
@@ -7217,8 +7227,16 @@ impl<'a> Checker<'a> {
     ) -> Result<statements::Block, String> {
         let result = match statement {
             ast::Stmt::ClassDef(class) if !self.module_scope => {
-                self.define_local_class(class)?;
-                None
+                if self.registered_local_start.is_some() {
+                    let header = imre_ast::class_definition_expressions(class)
+                        .map(|expr| self.expr(expr))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let value = registered::class_definition(class, header);
+                    Some(self.bind_local_definition(&class.name, value)?)
+                } else {
+                    self.define_local_class(class)?;
+                    None
+                }
             }
             ast::Stmt::AnnAssign(assign) => {
                 let ast::Expr::Name(name) = &*assign.target else {

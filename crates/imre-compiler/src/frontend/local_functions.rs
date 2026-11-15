@@ -269,13 +269,15 @@ impl Checker<'_> {
         stmts: &[ast::Stmt],
         include_classes: bool,
     ) -> Result<(), String> {
-        let fixed_functions = self.registered_local_start.is_none();
+        if self.registered_local_start.is_some() {
+            return Ok(());
+        }
         let mut cmp_inputs = None;
         let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
             let (name, cmp_input) = match statement {
                 ast::Stmt::ClassDef(class) if include_classes => (class.name.as_str(), false),
-                ast::Stmt::FunctionDef(function) if fixed_functions => {
+                ast::Stmt::FunctionDef(function) => {
                     let name = function.name.as_str();
                     let cmp_input = cmp_keys::can_specialize(function)
                         && cmp_inputs
