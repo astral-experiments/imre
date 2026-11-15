@@ -2978,6 +2978,11 @@ impl Context {
             Value::Super { .. } => return self.super_getattribute(obj, name),
             _ => return self.default_object_attribute(obj, attr, ObjectAttribute::Get),
         };
+        let hooks = self.attribute_hooks(class);
+        self.attribute_with_hooks(obj, class, (attr, name), original, hooks, report_missing)
+    }
+
+    fn attribute_hooks(&self, class: Id) -> (Option<Id>, Option<Id>) {
         // Select both hooks before descriptor binding or Python key comparisons can rebind them.
         let (mut primary, mut fallback) = (None, None);
         let _ = self.find_in_mro(class, |base| {
@@ -2985,6 +2990,18 @@ impl Context {
             fallback = fallback.or_else(|| self.own_class_attr(base, "__getattr__"));
             primary.zip(fallback)
         });
+        (primary, fallback)
+    }
+
+    fn attribute_with_hooks(
+        &mut self,
+        obj: Id,
+        class: Id,
+        (attr, name): (AttributeName<'_>, &str),
+        original: Option<Id>,
+        (primary, fallback): (Option<Id>, Option<Id>),
+        report_missing: bool,
+    ) -> Result<Id> {
         let fallback = fallback.map(|hook| {
             let mark = self.heap.temporary_mark();
             self.heap.keep(hook);
@@ -3187,14 +3204,18 @@ impl Context {
                 explicit: false,
             }));
         }
-        if let Value::Instance { class, .. } = *self.heap.get(obj)
-            && self.class_attr(class, "__getattr__").is_none()
-            && self.class_attr(class, "__getattribute__").is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
+        let attr = AttributeName::Linked(name);
+        let Value::Instance { class, .. } = *self.heap.get(obj) else {
+            return self.lookup_attribute(obj, attr, true);
+        };
+        let hooks @ (primary, fallback) = self.attribute_hooks(class);
+        if fallback.is_none()
+            && primary.is_none_or(|hook| matches!(self.heap.get(hook), Value::Native(symbol) if symbol == "object.__getattribute__"))
         {
-            self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Method(receiver))
-        } else {
-            self.lookup_attribute(obj, AttributeName::Linked(name), true)
+            return self.default_attr(obj, AttributeName::Text(name), AttributeLookup::Method(receiver));
         }
+        self.attribute_with_hooks(obj, class, (attr, name), None, hooks, true)
+            .or_else(|error| self.attribute_error_context(error, obj, attr, None))
     }
 
     /// Base lookup bypasses Python's __getattribute__ and __getattr__ hooks.
