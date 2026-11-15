@@ -924,7 +924,7 @@ impl Checker<'_> {
         explicit: bool,
     ) -> Result<Expr, String> {
         let ty = value.ty;
-        if ty == Type::PythonObject {
+        if !explicit && ty == Type::PythonObject {
             self.require_registered_operation(at)?;
             return Ok(super::fstrings::object_conversion(value, 's'));
         }
@@ -971,13 +971,10 @@ impl Checker<'_> {
             | Type::ImportException
             | Type::TimeoutExpired => Builtin::Str,
             _ => {
-                return self.structured_display("str", &value, at)?.ok_or_else(|| {
-                    error(
-                        self.source,
-                        at,
-                        "unknown function or unsupported builtin arguments",
-                    )
-                });
+                return match self.structured_display("str", &value, at)? {
+                    Some(text) => Ok(text),
+                    None => self.positional_builtin_fallback(at, "str", vec![value]),
+                };
             }
         };
         let text = Expr {
