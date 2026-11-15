@@ -20,6 +20,7 @@ pub(super) use float::{from_numeric, from_numeric_slots, round_float_to_integer}
 mod integer;
 mod power;
 mod print;
+pub(super) use print::write as write_object;
 mod text;
 mod translation;
 pub(super) use collections::{

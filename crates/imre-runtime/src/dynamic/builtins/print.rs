@@ -13,7 +13,7 @@ fn separator(ctx: &mut Context, name: &str, value: Option<Id>, default: &str) ->
     }
 }
 
-pub(super) fn write(ctx: &mut Context, file: Id, value: Id) -> Result<()> {
+pub(in crate::dynamic) fn write(ctx: &mut Context, file: Id, value: Id) -> Result<()> {
     // PyFile_WriteObject obtains the writer before invoking the value's __str__.
     let before_writer = ctx.heap.temporary_mark();
     let writer = ctx.lookup_attr(file, "write")?;
