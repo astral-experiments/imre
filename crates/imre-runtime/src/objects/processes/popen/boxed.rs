@@ -1,4 +1,4 @@
-//! Boxed callers share the typed process control, communication cursor and file owners.
+//! Boxed callers share the typed process control and file owners.
 use super::*;
 use crate::objects::Words;
 
@@ -89,11 +89,6 @@ impl From<Error> for BoxedLaunchError {
             direct: false,
         }
     }
-}
-
-pub(crate) struct BoxedCommunication {
-    pub(crate) streams: [Option<Vec<u8>>; 2],
-    pub(crate) timed_out: bool,
 }
 
 impl PreparedHandles {
@@ -318,47 +313,6 @@ impl BoxedPopen {
 
     pub(crate) fn cleanup() {
         cleanup()
-    }
-
-    pub(crate) fn begin_communication(
-        &self,
-        input: &[u8],
-        seconds: Option<f64>,
-        select: bool,
-    ) -> Result<communicate::PendingExchange> {
-        self.0.borrow_mut().begin_exchange(
-            communicate::Input::Live(input),
-            seconds.map(Deadline::Float).as_ref(),
-            false,
-            select,
-        )
-    }
-
-    pub(crate) fn resume_communication(
-        &self,
-        pending: &mut communicate::PendingExchange,
-        input: &[u8],
-    ) -> Result<()> {
-        pending.resume(&mut self.0.borrow_mut(), communicate::Input::Live(input))
-    }
-
-    pub(crate) fn finish_communication(
-        &self,
-        pending: communicate::PendingExchange,
-    ) -> BoxedCommunication {
-        let exchange = pending.finish();
-        let process = self.0.borrow();
-        let (streams, timed_out) = match exchange {
-            communicate::Exchange::Done([out, err]) => (
-                [
-                    process.pipes[1].as_ref().map(|_| out),
-                    process.pipes[2].as_ref().map(|_| err),
-                ],
-                false,
-            ),
-            communicate::Exchange::Timeout(streams, _) => (streams, true),
-        };
-        BoxedCommunication { streams, timed_out }
     }
 }
 

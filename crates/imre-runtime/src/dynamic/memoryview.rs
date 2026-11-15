@@ -184,6 +184,7 @@ impl<'a> Span<'a> {
         }
         let bytes = self.element(index)?;
         let number = match self.format {
+            "b" | "@b" => i64::from(bytes[0] as i8),
             "I" | "@I" => i64::from(u32::from_ne_bytes(bytes.as_ref().try_into().unwrap())),
             _ => i64::from(bytes[0]),
         };
@@ -437,12 +438,14 @@ impl Context {
         let (format, width) = match name {
             "B" => ("B", 1),
             "@B" => ("@B", 1),
+            "b" => ("b", 1),
+            "@b" => ("@b", 1),
             "I" => ("I", size_of::<u32>()),
             "@I" => ("@I", size_of::<u32>()),
             _ => {
                 return Err(Error::new(
                     "NotImplementedError",
-                    "only casts to unsigned bytes and unsigned ints are supported",
+                    "only casts to bytes and unsigned ints are supported",
                 ));
             }
         };
