@@ -1,5 +1,5 @@
 //! Boxed POSIX readiness shares the descriptor sets and poll registrations with typed calls.
-use super::super::copy_ids;
+use super::super::{calls::RegisteredCall, copy_ids};
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{
     errno_error,
@@ -57,11 +57,37 @@ pub(super) fn timeout(
     Ok(readiness::int_timeout(n.to_i64(), poll)?)
 }
 
-/// Retain original ready objects in input order, even when the same descriptor appears twice.
-fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
+/// Keep the positional arguments under the ordinary call's operand roots until return.
+pub(in crate::dynamic) fn prepare(
+    args: Vec<Id>,
+    kwargs: &[(String, Id)],
+) -> Result<RegisteredCall> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "select.select() takes no keyword arguments",
+        ));
+    }
+    let n = args.len();
+    let expected = match n {
+        3 | 4 => return Ok(RegisteredCall::Select(args)),
+        0..3 => "at least 3 arguments",
+        _ => "at most 4 arguments",
+    };
+    Err(Error::new(
+        "TypeError",
+        format!("select expected {expected}, got {n}"),
+    ))
+}
+
+/// Convert each input and keep its Python identity alive on the calling execution.
+fn descriptor_sets(
+    ctx: &mut Context,
+    args: &[Id],
+    inputs: &mut [Vec<(Id, i32)>; 3],
+) -> Result<(SelectFds, Option<Duration>)> {
     let timeout = timeout(ctx, args.get(3), false)?;
     let mut sets = SelectFds::new();
-    let mut inputs = [Vec::new(), Vec::new(), Vec::new()];
     for (group, items) in inputs.iter_mut().enumerate() {
         let source = args[group];
         let iterator = ctx.iterator(source).map_err(|e| {
@@ -84,7 +110,23 @@ fn select(ctx: &mut Context, args: &[Id]) -> Result<Id> {
             items.push((obj, n));
         }
     }
-    let any_ready = sets.wait(timeout, || ctx.dispatch_signals())?;
+    Ok((sets, timeout))
+}
+
+/// Retain original ready objects in input order, even when the same descriptor appears twice.
+///
+/// # Safety
+/// The registered caller owns the context and roots the arguments throughout the wait.
+pub(in crate::dynamic) unsafe fn run(context: *mut Context, args: &[Id]) -> Result<Id> {
+    // SAFETY: borrow the active execution only while converting and rooting inputs.
+    let mut inputs = [Vec::new(), Vec::new(), Vec::new()];
+    let (mut sets, timeout) = descriptor_sets(unsafe { &mut *context }, args, &mut inputs)?;
+    let any_ready = sets.wait(timeout, || {
+        // SAFETY: only the rooted operands and native fd sets survive through signal delivery.
+        unsafe { Context::dispatch_pending_signals(context) }
+    })?;
+    // SAFETY: the native wait and any registered signal callbacks have finished.
+    let ctx = unsafe { &mut *context };
     let mut lists = Vec::new();
     lists
         .try_reserve_exact(3)
@@ -139,9 +181,6 @@ pub(super) fn call(
                 format!("select.poll() takes no arguments ({n} given)"),
             ));
         }
-        ("select", 3 | 4) => return select(ctx, args),
-        ("select", 0..3) => Some("at least 3 arguments"),
-        ("select", _) => Some("at most 4 arguments"),
         ("poll.register", 0) => Some("at least 1 argument"),
         ("poll.register", 3..) => Some("at most 2 arguments"),
         ("poll.modify", n) if n != 2 => Some("2 arguments"),
