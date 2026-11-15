@@ -1134,7 +1134,7 @@ impl Checker<'_> {
                 vec![self.local(exc), expected],
             ),
         };
-        let store = Statement::SetField(
+        let store = Statement::set_field(
             self.local(root),
             caught,
             self.coerce(self.local(exc), self.classes.fields[class][caught], item)?,

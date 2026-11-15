@@ -365,8 +365,8 @@ impl Checker<'_> {
             let v = me.coerce(v, s.stored, attr)?;
             Ok(Expr::scope(
                 vec![
-                    Statement::SetField(view.clone(), s.value, v),
-                    Statement::SetField(view, s.ready, Expr::boolean(true)),
+                    Statement::set_field(view.clone(), s.value, v),
+                    Statement::set_field(view, s.ready, Expr::boolean(true)),
                 ],
                 Expr::none(),
                 Vec::new(),
@@ -402,8 +402,8 @@ impl Checker<'_> {
                 vec![Statement::If(
                     field(&view, s.ready, Type::Bool),
                     vec![
-                        Statement::SetField(view.clone(), s.value, release),
-                        Statement::SetField(view, s.ready, Expr::boolean(false)),
+                        Statement::set_field(view.clone(), s.value, release),
+                        Statement::set_field(view, s.ready, Expr::boolean(false)),
                     ],
                     vec![Statement::raise(exc)],
                 )],

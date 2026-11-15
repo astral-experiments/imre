@@ -76,8 +76,8 @@ impl Checker<'_> {
                         vec![Statement::Assign(result, field(value, getter.returns))],
                         vec![
                             Statement::Assign(result, compute),
-                            Statement::SetField(self.local(owner), value, self.local(result)),
-                            Statement::SetField(self.local(owner), ready, Expr::boolean(true)),
+                            Statement::set_field(self.local(owner), value, self.local(result)),
+                            Statement::set_field(self.local(owner), ready, Expr::boolean(true)),
                         ],
                     ),
                 ],

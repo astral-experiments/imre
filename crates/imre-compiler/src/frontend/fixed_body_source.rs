@@ -30,11 +30,23 @@ impl FixedBodySource {
             let Some((range, Some(expected))) = sites.next() else {
                 return false;
             };
-            if !expected.matches(&node) {
+            if matches!(expected, FixedNode::StoreField) {
+                let ir::Node::Statement(Statement::SetField(
+                    _,
+                    ir::StoreField::Written(field, _),
+                    _,
+                )) = node
+                else {
+                    return false;
+                };
+                if !matches!(self.attributes.get(&range), Some(FixedAttribute::Store(original)) if original == field)
+                {
+                    return false;
+                }
+                python_arguments = true;
+            } else if !expected.matches(&node) {
                 return false;
             }
-            // A placed descriptor write keeps the source function's live argument binder.
-            python_arguments |= matches!(expected, FixedNode::StoreField(_));
             fixed_sites.push(range);
             true
         });
@@ -69,6 +81,7 @@ impl FixedBodySource {
 
 #[derive(Clone)]
 pub(crate) enum FixedAttribute {
+    Store(ir::FieldUse),
     CallValue(Box<registered::values::CheckedCall>),
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
@@ -93,7 +106,7 @@ pub(super) enum FixedNode {
         message: bool,
     },
     Store(usize),
-    StoreField(usize),
+    StoreField,
     Branch(usize, usize),
     TryFinally(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
@@ -155,7 +168,6 @@ impl FixedNode {
                 cause: raised.cause.is_some(),
             },
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
-            ir::Node::Statement(Statement::SetField(_, field, _)) => Self::StoreField(*field),
             ir::Node::Expression(expr) => match expr.kind {
                 ExprKind::None if expr.ty != Type::None => return None,
                 ExprKind::None | ExprKind::Bool(_) | ExprKind::Float(_) | ExprKind::Bytes(_) => {
@@ -429,26 +441,21 @@ impl SourceSites {
     }
 
     pub(super) fn field(&mut self, field: &ast::ExprAttribute, value: &Expr) {
-        if let Some(site) = self.site_at(field.range()) {
-            self.attribute(site, field, ir::Node::Expression(value));
-        }
-    }
-
-    fn attribute(&mut self, site: PendingSite, field: &ast::ExprAttribute, value: ir::Node<'_>) {
-        // Private names require the registered class's lexical mangling.
-        if !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
-            && let Some(native) = FixedNode::checked(&value)
+        if let Some(site) = self.site_at(field.range())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
+            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
-            let action = match value {
-                ir::Node::Expression(_) => ir::AttributeAction::Load,
-                ir::Node::Statement(_) => ir::AttributeAction::Store,
-            };
-            self.python_operation(
-                site,
-                field.attr.start(),
-                registered::attribute_opcode(action, field),
-                native,
+            self.attributes.insert(
+                site.range,
+                FixedAttribute::Operation {
+                    operation: Box::new(registered::attribute_opcode(
+                        ir::AttributeAction::Load,
+                        field,
+                    )),
+                    position: field.attr.start(),
+                },
             );
+            self.commit(site, node);
         }
     }
 
@@ -479,23 +486,6 @@ impl SourceSites {
         }
     }
 
-    fn python_operation(
-        &mut self,
-        site: PendingSite,
-        position: TextSize,
-        operation: Builtin,
-        native: FixedNode,
-    ) {
-        self.attributes.insert(
-            site.range,
-            FixedAttribute::Operation {
-                operation: Box::new(operation),
-                position,
-            },
-        );
-        self.commit(site, native);
-    }
-
     /// The fixed branch converts the written local to bool. Its Python entry tests the same handle.
     pub(super) fn branch_test(&mut self, source: &ast::Expr, test: &Expr) {
         if source.is_name_expr()
@@ -523,12 +513,21 @@ impl SourceSites {
         &mut self,
         field: &ast::ExprAttribute,
         rhs: TextRange,
-        statement: &Statement,
+        destination: &mut ir::StoreField,
     ) {
         if self.wrapper_fields
+            && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
             && let Some(site) = self.statement_site(rhs)
+            && let ir::StoreField::Native(slot) = *destination
         {
-            self.attribute(site, field, ir::Node::Statement(statement));
+            let key = ir::FieldUse {
+                slot,
+                target: field.range(),
+            };
+            *destination = ir::StoreField::Written(key, field.attr.clone());
+            self.attributes
+                .insert(site.range, FixedAttribute::Store(key));
+            self.commit(site, FixedNode::StoreField);
         }
     }
 
@@ -867,6 +866,8 @@ mod tests {
             "        self.text = text\n",
             "        self.other = text\n",
             "    def both(self, suffix: str) -> str:\n",
+            "        self.other = suffix\n",
+            "        self.other = suffix\n",
             "        return (self.\n                text) + self.text\n",
             "class Other(Entry): pass\n",
             "def native(entry: Entry) -> str: return entry.text\n",
@@ -901,8 +902,32 @@ mod tests {
             .find(|(_, definition, _)| usize::from(definition.start()) == both)
             .unwrap();
         assert!(source.clone().place(module.functions[id].clone()).is_ok());
-        assert_eq!(source.attributes.len(), 2);
+        let function = &module.functions[id];
+        assert!(source.clone().place(function.clone()).is_ok());
+        let mut changed = function.clone();
+        changed.body.swap(0, 1);
+        assert!(source.clone().place(changed).is_err());
+        let mut changed = function.clone();
+        let Statement::SetField(_, ir::StoreField::Written(key, _), _) = &mut changed.body[0]
+        else {
+            panic!("expected checked field store");
+        };
+        key.slot += 1;
+        assert!(source.clone().place(changed).is_err());
+        let mut changed = function.clone();
+        let Statement::SetField(_, _, rhs) = &mut changed.body[0] else {
+            panic!("expected checked field store");
+        };
+        rhs.kind = ExprKind::Str("replaced".into());
+        assert!(source.clone().place(changed).is_err());
+
+        assert_eq!(source.attributes.len(), 4);
         for (range, field) in &source.attributes {
+            if let FixedAttribute::Store(key) = field {
+                assert_eq!(&text[*range], "self.other = suffix");
+                assert_eq!(&text[key.target], "self.other");
+                continue;
+            }
             let FixedAttribute::Operation {
                 operation,
                 position,
@@ -930,7 +955,7 @@ mod tests {
             let Statement::Return(Expr {
                 kind: ExprKind::Binary(_, first, _),
                 ..
-            }) = &mut module.functions[id].body[0]
+            }) = module.functions[id].body.last_mut().unwrap()
             else {
                 panic!("expected the two checked field operands")
             };

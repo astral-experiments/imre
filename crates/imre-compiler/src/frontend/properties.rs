@@ -65,7 +65,7 @@ impl<'a> Checker<'a> {
                 }));
             }
             let (receiver, index, ty) = self.writable_field_value(attr, receiver)?;
-            return Ok(Statement::SetField(
+            return Ok(Statement::set_field(
                 receiver,
                 index,
                 self.coerce(value, ty, attr)?,

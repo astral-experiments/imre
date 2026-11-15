@@ -1860,19 +1860,12 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// success and unwinds it before transferring an exception to the handler.
     pub(in crate::llvm) fn mutate_attribute<'e>(
         &mut self,
-        operation: &ir::Builtin,
+        action: ir::AttributeAction,
+        name: &ruff_python_ast::Identifier,
+        range: TextRange,
         mut operands: impl Iterator<Item = &'e Expr>,
     ) -> String {
         use ir::AttributeAction;
-        let ir::Builtin::RegisteredAttribute {
-            action,
-            name,
-            range,
-        } = operation
-        else {
-            unreachable!("attribute operation");
-        };
-        let (action, range) = (*action, *range);
         let first = operands.next().expect("attribute operand");
         let mark = self.temporary_mark();
         self.unwind_stack_operands(&mark, |code| {

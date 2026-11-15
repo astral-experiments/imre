@@ -2055,7 +2055,7 @@ impl Checker<'_> {
         Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
-                body: vec![Statement::SetField(self.local(0), field, value)],
+                body: vec![Statement::set_field(self.local(0), field, value)],
                 value: Box::new(Expr::none()),
                 clear: Vec::new(),
             },

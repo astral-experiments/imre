@@ -368,7 +368,7 @@ impl Verifier<'_> {
                 self.item(receiver.ty, index.ty).map(|_| ())
             }
             Statement::SetField(receiver, field, value) => {
-                self.field(receiver.ty, *field, value.ty)
+                self.field(receiver.ty, field.slot(), value.ty)
             }
             Statement::AugmentField(receiver, field, _, _) => {
                 let Type::Class(class) = receiver.ty else {

@@ -1289,14 +1289,17 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 (Statement::Break(Some(range)) | Statement::Continue(range), _) => {
                     frame.statement_site(*range, None)
                 }
-                (Statement::SetField(receiver, _, value), Some(site)) => {
+                (
+                    Statement::SetField(receiver, ir::StoreField::Written(field, name), value),
+                    Some(site),
+                ) => {
                     frame.statement_site(site, None);
-                    let Some(crate::frontend::FixedAttribute::Operation { operation, .. }) =
-                        frame.fixed_attribute(site)
-                    else {
-                        unreachable!("placed field store retains its attribute operation");
-                    };
-                    frame.mutate_attribute(operation, [value, receiver].into_iter());
+                    frame.mutate_attribute(
+                        ir::AttributeAction::Store,
+                        name,
+                        field.target,
+                        [value, receiver].into_iter(),
+                    );
                     return;
                 }
                 (_, Some(range)) => frame.statement_site(range, None),
@@ -1385,7 +1388,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 let code = self.fixed();
                 let value = code.operand(rhs);
                 let receiver = code.operand(receiver);
-                code.set_field(&receiver.value, *field, &value.value);
+                code.set_field(&receiver.value, field.slot(), &value.value);
                 code.release_operand(&receiver);
                 code.release_operand(&value);
             }

@@ -554,7 +554,7 @@ mod tests {
         let initializer = function(
             vec![0, 1],
             vec![ty; 2],
-            vec![Statement::SetField(
+            vec![Statement::set_field(
                 Expr::local(0, ty),
                 0,
                 Expr::local(1, ty),
@@ -624,7 +624,7 @@ mod tests {
         let mutating = function(
             vec![0],
             vec![ty],
-            vec![Statement::SetField(
+            vec![Statement::set_field(
                 Expr::local(0, ty),
                 0,
                 Expr::local(0, ty),
