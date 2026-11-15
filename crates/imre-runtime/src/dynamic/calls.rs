@@ -1738,7 +1738,12 @@ impl Context {
             {
                 self.bind_attribute(method, object, class)
             }
-            (None, None) => self.builtin_attribute(object, name, AttributeLookup::Value, None),
+            (None, None) => self.builtin_attribute(
+                object,
+                AttributeName::Text(name),
+                AttributeLookup::Value,
+                None,
+            ),
         }
     }
 
@@ -2918,7 +2923,12 @@ impl Context {
         }
         let base = self.scalar_value(obj);
         if builtins::method_name(self.heap.get(base), name).is_some() {
-            return self.builtin_attribute(obj, name, AttributeLookup::Value, None);
+            return self.builtin_attribute(
+                obj,
+                AttributeName::Text(name),
+                AttributeLookup::Value,
+                None,
+            );
         }
         let mut kind = self
             .builtin_type_name(obj)
@@ -3477,7 +3487,7 @@ impl Context {
             if name == "maxlen" {
                 return Ok(ring.maxlen.map_or(NONE, |n| self.int(n as i64)));
             }
-            return self.builtin_attribute(obj, name, lookup, native_key);
+            return self.builtin_attribute(obj, attr, lookup, native_key);
         }
         if let Some(value) = super::paramspec::attribute(self, obj, name) {
             return value;
@@ -4584,7 +4594,7 @@ impl Context {
                 return match name {
                     "__self__" => Ok(receiver),
                     "__func__" => Ok(callable),
-                    "__init__" => self.builtin_attribute(obj, name, lookup, native_key),
+                    "__init__" => self.builtin_attribute(obj, attr, lookup, native_key),
                     _ => self.lookup_attr(callable, name),
                 };
             }
@@ -6158,16 +6168,18 @@ impl Context {
                 return self.instance_attribute(obj, class, None, name);
             }
         }
-        self.builtin_attribute(obj, name, lookup, native_key)
+        self.builtin_attribute(obj, attr, lookup, native_key)
     }
 
     fn builtin_attribute(
         &mut self,
         obj: Id,
-        name: &str,
+        attr: AttributeName<'_>,
         lookup: AttributeLookup,
         native_key: Option<(Id, Id, Id)>,
     ) -> Result<Id> {
+        let spelling = attr.text(self)?;
+        let name = spelling.as_ref();
         if name == "__doc__" {
             let owner = match self.heap.get(obj) {
                 Value::Native(symbol) => Some(symbol.as_str()),
@@ -6323,6 +6335,17 @@ impl Context {
         }
         if let Some((class, receiver, key)) = native_key {
             return self.native_attribute_with_key(obj, class, receiver, key, name);
+        }
+        if self.heap.get(obj).intrinsic_type_name().is_some() {
+            let class = self.exact_type(obj)?;
+            if self.native_type_dicts.get(&class).is_some() {
+                let key = attr.key(self);
+                if let Some((declaring, _, member)) = self.class_dictionary_member(class, key)
+                    && declaring == class
+                {
+                    return self.bind_attribute(member, obj, class);
+                }
+            }
         }
         Err(self.missing_attribute(obj, name))
     }
