@@ -199,6 +199,39 @@ fn nested_call_uses_the_boundary_above_the_previous_argument() {
 }
 
 #[test]
+fn attribute_store_shares_its_mark_only_with_the_value() {
+    let output = emit_captured_body("def store(target, make):\n    target().field = make()\n");
+    let body = &output.functions;
+    let mut marks = body
+        .lines()
+        .filter(|line| line.contains("call i64 @imre_dyn_truth_mark("))
+        .map(|line| line.split_whitespace().next().unwrap());
+    let value = marks.next().unwrap();
+    let receiver = marks.next().unwrap();
+    assert!(marks.next().is_none());
+    let mut calls = body
+        .lines()
+        .filter(|line| line.contains("call i64 @imre_dyn_positional_call_at("));
+    assert!(
+        calls
+            .next()
+            .unwrap()
+            .contains(&format!(", i64 {value}, ptr "))
+    );
+    assert!(
+        calls
+            .next()
+            .unwrap()
+            .contains(&format!(", i64 {receiver}, ptr "))
+    );
+    let store = body
+        .lines()
+        .find(|line| line.contains("call void @imre_dyn_mutate_attribute_at("))
+        .unwrap();
+    assert!(store.ends_with(&format!(", i64 {value})")));
+}
+
+#[test]
 fn captured_publish_emits_its_registered_callback_and_error_return() {
     let output = emit_captured_body(
         "def publish(a: int, b: int, send):\n    total = a + b\n    send(total)\n",

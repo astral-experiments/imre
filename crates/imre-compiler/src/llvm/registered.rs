@@ -669,8 +669,11 @@ impl<'f> Frame<'f, '_, '_> {
     }
 
     pub(crate) fn evaluate_handle(&mut self, expr: &Expr) -> String {
-        let value =
-            CheckedBody::registered(self.reborrow()).value_for(expr, ValueUse::PythonHandle);
+        self.handle_for(expr, ValueUse::PythonHandle)
+    }
+
+    fn handle_for(&mut self, expr: &Expr, usage: ValueUse) -> String {
+        let value = CheckedBody::registered(self.reborrow()).value_for(expr, usage);
         self.materialize_owned(value)
     }
 

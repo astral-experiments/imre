@@ -45,23 +45,23 @@ pub(super) enum ValueUse<'a> {
     General,
     ComparisonTruth,
     PythonHandle,
-    CallOperand(&'a str, &'a std::cell::OnceCell<String>),
+    RootedOperand(&'a str, Option<&'a std::cell::OnceCell<String>>),
     IntegerOperand,
     FinalIntegerOperand,
 }
 
 impl<'a> ValueUse<'a> {
-    /// The caller can provide the root boundary above its preceding arguments.
+    /// An enclosing operation can supply the boundary above its preceding operands.
     pub(super) fn operand_mark(self, frame: &mut CheckedFrame<'_, '_, '_>) -> Cow<'a, str> {
         match self {
-            Self::CallOperand(mark, _) => Cow::Borrowed(mark),
+            Self::RootedOperand(mark, _) => Cow::Borrowed(mark),
             _ => Cow::Owned(frame.temporary_mark()),
         }
     }
 
     /// Tell the enclosing call where the producer kept its completed operand.
     pub(super) fn retained_operand(self, next: String) {
-        if let Self::CallOperand(_, retained) = self {
+        if let Self::RootedOperand(_, Some(retained)) = self {
             retained.set(next).expect("one result per call operand");
         }
     }
@@ -130,7 +130,7 @@ impl CheckedValue {
         usage: ValueUse,
         permanent: bool,
     ) -> Self {
-        if matches!(usage, ValueUse::PythonHandle | ValueUse::CallOperand(..)) {
+        if matches!(usage, ValueUse::PythonHandle | ValueUse::RootedOperand(..)) {
             if permanent {
                 let body = frame.body();
                 let raw = body.instruction(format!("ashr i64 {}, 1", value.operand));
