@@ -1547,7 +1547,7 @@ impl Inference {
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
                         && checker.unrepresented.borrow().is_none()
                         && method_storage == Some((helpers.len(), globals.types().len()))
-                        && let source = checker.fixed_body_source(function, signature, statements.len(), &body)
+                        && let source = checker.fixed_body_source(function, signature, &params, statements.len(), &body)
                         // Module storage and method targets belong to the graph that selected them.
                         // A written global callee will be looked up again by the Python frame.
                         && source.as_ref().map_or(!signature.physical_frame, |source| {
