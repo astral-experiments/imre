@@ -1096,7 +1096,7 @@ pub(super) fn registered_import(
                 .map(|alias| {
                     (
                         alias.name.to_string(),
-                        alias.asname.as_ref().unwrap_or(&alias.name).to_string(),
+                        alias.asname.as_ref().map(ToString::to_string),
                     )
                 })
                 .collect(),
@@ -5972,7 +5972,7 @@ publish(5, callback)
             ) if module == "helper"
                 && names
                     .iter()
-                    .any(|(name, binding)| name == "adjusted" && binding == name) =>
+                    .any(|(name, binding)| name == "adjusted" && binding.is_none()) =>
             {
                 imports += 1
             }

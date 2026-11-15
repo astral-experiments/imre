@@ -1113,7 +1113,11 @@ impl<'p> RegisteredFrame<'_, 'p> {
                         self.op("import_star", &[&self.scope.clone(), &module]);
                     } else {
                         let value = self.op("from", &[&module, &member]);
-                        self.bind(binding, &value);
+                        if let Some(binding) = binding {
+                            self.bind(binding, &value);
+                        } else {
+                            self.op("assign", &[&self.scope.clone(), &member, &value]);
+                        }
                     }
                 }
             }
