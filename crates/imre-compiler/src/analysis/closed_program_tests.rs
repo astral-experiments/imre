@@ -268,7 +268,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
             None,
             Some((&graph, &Default::default())),
             None,
-            Some(&mut cache),
+            Some((&mut cache, true)),
         )
     };
     fs::remove_file(entry).unwrap();
@@ -298,7 +298,7 @@ fn registered_parameter_changes_recheck_the_unchanged_caller() {
         None,
         Some((&graph, &Default::default())),
         None,
-        Some(&mut cache),
+        Some((&mut cache, true)),
     )
     .unwrap_err();
     assert!(
@@ -1346,6 +1346,11 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
     )
     .unwrap();
     check("import rules\n", bad, false).unwrap();
+    let declared = "class C: pass\ndef bad() -> C:\n    return 42\ndef good() -> C: return C()\n";
+    let saved = "from rules import bad as read\nsaved = read\ndef read(): return 0\nsaved()\n";
+    let error = check(saved, declared, false).unwrap_err();
+    assert!(error.contains("rules.py:3:12"), "{error}");
+    check("from rules import good as read\nread()\n", declared, false).unwrap();
     check("install_hook()\nimport rules\n", bad, true).unwrap();
     check(
         "import rules\n",

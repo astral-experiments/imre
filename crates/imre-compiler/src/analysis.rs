@@ -480,7 +480,7 @@ pub(crate) fn check_registered_project<'a>(
         &crate::dynamic::ProviderSources<'_>,
     )>,
     refusal: Option<&crate::frontend::phase::Diagnostic>,
-    cache: Option<&mut AnalysisCache>,
+    cache: Option<(&mut AnalysisCache, bool)>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
     let capacity = sources.len();
@@ -590,13 +590,21 @@ pub(crate) fn check_registered_project<'a>(
             })
         {
             let winners = sources.map(|winner| (winner.checked_module.unwrap(), winner));
+            let owner = cache
+                .as_ref()
+                .and_then(|(cache, _)| cache.closed_diagnostics.as_ref())
+                .filter(|prior| {
+                    prior.same_files(&graph.session, &graph.inputs)
+                        && prior.inputs.files == graph.inputs.files
+                })
+                .map_or(&graph.session, |prior| &prior.session);
             graph.session.check_registered_execution(
                 || contract.original(graph).clone(),
                 winners.clone(),
                 has_file_body,
                 entry_operand,
                 &called_bodies,
-                Some(graph),
+                Some((graph, owner)),
             )?;
             return Ok(RegisteredLayouts::from_winners(
                 || graph.session.clone(),
@@ -694,7 +702,7 @@ pub(crate) fn check_registered_project<'a>(
         }
         paths.push((path, is_program, original));
     }
-    if let Some(cache) = cache {
+    if let Some((cache, true)) = cache {
         cache.restore_selected_diagnostics(&mut session)?;
     } else {
         session.set_closed_program_rules();
@@ -1048,7 +1056,7 @@ impl Session {
         has_file_body: Option<&dyn Fn(&str) -> bool>,
         entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
         called_bodies: &[(&Path, &str, TextRange, &crate::frontend::phase::Diagnostic)],
-        original: Option<&crate::modules::SourceGraph>,
+        original: Option<(&crate::modules::SourceGraph, &Session)>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
         let checked;
@@ -1073,7 +1081,7 @@ impl Session {
             } else {
                 (entry, start)
             };
-            let closed = original.and_then(|graph| {
+            let closed = original.and_then(|(graph, _)| {
                 let closed = graph.closed_initializer.as_ref()?;
                 let module = &graph.modules[graph.entry];
                 (entry == graph.entry
@@ -1100,7 +1108,8 @@ impl Session {
                         )
                     })
                     .collect();
-                checked = self.checked_initializer_calls(
+                let owner = original.map_or(self, |(_, owner)| owner);
+                checked = owner.checked_initializer_calls(
                     (entry, start.path),
                     start.main_body,
                     |name| selected.get(name).copied(),
@@ -4139,7 +4148,9 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     }
                     scalar.map(|annotation| (file, annotation))
                 }
-                Some(_) if diagnostic.id().is_lint_named("invalid-return-type") => {
+                _ if checks == FileChecks::DeclaredSignatures
+                    && diagnostic.id().is_lint_named("invalid-return-type") =>
+                {
                     let scope = return_scope(db, file, range?)?;
                     checked.result_scopes(db).binary_search(&scope).ok()?;
                     None
@@ -4152,6 +4163,8 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     None
                 }
                 Some(_) => return None,
+                // A reached installed function contributes only its own explicit return sites.
+                None if checks == FileChecks::DeclaredSignatures => return None,
                 None if checks == FileChecks::NamedFunctionCalls
                     && diagnostic.id().is_lint_named("invalid-argument-type") =>
                 {
