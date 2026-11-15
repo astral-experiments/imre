@@ -1589,7 +1589,7 @@ pub(super) fn call(
             1,
         )?;
         let depth = index_c_int(ctx, depth.expect("required depth argument"))?;
-        ctx.threads.coroutine_origin_depth =
+        ctx.heap.execution.coroutine_origin_depth =
             u32::try_from(depth).map_err(|_| Error::new("ValueError", "depth must be >= 0"))?;
         return Ok(NONE);
     }
@@ -1631,7 +1631,7 @@ pub(super) fn call(
             return Ok(fixed_structseq::record(
                 ctx,
                 fixed_structseq::ASYNCGEN_HOOKS,
-                ctx.threads.asyncgen_hooks.to_vec(),
+                ctx.heap.execution.asyncgen_hooks.to_vec(),
             ));
         }
         if matches!(name, "sys.getprofile" | "sys.gettrace") {
@@ -1787,7 +1787,7 @@ pub(super) fn call(
                 ctx.int(i64::from(crate::sys::cpu_count::configured().unwrap_or(-1)))
             }
             "sys.get_coroutine_origin_tracking_depth" => {
-                ctx.int(i64::from(ctx.threads.coroutine_origin_depth))
+                ctx.int(i64::from(ctx.heap.execution.coroutine_origin_depth))
             }
             "_socket.getdefaulttimeout" => {
                 let timeout = *ctx.interpreter.socket_default_timeout.lock().unwrap();

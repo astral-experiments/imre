@@ -36,8 +36,6 @@ pub(super) struct Workers {
     // Thread errors use the original sys module when its registry entry changes.
     pub(super) system_module: Option<Id>,
     pub(super) default_unraisable_hook: Option<Id>,
-    pub(super) asyncgen_hooks: [Id; 2],
-    pub(super) coroutine_origin_depth: u32,
 }
 
 impl Workers {
@@ -45,7 +43,6 @@ impl Workers {
         self.system_module
             .into_iter()
             .chain(self.default_unraisable_hook)
-            .chain(self.asyncgen_hooks)
     }
 }
 
