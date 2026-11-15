@@ -134,23 +134,19 @@ fn b2a_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id>
     else {
         unreachable!()
     };
-    let encode = |ctx: &mut Context, view| {
+    let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
         let quotetabs = ctx.optional_truth(quotetabs, false)?;
         let istext = ctx.optional_truth(istext, true)?;
         let header = ctx.optional_truth(header, false)?;
-        Ok(crate::objects::encode_quoted_printable(
-            ctx.native_buffer_bytes(view)?,
+        let storage = buffer.storage(ctx)?;
+        crate::objects::encode_quoted_printable(
+            &storage.read(0..storage.len())?,
             quotetabs,
             istext,
             header,
-        )?)
-    };
-    let bytes = if let Some(method) = ctx.python_buffer_method(data, true)? {
-        ctx.with_contiguous_python_buffer(data, method, 0, encode)?
-    } else {
-        ctx.native_buffer_bytes(data)?;
-        ctx.with_buffer_export(data, |ctx| encode(ctx, data))?
-    };
+        )
+        .map_err(Into::into)
+    })?;
     Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
