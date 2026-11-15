@@ -1600,6 +1600,19 @@ fn lower_graph(
         ) {
             Ok(body) => body,
             Err(report) => {
+                if defer_capture
+                    && physical_function
+                    && *module_id == graph.entry
+                    && matches!(source, Cow::Borrowed(_))
+                {
+                    let mut checker = checker_for(*module_id);
+                    checker.nonreturning_functions = &completed_calls;
+                    if let Ok(Some((_, placement))) = registered::prepare_checked_definition(
+                        &checker, definition, signature, inference, None,
+                    ) {
+                        placement.retain_for_launch(graph, &inference.source_checks);
+                    }
+                }
                 if refused(report) {
                     continue;
                 }
