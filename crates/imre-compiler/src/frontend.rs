@@ -9395,6 +9395,22 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// Place an original callee in the Python scope already selected for the checked FILE tail.
+    fn placing_module_call(&self, call: &ast::ExprCall) -> bool {
+        self.placement_only
+            && self.module_scope
+            && self.namespace.is_none()
+            && self
+                .fixed_sites
+                .as_ref()
+                .is_some_and(|sites| sites.site_at(call.range()).is_some())
+            && self
+                .graph
+                .session
+                .operand_types(self.module)
+                .is_original_operand(&call.func)
+    }
+
     /// Keep the written range on the checked expression that produced it.
     fn expression_at(&mut self, range: TextRange, value: Expr) -> Expr {
         if let Some(sites) = &mut self.fixed_sites {
@@ -9806,6 +9822,19 @@ impl<'a> Checker<'a> {
                 self.require_registered_operation(expression)?;
                 return Ok(value);
             }
+        }
+        // The declaration prefix has installed this Python class before the checked FILE tail.
+        if matches!(binding, Some(Binding::RegisteredClass(_)))
+            && self.placement_only
+            && self.module_scope
+            && self.fixed_sites.is_some()
+            && self.namespace.is_none()
+            && let Some(name) = expression.as_name_expr()
+        {
+            return Ok(self.expression_at(
+                name.range(),
+                registered::values::name_binding(name.id.clone()),
+            ));
         }
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(expression)?;
@@ -13897,6 +13926,14 @@ impl<'a> Checker<'a> {
         {
             return self.json_encode(call, op);
         }
+        if matches!(binding, Some(Binding::RegisteredClass(_)))
+            && call.func.is_name_expr()
+            && self.placing_module_call(call)
+        {
+            let class = self.expr(&call.func)?;
+            let value = self.call_with_target(call, class)?;
+            return Ok(self.expression_at(call.range(), value));
+        }
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(call.func.as_ref())?;
             return self.call_with_target(call, Expr::unrepresented());
@@ -15998,7 +16035,7 @@ impl<'a> Checker<'a> {
 
     /// Use the live builtin when the checked operands have no fixed operation.
     fn positional_builtin_fallback(
-        &self,
+        &mut self,
         call: &ast::ExprCall,
         name: &str,
         args: Vec<Expr>,
@@ -16012,6 +16049,13 @@ impl<'a> Checker<'a> {
                     .iter()
                     .any(|value| self.types.stores_python_object(value.ty)))
         {
+            if self.placing_module_call(call) {
+                // The argument operations are already in the checked tail. Insert the callee
+                // before them the same way as for any other written Python invocation.
+                let value = registered::values::name_call(call, name, args);
+                self.fixed_sites.as_mut().unwrap().invoked(call, &value);
+                return Ok(value);
+            }
             Ok(self.registered_builtin_call(call, name, args))
         } else {
             Err(error(

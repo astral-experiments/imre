@@ -399,7 +399,7 @@ impl SourceSites {
         ))
     }
 
-    fn site_at(&self, range: TextRange) -> Option<PendingSite> {
+    pub(super) fn site_at(&self, range: TextRange) -> Option<PendingSite> {
         self.current.filter(|site| site.range == range)
     }
 
