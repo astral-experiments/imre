@@ -1000,7 +1000,7 @@ impl Inference {
             let previous_checks = std::mem::take(&mut checked_before_registration);
             checked_bodies.clear();
             if widened {
-                local_returns.clear();
+                local_returns.retain(|id, _| previous_checks.contains(id));
                 first_open_return = None;
                 self.revisit_checked_returns();
             }
@@ -1658,7 +1658,7 @@ impl Inference {
                                         .into_iter()
                                         .filter(|&slot| definitions[slot].2.method.is_none()),
                                 )
-                                .map(|slot| (slot, None))
+                                .map(|slot| (slot, local_returns.remove(&slot)))
                                 .filter(resolved),
                         );
                     }
