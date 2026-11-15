@@ -3,17 +3,33 @@
 
 use super::thread_lock::Lock;
 use super::thread_worker::{Operation, WorkerStatus};
-use super::value::{Body, Code, CodeDefinition, CodeObject, WorkerStack};
+use super::value::{Body, Code, CodeDefinition, CodeObject, ParkedExecution, WorkerStack};
 use super::{CallParameters, Context, Error, Id, NONE, Result, Value, copy_label, ffi};
 use std::collections::HashMap;
 use std::io::Write;
 use std::sync::Arc;
 
-enum Argument {
+pub(super) enum Argument {
     Lock(Lock),
     Builtin(&'static str),
     /// Another bound slot already holds this Python object.
     Alias(usize),
+}
+
+impl Argument {
+    /// Resolve aliases from the earlier formal in this same child frame.
+    pub(super) fn realize(
+        self,
+        ctx: &mut Context,
+        local: Id,
+        shape: &crate::source_arguments::Shape<'_, String>,
+    ) -> Id {
+        match self {
+            Self::Lock(lock) => ctx.alloc(lock.into_value()),
+            Self::Builtin(name) => ctx.builtin(name),
+            Self::Alias(first) => ctx.scope_data(local).names[shape.parameter(first)],
+        }
+    }
 }
 
 pub(super) struct Callback {
@@ -369,102 +385,98 @@ impl Callback {
         })
     }
 
-    /// Check the native entry before reporting readiness. Only a published worker enters Python.
-    pub(super) fn into_call(
+    /// Prepare and park the registered call on this pthread. Only its creator can open the gate.
+    /// Startup failures go to the creator. Call errors belong to the published worker.
+    pub(super) fn run(
         self,
         interpreter: Arc<super::InterpreterState>,
-        fault_workers: Arc<()>,
-    ) -> Result<impl FnOnce(Option<String>) -> WorkerStatus + Send + use<>> {
-        let mut slots = Vec::new();
-        slots
-            .try_reserve_exact(self.values.len())
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        let parameters = self
-            .definition
-            .call_parameters(|| CallParameters::from_signature(&self.signature))?;
-        if parameters.varargs.is_some()
-            || parameters.kwargs.is_some()
-            || self.values.len() != parameters.positional.len() + parameters.keyword_only.len()
+        fault_workers: &Arc<()>,
+        enter: impl FnOnce() -> bool + Send,
+        detached_label: Option<String>,
+    ) -> Result<WorkerStatus> {
+        // Captured entries bypass argument selection. Older native code must still
+        // have an empty signature to enter with only its closure cell.
+        if self.captured_lock.is_some()
+            && self
+                .definition
+                .call_parameters(|| CallParameters::from_signature(&self.signature))?
+                .argument_slots()
+                .next()
+                .is_some()
         {
             return Err(unsupported());
         }
-        Ok(move |detached_label| {
-            let heap = super::Heap::with_worker_stack(
-                Some(self.frames),
-                self.gc_settings,
-                self.allocation_traces,
-            );
-            let mut ctx = ffi::new_worker_context(interpreter, heap);
-            let mark = ctx.heap.temporary_mark();
-            let globals = ctx.scope(&self.module, None);
-            let cell = self.captured_lock.map(|lock| {
-                let value = ctx.alloc(lock.into_value());
-                ctx.alloc(Value::Cell(Some(value)))
-            });
-            let name = ctx.text(self.name);
-            let qualname = ctx.text(self.qualname);
-            let signature = ctx.text(self.signature);
-            let filename = ctx.text_codepoints(self.filename);
-            let location = (filename, self.first_line);
-            let code = ctx.realize_code(
-                Body::Native(self.entry, NONE),
-                self.definition,
-                name,
-                signature,
-                (qualname, NONE),
-                location,
-            );
-            let function = ctx.function_with_closure(
-                code,
-                (globals, ctx.root_module_name(globals)),
-                super::source_code::FunctionClosure::Cells(cell.as_slice()),
-                (name, qualname),
-                NONE,
-                NONE,
-            );
-            for value in self.values {
-                let id = match value {
-                    Argument::Lock(lock) => ctx.alloc(lock.into_value()),
-                    Argument::Builtin(name) => ctx.builtin(name),
-                    Argument::Alias(first) => slots[first],
-                };
-                slots.push(id);
+        let heap = super::Heap::with_worker_stack(
+            Some(self.frames),
+            self.gc_settings,
+            self.allocation_traces,
+        );
+        let mut ctx = ffi::new_worker_context(interpreter, heap);
+        let mark = ctx.heap.temporary_mark();
+        let globals = ctx.scope(&self.module, None);
+        let cell = self.captured_lock.map(|lock| {
+            let value = ctx.alloc(lock.into_value());
+            ctx.alloc(Value::Cell(Some(value)))
+        });
+        let name = ctx.text(self.name);
+        let qualname = ctx.text(self.qualname);
+        let signature = ctx.text(self.signature);
+        let filename = ctx.text_codepoints(self.filename);
+        let location = (filename, self.first_line);
+        let code = ctx.realize_code(
+            Body::Native(self.entry, NONE),
+            self.definition,
+            name,
+            signature,
+            (qualname, NONE),
+            location,
+        );
+        let function = ctx.function_with_closure(
+            code,
+            (globals, ctx.root_module_name(globals)),
+            super::source_code::FunctionClosure::Cells(cell.as_slice()),
+            (name, qualname),
+            NONE,
+            NONE,
+        );
+        ctx.heap.observe_fault_workers(fault_workers);
+        let call = ffi::OperandCall::prepare(&mut ctx, mark, function, |ctx| {
+            ctx.prepare_function_call(
+                function,
+                super::calls::FunctionArguments::Bound(self.values),
+            )
+        });
+        if let Err(error) = &call {
+            for root in error.roots() {
+                ctx.heap.keep(root);
             }
-            ctx.heap.observe_fault_workers(&fault_workers);
-            // SAFETY: this child owns the context, registered function and bound operands.
-            let result = unsafe {
-                ffi::run_with_operands(
-                    &raw mut ctx,
-                    mark,
-                    function,
-                    |ctx| {
-                        ctx.prepare_function_call(
-                            function,
-                            super::calls::FunctionArguments::Bound(slots),
-                        )
-                    },
-                    Context::finish_call_operands,
-                )
-            };
-            let mut status = Ok(());
-            if let Err(error) = result {
-                for root in error.roots() {
-                    ctx.heap.keep(root);
-                }
-                if let Some(label) = detached_label {
-                    if error.kind != "SystemExit" {
-                        let _ = writeln!(
-                            crate::sys::stderr_writer(),
-                            "Exception ignored in thread started by {label}:\n{}",
-                            error.report(&ctx.heap)
-                        );
-                    }
-                } else {
-                    status = Err(error.report(&ctx.heap).to_string());
-                }
+        }
+        // SAFETY: only the native publication crosses the wait. The registered frame
+        // and any exception roots stay in this pthread's parked execution.
+        if !unsafe { ParkedExecution::wait(&raw mut ctx, enter) }? {
+            return Ok(Ok(()));
+        }
+        // SAFETY: this pthread has resumed the same context and its marked caller.
+        let result =
+            call.and_then(|call| unsafe { call.run(&raw mut ctx, Context::finish_call_operands) });
+        let mut status = Ok(());
+        if let Err(error) = result {
+            for root in error.roots() {
+                ctx.heap.keep(root);
             }
-            ctx.unwind_operands(mark);
-            status
-        })
+            if let Some(label) = detached_label {
+                if error.kind != "SystemExit" {
+                    let _ = writeln!(
+                        crate::sys::stderr_writer(),
+                        "Exception ignored in thread started by {label}:\n{}",
+                        error.report(&ctx.heap)
+                    );
+                }
+            } else {
+                status = Err(error.report(&ctx.heap).to_string());
+            }
+        }
+        ctx.unwind_operands(mark);
+        Ok(status)
     }
 }

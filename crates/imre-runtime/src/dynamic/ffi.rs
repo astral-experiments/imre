@@ -2858,8 +2858,9 @@ unsafe fn scoped_call(
         ctx.heap.set_call_position(None);
         return NONE;
     }
+    let call = OperandCall::prepare(ctx, mark, callable, prepare);
     // SAFETY: the generated caller owns the marked operands throughout the call.
-    let mut result = unsafe { run_with_operands(context, mark, callable, prepare, release) };
+    let mut result = call.and_then(|call| unsafe { call.run(context, release) });
     // SAFETY: execution has returned to the generated caller.
     let ctx = unsafe { &mut *context };
     // Ordinary traceback nodes also own the saved call range, including when the
@@ -2868,46 +2869,59 @@ unsafe fn scoped_call(
     finish_at(ctx, result, span)
 }
 
-/// Run a prepared call with the normal caller-to-frame operand transfer.
-///
-/// # Safety
-/// The current thread owns this context and its marked caller frame through return.
-#[inline]
-pub(super) unsafe fn run_with_operands(
-    context: *mut Context,
+/// A registered call and the caller's operand mark to restore on return.
+pub(super) struct OperandCall {
+    call: calls::RegisteredCall,
     mark: usize,
-    callable: Id,
-    prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
-    release: impl FnOnce(&mut Context, usize, Id),
-) -> Result<Id> {
-    // SAFETY: borrow the caller only for preparation, before invoking native code.
-    let ctx = unsafe { &mut *context };
-    let call = prepare(ctx);
-    let transferred = matches!(call, Ok(calls::RegisteredCall::Native(_)))
-        && match *ctx.heap.get(callable) {
-            Value::Function { .. } => true,
-            Value::Method { callable, .. } => {
-                matches!(ctx.heap.get(callable), Value::Function { .. })
-            }
-            _ => false,
-        };
-    if transferred {
-        // Binding succeeded. The native frame now owns the receiver and argument values.
-        ctx.heap.release_bound_call_operands(mark);
-    }
-    // SAFETY: preparation returned any native activation with its frame already rooted.
-    let result = call.and_then(|call| unsafe { call.run(context) });
-    // SAFETY: the native frame has returned and the caller is active again.
-    let ctx = unsafe { &mut *context };
-    result.and_then(|value| {
+    transferred: bool,
+}
+
+impl OperandCall {
+    pub(super) fn prepare(
+        ctx: &mut Context,
+        mark: usize,
+        callable: Id,
+        prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    ) -> Result<Self> {
+        let call = prepare(ctx)?;
+        let transferred = matches!(call, calls::RegisteredCall::Native(_))
+            && match *ctx.heap.get(callable) {
+                Value::Function { .. } => true,
+                Value::Method { callable, .. } => {
+                    matches!(ctx.heap.get(callable), Value::Function { .. })
+                }
+                _ => false,
+            };
         if transferred {
+            ctx.heap.release_bound_call_operands(mark);
+        }
+        Ok(Self {
+            call,
+            mark,
+            transferred,
+        })
+    }
+
+    /// # Safety
+    /// This thread owns the context and marked caller frame used to prepare the call.
+    #[inline]
+    pub(super) unsafe fn run(
+        self,
+        context: *mut Context,
+        release: impl FnOnce(&mut Context, usize, Id),
+    ) -> Result<Id> {
+        // SAFETY: the owner has resumed with the prepared activation still rooted.
+        let value = unsafe { self.call.run(context) }?;
+        // SAFETY: the call returned to the marked caller on this thread.
+        let ctx = unsafe { &mut *context };
+        if self.transferred {
             // Caller-side packed handles may already have been collected.
-            ctx.finish_call_operands(mark, value);
+            ctx.finish_call_operands(self.mark, value);
         } else {
-            release(ctx, mark, value);
+            release(ctx, self.mark, value);
         }
         ctx.check_call_return(value)
-    })
+    }
 }
 
 /// Definition sites carry either an ordinary entry or a coroutine resume entry.
