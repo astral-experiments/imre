@@ -9278,8 +9278,12 @@ impl<'a> Checker<'a> {
 
     /// MIME module tables are rebound by init(). Qualified loads and stores
     /// use the same owned state fields as the bundled implementation.
-    fn mime_attribute(&self, attr: &ast::ExprAttribute) -> Option<ast::ExprAttribute> {
-        let Binding::Module(module) = self.resolve(&attr.value)? else {
+    fn mime_attribute(
+        &self,
+        attr: &ast::ExprAttribute,
+        binding: Option<Binding>,
+    ) -> Option<ast::ExprAttribute> {
+        let Binding::Module(module) = binding? else {
             return None;
         };
         if !self.graph.modules[module].is_bundled("mimetypes")
@@ -9587,8 +9591,11 @@ impl<'a> Checker<'a> {
         if let Some(method) = self.boxed_descriptor(expression) {
             return Err(self.scoped_builtin_error(method, expression));
         }
+        let base_binding = expression
+            .as_attribute_expr()
+            .and_then(|attr| self.resolve(&attr.value));
         if let ast::Expr::Attribute(attribute) = expression
-            && let Some(field) = self.mime_attribute(attribute)
+            && let Some(field) = self.mime_attribute(attribute, base_binding)
         {
             return self.typed_expr(&ast::Expr::Attribute(field));
         }
@@ -9617,7 +9624,7 @@ impl<'a> Checker<'a> {
                 Ok(result)
             }
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
-            _ => self.non_call_expr(expression),
+            _ => self.non_call_expr(expression, base_binding),
         }
     }
 
@@ -9654,7 +9661,11 @@ impl<'a> Checker<'a> {
     }
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
-    fn non_call_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+    fn non_call_expr(
+        &mut self,
+        expression: &ast::Expr,
+        base_binding: Option<Binding>,
+    ) -> Result<Expr, String> {
         if let Some(name) = self.boxed_builtin_callable(expression) {
             return Err(self.scoped_builtin_error(name, expression));
         }
@@ -9683,9 +9694,6 @@ impl<'a> Checker<'a> {
         {
             return Ok(annotations::class_value(name));
         }
-        let base_binding = expression
-            .as_attribute_expr()
-            .and_then(|attr| self.resolve(&attr.value));
         self.check_module_member(expression, binding, |_| base_binding)?;
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) = base_binding
