@@ -97,6 +97,23 @@ pub(crate) enum FixedAttribute {
     Call(Option<Box<Expr>>, Box<ir::RegisteredCall>),
 }
 
+impl FixedAttribute {
+    /// Borrow the written target and arguments from the checked operation in evaluation order.
+    pub(crate) fn call_operands<'a>(&'a self, expr: &'a Expr) -> Option<(&'a Expr, &'a [Expr])> {
+        let Self::Call(target, _) = self else {
+            return None;
+        };
+        if let (None, ExprKind::Invoke { callable, args }) = (target, &expr.kind) {
+            return Some((callable, &args.values));
+        }
+        let values = expr.named_call_arguments()?;
+        match target.as_deref() {
+            Some(target) => Some((target, values)),
+            None => values.split_first(),
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub(super) enum FixedNode {
     Position(TextRange),
@@ -134,6 +151,26 @@ impl FixedNode {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
     }
 
+    fn local_invoke(expr: &Expr) -> Option<Self> {
+        let ExprKind::Invoke { callable, args } = &expr.kind else {
+            return None;
+        };
+        let ExprKind::Local(slot) = callable.kind else {
+            return None;
+        };
+        (matches!(callable.ty, Type::Callable(_))
+            && args.site.python().is_none()
+            && args.order.iter().copied().eq(0..args.values.len()))
+        .then(|| {
+            Self::NamedCall(
+                std::mem::discriminant(&expr.kind),
+                slot,
+                args.values.len(),
+                expr.ty,
+            )
+        })
+    }
+
     /// Compare owned payloads against the final instruction without copying them.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
         if let ir::Node::Expression(expr) = node {
@@ -145,8 +182,11 @@ impl FixedNode {
                     return matches!(self, Self::Scalar(ir::Constant::Bytes(expected)) if expected == value);
                 }
                 ExprKind::Invoke { .. } => {
-                    return matches!(self, Self::Invocation(call, ty)
-                        if *ty == expr.ty && expr.python_call() == Some(call.as_ref()));
+                    return if let Self::Invocation(call, ty) = self {
+                        *ty == expr.ty && expr.python_call() == Some(call.as_ref())
+                    } else {
+                        Self::local_invoke(expr).as_ref() == Some(self)
+                    };
                 }
                 _ => {}
             }
@@ -501,6 +541,31 @@ impl SourceSites {
                 .insert(site.range, FixedAttribute::Call(Some(target), invoke));
             self.commit(site, node);
         }
+    }
+
+    /// A checked positional invocation already owns the callable and every written argument.
+    pub(super) fn local_call(&mut self, call: &ast::ExprCall, value: &Expr) {
+        let Some(site) = self.site_at(call.range()) else {
+            return;
+        };
+        let Some(node) = FixedNode::local_invoke(value) else {
+            return;
+        };
+        self.commit(site, node);
+        if self
+            .sites
+            .get(site.index + 1)
+            .is_none_or(|(range, _)| *range != call.func.range())
+        {
+            self.invoked(call, value);
+        }
+        let invoke = ir::RegisteredCall::new(
+            call.range(),
+            registered::values::callable_target(call),
+            ir::RegisteredArguments::Positional,
+        );
+        self.attributes
+            .insert(site.range, FixedAttribute::Call(None, invoke));
     }
 
     pub(super) fn field(&mut self, field: &ast::ExprAttribute, value: &Expr) {

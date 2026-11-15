@@ -960,21 +960,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 _ => range.start(),
             };
             return frame.at_expression(range, position, |frame| {
-                if let Some(FixedAttribute::Call(target, site)) = attribute {
-                    let args = expr
-                        .named_call_arguments()
-                        .expect("placed call has its written operands");
-                    let (target, args) = match target.as_deref() {
-                        Some(target) => (target, args),
-                        None => args.split_first().expect("placed method has a receiver"),
+                if let Some(attr @ FixedAttribute::Call(target, site)) = attribute {
+                    let (callee, args) = attr.call_operands(expr).expect("placed call operands");
+                    let load = if target.is_some() {
+                        CheckedFrame::source_callee
+                    } else {
+                        CheckedFrame::kept_call_value
                     };
-                    return CheckedBody::registered(frame.reborrow()).python_call(
-                        site,
-                        None,
-                        target,
-                        args,
-                        CheckedFrame::source_callee,
-                    );
+                    return CheckedBody::registered(frame.reborrow())
+                        .python_call(site, None, callee, args, load);
                 }
                 if let Some(FixedAttribute::Load(name)) = attribute {
                     let operands = expr

@@ -982,13 +982,20 @@ impl Checker<'_> {
         if let Some(id) = saved {
             args.site = ir::CallSite::SavedFunction(self.call_origin(call), id);
         }
-        Ok(Expr {
+        let value = Expr {
             ty: returns,
             kind: ExprKind::Invoke {
                 callable: Box::new(callable),
                 args,
             },
-        })
+        };
+        if local_callable
+            && let Some(sites) = &mut self.fixed_sites
+            && registered::values::fixed_positional_arguments(call)
+        {
+            sites.local_call(call, &value);
+        }
+        Ok(value)
     }
 
     pub(super) fn saved_call_target(&self, slot: usize) -> Option<usize> {
