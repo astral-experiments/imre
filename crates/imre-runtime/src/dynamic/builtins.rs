@@ -2637,9 +2637,9 @@ pub(super) fn call(
                     return Ok(args[0]);
                 }
                 let mut exports = ctx
-                    .buffer_exports
-                    .iter()
-                    .filter(|&&view| view == args[0])
+                    .heap
+                    .buffer_exports()
+                    .filter(|&view| view == args[0])
                     .count();
                 if ctx.heap.may_have_buffer_views(args[0]) {
                     let (heap, roots) = ctx.heap_and_roots();

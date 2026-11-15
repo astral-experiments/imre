@@ -977,7 +977,6 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         fault_file: None,
         fault_user_files: HashMap::new(),
         exit_callbacks: Vec::new(),
-        buffer_exports: Vec::new(),
         repr_ancestors: Vec::new(),
         repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
@@ -3706,7 +3705,6 @@ impl Context {
                 .chain(self.threads.roots())
                 .chain(self.fault_file)
                 .chain(self.fault_user_files.values().copied())
-                .chain(self.buffer_exports.iter().copied())
                 .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
