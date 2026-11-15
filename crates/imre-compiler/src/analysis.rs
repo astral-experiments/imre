@@ -507,38 +507,6 @@ pub(crate) fn check_registered_project<'a>(
         .into_iter()
         .flat_map(|p| p.values().copied())
         .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "pyi"));
-    let entry_operand = checked.zip(refusal).and_then(|(graph, report)| {
-        let site = report.entry_operand()?;
-        if site.module != graph.entry {
-            return None;
-        }
-        let reached =
-            graph
-                .session
-                .unconditional_module_operand(site.module, site.statement, site.operand);
-        reached.then(|| {
-            (
-                site.module,
-                graph.modules[site.module].original_source(),
-                report,
-            )
-        })
-    });
-    let called_bodies: Vec<_> = checked
-        .zip(refusal)
-        .into_iter()
-        .flat_map(|(graph, report)| {
-            report.function_reports().map(|((id, range), report)| {
-                let module = &graph.modules[id];
-                (
-                    module.path.as_path(),
-                    module.original_source(),
-                    range,
-                    report,
-                )
-            })
-        })
-        .collect();
     if let Some(graph) = checked
         && !graph.has_checked_only_import
         // This result belongs to the checked adapter, before a native declaration won.
@@ -616,8 +584,7 @@ pub(crate) fn check_registered_project<'a>(
                 || contract.original(graph).clone(),
                 winners.clone(),
                 has_file_body,
-                entry_operand,
-                &called_bodies,
+                checked.zip(refusal),
                 Some((graph, owner)),
             )?;
             return Ok(RegisteredLayouts::from_winners(
@@ -724,8 +691,7 @@ pub(crate) fn check_registered_project<'a>(
         || session.closed_program_errors(&paths, None, &[], refusal, None),
         winners.clone(),
         has_file_body,
-        entry_operand,
-        &called_bodies,
+        checked.zip(refusal),
         None,
     )?;
     Ok(RegisteredLayouts::from_winners(|| session, winners))
@@ -1090,8 +1056,10 @@ impl Session {
         contracts: impl FnOnce() -> Result<(), String>,
         sources: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
         has_file_body: Option<&dyn Fn(&str) -> bool>,
-        entry_operand: Option<(usize, &str, &crate::frontend::phase::Diagnostic)>,
-        called_bodies: &[(&Path, &str, TextRange, &crate::frontend::phase::Diagnostic)],
+        native: Option<(
+            &crate::modules::SourceGraph,
+            &crate::frontend::phase::Diagnostic,
+        )>,
         original: Option<(&crate::modules::SourceGraph, &Session)>,
     ) -> Result<(), String> {
         let mut captures = execution::CapturedImports::default();
@@ -1140,6 +1108,13 @@ impl Session {
                                 module: id,
                                 path: source.path,
                                 declares_signatures: source.declares_signatures,
+                                native: native.and_then(|(graph, report)| {
+                                    let id = source.checked_module?;
+                                    let module = &graph.modules[id];
+                                    (source.path == module.path
+                                        && source.source == module.original_source())
+                                    .then_some((id, report))
+                                }),
                             },
                         )
                     })
@@ -1162,24 +1137,30 @@ impl Session {
                 }
                 Some(error)
             } else if let Some((id, function)) = initializer.entered_function
-                && let Some((_, _, _, report)) =
-                    called_bodies.iter().find(|&&(path, source, range, _)| {
-                        function == range
-                            && sources.clone().any(|(owner, winner)| {
-                                owner == id
-                                    && winner.declares_signatures
-                                    && winner.path == path
-                                    && winner.source == source
-                            })
-                    })
+                && let Some((graph, native)) = native
+                && let Some((_, winner)) = sources.clone().find(|(owner, _)| *owner == id)
+                && winner.declares_signatures
+                && let Some((_, report)) = native.function_reports().find(|((module, range), _)| {
+                    let source = &graph.modules[*module];
+                    function == *range
+                        && winner.path == source.path
+                        && winner.source == source.original_source()
+                })
             {
-                Some(*report)
-            } else if let Some((owner, original, error)) = entry_operand
+                Some(report)
+            } else if let Some((graph, report)) = native
                 && start.main_body
-                && start.checked_module == Some(owner)
-                && start.source == original
+                && let Some(site) = report.entry_operand()
+                && site.module == graph.entry
+                && start.checked_module == Some(site.module)
+                && start.source == graph.modules[site.module].original_source()
+                && graph.session.unconditional_module_operand(
+                    site.module,
+                    site.statement,
+                    site.operand,
+                )
             {
-                Some(error)
+                Some(report)
             } else {
                 None
             }

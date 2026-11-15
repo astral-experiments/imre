@@ -88,7 +88,7 @@ pub(crate) fn passive_function(function: &StmtFunctionDef) -> bool {
 fn passive_function_return<T>(
     function: &StmtFunctionDef,
     operand: impl Fn(&Expr) -> Option<T>,
-) -> Option<Option<T>> {
+) -> Option<Option<(TextRange, T)>> {
     if !passive_declaration(function) {
         return None;
     }
@@ -97,7 +97,7 @@ fn passive_function_return<T>(
         match statement {
             Stmt::Return(ret) => {
                 let value = match &ret.value {
-                    Some(value) => Some(operand(value)?),
+                    Some(value) => Some((value.range(), operand(value)?)),
                     None => None,
                 };
                 first_return.get_or_insert(value);
@@ -122,6 +122,7 @@ pub(super) struct InitializerSource<'a> {
     pub(super) module: crate::modules::ModuleId,
     pub(super) path: &'a Path,
     pub(super) declares_signatures: bool,
+    pub(super) native: Option<(crate::modules::ModuleId, &'a Diagnostic)>,
 }
 
 impl<'a> InitializerSource<'a> {
@@ -130,6 +131,7 @@ impl<'a> InitializerSource<'a> {
             module,
             path,
             declares_signatures: true,
+            native: None,
         }
     }
 }
@@ -690,11 +692,22 @@ impl Session {
             })
             && !generator()?
         {
+            let (returned, value) = ret.unzip();
             let value =
-                ret.unwrap_or_else(|| Type::none(&self.db, &owner_model.program_environment()));
+                value.unwrap_or_else(|| Type::none(&self.db, &owner_model.program_environment()));
             // A returned literal can still fail the function's declared return contract.
             if let Some(annotation) = &function.returns {
                 let expected = super::annotation_type(&self.db, &owner_model, annotation)?;
+                if let Some((id, native)) = source.native
+                    && let Some((operand, report)) =
+                        native.declared_return(id, source.path, annotation.range())
+                    && returned == Some(operand)
+                    && !value.is_unknown()
+                    && !super::OperandTypes::accepts_type(&owner_model, value, expected)
+                    && self.unconditional_module_operand(module, site.guard_start, call.range())
+                {
+                    return Some(Err(report.clone()));
+                }
                 if !value.is_assignable_to(&self.db, &owner_model.program_environment(), expected) {
                     return None;
                 }
