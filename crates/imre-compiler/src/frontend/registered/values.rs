@@ -128,17 +128,21 @@ impl<'a> RegisteredSource<'a> {
         };
         match node {
             ast::Expr::Call(call) => {
-                let (selection, target) = self.call_target(call);
-                let method = matches!(selection, ir::RegisteredCallTarget::Method { .. })
-                    .then_some(call.func.as_ref());
-                let Some(target) = receiver(target, method.is_some(), method)? else {
+                let field = self.direct_method(call);
+                let input = field.map_or(call.func.as_ref(), |field| field.value.as_ref());
+                let method = field.map(|_| call.func.as_ref());
+                let Some(target) = receiver(input, field.is_some(), method)? else {
                     return Ok(None);
                 };
-                let site = match placed {
-                    Some(FixedAttribute::Call(None, site)) if site.target == selection => Some(site),
-                    _ => None,
-                };
-                Ok(Some(selection.prepare(call, target, site, child)?))
+                if let (Some(field), Some(FixedAttribute::Call(None, site))) = (field, placed)
+                    && let ir::RegisteredCallTarget::Method { name, attribute, name_start } = &site.target
+                    && *name == field.attr.id && *attribute == field.range() && *name_start == field.attr.start()
+                {
+                    let arguments = call_arguments(call, child)?;
+                    return Ok(Some(invoke_value(site, Box::new(target), arguments)));
+                }
+                let selection = field.map_or_else(|| callable_target(call), method_target);
+                Ok(Some(selection.prepare(call, target, child)?))
             }
             ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
                 let op = match placed {
@@ -522,17 +526,8 @@ impl ir::RegisteredCallTarget {
         self,
         call: &ast::ExprCall,
         target: Expr,
-        placed: Option<Box<ir::RegisteredCall>>,
         child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Expr, E> {
-        if matches!(self, Self::Method { .. }) {
-            let arguments = call_arguments(call, child)?;
-            let (site, target) = match placed {
-                Some(site) => (site, Box::new(target)),
-                None => self.bind(call, target, None),
-            };
-            return Ok(invoke_value(site, target, arguments));
-        }
         let (layout, arguments) = prepared_arguments(call, child)?;
         let (site, target) = self.bind(call, target, Some(layout));
         Ok(invoke_value(site, target, arguments))
@@ -662,7 +657,7 @@ impl Checker<'_> {
         call: &ast::ExprCall,
         target: Expr,
     ) -> Result<Expr, String> {
-        let value = callable_target(call).prepare(call, target, None, |arg| self.expr(arg))?;
+        let value = callable_target(call).prepare(call, target, |arg| self.expr(arg))?;
         Ok(self.scoped_call(value))
     }
 
@@ -1508,7 +1503,7 @@ impl Checker<'_> {
             let mut fixed_result = true;
             // Positional calls use their written order. Keyword calls already have a slot per operand.
             let mut indices = indices.into_iter().chain(0..call.arguments.len());
-            let value = callable_target(call).prepare(call, target, None, |arg| {
+            let value = callable_target(call).prepare(call, target, |arg| {
                 let index = indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
