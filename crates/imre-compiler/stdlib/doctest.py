@@ -314,7 +314,7 @@ def _call_hook(hook: Callable[[DocTest], None] | None, test: DocTest) -> None:
         hook(test)
 
 
-class _DocTestCase(unittest.TestCase):
+class DocTestCase(unittest.TestCase):
     _dt_setUp = None
     _dt_tearDown = None
     _dt_test: DocTest
@@ -322,13 +322,17 @@ class _DocTestCase(unittest.TestCase):
     _dt_optionflags: int
     _dt_checker: OutputChecker | None
 
-    def __init__(self, test: DocTest, optionflags: int = 0, *,
+    def __init__(self, test: DocTest, optionflags: int = 0,
+                 setUp: Callable[[DocTest], None] | None = None,
+                 tearDown: Callable[[DocTest], None] | None = None,
                  checker: OutputChecker | None = None) -> None:
         super().__init__()
         self._dt_optionflags = optionflags
         self._dt_checker = checker
         self._dt_test = test
         self._dt_globs = {}
+        self._dt_setUp = setUp
+        self._dt_tearDown = tearDown
 
     def setUp(self) -> None:
         test = self._dt_test

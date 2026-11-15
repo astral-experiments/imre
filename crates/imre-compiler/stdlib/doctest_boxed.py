@@ -136,15 +136,8 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
     return _suite_from_tests(tests, lambda test: DocTestCase(test, optionflags, setUp, tearDown, checker))
 
 
-# Object cases store hooks on each instance, including their absence after deletion.
-del _DocTestCase._dt_setUp, _DocTestCase._dt_tearDown
-
-
-class DocTestCase(_DocTestCase):
-    def __init__(self, test, optionflags=0, setUp=None, tearDown=None, checker=None):
-        super().__init__(test, optionflags, checker=checker)
-        self._dt_setUp = setUp
-        self._dt_tearDown = tearDown
+# Live cases store both hooks on the instance, including None.
+del DocTestCase._dt_setUp, DocTestCase._dt_tearDown
 
 
 class SkipDocTestCase(DocTestCase):
