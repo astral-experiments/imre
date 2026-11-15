@@ -3827,6 +3827,8 @@ pub(super) struct Heap {
     gc_order: GcOrder,
     linked_constants: HashMap<ConstantSlot, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
+    // Boxed empty and Latin-1 strings are identified by their character index in this heap.
+    short_strings: HashMap<usize, InternedString>,
     full_collection: Option<CycleSet>,
     prompt_cycles: CycleSet,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
@@ -4256,6 +4258,7 @@ impl Heap {
             prompt_cycles: CycleSet::default(),
             linked_constants: HashMap::new(),
             short_bytes: HashMap::new(),
+            short_strings: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             abc_subclass_cache: HashMap::new(),
@@ -4572,8 +4575,8 @@ impl Heap {
     }
 
     pub(super) fn owned_text(&mut self, text: crate::Str) -> Id {
-        if let Some(owner) = crate::objects::short_string(&text) {
-            return self.intern_literal(owner, true);
+        if let Some(id) = self.short_string(&text) {
+            return id;
         }
         self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
     }
@@ -4863,40 +4866,49 @@ impl Heap {
         id
     }
 
-    /// A code literal and every occurrence of a Latin-1 character share their Python handle.
-    fn intern_literal(&mut self, owner: crate::StrOwner, static_character: bool) -> Id {
-        if let Some(entry) = self.interned.get_mut(&owner) {
+    /// Return the heap's singleton for the empty string or one Latin-1 character.
+    fn short_string(&mut self, text: &str) -> Option<Id> {
+        let index = crate::objects::short_index(text)?;
+        if let Some(entry) = self.short_strings.get_mut(&index) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
-            return id;
+            return Some(id);
         }
-        let id = self.alloc_slot_with_trace(Value::Str((*owner).clone()), !static_character);
-        self.interned
-            .insert(owner, InternedString { id, literal: true });
-        id
+        let id = self.alloc_slot_with_trace(Value::Str(text.into()), false);
+        self.short_strings
+            .insert(index, InternedString { id, literal: true });
+        Some(id)
+    }
+
+    fn interned_string(&self, text: &str) -> Option<&InternedString> {
+        match crate::objects::short_index(text) {
+            Some(index) => self.short_strings.get(&index),
+            None => self.interned.get(text),
+        }
     }
 
     /// Mark the shared spelling as a live code constant and return its local Python handle.
     pub fn code_name(&mut self, text: &str) -> Id {
+        if let Some(id) = self.short_string(text) {
+            return id;
+        }
         if let Some(entry) = self.interned.get_mut(text) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
             return id;
         }
-        if let Some(owner) = crate::objects::short_string(text) {
-            return self.intern_literal(owner, true);
-        }
-        self.intern_literal(
-            crate::sys::intern_owner(&crate::objects::literal_string(text)),
-            false,
-        )
+        let owner = crate::sys::intern_owner(&crate::objects::literal_string(text));
+        let id = self.alloc_slot(Value::Str((*owner).clone()));
+        self.interned
+            .insert(owner, InternedString { id, literal: true });
+        id
     }
 
     pub fn string_literal(&mut self, text: &str) -> Result<Id> {
-        if let Some(owner) = crate::objects::short_string(text) {
-            return Ok(self.intern_literal(owner, true));
+        if let Some(id) = self.short_string(text) {
+            return Ok(id);
         }
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if intern && let Some(entry) = self.interned.get_mut(text) {
@@ -4927,7 +4939,7 @@ impl Heap {
     /// Runtime-compiled ASCII constants are interned for the lifetime of their code.
     pub fn source_string_constant(&mut self, text: &str) -> Option<Id> {
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-        if intern && let Some(entry) = self.interned.get(text) {
+        if intern && let Some(entry) = self.interned_string(text) {
             let id = entry.id;
             self.keep(id);
             return Some(id);
@@ -4944,7 +4956,7 @@ impl Heap {
     }
 
     pub fn is_interned(&self, id: Id) -> bool {
-        matches!(self.get(id), Value::Str(s) if self.interned.get(s.as_str()).is_some_and(|entry| entry.id == id))
+        matches!(self.get(id), Value::Str(s) if self.interned_string(s).is_some_and(|entry| entry.id == id))
     }
 
     /// A dead boxed string may still occupy its slot until the next collection.
@@ -4952,7 +4964,7 @@ impl Heap {
         let Value::Str(text) = self.get(id) else {
             unreachable!()
         };
-        if let Some(&entry) = self.interned.get(text.as_str())
+        if let Some(&entry) = self.interned_string(text)
             && (entry.id == id
                 || entry.literal
                 || self.bound_in_active_frame(entry.id)
@@ -4960,6 +4972,13 @@ impl Heap {
         {
             self.keep(entry.id);
             return entry.id;
+        }
+        if let Some(index) = crate::objects::short_index(text) {
+            if self.short_strings.try_reserve(1).is_ok() {
+                self.short_strings
+                    .insert(index, InternedString { id, literal: false });
+            }
+            return id;
         }
         let Ok(owner) = crate::objects::try_literal_string(text) else {
             return id;
@@ -5932,6 +5951,7 @@ impl Heap {
         pending.extend(
             self.interned
                 .values()
+                .chain(self.short_strings.values())
                 .filter(|entry| entry.literal)
                 .map(|entry| entry.id),
         );
@@ -7779,8 +7799,10 @@ impl Heap {
             self.traces[id as usize].get() != UNMARKED
                 && slot.value.as_ref().is_some_and(Value::owns_open_descriptor)
         });
-        self.interned
-            .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
+        let marked_string =
+            |entry: &InternedString| self.traces[entry.id as usize].get() != UNMARKED;
+        self.interned.retain(|_, entry| marked_string(entry));
+        self.short_strings.retain(|_, entry| marked_string(entry));
         let callbacks = self.clear_weak_targets(None, None, true);
         self.linked_sources
             .retain(|&owner, _| self.traces[owner as usize].get() != UNMARKED);
@@ -8176,6 +8198,34 @@ mod tests {
         assert_eq!(replacement, discarded);
         heap.release_temporaries_since(mark);
         assert!(!heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+    }
+
+    #[test]
+    fn boxed_short_interning_uses_only_the_heap_slot() {
+        let native = crate::objects::literal_string("é");
+        let count = crate::StrOwner::strong_count(&native);
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+
+        // An explicitly distinct result can be weakly interned until a literal adopts it.
+        let distinct = || Value::Str("é".into());
+        let mortal = heap.fresh_string(distinct()).unwrap();
+        assert_eq!(heap.intern(mortal, std::iter::empty()), mortal);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let next = heap.fresh_string(distinct()).unwrap();
+        assert!(!heap.is_interned(next));
+        assert_eq!(heap.intern(next, std::iter::empty()), next);
+        assert_eq!(heap.string_literal("é").unwrap(), next);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        assert_eq!(heap.code_name("é"), next);
+        assert_eq!(heap.alloc(distinct()), next);
+
+        let again = crate::sys::intern_owner(&native);
+        assert!(crate::StrOwner::ptr_eq(&again, &native));
+        drop(again);
+        assert_eq!(crate::StrOwner::strong_count(&native), count);
     }
 
     #[test]
