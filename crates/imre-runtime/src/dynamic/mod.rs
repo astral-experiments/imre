@@ -3681,22 +3681,22 @@ impl Context {
                     let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
                     entries.push((self.heap.code_name(field), descriptor));
                 } else if let Some(owner) = method_decorator::owner(name) {
-                    let doc = self
-                        .text(builtins::type_doc(owner).expect("method decorator documentation"));
-                    entries.push((self.heap.code_name("__doc__"), doc));
                     for field in ["__func__", "__wrapped__"] {
                         let descriptor = self.readonly_member(owner, field);
                         entries.push((self.heap.code_name(field), descriptor));
                     }
                     for field in [
-                        "__dict__",
                         "__isabstractmethod__",
+                        "__dict__",
                         "__annotations__",
                         "__annotate__",
                     ] {
                         let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
                         entries.push((self.heap.code_name(field), descriptor));
                     }
+                    let doc = self
+                        .text(builtins::type_doc(owner).expect("method decorator documentation"));
+                    entries.push((self.heap.code_name("__doc__"), doc));
                 } else if name == "method" {
                     for field in ["__func__", "__self__"] {
                         let descriptor = self.readonly_member("method", field);

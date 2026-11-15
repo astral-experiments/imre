@@ -486,8 +486,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 name.as_str(),
                 "builtin_function_or_method"
                     | "function"
-                    | "classmethod"
-                    | "staticmethod"
                     | "property"
                     | "member_descriptor"
                     | "getset_descriptor"
@@ -524,23 +522,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__name__",
                         "__qualname__",
                         "__type_params__",
-                    ],
-                ),
-                "classmethod" | "staticmethod" => (
-                    if name == "staticmethod" {
-                        &["__call__"]
-                    } else {
-                        &[]
-                    },
-                    &[
-                        "__annotate__",
-                        "__annotations__",
-                        "__class_getitem__",
-                        "__dict__",
-                        "__func__",
-                        "__get__",
-                        "__isabstractmethod__",
-                        "__wrapped__",
                     ],
                 ),
                 "property" => (
