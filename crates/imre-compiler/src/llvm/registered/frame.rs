@@ -1913,6 +1913,9 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
             }
             code.discard_truth(&mark);
         });
+        if action == AttributeAction::Store {
+            self.release_target();
+        }
         permanent::NONE.to_string()
     }
 }

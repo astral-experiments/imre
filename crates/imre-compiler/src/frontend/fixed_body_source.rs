@@ -22,6 +22,7 @@ impl FixedBodySource {
         }
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
+        let mut python_arguments = self.arguments == FrameArguments::Python;
         let complete = ir::all_nodes(&function.body, &mut |node, _| {
             if !node.has_fixed_site() {
                 return true;
@@ -32,6 +33,8 @@ impl FixedBodySource {
             if !expected.matches(&node) {
                 return false;
             }
+            // A placed descriptor write keeps the source function's live argument binder.
+            python_arguments |= matches!(expected, FixedNode::StoreField(_));
             fixed_sites.push(range);
             true
         });
@@ -53,7 +56,7 @@ impl FixedBodySource {
             fixed_attributes: (!self.attributes.is_empty()).then(|| Box::new(self.attributes)),
         };
         if matches!(frame.inputs, FrameInputs::Checked { .. })
-            && self.arguments == FrameArguments::Python
+            && python_arguments
             && !frame.bind_python_arguments()
         {
             return Err(frame
@@ -476,7 +479,7 @@ impl SourceSites {
         }
     }
 
-    /// A physical method stores through the actual receiver at the original attribute range.
+    /// The Python frame stores through the actual receiver at the original attribute range.
     pub(super) fn store_field(
         &mut self,
         field: &ast::ExprAttribute,
