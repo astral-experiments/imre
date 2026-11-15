@@ -427,9 +427,17 @@ impl StatementLowering for Checker<'_> {
                 if outer == FinallyScope::Outside && !try_.finalbody.is_empty() {
                     self.finally_scope = FinallyScope::Protected;
                 }
+                let start = output.len();
                 let result = self.try_statement(try_, output);
                 self.finally_scope = outer;
-                result
+                let continues = result?;
+                if let Some(sites) = &mut self.fixed_sites
+                    && let [statement] = &output[start..]
+                    && let Some(first) = try_.body.first()
+                {
+                    sites.statement(first.range(), statement);
+                }
+                Ok(continues)
             }
             _ => {
                 let (statements, continues) = self.specialized_statement(stmt)?;

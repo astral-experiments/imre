@@ -7770,6 +7770,12 @@ impl<'a> Checker<'a> {
     /// turn an arbitrary first-party definition into a builtin category.
     /// Class-form raises construct a new instance, just like an explicit call.
     fn simple_exception(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
+        let value = self.exception_constructor(call, kind)?;
+        self.record_named_call(call, &value);
+        Ok(value)
+    }
+
+    fn exception_constructor(&mut self, call: &ast::ExprCall, kind: u32) -> Result<Expr, String> {
         if self.is_import_error(kind) {
             return self.import_error(call, kind, None);
         }
@@ -7829,15 +7835,13 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::ExceptionArgument(kind), vec![v]),
             });
         }
-        let exception = Expr {
+        Ok(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
                 kind,
                 message: arg.map(Box::new),
             },
-        };
-        self.record_named_call(call, &exception);
-        Ok(exception)
+        })
     }
 
     fn fault_enabled(&self) -> bool {
