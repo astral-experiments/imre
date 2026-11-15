@@ -11963,7 +11963,9 @@ impl<'a> Checker<'a> {
             // An import exception binds each display before initializing its fields.
             if let Some(kind) = self.exception_category(&call.func)
                 && self.is_import_error(kind)
-                && self.class_reference(&call.func).is_none()
+                && self
+                    .class_reference_with_binding(&call.func, || binding)
+                    .is_none()
             {
                 return self.import_error(call, kind, None);
             }
@@ -13379,7 +13381,7 @@ impl<'a> Checker<'a> {
             }
             self.calendar_class_attribute(attr, base)?;
         }
-        if let Some(class) = self.class_reference(&call.func) {
+        if let Some(class) = self.class_reference_with_binding(&call.func, || binding) {
             let result = self.construct(call, class);
             if result.is_err() && self.native_mock(class) && self.boxed_mock_arguments(call)? {
                 return Err(self.object_runtime_export("configured unittest.mock.Mock", call));
