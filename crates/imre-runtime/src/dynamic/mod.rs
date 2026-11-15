@@ -444,6 +444,12 @@ impl CallParameters {
     }
 
     /// Decode both compiled and runtime-created function metadata once per definition.
+    fn from_signature(signature: &str) -> Result<Self> {
+        let mut metadata = serde_json::from_str(signature)
+            .map_err(|error| Error::new("SystemError", error.to_string()))?;
+        Self::from_metadata(&mut metadata)
+    }
+
     fn from_metadata(metadata: &mut serde_json::Value) -> Result<Self> {
         fn take_names(metadata: &mut serde_json::Value, key: &str) -> Result<Vec<String>> {
             let mut result = Vec::new();
@@ -558,11 +564,8 @@ impl Context {
 
     fn parsed_parameters(&self, code: Id) -> Result<Arc<CallParameters>> {
         let code = self.code_object(code);
-        code.definition.call_parameters(|| {
-            let mut metadata = serde_json::from_str(self.str_value(code.parameters)?)
-                .map_err(|error| Error::new("SystemError", error.to_string()))?;
-            CallParameters::from_metadata(&mut metadata)
-        })
+        code.definition
+            .call_parameters(|| CallParameters::from_signature(self.str_value(code.parameters)?))
     }
 
     fn alloc(&mut self, value: Value) -> Id {
