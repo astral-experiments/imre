@@ -778,8 +778,11 @@ fn collect_class<'syntax>(
         }
         match statement {
             ast::Stmt::Assign(member) if let Some(members) = &mut enum_members => {
-                let name =
-                    members.declare(graph, module, definition.module, member, &class_bindings)?;
+                let Some(name) =
+                    members.declare(graph, module, definition.module, member, &class_bindings)?
+                else {
+                    return Ok(None);
+                };
                 names.insert(name.clone());
                 class_bindings.insert(name);
             }
