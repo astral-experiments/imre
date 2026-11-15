@@ -842,18 +842,7 @@ pub(super) fn method(
             )));
         }
         let receiver = ctx.scalar_value(receiver);
-        let one_arg = || {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!("{name}() takes no keyword arguments")));
-            }
-            match args {
-                [value] => Ok(*value),
-                _ => Err(type_error(format!(
-                    "{name}() takes exactly one argument ({} given)",
-                    args.len()
-                ))),
-            }
-        };
+        let one_arg = || super::one_positional_arg(name, args, kwargs);
         return match method {
             "__getitem__" => ctx.sequence_subscript(receiver, one_arg()?),
             "append" => {
