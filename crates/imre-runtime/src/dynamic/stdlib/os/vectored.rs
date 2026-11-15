@@ -160,19 +160,23 @@ pub(super) fn transfer(
     };
     let mut spans = Vec::new();
     spans.try_reserve_exact(count).map_err(no_memory)?;
-    let mark = ctx.buffer_exports.len();
+    let mark = ctx.heap.execution.buffer_exports.len();
     let result = (|| {
         for index in 0..count {
             let key = ctx.int(index as i64);
             let item = ctx.get_item(buffers, key)?;
             let (storage, range) = buffer_span(ctx, item, !write)?;
             // Pin this view and backing before the next __getitem__ runs Python.
-            ctx.buffer_exports.try_reserve(2).map_err(no_memory)?;
-            ctx.buffer_exports.extend([item, storage]);
+            ctx.heap
+                .execution
+                .buffer_exports
+                .try_reserve(2)
+                .map_err(no_memory)?;
+            ctx.heap.execution.buffer_exports.extend([item, storage]);
             spans.push((storage, range));
         }
         transfer_exported(ctx, fd, &spans, transfer, write)
     })();
-    ctx.buffer_exports.truncate(mark);
+    ctx.heap.execution.buffer_exports.truncate(mark);
     result
 }

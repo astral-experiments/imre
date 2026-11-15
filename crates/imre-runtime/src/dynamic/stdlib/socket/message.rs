@@ -23,7 +23,7 @@ struct Buffers {
 impl Buffers {
     fn new(ctx: &Context) -> Self {
         Self {
-            mark: ctx.buffer_exports.len(),
+            mark: ctx.heap.execution.buffer_exports.len(),
             leases: Vec::new(),
             spans: Vec::new(),
         }
@@ -36,7 +36,9 @@ impl Buffers {
         self.spans
             .try_reserve(1)
             .map_err(|_| crate::Error::memory_error())?;
-        ctx.buffer_exports
+        ctx.heap
+            .execution
+            .buffer_exports
             .try_reserve(2)
             .map_err(|_| crate::Error::memory_error())?;
         ctx.heap.reserve_temporaries(1)?;
@@ -76,7 +78,7 @@ impl Buffers {
             }
         })?;
         ctx.heap.keep(object);
-        ctx.buffer_exports.extend([view, storage]);
+        ctx.heap.execution.buffer_exports.extend([view, storage]);
         self.spans.push((storage, range));
         self.leases.push(Lease {
             object_root,
@@ -106,7 +108,7 @@ impl Buffers {
                 ctx.notify_native_buffer_release(object);
             }
             let slot = self.mark + 2 * i;
-            ctx.buffer_exports[slot..slot + 2].fill(NONE);
+            ctx.heap.execution.buffer_exports[slot..slot + 2].fill(NONE);
             if let Some(view) = lease.view {
                 ctx.heap.keep(view);
                 ctx.release_python_buffer(object, view);
@@ -114,7 +116,7 @@ impl Buffers {
             ctx.heap.release_temporaries_since(mark);
             *ctx.heap.temporary_root(lease.object_root) = NONE;
         }
-        ctx.buffer_exports.truncate(self.mark);
+        ctx.heap.execution.buffer_exports.truncate(self.mark);
         result
     }
 }

@@ -250,8 +250,6 @@ pub(crate) struct Context {
     fault_file: Option<Id>,
     fault_user_files: HashMap<i32, Id>,
     exit_callbacks: Vec<Id>,
-    // A buffer export pins its bytearray's size while Python callbacks run.
-    buffer_exports: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
     repr_ancestors: Vec<Id>,
     repr_spare_stack: bool,
@@ -1166,12 +1164,9 @@ impl Context {
         }))
     }
 
-    /// Keep the buffer exported while an argument conversion runs Python.
-    fn with_buffer_export<T>(
-        &mut self,
-        input: Id,
-        convert: impl FnOnce(&mut Self) -> Result<T>,
-    ) -> Result<T> {
+    /// Pin the view or mutable storage for this execution and return its previous export mark.
+    fn begin_buffer_export(&mut self, input: Id) -> usize {
+        let mark = self.heap.execution.buffer_exports.len();
         let input = self.scalar_value(input);
         let tracks_exports = match self.heap.get(input) {
             Value::ByteArray(_)
@@ -1184,20 +1179,29 @@ impl Context {
             _ => false,
         };
         if !tracks_exports {
-            return convert(self);
+            return mark;
         }
-        let mark = self.buffer_exports.len();
-        self.buffer_exports.push(input);
+        self.heap.execution.buffer_exports.push(input);
         // A raw callback view has no public obj. Keep its mapped backing open
         // for the duration of any further buffer acquisition through that view.
         #[cfg(target_os = "linux")]
         if let Some(window) = self.raw_read_window(input)
             && matches!(self.heap.get(window.backing), Value::Mmap { .. })
         {
-            self.buffer_exports.push(window.backing);
+            self.heap.execution.buffer_exports.push(window.backing);
         }
+        mark
+    }
+
+    /// Keep the buffer exported while an argument conversion runs Python.
+    fn with_buffer_export<T>(
+        &mut self,
+        input: Id,
+        convert: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let mark = self.begin_buffer_export(input);
         let result = convert(self);
-        self.buffer_exports.truncate(mark);
+        self.heap.execution.buffer_exports.truncate(mark);
         result
     }
 
@@ -1214,7 +1218,7 @@ impl Context {
     }
 
     fn buffer_is_exported(&mut self, storage: Id) -> Result<bool> {
-        if self.buffer_exports.iter().any(|&id| id == storage || matches!(self.heap.get(id), Value::BytesIoBuffer {storage: backing,..} if *backing == storage)) {
+        if self.heap.buffer_exports().any(|id| id == storage || matches!(self.heap.get(id), Value::BytesIoBuffer {storage: backing,..} if *backing == storage)) {
             return Ok(true);
         }
         if !self.heap.may_have_buffer_views(storage) {

@@ -3902,6 +3902,8 @@ pub(super) struct Frame {
 pub(super) struct ExecutionState {
     frames: Vec<Frame>,
     pub(super) contexts: Vec<Id>,
+    // Native buffer acquisitions remain outstanding while their execution is parked.
+    pub(super) buffer_exports: Vec<Id>,
     pub(super) pending: Option<Error>,
     pub(super) call_depth: usize,
     // Python alias frames represented by a renderer suspended in a tuple argument callback.
@@ -3933,6 +3935,7 @@ impl ExecutionState {
     fn roots(&self) -> impl Iterator<Item = Id> + '_ {
         self.contexts
             .iter()
+            .chain(&self.buffer_exports)
             .copied()
             .chain(self.pending.iter().flat_map(Error::roots))
             .chain(
@@ -3985,6 +3988,11 @@ impl Drop for ParkedExecution {
 impl Heap {
     fn executions(&self) -> impl Iterator<Item = &ExecutionState> {
         std::iter::once(&self.execution).chain(self.parked_executions.iter().flatten())
+    }
+
+    pub(super) fn buffer_exports(&self) -> impl Iterator<Item = Id> + '_ {
+        self.executions()
+            .flat_map(|state| state.buffer_exports.iter().copied())
     }
 
     pub(super) fn context_is_entered(&self, context: Id) -> bool {
@@ -7794,6 +7802,51 @@ mod tests {
         assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), TRUE);
         ctx.call(reset, vec![token], vec![]).unwrap();
         assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
+    }
+
+    #[test]
+    fn parked_buffer_exports_release_with_their_execution() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut parked = Vec::new();
+        for byte in [1, 2] {
+            let temporaries = ctx.heap.temporary_mark();
+            let storage = ctx.alloc(Value::ByteArray(vec![byte]));
+            let view = ctx.new_memoryview(storage).unwrap();
+            let mark = ctx.begin_buffer_export(view);
+            ctx.begin_buffer_export(storage);
+            ctx.heap.release_temporaries_since(temporaries);
+            let slot = ctx.heap.park_execution().unwrap();
+            parked.push((slot, storage, view, mark));
+            ctx.heap.execution = ExecutionState::new(None);
+        }
+
+        // The two export lists are the only roots left for these views.
+        ctx.collect_generation(2).unwrap();
+        for &(_, storage, view, _) in &parked {
+            assert!(ctx.buffer_is_exported(storage).unwrap());
+            let release = ctx.lookup_attr(view, "release").unwrap();
+            assert_eq!(
+                ctx.call(release, vec![], vec![]).unwrap_err().kind,
+                "BufferError"
+            );
+        }
+        ctx.heap.execution = ExecutionState::default();
+
+        // Finish the first acquisition before the second execution resumes.
+        for (slot, storage, view, mark) in parked {
+            ctx.heap.resume_execution(slot);
+            assert_eq!(ctx.heap.execution.buffer_exports, [view, storage]);
+            let release = ctx.lookup_attr(view, "release").unwrap();
+            assert_eq!(
+                ctx.call(release, vec![], vec![]).unwrap_err().kind,
+                "BufferError"
+            );
+            ctx.heap.execution.buffer_exports.truncate(mark);
+            assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
+            assert!(!ctx.buffer_is_exported(storage).unwrap());
+            ctx.heap.execution = ExecutionState::default();
+        }
+        assert_eq!(ctx.heap.buffer_exports().count(), 0);
     }
 
     #[test]
