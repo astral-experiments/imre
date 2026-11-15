@@ -3514,7 +3514,7 @@ impl Session {
         if !errors.is_empty() {
             return Err(errors.join("\n"));
         }
-        if let Some(report) = native {
+        for report in native.into_iter().flat_map(|native| native.reports()) {
             let selected = modules
                 .iter()
                 .enumerate()

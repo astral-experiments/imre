@@ -828,6 +828,20 @@ fn dormant_thread_preserves_the_declared_call_diagnostic_across_edits() {
     std::fs::write(&scores, fixed).unwrap();
     compiler.check_file(&entry, None).unwrap();
     check_file(&entry, None).unwrap();
+
+    let wrong = source.replace("take('x')", "take(True)");
+    std::fs::write(
+        &scores,
+        format!("{wrong}\nif False:\n    class Neighbor:\n        pass\n"),
+    )
+    .unwrap();
+    let expected = ":5:17: Imre: expected int, got bool; annotations are enforced contracts";
+    assert_source_refusal(&entry, &scores, expected, &[CompileOptions::default()]);
+    assert_source_diagnostic(
+        &compiler.check_file(&entry, None).unwrap_err(),
+        &scores,
+        expected,
+    );
 }
 
 #[test]

@@ -173,9 +173,12 @@ impl<M> Diagnostic<M> {
         Some((*module, *range))
     }
 
+    pub(crate) fn reports(&self) -> impl Iterator<Item = &Self> {
+        std::iter::once(self).chain(&self.following)
+    }
+
     pub(crate) fn function_reports(&self) -> impl Iterator<Item = ((ModuleId, TextRange), &Self)> {
-        std::iter::once(self)
-            .chain(self.following.iter())
+        self.reports()
             .filter_map(|report| Some((report.function_site()?, report)))
     }
 
@@ -234,19 +237,17 @@ impl<M> Diagnostic<M> {
         module: ModuleId,
         annotation: TextRange,
     ) -> Option<&Self> {
-        std::iter::once(self)
-            .chain(self.following.iter())
-            .find(|report| {
-                report.kind == Kind::ExactType
-                    && report.path.as_deref() == Some(path)
-                    && report.position.as_ref().is_some_and(|position| {
-                        position.range == operand
-                            && position.expected_from.is_some_and(|declaration| {
-                                declaration.module == module
-                                    && annotation.contains_range(declaration.annotation)
-                            })
-                    })
-            })
+        self.reports().find(|report| {
+            report.kind == Kind::ExactType
+                && report.path.as_deref() == Some(path)
+                && report.position.as_ref().is_some_and(|position| {
+                    position.range == operand
+                        && position.expected_from.is_some_and(|declaration| {
+                            declaration.module == module
+                                && annotation.contains_range(declaration.annotation)
+                        })
+                })
+        })
     }
 
     pub(crate) fn declared_return(
@@ -255,15 +256,13 @@ impl<M> Diagnostic<M> {
         path: &Path,
         annotation: TextRange,
     ) -> Option<(TextRange, &Self)> {
-        std::iter::once(self)
-            .chain(&self.following)
-            .find_map(|report| {
-                let position = report.position.as_ref()?;
-                (report.kind == Kind::ReturnType
-                    && report.path.as_deref() == Some(path)
-                    && position.expected_from == Some(TypeDeclaration { module, annotation }))
-                .then_some((position.range, report))
-            })
+        self.reports().find_map(|report| {
+            let position = report.position.as_ref()?;
+            (report.kind == Kind::ReturnType
+                && report.path.as_deref() == Some(path)
+                && position.expected_from == Some(TypeDeclaration { module, annotation }))
+            .then_some((position.range, report))
+        })
     }
 
     pub(super) fn in_module(self, graph: &SourceGraph, module: ModuleId) -> Self {
