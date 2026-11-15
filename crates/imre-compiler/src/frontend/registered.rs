@@ -2162,12 +2162,7 @@ impl<'a> SuitePreparation<'a> {
             let kind = RegisteredScope::Function {
                 is_async: def.is_async,
             };
-            // The header owns the docstring. A sole docstring still locates the implicit return.
-            let statements = if header.doc.is_some() && def.body.len() > 1 {
-                &def.body[1..]
-            } else {
-                &def.body
-            };
+            let statements = function_text::executable_body(&def.body, header.doc.is_some());
             let suite =
                 self.function_suite(statements, kind, header.metadata.suspension_flags() != 0);
             let refusal = suite.refusal;
