@@ -4,7 +4,6 @@ use std::ops::Range;
 use super::{Frame, RegisteredFrame};
 use crate::ir::{Expr, MatchCase, MatchTest};
 use crate::llvm::operations::{CheckedBody, CheckedValue};
-use imre_ast::{SequencePatternItems, SequencePatternPlan};
 
 /// Temporary Python captures in the order the current alternative obtained them.
 struct PatternCaptures {
@@ -320,8 +319,8 @@ impl Frame<'_, '_, '_> {
                 }
                 self.label(&done);
             }
-            MatchTest::Sequence(plan, items) => {
-                self.sequence_test(plan, items, value, failed, captures, targets)
+            MatchTest::Sequence { star, items } => {
+                self.sequence_test(*star, items, value, failed, captures, targets)
             }
             MatchTest::Mapping(items, rest) => {
                 let f = &mut *self.code;
@@ -397,7 +396,7 @@ impl Frame<'_, '_, '_> {
 
     fn sequence_test(
         &mut self,
-        plan: &SequencePatternPlan,
+        star: Option<usize>,
         items: &[MatchTest],
         value: &str,
         failed: &str,
@@ -408,40 +407,39 @@ impl Frame<'_, '_, '_> {
         let sequence = f.op("match_sequence", &[value]);
         let condition = f.truth(&sequence);
         f.pattern_check(&condition, failed);
-        if let Some((op, count)) = plan.length {
+        // A sole star tests the sequence protocol without calling len.
+        let required_items = items.len() - usize::from(star.is_some());
+        if star.is_none() || required_items != 0 {
             let len = f.op("match_sequence_length", &[value]);
-            let required = f.integer(count);
-            let valid = f.op(op.as_str(), &[&len, &required]);
+            let required = f.integer(required_items);
+            let op = if star.is_some() { ">=" } else { "==" };
+            let valid = f.op(op, &[&len, &required]);
             let cond = f.truth(&valid);
             f.pattern_check(&cond, failed);
         }
-        match plan.items {
-            SequencePatternItems::Ignore => {}
-            SequencePatternItems::IndexAround(star) => {
-                for (i, child) in items
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, p)| !matches!(p, MatchTest::Always))
-                {
-                    let f = &mut *self.code;
-                    let index = if i < star {
-                        f.integer(i)
-                    } else {
-                        let size = f.op("match_sequence_length", &[value]);
-                        let offset = f.integer(items.len() - i);
-                        f.op("-", &[&size, &offset])
-                    };
-                    let item = f.op("get", &[value, &index]);
-                    self.test_pattern(child, &item, failed, captures, None, None);
-                }
+        if let Some(star) = star.filter(|&index| matches!(items[index], MatchTest::Always)) {
+            for (i, child) in items
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| !matches!(p, MatchTest::Always))
+            {
+                let f = &mut *self.code;
+                let index = if i < star {
+                    f.integer(i)
+                } else {
+                    let size = f.op("match_sequence_length", &[value]);
+                    let offset = f.integer(items.len() - i);
+                    f.op("-", &[&size, &offset])
+                };
+                let item = f.op("get", &[value, &index]);
+                self.test_pattern(child, &item, failed, captures, None, None);
             }
-            SequencePatternItems::Unpack(star) => {
-                let count = f.integer(items.len());
-                let star = star.map_or_else(|| "0".into(), |i| f.integer(i));
-                let mark = f.temporary_mark();
-                let values = f.op("unpack", &[value, &count, &star]);
-                self.test_collected_items(&mark, &values, items.iter(), failed, captures, targets);
-            }
+        } else if items.iter().any(|item| !matches!(item, MatchTest::Always)) {
+            let count = f.integer(items.len());
+            let star = star.map_or_else(|| "0".into(), |i| f.integer(i));
+            let mark = f.temporary_mark();
+            let values = f.op("unpack", &[value, &count, &star]);
+            self.test_collected_items(&mark, &values, items.iter(), failed, captures, targets);
         }
     }
 }

@@ -3697,7 +3697,10 @@ pub(crate) enum MatchTest {
     Equal(Expr),
     Or(Vec<MatchTest>),
     Capture(Box<MatchTest>, usize),
-    Sequence(imre_ast::SequencePatternPlan, Vec<MatchTest>),
+    Sequence {
+        star: Option<usize>,
+        items: Vec<MatchTest>,
+    },
     Mapping(Vec<(Expr, MatchTest)>, Option<usize>),
     Class {
         range: ruff_text_size::TextRange,
@@ -3801,7 +3804,7 @@ macro_rules! pattern_expressions {
         while let Some(test) = pending.pop() {
             match test {
                 MatchTest::Equal(value) => ($visit)(value),
-                MatchTest::Or(tests) | MatchTest::Sequence(_, tests) => {
+                MatchTest::Or(tests) | MatchTest::Sequence { items: tests, .. } => {
                     pending.extend(tests.into_iter().rev())
                 }
                 MatchTest::Capture(inner, _) => pending.push(inner),

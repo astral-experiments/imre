@@ -180,52 +180,6 @@ pub fn context_run_arguments<T>(positional: &[T]) -> Result<(&T, &[T]), &'static
         .ok_or("run() missing 1 required positional argument")
 }
 
-/// A pattern that neither inspects nor captures its operand.
-pub fn wildcard_pattern(pattern: &ast::Pattern) -> bool {
-    matches!(pattern, ast::Pattern::MatchAs(p) if p.pattern.is_none() && p.name.is_none())
-        || matches!(pattern, ast::Pattern::MatchStar(p) if p.name.is_none())
-}
-
-/// The sequence protocol operations required by one validated sequence pattern.
-#[derive(Clone)]
-pub struct SequencePatternPlan {
-    /// A sole star does not call len. Otherwise require exactly or at least this many items.
-    pub length: Option<(ast::CmpOp, usize)>,
-    pub items: SequencePatternItems,
-}
-
-#[derive(Clone)]
-pub enum SequencePatternItems {
-    /// Every item is a wildcard. The subject need not be indexed or iterated.
-    Ignore,
-    /// Fetch only inspected items on either side of this ignored star.
-    IndexAround(usize),
-    /// Unpack in iteration order, collecting a list at the optional capture.
-    Unpack(Option<usize>),
-}
-
-/// Use the same observable length, indexing and iteration policy in both boxed backends.
-pub fn sequence_pattern_plan(patterns: &[ast::Pattern]) -> SequencePatternPlan {
-    let star = patterns
-        .iter()
-        .position(|p| matches!(p, ast::Pattern::MatchStar(_)));
-    let length = match star {
-        None => Some((ast::CmpOp::Eq, patterns.len())),
-        Some(_) if patterns.len() > 1 => Some((ast::CmpOp::GtE, patterns.len() - 1)),
-        _ => None,
-    };
-    let items = if patterns.iter().all(wildcard_pattern) {
-        SequencePatternItems::Ignore
-    } else if let Some(index) = star
-        && wildcard_pattern(&patterns[index])
-    {
-        SequencePatternItems::IndexAround(index)
-    } else {
-        SequencePatternItems::Unpack(star)
-    };
-    SequencePatternPlan { length, items }
-}
-
 #[derive(Default)]
 struct ScopedImports<'a> {
     bindings: Option<&'a mut BTreeSet<String>>,
