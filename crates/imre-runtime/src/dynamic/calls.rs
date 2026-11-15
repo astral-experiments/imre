@@ -10504,12 +10504,13 @@ impl Context {
             .filter(|kind| kind.scalar_base().is_none())
             .and_then(|_| self.float_enum_type(&bases));
         let object = self.builtin("object");
-        // Socket subtypes store their native endpoint separately from Python member slots.
+        // These subtypes keep their native payload separate from Python member slots.
         let ordinary_slots = typed_dict_meta.is_none()
             && enum_kind.is_none()
             && bases.iter().all(|&base| {
                 let storage = self.allocation_base(base).unwrap_or(base);
                 storage == object
+                    || self.is_date_allocation_base(storage)
                     || self.heap.get(storage).heap_type() == Some(stdlib::socket::CLASS)
             });
         let layout = if ordinary_slots {
