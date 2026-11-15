@@ -28,7 +28,7 @@ impl Checker<'_> {
         if let ast::Expr::BoolOp(boolean) = expression {
             let and = boolean.op == ast::BoolOp::And;
             let mut values = Vec::new();
-            let mut exits = assignments::BooleanExits::new(self, boolean);
+            let mut exits = assignments::BooleanExits::default();
             for (index, value) in boolean.values.iter().enumerate() {
                 values.push(self.condition(value)?);
                 if index + 1 < boolean.values.len() {
@@ -231,7 +231,7 @@ impl Checker<'_> {
             .split_last()
             .expect("boolean operands are nonempty");
         let mut operands = Vec::with_capacity(prefix.len());
-        let mut exits = assignments::BooleanExits::new(self, boolean);
+        let mut exits = assignments::BooleanExits::default();
         let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
