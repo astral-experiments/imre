@@ -6402,18 +6402,24 @@ impl<'a> Checker<'a> {
             } => (args.pop().expect("encode receiver"), true),
             iterable => (iterable, false),
         };
-        let captured = self.hidden(iterable.ty);
-        let cursor = if mapping.is_none()
+        let indexed = mapping.is_none()
             && set_element.is_none()
             && self.types.deque_element(iterable.ty).is_none()
             && !string
-            && !encoded_bytes
-        {
-            Some(self.hidden(Type::Int))
+            && !encoded_bytes;
+        let mut output = Vec::new();
+        let mut cleanup = Vec::new();
+        // Indexed loops read the container again on each pull. Enumerate evaluates
+        // its start before acquiring the iterator. Other cursors own the receiver.
+        let (iterable, captured) = if indexed || start.is_some() {
+            let source = self.hidden(iterable.ty);
+            output.push(Statement::Assign(source, iterable));
+            cleanup.push(source);
+            (self.local(source), Some(source))
         } else {
-            None
+            (iterable, None)
         };
-        let mut output = vec![Statement::Assign(captured, iterable)];
+        let cursor = indexed.then(|| self.hidden(Type::Int));
         let zero_based = cursor.is_some()
             && matches!(&start, Some(Expr { kind: ExprKind::Int(value), .. }) if value == "0");
         let counter = start.filter(|_| !zero_based).map(|start| {
@@ -6422,7 +6428,6 @@ impl<'a> Checker<'a> {
             slot
         });
         let mut body = Vec::new();
-        let mut cleanup = vec![captured];
         let (item, pull) = if let Some(cursor) = cursor {
             output.push(Statement::Assign(cursor, Expr::integer(0)));
             cleanup.push(cursor);
@@ -6432,14 +6437,14 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if bytes {
                             Builtin::BytesGet
-                        } else if matches!(self.locals[captured], Type::VarTuple(_)) {
+                        } else if matches!(iterable.ty, Type::VarTuple(_)) {
                             Builtin::TupleIndex
-                        } else if matches!(self.locals[captured], Type::List(_)) {
+                        } else if matches!(iterable.ty, Type::List(_)) {
                             Builtin::SequenceGetInBounds
                         } else {
                             Builtin::ListGet(None)
                         },
-                        vec![self.local(captured), self.local(cursor)],
+                        vec![iterable, self.local(cursor)],
                     ),
                 },
                 None,
@@ -6447,8 +6452,6 @@ impl<'a> Checker<'a> {
         } else {
             let (key_type, value_type) = mapping.unwrap_or((element, Type::None));
             let iterator = self.hidden(Type::Iterator);
-            // enumerate evaluates its start before obtaining the actual iterator.
-            // The earlier capture preserves the receiver through those effects.
             output.push(Statement::Assign(
                 iterator,
                 Expr {
@@ -6456,14 +6459,14 @@ impl<'a> Checker<'a> {
                     kind: ExprKind::Builtin(
                         if string || encoded_bytes {
                             Builtin::StringIter
-                        } else if self.types.deque_element(self.locals[captured]).is_some() {
+                        } else if self.types.deque_element(iterable.ty).is_some() {
                             Builtin::DequeIter { reverse: false }
                         } else if set_element.is_some() {
                             Builtin::SetIter
                         } else {
                             Builtin::DictIter(items)
                         },
-                        vec![self.local(captured)],
+                        vec![iterable],
                     ),
                 },
             ));
@@ -6549,13 +6552,13 @@ impl<'a> Checker<'a> {
         }
         cleanup.extend(counter);
         output.extend(before_iteration);
-        let test = match cursor {
-            Some(cursor) => pipelines::compare(
+        let test = match cursor.zip(captured) {
+            Some((cursor, source)) => pipelines::compare(
                 Compare::Less,
                 self.local(cursor),
                 Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Len, vec![self.local(captured)]),
+                    kind: ExprKind::Builtin(Builtin::Len, vec![self.local(source)]),
                 },
             ),
             None => Expr::boolean(true),
