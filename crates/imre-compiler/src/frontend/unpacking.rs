@@ -1313,6 +1313,13 @@ impl PatternBinder for Checker<'_> {
         {
             return Ok(PatternSnapshot::from_items(self, items));
         }
+        // A successful builtin split returns at most maxsplit + 1 fields.
+        let split_fits = row.is_none()
+            && value
+                .split_operands()
+                .and_then(|(_, [_, _, limit])| limit.tagged_integer_literal())
+                .and_then(|limit| usize::try_from(limit).ok())
+                .is_some_and(|limit| limit < fixed);
         let (captured, mut body) = if let Some(Row::Projected(captured)) = row {
             (captured, Vec::new())
         } else {
@@ -1351,7 +1358,7 @@ impl PatternBinder for Checker<'_> {
                     Vec::new(),
                 ));
             }
-            if star.is_none() {
+            if star.is_none() && !split_fits {
                 body.push(Statement::If(
                     comparison(self.local(length), Compare::Greater, Expr::integer(fixed)),
                     vec![unpack_error(string(format!(

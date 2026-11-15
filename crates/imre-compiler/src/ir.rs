@@ -980,26 +980,29 @@ impl Expr {
         }
     }
 
-    /// A single explicit split whose immediately selected field is its prefix
-    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
-    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, [&Self; 2])> {
+    /// Operands of the checked text split, in binding order.
+    pub(crate) fn split_operands(&self) -> Option<(bool, &[Self; 3])> {
         let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
         else {
             return None;
         };
-        let [source, separator, limit] = args.as_slice() else {
-            return None;
-        };
+        Some((*reverse, args.as_slice().try_into().ok()?))
+    }
+
+    /// A single explicit split whose immediately selected field is its prefix
+    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
+    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, [&Self; 2])> {
+        let (reverse, [source, separator, limit]) = self.split_operands()?;
         let ExprKind::Present(separator) = &separator.kind else {
             return None;
         };
-        let selected = if *reverse {
+        let selected = if reverse {
             matches!(&index.kind, ExprKind::Unary(UnaryOp::USub, one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
         } else {
             matches!(&index.kind, ExprKind::Int(n) if n == "0")
         };
         (selected && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
-            .then_some((*reverse, [source, separator.as_ref()]))
+            .then_some((reverse, [source, separator.as_ref()]))
     }
 }
 
