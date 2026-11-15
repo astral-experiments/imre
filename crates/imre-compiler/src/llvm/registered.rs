@@ -169,7 +169,7 @@ pub(crate) fn frame_inputs(
             ir::Node::Expression(expr) => expr,
         };
         if let Some(crate::frontend::FixedAttribute::Call(None, _)) = attribute
-            && let ExprKind::Builtin(_, operands) = &expr.kind
+            && let Some(operands) = expr.named_call_arguments()
         {
             uses_python_protocol = true;
             if has_scalar {
