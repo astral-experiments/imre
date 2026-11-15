@@ -2336,16 +2336,6 @@ pub(super) unsafe extern "C" fn imre_boxed_named_op(
     if unsafe { imre_dyn_failed(ctx) } {
         return NONE;
     }
-    // SAFETY: the emitter supplies a terminated opcode.
-    if unsafe { libc::strcmp(op, c"setattr".as_ptr()) == 0 } {
-        // The existing setter can consume this spelling without boxing the name.
-        // SAFETY: the generated name has exactly len bytes for the lifetime of this call.
-        let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
-        let result = std::str::from_utf8(name)
-            .map_err(|error| Error::new("UnicodeError", error.to_string()))
-            .and_then(|name| ctx.set_attr(receiver, name, value));
-        return finish(ctx, result);
-    }
     // SAFETY: generated code owns the context, opcode and linked name for this call.
     unsafe {
         let key = imre_dyn_lit(ctx, 6, name, len);
@@ -2354,6 +2344,48 @@ pub(super) unsafe extern "C" fn imre_boxed_named_op(
         } else {
             imre_dyn_op_at(ctx, op, receiver, key, value, std::ptr::null())
         }
+    }
+}
+
+/// Apply a written attribute operation at its source after both operands have succeeded.
+///
+/// # Safety
+/// The frame supplies a live context, its operand mark, a NUL-terminated UTF-8
+/// identifier, and a pointer to the four source-position words.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_mutate_attribute_at(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    value: Id,
+    delete: bool,
+    position: *const [u32; 4],
+    mark: usize,
+) {
+    // SAFETY: generated code supplies the live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return;
+    }
+    let previous = ctx.heap.take_call_position();
+    // SAFETY: generated code supplies a non-null static four-word position.
+    ctx.heap.set_call_position(Some(unsafe { *position }));
+    // SAFETY: the compiler emits a terminated source identifier.
+    let name = unsafe { cstr(name) };
+    let result = if delete {
+        ctx.delete_attr(receiver, name)
+    } else {
+        ctx.set_attr(receiver, name, value).map(|_| ())
+    };
+    // Source operands may run Python during release. Keep their caller at STORE_ATTR
+    // or DELETE_ATTR and preserve a descriptor exception through those callbacks.
+    ctx.heap.execution.pending = result.err();
+    ctx.unwind_operands(mark);
+    let mut result = ctx.heap.execution.pending.take().map_or(Ok(()), Err);
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Uniform));
+    ctx.heap.set_call_position(previous);
+    if let Err(error) = result {
+        finish(ctx, Err(error));
     }
 }
 
