@@ -1867,11 +1867,7 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
                 _ => source.trim_matches(matches),
             };
             if part.len() == source.len() {
-                if receiver == storage || source.is_empty() {
-                    return Ok(storage);
-                }
-                // An unchanged nonempty str subclass produces a fresh exact str.
-                return ctx.heap.fresh_string(Value::Str(part.into()));
+                return ctx.unchanged_string(receiver, storage);
             }
             Ok(ctx.text(part.to_owned()))
         }
@@ -1884,8 +1880,8 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
             while name != "lstrip" && start < end && remove(points[end - 1]) {
                 end -= 1;
             }
-            if receiver == storage && start == 0 && end == points.len() {
-                return Ok(storage);
+            if start == 0 && end == points.len() {
+                return ctx.unchanged_string(receiver, storage);
             }
             Ok(ctx.text_codepoints(points[start..end].to_vec()))
         }
