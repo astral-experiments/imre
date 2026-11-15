@@ -262,6 +262,20 @@ pub(crate) struct IndexedFileInput {
 }
 
 impl<'session> OperandTypes<'session> {
+    /// Class scopes can mangle names. Type parameter scopes can diagnose duplicate bindings.
+    pub(crate) fn has_name_scopes(self) -> bool {
+        use ty_python_core::scope::ScopeKind;
+        let db = &self.session.db;
+        let index =
+            ty_python_core::semantic_index(db, db.program_file(self.session.files[self.module]));
+        index.scope_ids().any(|id| {
+            matches!(
+                index.scope(id.file_scope_id(db)).kind(),
+                ScopeKind::Class | ScopeKind::TypeParams
+            )
+        })
+    }
+
     pub(crate) fn indexed_input(self, parsed: &ParsedModuleRef) -> IndexedFileInput {
         let db = &self.session.db;
         let file = parsed.module().file();
