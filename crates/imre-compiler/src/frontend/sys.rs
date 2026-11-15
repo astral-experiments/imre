@@ -541,7 +541,7 @@ impl Checker<'_> {
             }
             _ => {}
         }
-        let ast::Expr::Attribute(attribute) = &*call.func else {
+        let (None, ast::Expr::Attribute(attribute)) = (binding, &*call.func) else {
             return Ok(None);
         };
         let receiver = self.resolve(&attribute.value);
@@ -558,22 +558,21 @@ impl Checker<'_> {
         {
             return Err(self.scoped_builtin_error("io.TextIOWrapper.reconfigure", call));
         }
-        let stderr = match receiver {
-            Some(Binding::Intrinsic(Intrinsic::Stdout | Intrinsic::OriginalStdout)) => {
-                // The ordinary TextIO method path evaluates and retains the receiver first.
-                return Ok(None);
-            }
-            Some(Binding::Intrinsic(Intrinsic::Stderr)) => true,
-            _ => return Ok(None),
-        };
+        if receiver != Some(Binding::Intrinsic(Intrinsic::Stderr)) {
+            return Ok(None);
+        }
         self.reject_builtin_keywords(call)?;
         let (ty, op, args) = match (attribute.attr.as_str(), call.arguments.args.as_slice()) {
             ("write", [text]) => (
                 Type::Int,
-                Builtin::SysStreamWrite { stderr },
+                Builtin::SysStreamWrite { stderr: true },
                 vec![self.expr_expected(text, Type::Str)?],
             ),
-            ("flush", []) => (Type::None, Builtin::SysStreamFlush { stderr }, Vec::new()),
+            ("flush", []) => (
+                Type::None,
+                Builtin::SysStreamFlush { stderr: true },
+                Vec::new(),
+            ),
             _ => {
                 return Err(error(
                     self.source,
