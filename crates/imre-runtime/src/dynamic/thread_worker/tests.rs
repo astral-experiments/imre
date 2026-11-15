@@ -67,6 +67,25 @@ fn each_execution_traces_its_pending_error_until_it_is_consumed() {
 }
 
 #[test]
+fn detached_start_dispatches_its_audit_hooks_when_invoked() {
+    let mut ctx = context();
+    let start = ctx.builtin("_thread.start_new_thread");
+    let target = ctx.builtin("_thread.exit");
+    let positional = ctx.alloc(Value::Tuple(Vec::new()));
+    let hook = ctx.builtin("len");
+    ctx.audit_hooks.push(hook);
+
+    let call = ctx
+        .prepare_call(start, vec![target, positional].into(), vec![])
+        .expect("preparing the start must not call the audit hook");
+    // SAFETY: this test owns the context and its original argument roots.
+    let error = unsafe { call.run(&raw mut ctx) }.unwrap_err();
+    assert_eq!(error.kind, "TypeError");
+    assert!(error.message.contains("len"));
+    assert!(!ctx.workers.has_unreaped_workers());
+}
+
+#[test]
 fn bound_release_signals_the_selected_native_waiter() {
     let mut ctx = context();
     let gate = Arc::<PrimitiveLock>::default();

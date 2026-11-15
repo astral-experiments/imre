@@ -107,11 +107,12 @@ pub(super) fn call(
     }
 }
 
-pub(super) fn prepare_start(
-    ctx: &mut Context,
-    args: &[Id],
-    kwargs: &[(String, Id)],
-) -> Result<super::thread_worker::Start> {
+/// Validated audit operands, kept alive by the originating registered call.
+pub(super) struct Start {
+    operands: [Id; 3],
+}
+
+pub(super) fn prepare_start(ctx: &Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Start> {
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -149,22 +150,44 @@ pub(super) fn prepare_start(
             "optional 3rd arg must be a dictionary",
         ));
     }
-    super::stdlib::audit::event(
-        ctx,
-        "_thread.start_new_thread",
-        &[*function, *positional, keyword.unwrap_or(super::NONE)],
-    )?;
-    super::thread_worker::check_start(ctx)?;
-    // The registered caller owns the original target, positional tuple and optional dict.
-    let pos = ctx
-        .tuple_elements(*positional)
-        .expect("validated thread arguments");
-    let Some((callback, roots)) =
-        Callback::capture(ctx, ctx.heap.get(*function), args, pos, keyword, false)?
-    else {
-        return Err(super::thread_callback::unsupported());
-    };
-    if let Some(sys) = ctx.threads.system_module
+    Ok(Start {
+        operands: [*function, *positional, keyword.unwrap_or(super::NONE)],
+    })
+}
+
+impl Start {
+    /// # Safety
+    /// The registered caller owns the context and roots the original operands through publication.
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        // An audit hook can change the function's code or mutate its keyword dictionary.
+        // SAFETY: the event runs on the calling execution before target selection.
+        let audited = unsafe {
+            super::stdlib::audit::event_at(context, "_thread.start_new_thread", &self.operands)
+        };
+        // SAFETY: all hooks have returned to the originating frame.
+        let ctx = unsafe { &mut *context };
+        let start = audited
+            .and_then(|()| self.select(ctx))
+            .map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
+        // SAFETY: the caller owns the selected start and its roots until publication.
+        unsafe { start.run(context) }
+    }
+
+    fn select(self, ctx: &mut Context) -> Result<super::thread_worker::Start> {
+        let [function, positional, keyword] = self.operands;
+        let keyword = (keyword != super::NONE).then_some(keyword);
+        let args = &self.operands[..2 + usize::from(keyword.is_some())];
+        super::thread_worker::check_start(ctx)?;
+        // The registered caller owns the original target, positional tuple and optional dict.
+        let pos = ctx
+            .tuple_elements(positional)
+            .expect("validated thread arguments");
+        let Some((callback, roots)) =
+            Callback::capture(ctx, ctx.heap.get(function), args, pos, keyword, false)?
+        else {
+            return Err(super::thread_callback::unsupported());
+        };
+        if let Some(sys) = ctx.threads.system_module
         && let Value::Module { scope, .. } = ctx.heap.get(sys)
         // Once exposed, the live dict can be changed through an arbitrary alias.
         && (ctx.scope_data(*scope).namespace.is_some()
@@ -183,5 +206,6 @@ pub(super) fn prepare_start(
             "custom thread exception reporting requires the boxed Python heap",
         ));
     }
-    super::thread_worker::prepare_detached(ctx, callback, *function, roots)
+        super::thread_worker::prepare_detached(ctx, callback, function, roots)
+    }
 }

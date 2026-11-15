@@ -276,6 +276,7 @@ pub(super) enum RegisteredCall {
     },
     InContext(Box<RegisteredCall>),
     Start(Box<thread_worker::Start>),
+    StartDetached(super::lowlevel_threads::Start),
     Join(thread_worker::Join),
     ShutdownWorkers,
     Acquire(thread_lock::Acquire),
@@ -320,6 +321,8 @@ impl RegisteredCall {
             Self::ShutdownWorkers => unsafe { thread_worker::shutdown_workers(context) },
             // SAFETY: the native worker takes no reference into its creator's heap.
             Self::Start(start) => unsafe { start.run(context) },
+            // SAFETY: the calling frame roots the arguments through auditing and publication.
+            Self::StartDetached(start) => unsafe { start.run(context) },
             // SAFETY: the caller owns the context and its interrupted frame on this thread.
             Self::Acquire(wait) => unsafe { wait.run_registered(context) },
             Self::Release(lock) => {
@@ -8648,7 +8651,7 @@ impl Context {
                         }
                         "_thread.start_new_thread" => {
                             return super::lowlevel_threads::prepare_start(self, &args, &kwargs)
-                                .map(|start| RegisteredCall::Start(Box::new(start)))
+                                .map(RegisteredCall::StartDetached)
                                 .map_err(|error| stdlib::io::qualify_error(self, error, None));
                         }
                         "_thread._shutdown" | "_imre_thread.shutdown"
@@ -9789,15 +9792,20 @@ impl Context {
         message: &'static str,
         operation: impl FnOnce(&mut Self) -> Result<T>,
     ) -> Result<T> {
+        self.enter_slot_depth(message)?;
+        let result = operation(self);
+        self.heap.execution.slot_depth -= 1;
+        result
+    }
+
+    pub(super) fn enter_slot_depth(&mut self, message: &'static str) -> Result<()> {
         if stacker::remaining_stack().map_or(self.heap.execution.slot_depth >= 128, |remaining| {
             remaining < 64 * 1024
         }) {
             return Err(Error::new("RecursionError", message));
         }
         self.heap.execution.slot_depth += 1;
-        let result = operation(self);
-        self.heap.execution.slot_depth -= 1;
-        result
+        Ok(())
     }
 
     fn call_instance(
