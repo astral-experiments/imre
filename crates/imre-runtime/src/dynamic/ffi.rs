@@ -1504,11 +1504,8 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             "Exception ignored during resource cleanup",
         );
     }
-    let status = if stdlib::io::flush_standard_outputs(&mut ctx) {
-        status
-    } else {
-        120
-    };
+    let flushed = stdlib::io::flush_standard_outputs(&mut ctx);
+    let status = crate::objects::exceptions::status_after_flush(status, flushed);
     stdlib::io::prepare_writer_shutdown(&ctx);
     crate::fault_handler::unregister_all();
     crate::fault_handler::disable();
@@ -1535,20 +1532,28 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     use std::io::Write;
 
+    let mark = ctx.heap.temporary_mark();
     let instance = error
         .trace
         .as_ref()
         .and_then(|trace| trace.instance)
         .unwrap_or_else(|| ctx.alloc(Value::Raised(error)));
     ctx.heap.keep(instance);
+    let before_code = ctx.heap.temporary_mark();
     let code = ctx.lookup_attr(instance, "code").unwrap_or(instance);
-    if code == NONE {
-        return 0;
+    let status = if code == NONE {
+        Some(0)
+    } else {
+        ctx.borrow_int(code)
+            .ok()
+            .map(|integer| integer.exit_status())
+    };
+    if let Some(status) = status {
+        ctx.discard_temporaries(before_code, None);
+        ctx.discard_temporaries(mark, None);
+        return status;
     }
-    if let Ok(integer) = ctx.borrow_int(code) {
-        return integer.exit_status();
-    }
-    ctx.heap.keep(code);
+    ctx.discard_temporaries(mark, Some(code));
     if let Ok(stream) = ctx.sys_binding("stderr") {
         let file = stream.unwrap_or(NONE);
         ctx.heap.keep(file);

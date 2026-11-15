@@ -2717,7 +2717,7 @@ fn report_unhandled() -> UnhandledExit {
             };
             let _ = crate::sys::write_stderr(text, true);
         }
-        return UnhandledExit::status(status_after_flush(
+        return UnhandledExit::status(finish_native_stdio(
             status,
             stdout,
             stderr.and(crate::sys::flush_stderr()),
@@ -2727,7 +2727,7 @@ fn report_unhandled() -> UnhandledExit {
     write_exception_chain(pending);
     // Exception display may have written more stdout after the pre-report flush.
     let stdout = stdout.and_then(|()| crate::flush_stdout());
-    let status = status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()));
+    let status = finish_native_stdio(1, stdout, stderr.and(crate::sys::flush_stderr()));
     UnhandledExit {
         status,
         interrupt: interrupted,
@@ -2810,15 +2810,21 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
     }
 }
 
+/// A failure to flush a standard stream replaces the requested process status.
+pub(crate) fn status_after_flush(status: i32, flushed: bool) -> i32 {
+    if flushed { status } else { 120 }
+}
+
 /// CPython reports a stdout flush error, silently records a stderr flush error,
-/// and uses status 120 if either stream could not be finalized.
-pub(crate) fn status_after_flush(
+/// then applies the common process status.
+pub(crate) fn finish_native_stdio(
     status: i32,
     stdout: io::Result<()>,
     stderr: io::Result<()>,
 ) -> i32 {
     #[cfg(unix)]
     crate::signals::finalize();
+    let flushed = stdout.is_ok() && stderr.is_ok();
     if let Err(error) = stdout {
         let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
         let error = super::files::errno_error(error);
@@ -2840,12 +2846,8 @@ pub(crate) fn status_after_flush(
         } else {
             let _ = writeln!(diagnostic, "{name}: {message}");
         }
-        120
-    } else if stderr.is_err() {
-        120
-    } else {
-        status
     }
+    status_after_flush(status, flushed)
 }
 
 #[cfg(test)]

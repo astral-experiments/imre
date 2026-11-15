@@ -3586,6 +3586,21 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
                     native_timeout=300)
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
+        compare(
+            "-IB", "-c",
+            "phase = 'alive'\n"
+            "class Code:\n"
+            "    def __str__(self): return phase\n"
+            "class Exit(SystemExit):\n"
+            "    @property\n"
+            "    def code(self):\n"
+            "        return Code()\n"
+            "    def __del__(self):\n"
+            "        global phase\n"
+            "        phase = 'released'\n"
+            "raise Exit()\n",
+            status=1, stderr=b"released\n",
+        )
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
