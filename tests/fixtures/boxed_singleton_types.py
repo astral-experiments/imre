@@ -8,6 +8,15 @@ def current():
         (types.EllipsisType, ...),
     ):
         print(cls() is singleton, cls() is cls())
+        new = cls.__dict__["__new__"]
+        assert new.__self__ is cls
+        assert new(cls) is singleton
+        try:
+            new(object)
+        except TypeError as error:
+            print(error.args)
+        else:
+            print("unexpected success")
         for positional in (True, False):
             try:
                 if positional:

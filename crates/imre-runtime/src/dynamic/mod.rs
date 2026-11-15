@@ -3472,6 +3472,7 @@ impl Context {
                 self.install_module_namespace(value);
                 &[]
             }
+            _ if builtins::singleton_instance(name).is_some() => &["__new__"],
             "function" => &["__call__", "__get__"],
             "method" => &["__get__", "__reduce__"],
             "builtin_function_or_method" => &["__call__", "__reduce__"],
