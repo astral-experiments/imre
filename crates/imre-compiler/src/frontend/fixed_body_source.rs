@@ -386,6 +386,74 @@ impl SourceSites {
                 })
     }
 
+    /// Visit composed operation sites, retaining each operand's own source range where available.
+    fn operand_sites(
+        value: &Expr,
+        fallback: TextRange,
+        mut record: impl FnMut(&ir::Node<'_>, Option<TextRange>, TextRange),
+    ) {
+        ir::all_operand_nodes(value, None, &mut |node, parent| {
+            if node.has_fixed_site() {
+                let own = match node {
+                    ir::Node::Expression(expr) => expr.written_range(),
+                    ir::Node::Statement(_) => None,
+                };
+                let range = own
+                    .or_else(|| parent.and_then(Expr::written_range))
+                    .unwrap_or(fallback);
+                record(&node, own, range);
+            }
+            true
+        });
+    }
+
+    /// First source site after the operands already checked.
+    pub(super) fn next_operand(&self) -> usize {
+        self.sites.len()
+    }
+
+    /// The receiver already owns its complete sites. Only the key gained Python operations.
+    pub(super) fn subscript(&mut self, index: &ast::ExprSubscript, begin: usize, value: &Expr) {
+        let Some(site) = self.site_at(index.range()) else {
+            return;
+        };
+        if begin <= site.index || begin > self.sites.len() {
+            return;
+        }
+        let read = value.without_location();
+        let ExprKind::Builtin(Builtin::RegisteredSubscript(..), operands) = &read.kind else {
+            return;
+        };
+        let mut next = begin;
+        let mut added = Vec::new();
+        Self::operand_sites(&operands[1], index.slice.range(), |node, own, range| {
+            if let Some((written, Some(expected))) = self.sites.get(next)
+                && own.is_none_or(|owned| *written == owned)
+                && expected.matches(node)
+            {
+                next += 1;
+            } else {
+                added.push((next, (range, FixedNode::checked(node))));
+            }
+        });
+        if next != self.sites.len() {
+            return;
+        }
+        // Insert in reverse so the indices of the original sites remain valid.
+        for (at, operand) in added.into_iter().rev() {
+            self.sites.insert(at, operand);
+        }
+        self.sites.insert(
+            site.index + 1,
+            (
+                index.range(),
+                FixedNode::checked(&ir::Node::Expression(read)),
+            ),
+        );
+        self.checked_expression(index.range(), value);
+        self.next_index = self.sites.len();
+    }
+
     /// Insert the ordinary callee before the already-checked arguments at this source position.
     pub(super) fn invoked(&mut self, call: &ast::ExprCall, value: &Expr) {
         let site = self.site_at(call.range()).unwrap();
@@ -393,17 +461,8 @@ impl SourceSites {
             unreachable!()
         };
         let end = self.sites.len();
-        ir::all_operand_nodes(callable, None, &mut |node, parent| {
-            if node.has_fixed_site() {
-                let range = match node {
-                    ir::Node::Expression(expr) => expr.written_range(),
-                    ir::Node::Statement(_) => None,
-                }
-                .or_else(|| parent.and_then(Expr::written_range))
-                .unwrap_or_else(|| call.func.range());
-                self.sites.push((range, FixedNode::checked(&node)));
-            }
-            true
+        Self::operand_sites(callable, call.func.range(), |node, _, range| {
+            self.sites.push((range, FixedNode::checked(node)));
         });
         // The callable is evaluated before the written arguments that were checked first.
         let count = self.sites.len() - end;
@@ -574,6 +633,34 @@ impl SourceSites {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refused_key_keeps_its_written_sites_and_the_next_operand_index() {
+        let text = "items[key], later()";
+        let parsed = ruff_python_parser::parse_expression(text).unwrap();
+        let pair = parsed.expr().as_tuple_expr().unwrap();
+        let index = pair.elts[0].as_subscript_expr().unwrap();
+        let later = pair.elts[1].range();
+        let value =
+            registered::values::subscript(index, Expr::none(), unpacking::string("changed"), text);
+        for missing in [false, true] {
+            let mut sites = SourceSites::default();
+            sites.enter(index.range());
+            sites.leaf(index.value.range(), &Expr::none());
+            let key = sites.next_operand();
+            sites.leaf(index.slice.range(), &unpacking::string("written"));
+            if missing {
+                sites.sites[key].1 = None;
+            }
+            let before = sites.sites.clone();
+            let next = sites.next_index;
+            sites.subscript(index, key, &value);
+            assert!(sites.sites == before);
+            assert_eq!(sites.next_index, next);
+            sites.leaf(later, &Expr::none());
+            assert_eq!(sites.sites[next].0, later);
+        }
+    }
 
     #[test]
     fn rewriting_the_same_checked_if_declines_its_original_sites() {

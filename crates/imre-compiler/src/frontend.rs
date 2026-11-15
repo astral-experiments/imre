@@ -1642,7 +1642,14 @@ fn lower_graph(
             Err(refusal) => refusal.cannot_return,
         };
         let placed = match checked_region(
-            result.map_err(|refusal| refusal.failure),
+            result.map_err(|refusal| {
+                if let Some(body) = refusal.prepared
+                    && let Some(prepared) = pending_capture.borrow_mut().as_mut()
+                {
+                    prepared.insert(signature.id, PreparedBody::Fixed(*body));
+                }
+                refusal.failure
+            }),
             graph,
             *module_id,
             &mut unavailable,
@@ -2350,6 +2357,8 @@ struct LoweredBody {
 
 type CompletedBody = (LoweredBody, HashMap<usize, zip_sums::Sum>);
 struct BodyRefusal {
+    /// A complete source frame can survive a refusal of the native calling convention.
+    prepared: Option<Box<CompletedBody>>,
     failure: Failure,
     cannot_return: bool,
 }
@@ -2358,6 +2367,7 @@ impl From<Failure> for BodyRefusal {
     fn from(failure: Failure) -> Self {
         Self {
             failure,
+            prepared: None,
             cannot_return: false,
         }
     }
@@ -2552,12 +2562,24 @@ fn lower_function(
         body = checker.generator_body(body);
     }
     // Placement can require a Python frame after the entire suite has been checked.
-    checker
-        .finish_region(Ok(()))
-        .map_err(|failure| BodyRefusal {
-            cannot_return,
-            failure,
-        })?;
+    let failure = match checker.finish_region(Ok(())) {
+        Ok(()) => None,
+        Err(failure)
+            if failure.is_representation()
+                && checker.fixed_sites.is_some()
+                && registered_locals.is_none() =>
+        {
+            checker.frame_arguments = FrameArguments::Python;
+            Some(failure)
+        }
+        Err(failure) => {
+            return Err(BodyRefusal {
+                failure,
+                cannot_return,
+                prepared: None,
+            });
+        }
+    };
     let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings.drain());
@@ -2580,7 +2602,16 @@ fn lower_function(
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
         source = checker.fixed_body_source(definition, signature, statements.len(), &body);
     }
-    Ok(checker.completed_body(params, body, source, cannot_return))
+    let reusable = source.is_some();
+    let finish = || checker.completed_body(params, body, source, cannot_return);
+    match failure {
+        Some(failure) => Err(BodyRefusal {
+            failure,
+            cannot_return,
+            prepared: reusable.then(|| Box::new(finish())),
+        }),
+        None => Ok(finish()),
+    }
 }
 
 fn signature(
@@ -10894,13 +10925,21 @@ impl<'a> Checker<'a> {
                 }
                 let list = Self::enum_text(self.expr(&subscript.value)?);
                 if list.ty == Type::PythonObject {
+                    let key_site = self
+                        .fixed_sites
+                        .as_ref()
+                        .map(fixed_body_source::SourceSites::next_operand);
                     let key =
                         registered::values::index_key(&subscript.slice, &mut |key| self.expr(key))?;
-                    return Ok(registered::values::located(
+                    let value = registered::values::located(
                         expression.range(),
                         expression.start(),
                         registered::values::subscript(subscript, list, key, self.source),
-                    ));
+                    );
+                    if let (Some(start), Some(sites)) = (key_site, &mut self.fixed_sites) {
+                        sites.subscript(subscript, start, &value);
+                    }
+                    return Ok(value);
                 }
                 if self.dict_or_record(list.ty).is_some() {
                     return self.dict_or_record_item(list, &subscript.slice, expression);
