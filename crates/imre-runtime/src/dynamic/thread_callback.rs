@@ -363,55 +363,12 @@ impl Callback {
         })
     }
 
-    /// Prepare on the child. Publication decides whether to invoke or discard its operands.
+    /// Check the native entry before reporting readiness. Only a published worker enters Python.
     pub(super) fn into_call(
         self,
         interpreter: Arc<super::InterpreterState>,
-        fault_workers: &Arc<()>,
-    ) -> Result<impl FnOnce(bool, Option<String>) -> WorkerStatus + use<>> {
-        let heap = super::Heap::with_worker_stack(
-            Some(self.frames),
-            self.gc_settings,
-            self.allocation_traces,
-        );
-        let mut ctx = ffi::new_context_with_heap(
-            self.config,
-            std::iter::empty::<String>(),
-            heap,
-            Some(interpreter),
-        );
-        let mark = ctx.heap.temporary_mark();
-        let globals = ctx.scope(&self.module, None);
-        // The worker owns this cell and its selected lock before it reports readiness.
-        let cell = self.receiver.map(|receiver| {
-            let value = match receiver {
-                Argument::Lock(lock) => ctx.alloc(Value::PrimitiveLock(lock)),
-                Argument::RLock(lock) => ctx.alloc(Value::HandlerLock(lock)),
-                Argument::Builtin(_) => unreachable!("the terminal receiver is an exact lock"),
-            };
-            ctx.alloc(Value::Cell(Some(value)))
-        });
-        let name = ctx.text(self.name);
-        let qualname = ctx.text(self.qualname);
-        let signature = ctx.text(self.signature);
-        let filename = ctx.text_codepoints(self.filename);
-        let location = (filename, self.first_line);
-        let code = ctx.realize_code(
-            Body::Native(self.entry, NONE),
-            self.definition,
-            name,
-            signature,
-            (qualname, NONE),
-            location,
-        );
-        let function = ctx.function_with_closure(
-            code,
-            (globals, ctx.root_module_name(globals)),
-            super::source_code::FunctionClosure::Cells(cell.as_slice()),
-            (name, qualname),
-            NONE,
-            NONE,
-        );
+        fault_workers: Arc<()>,
+    ) -> Result<impl FnOnce(Option<String>) -> WorkerStatus + Send + use<>> {
         // Preserve object identity when multiple parameters alias the same lock.
         let mut aliases = HashMap::new();
         aliases
@@ -421,45 +378,85 @@ impl Callback {
         slots
             .try_reserve_exact(self.values.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for value in self.values {
-            let id = match value {
-                Argument::Lock(lock) => *aliases
-                    .entry(Arc::as_ptr(&lock).cast::<()>())
-                    .or_insert_with(|| ctx.alloc(Value::PrimitiveLock(lock))),
-                Argument::RLock(lock) => *aliases
-                    .entry(Arc::as_ptr(&lock).cast::<()>())
-                    .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
-                Argument::Builtin(name) => ctx.builtin(name),
-            };
-            slots.push(id);
-        }
-        let parameters = ctx.parsed_parameters(code)?;
+        let parameters = self
+            .definition
+            .call_parameters(|| CallParameters::from_signature(&self.signature))?;
         if parameters.varargs.is_some()
             || parameters.kwargs.is_some()
-            || slots.len() != parameters.positional.len() + parameters.keyword_only.len()
+            || self.values.len() != parameters.positional.len() + parameters.keyword_only.len()
         {
             return Err(unsupported());
         }
-        ctx.heap.observe_fault_workers(fault_workers);
-        Ok(move |published, detached_label| {
-            let result = if published {
-                // SAFETY: the callable, arguments and marked frame belong to this child's context.
-                unsafe {
-                    ffi::run_with_operands(
-                        &raw mut ctx,
-                        mark,
-                        function,
-                        |ctx| {
-                            ctx.prepare_function_call(
-                                function,
-                                super::calls::FunctionArguments::Bound(slots),
-                            )
-                        },
-                        Context::finish_call_operands,
-                    )
-                }
-            } else {
-                Ok(NONE)
+        Ok(move |detached_label| {
+            let heap = super::Heap::with_worker_stack(
+                Some(self.frames),
+                self.gc_settings,
+                self.allocation_traces,
+            );
+            let mut ctx = ffi::new_context_with_heap(
+                self.config,
+                std::iter::empty::<String>(),
+                heap,
+                Some(interpreter),
+            );
+            let mark = ctx.heap.temporary_mark();
+            let globals = ctx.scope(&self.module, None);
+            let cell = self.receiver.map(|receiver| {
+                let value = match receiver {
+                    Argument::Lock(lock) => ctx.alloc(Value::PrimitiveLock(lock)),
+                    Argument::RLock(lock) => ctx.alloc(Value::HandlerLock(lock)),
+                    Argument::Builtin(_) => unreachable!("the terminal receiver is an exact lock"),
+                };
+                ctx.alloc(Value::Cell(Some(value)))
+            });
+            let name = ctx.text(self.name);
+            let qualname = ctx.text(self.qualname);
+            let signature = ctx.text(self.signature);
+            let filename = ctx.text_codepoints(self.filename);
+            let location = (filename, self.first_line);
+            let code = ctx.realize_code(
+                Body::Native(self.entry, NONE),
+                self.definition,
+                name,
+                signature,
+                (qualname, NONE),
+                location,
+            );
+            let function = ctx.function_with_closure(
+                code,
+                (globals, ctx.root_module_name(globals)),
+                super::source_code::FunctionClosure::Cells(cell.as_slice()),
+                (name, qualname),
+                NONE,
+                NONE,
+            );
+            for value in self.values {
+                let id = match value {
+                    Argument::Lock(lock) => *aliases
+                        .entry(Arc::as_ptr(&lock).addr())
+                        .or_insert_with(|| ctx.alloc(Value::PrimitiveLock(lock))),
+                    Argument::RLock(lock) => *aliases
+                        .entry(Arc::as_ptr(&lock).addr())
+                        .or_insert_with(|| ctx.alloc(Value::HandlerLock(lock))),
+                    Argument::Builtin(name) => ctx.builtin(name),
+                };
+                slots.push(id);
+            }
+            ctx.heap.observe_fault_workers(&fault_workers);
+            // SAFETY: this child owns the context, registered function and bound operands.
+            let result = unsafe {
+                ffi::run_with_operands(
+                    &raw mut ctx,
+                    mark,
+                    function,
+                    |ctx| {
+                        ctx.prepare_function_call(
+                            function,
+                            super::calls::FunctionArguments::Bound(slots),
+                        )
+                    },
+                    Context::finish_call_operands,
+                )
             };
             let mut status = Ok(());
             if let Err(error) = result {
