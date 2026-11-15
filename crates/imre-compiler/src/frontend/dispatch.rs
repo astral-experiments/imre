@@ -75,10 +75,7 @@ impl ClassInfo<'_> {
     }
 
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
-        self.declarations
-            .definitions
-            .iter()
-            .any(|c| c.abstract_methods.is_empty() && c.bases.contains(&class))
+        !self.types.concrete_subclasses(class).is_empty()
     }
 
     /// A concrete Mapping subclass supplies an iterator omitted by its abstract base.
