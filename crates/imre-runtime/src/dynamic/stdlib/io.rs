@@ -108,9 +108,8 @@ pub(in crate::dynamic) fn standard_output(ctx: &mut Context, stderr: bool) -> Re
     if ctx.config["unbuffered"].as_bool() == Some(true) {
         return unbuffered_standard(ctx, fd, if stderr { "<stderr>" } else { "<stdout>" });
     }
-    let file = crate::objects::TextFile::standard(stderr);
     let path = ctx.text(if stderr { "<stderr>" } else { "<stdout>" });
-    let buffer = ctx.alloc(super::BinaryFile::Standard { file, path }.into_value()?);
+    let buffer = ctx.alloc(super::BinaryFile::standard(stderr, path)?);
     let line_buffering = stderr || crate::stdio_settings().stdout_line_buffered;
     wrap_standard(ctx, fd, buffer, line_buffering, false)
 }

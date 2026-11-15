@@ -203,12 +203,6 @@ impl FileState {
         self.stream.take().map_or(Ok(()), Stream::close)
     }
 
-    pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
-        let stderr = self.standard_writer()?;
-        self.stream.take();
-        crate::sys::close_standard_output(stderr, false).map_err(errno_error)
-    }
-
     pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
         if self.closed() && input.is_empty() {
             return Ok(());
@@ -476,14 +470,6 @@ impl FileState {
         }
         self.write_with(text, input)?;
         self.write("\n")
-    }
-
-    /// Boxed native text files are standard writers or read-only files.
-    pub(super) fn standard_writer(&mut self) -> Result<bool> {
-        match self.stream()? {
-            Stream::Standard(stderr) => Ok(*stderr),
-            _ => Err(Error::new(Kind::UnsupportedOperation, "not writable")),
-        }
     }
 
     pub(super) fn has_encoding(&self) -> bool {

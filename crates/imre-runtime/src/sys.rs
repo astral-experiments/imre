@@ -14,6 +14,7 @@ use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 mod encoding;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 pub(crate) use encoding::langinfo;
@@ -217,45 +218,120 @@ fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> 
     }
 }
 
-/// Write bytes without flushing the text that precedes them.
-pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
-    with_standard_output(stderr, |out| out.raw.write_all(bytes)).map_err(errno_error)
+/// A binary view keeps its own closed state and uses the process output's byte buffer.
+pub(crate) struct StandardBuffer {
+    stderr: bool,
+    closed: AtomicBool,
 }
 
-pub(crate) fn flush_standard_buffer(stderr: bool) -> io::Result<()> {
-    with_standard_output(stderr, |out| out.raw.flush())
+impl StandardBuffer {
+    pub(crate) fn new(stderr: bool) -> Self {
+        Self {
+            stderr,
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn is_stderr(&self) -> bool {
+        self.stderr
+    }
+
+    pub(crate) fn closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn check_open(&self, message: &'static str) -> crate::Result<()> {
+        if self.closed() {
+            return Err(crate::Error::new(crate::Kind::ValueError, message));
+        }
+        Ok(())
+    }
+
+    fn with_open<T>(
+        &self,
+        message: &'static str,
+        op: impl FnOnce(&mut Output, i32) -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        with_standard_output(self.stderr, |out| {
+            self.check_open(message)?;
+            op(out, if self.stderr { 2 } else { 1 })
+        })
+    }
+
+    pub(crate) fn write(&self, bytes: &[u8]) -> crate::Result<()> {
+        self.with_open("write to closed file", |out, _| {
+            out.raw.write_all(bytes).map_err(errno_error)
+        })
+    }
+
+    pub(crate) fn flush(&self) -> crate::Result<()> {
+        self.with_open("flush of closed file", |out, _| {
+            out.raw.flush().map_err(errno_error)
+        })
+    }
+
+    pub(crate) fn position(&self, seek: Option<(i64, i32)>) -> crate::Result<i64> {
+        self.with_open("I/O operation on closed file.", |out, fd| {
+            buffer_position(out, fd, seek)
+        })
+    }
+
+    pub(crate) fn seekable(&self, message: &'static str) -> crate::Result<bool> {
+        self.with_open(
+            message,
+            |out, fd| Ok(buffer_position(out, fd, None).is_ok()),
+        )
+    }
+
+    pub(crate) fn fileno(&self, message: &'static str) -> crate::Result<i32> {
+        self.check_open(message)?;
+        Ok(if self.stderr { 2 } else { 1 })
+    }
+
+    pub(crate) fn close(&self) -> crate::Result<()> {
+        with_standard_output(self.stderr, |out| {
+            if self.closed.swap(true, Ordering::Relaxed) {
+                return Ok(());
+            }
+            close_output(out, false).map_err(errno_error)
+        })
+    }
+}
+
+impl Drop for StandardBuffer {
+    fn drop(&mut self) {
+        if !*self.closed.get_mut() {
+            let _ = close_standard_output(self.stderr, true);
+        }
+    }
+}
+
+pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| close_output(out, flush_text))
 }
 
 /// Text close attempts both flushes; either view discards any bytes left after close.
-pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
-    with_standard_output(stderr, |out| {
-        let text = if flush_text { out.flush() } else { Ok(()) };
-        let binary = out.raw.flush();
-        out.text = Default::default();
-        out.raw.buffer.clear();
-        out.raw.written = 0;
-        binary.and(text)
-    })
+fn close_output(out: &mut Output, flush_text: bool) -> io::Result<()> {
+    let text = if flush_text { out.flush() } else { Ok(()) };
+    let binary = out.raw.flush();
+    out.text = Default::default();
+    out.raw.buffer.clear();
+    out.raw.written = 0;
+    binary.and(text)
 }
 
 /// Seek after draining binary writes, or report their logical position without flushing.
-pub(crate) fn standard_buffer_position(
-    stderr: bool,
-    seek: Option<(i64, i32)>,
-) -> super::Result<i64> {
-    let fd = if stderr { 2 } else { 1 };
-    with_standard_output(stderr, |out| {
-        if let Some((offset, whence)) = seek {
-            out.raw.flush().map_err(errno_error)?;
-            crate::objects::os::seek(fd, offset, whence)
-        } else {
-            let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
-            let buffered = out.raw.buffer.len() - out.raw.written;
-            offset
-                .checked_add(buffered as i64)
-                .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
-        }
-    })
+fn buffer_position(out: &mut Output, fd: i32, seek: Option<(i64, i32)>) -> crate::Result<i64> {
+    if let Some((offset, whence)) = seek {
+        out.raw.flush().map_err(errno_error)?;
+        crate::objects::os::seek(fd, offset, whence)
+    } else {
+        let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
+        let buffered = out.raw.buffer.len() - out.raw.written;
+        offset
+            .checked_add(buffered as i64)
+            .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
+    }
 }
 
 /// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.
@@ -264,7 +340,7 @@ pub(super) fn write_escaped_stdout(text: &str) -> super::Result<()> {
     let bytes = settings
         .codec
         .encode(text, Some("backslashreplace"), || error_text(text))?;
-    write_standard_buffer(false, &bytes)
+    with_standard_output(false, |out| out.raw.write_all(&bytes)).map_err(errno_error)
 }
 
 /// Return the largest signed index for the executable target.

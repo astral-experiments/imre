@@ -12,10 +12,6 @@ pub(crate) enum MemoryText {
 pub(crate) struct TextFile(crate::ObjectOwner);
 
 impl TextFile {
-    pub(crate) fn standard(stderr: bool) -> Self {
-        Self(files::standard_stream(stderr))
-    }
-
     pub(crate) fn string_io(initial: Option<&str>, newline: Option<&str>) -> Result<Self> {
         files::FileState::string_io(initial, newline).map(Self)
     }
@@ -107,30 +103,9 @@ impl TextFile {
         unsafe { self.0.0.with(|storage| storage.file().closed()) }
     }
 
-    pub(crate) fn fileno(&self) -> Result<std::os::fd::RawFd> {
-        // SAFETY: reading the owned file's descriptor runs no Python callbacks.
-        unsafe { self.0.0.with(|storage| storage.file().fileno()) }
-    }
-
     pub(crate) fn write(&self, value: &str) -> Result<()> {
         // SAFETY: the text writer uses no Python callbacks during this borrow.
         unsafe { self.0.0.with_mut(|storage| storage.file_mut().write(value)) }
-    }
-
-    /// Identify the still-open original stream, even when Python retained an alias.
-    pub(crate) fn standard_writer(&self) -> Result<bool> {
-        // SAFETY: checking the file state does not reenter Python.
-        unsafe {
-            self.0
-                .0
-                .with_mut(|storage| storage.file_mut().standard_writer())
-        }
-    }
-
-    /// Closing the binary layer flushes only its bytes and closes the enclosing text view.
-    pub(crate) fn close_standard_buffer(&self) -> Result<()> {
-        // SAFETY: this owned file state is a standard output stream; flushing runs no Python.
-        unsafe { self.0.0.with_mut(|s| s.file_mut().close_standard_buffer()) }
     }
 
     pub(crate) fn flush(&self) -> Result<()> {
