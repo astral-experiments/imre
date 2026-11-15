@@ -786,7 +786,7 @@ fn fixed_frame_parameters(function: &ast::StmtFunctionDef) -> bool {
         && function.parameters.kwarg.is_none()
 }
 
-/// The fixed frame can retain the bundled or still-bound imported definition.
+/// A fixed frame can retain a bundled definition or an original provider binding.
 fn fixed_frame_provider(
     graph: &SourceGraph,
     owner: DefinitionId,
@@ -794,8 +794,7 @@ fn fixed_frame_provider(
 ) -> bool {
     let module = &graph.modules[owner.module];
     module.bundled
-        || owner.module != graph.entry
-            && module.is_program_source()
+        || module.is_program_source()
             && module.bindings.get(function.name.as_str()) == Some(&Binding::Definition(owner))
 }
 

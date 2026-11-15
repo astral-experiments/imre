@@ -1225,6 +1225,17 @@ mod tests {
             crate::check(&program).unwrap();
             crate::check_file(&path, None).unwrap();
             if callback != "cold" {
+                let mut entry = SourceGraph::load(&path, None, &[]).unwrap();
+                crate::checked_lower(&mut entry).unwrap();
+                let (functions, _) = entry.take_registered_functions();
+                let start =
+                    ruff_text_size::TextSize::try_from(program.find("async def cold").unwrap())
+                        .unwrap();
+                let cold = &functions[&entry.entry][&start];
+                assert!(
+                    matches!(cold.function.body.as_slice(), [ir::Statement::Return(value)]
+                    if matches!(value.kind, ExprKind::Local(0)))
+                );
                 let caller = dir.path().join("main.py");
                 std::fs::write(
                     &caller,
