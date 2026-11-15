@@ -898,6 +898,40 @@ mod tests {
     }
 
     #[test]
+    fn earlier_refusal_preserves_checked_siblings_at_their_original_slots() {
+        let text = concat!(
+            "def unused() -> int:\n    values: list[int] = [1]\n    values.append(True)\n    return 1\n",
+            "def twice(n: int) -> int:\n    return n * 2\n",
+            "def through(n: int) -> int:\n    return twice(n)\n",
+            "print(through(21))\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        graph.registered_startup = true;
+        let report = crate::frontend::lower_with_caller_cache(&mut graph, None, None)
+            .err()
+            .unwrap();
+        assert!(report.to_string().contains(":3:19:"), "{report}");
+        let (functions, _) = graph.take_registered_functions();
+        let frames = &functions[&graph.entry];
+        let frame = |name| &frames[&TextSize::try_from(text.find(name).unwrap()).unwrap()];
+        let twice = frame("def twice");
+        assert_eq!(&text[twice.fixed_sites[0]], "return n * 2");
+        let through = frame("def through");
+        let [Statement::Return(value)] = through.function.body.as_slice() else {
+            panic!("expected the original nonleaf return");
+        };
+        assert!(matches!(
+            value.without_location().kind,
+            ExprKind::Call(1, _)
+        ));
+        assert_eq!(&text[through.fixed_sites[1]], "twice(n)");
+        assert!(matches!(
+            through.fixed_attribute(through.fixed_sites[1]),
+            Some(FixedAttribute::Call(Some(_), _))
+        ));
+    }
+
+    #[test]
     fn original_sites_survive_only_unchanged_checked_operations() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: str) -> str:\n        return value\n",
