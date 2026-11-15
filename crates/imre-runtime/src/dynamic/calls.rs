@@ -1685,6 +1685,20 @@ impl Context {
         self.class_attr(class, name)
     }
 
+    /// Select the metaclass member used by a class read or write.
+    fn metaclass_member(&mut self, class: Id, name: &str) -> Option<(Id, Id)> {
+        let Value::Class { metaclass, .. } = *self.heap.get(class) else {
+            return None;
+        };
+        let meta = match metaclass {
+            Some(meta) => meta,
+            None if Self::TYPE_GETSETS.contains(&name) => self.builtin("type"),
+            None => return None,
+        };
+        self.instance_class_member(meta, name)
+            .map(|member| (meta, member))
+    }
+
     pub(super) fn instance_attribute(
         &mut self,
         object: Id,
@@ -3331,21 +3345,12 @@ impl Context {
         };
         let named_reader = reader.is_some_and(|(_, receiver)| receiver == NONE)
             && attr.nonexact_key(self).is_some();
-        let metaclass_member = match *self.heap.get(obj) {
-            _ if named_reader => {
-                let meta = self.exact_type(obj)?;
-                self.class_attr_with_name(meta, attr)
-                    .map(|member| (meta, member))
-            }
-            Value::Class {
-                metaclass: Some(meta),
-                ..
-            } => self.class_attr(meta, name).map(|member| (meta, member)),
-            Value::Class { .. } if name == "__text_signature__" => {
-                let meta = self.builtin("type");
-                self.own_class_attr(meta, name).map(|member| (meta, member))
-            }
-            _ => None,
+        let metaclass_member = if named_reader {
+            let meta = self.exact_type(obj)?;
+            self.class_attr_with_name(meta, attr)
+                .map(|member| (meta, member))
+        } else {
+            self.metaclass_member(obj, name)
         };
         if let Some((meta, member)) = metaclass_member
             && self.readable_data_descriptor(member)
@@ -6023,11 +6028,7 @@ impl Context {
                 let class = constructor.unwrap_or_else(|| self.builtin("module"));
                 return self.module_instance_attribute(obj, class, scope, name);
             }
-            Value::Class {
-                name: ref class_name,
-                scope,
-                ..
-            } => {
+            Value::Class { scope, .. } => {
                 if name == "__dict__" {
                     return Ok(self.class_dictionary(scope));
                 }
@@ -6056,20 +6057,6 @@ impl Context {
                     return Ok(self
                         .own_class_attr(obj, name)
                         .unwrap_or_else(|| self.heap.packed_tuple(Vec::new(), false)));
-                }
-                // A type's stored qualified name is metadata even if its str subclass is a descriptor.
-                if name == "__qualname__"
-                    && let Some(value) = self.own_class_attr(obj, name)
-                    && self.string_storage(value).is_some()
-                {
-                    return Ok(value);
-                }
-                if name == "__name__" && metaclass_member.is_none() {
-                    if let Some(name) = self.assigned_class_name(scope) {
-                        return Ok(name);
-                    }
-                    let class_name = class_name.clone();
-                    return Ok(self.heap.code_name(&class_name));
                 }
                 if let Some(value) = self.class_attr(obj, name) {
                     return self.bind_attribute(value, NONE, obj);
@@ -6927,17 +6914,8 @@ impl Context {
             let owner = self.builtin("typing.TypeVar");
             return Ok(self.own_class_attr(owner, name));
         }
-        if name == "__text_signature__"
-            && matches!(
-                self.heap.get(obj),
-                Value::Class {
-                    metaclass: None,
-                    ..
-                }
-            )
-        {
-            let meta = self.builtin("type");
-            return Ok(self.own_class_attr(meta, name));
+        if matches!(self.heap.get(obj), Value::Class { .. }) {
+            return Ok(self.metaclass_member(obj, name).map(|(_, member)| member));
         }
         let Some(member) = self.slot(obj, name) else {
             return Ok(None);
@@ -7197,6 +7175,23 @@ impl Context {
                 self.module_annotation(scope, name)
             }
             "__class__" => self.exact_type(receiver),
+            "__name__" | "__qualname__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                if let Value::Class { scope, .. } = *self.heap.get(receiver) {
+                    let stored = if name == "__name__" {
+                        self.assigned_class_name(scope)
+                    } else {
+                        self.own_class_attr(receiver, name)
+                    };
+                    if let Some(value) = stored {
+                        return Ok(value);
+                    }
+                    let text = self.class_name(receiver).to_owned();
+                    return Ok(self.heap.code_name(&text));
+                }
+                // Both getsets use the native type's published short name.
+                self.default_get_attr(receiver, "__name__")
+            }
             "__mro__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 if let Value::Class { scope, .. } = *self.heap.get(receiver) {
@@ -7256,6 +7251,65 @@ impl Context {
         value: Option<Id>,
     ) -> Result<()> {
         match name {
+            "__name__" | "__qualname__" => {
+                self.layout_receiver_class(owner, name, receiver)?;
+                self.check_immutable_type_write(receiver, name)?;
+                let Value::Class { scope, .. } = *self.heap.get(receiver) else {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "cannot set '{name}' attribute of immutable type '{}'",
+                            self.class_name(receiver)
+                        ),
+                    ));
+                };
+                let value = value.ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "cannot delete '{name}' attribute of immutable type '{}'",
+                            self.class_name(receiver)
+                        ),
+                    )
+                })?;
+                let storage = self.string_storage(value).ok_or_else(|| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "can only assign string to {}.{name}, not '{}'",
+                            self.class_name(receiver),
+                            self.type_name(value)
+                        ),
+                    )
+                })?;
+                if name == "__qualname__" {
+                    self.bind(scope, name, value);
+                    return Ok(());
+                }
+                if matches!(self.heap.get(storage), Value::SurrogateStr(_)) {
+                    self.encode_utf8_codepoints(storage, false, "strict")?;
+                }
+                if self.str_value(storage)?.contains('\0') {
+                    return Err(Error::new(
+                        "ValueError",
+                        "type name must not contain null characters",
+                    ));
+                }
+                let Value::Scope(frame) = self.heap.get_mut(scope) else {
+                    unreachable!()
+                };
+                let old = frame
+                    .class_namespace
+                    .get_or_insert_with(Default::default)
+                    .name_override
+                    .replace(value);
+                if let Some(old) = old
+                    && old != value
+                {
+                    self.heap.weak_edge_removed(old);
+                }
+                Ok(())
+            }
             "__code__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
                 self.set_function_attr(receiver, name, value.unwrap_or(NONE))
@@ -7720,47 +7774,6 @@ impl Context {
             && let Value::Class { scope, .. } = *self.heap.get(obj)
         {
             return self.set_abstract_methods(scope, value);
-        }
-        if (name == "__qualname__" || name == "__name__" && member.is_none())
-            && let Value::Class { scope, .. } = *self.heap.get(obj)
-        {
-            let storage = self.string_storage(value).ok_or_else(|| {
-                Error::new(
-                    "TypeError",
-                    format!(
-                        "can only assign string to {}.{name}, not '{}'",
-                        self.class_name(obj),
-                        self.type_name(value)
-                    ),
-                )
-            })?;
-            if name == "__qualname__" {
-                self.bind(scope, name, value);
-                return Ok(());
-            }
-            if matches!(self.heap.get(storage), Value::SurrogateStr(_)) {
-                self.encode_utf8_codepoints(storage, false, "strict")?;
-            }
-            if self.str_value(storage)?.contains('\0') {
-                return Err(Error::new(
-                    "ValueError",
-                    "type name must not contain null characters",
-                ));
-            }
-            let Value::Scope(frame) = self.heap.get_mut(scope) else {
-                unreachable!()
-            };
-            let old = frame
-                .class_namespace
-                .get_or_insert_with(Default::default)
-                .name_override
-                .replace(value);
-            if let Some(old) = old
-                && old != value
-            {
-                self.heap.weak_edge_removed(old);
-            }
-            return Ok(());
         }
         if exception_member.is_some() {
             return self.update_exception_field(obj, name, Some(value));

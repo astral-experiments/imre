@@ -2641,6 +2641,14 @@ impl Context {
         environment
     }
 
+    const TYPE_GETSETS: &[&str] = &[
+        "__mro__",
+        "__dict__",
+        "__text_signature__",
+        "__name__",
+        "__qualname__",
+    ];
+
     /// Materialize the class namespace used by its mapping proxy and annotation functions.
     fn class_dictionary(&mut self, scope: Id) -> Id {
         let dictionary = self.class_namespace_dict(scope, false);
@@ -3198,7 +3206,7 @@ impl Context {
             let descriptor = self.alloc(Value::LayoutDescriptor(value, "__class__"));
             self.builtins.insert("object.__class__".into(), descriptor);
         } else if name == "type" {
-            for field in ["__mro__", "__dict__", "__text_signature__"] {
+            for &field in Self::TYPE_GETSETS {
                 let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
                 self.builtins.insert(format!("type.{field}"), descriptor);
             }
@@ -3488,18 +3496,18 @@ impl Context {
         }
         let mut additional: &[&str] = &[];
         let methods = match name {
-            "type" => &[
-                "__getattribute__",
-                "__call__",
-                "mro",
-                "__subclasses__",
-                "__prepare__",
-                "__setattr__",
-                "__delattr__",
-                "__mro__",
-                "__dict__",
-                "__text_signature__",
-            ][..],
+            "type" => {
+                additional = Self::TYPE_GETSETS;
+                &[
+                    "__getattribute__",
+                    "__call__",
+                    "mro",
+                    "__subclasses__",
+                    "__prepare__",
+                    "__setattr__",
+                    "__delattr__",
+                ][..]
+            }
             "object" => &[
                 "__hash__",
                 "__ne__",
