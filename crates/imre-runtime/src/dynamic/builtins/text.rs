@@ -2080,16 +2080,13 @@ fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
         .map_err(|_| crate::Error::memory_error())?;
     for (i, &item) in items.iter().enumerate() {
         ctx.check_buffer_exporter(item)?;
-        let buffer = match ctx.heap.get(ctx.scalar_value(item)) {
-            Value::Array(array) => array.as_bytes(),
-            _ => ctx.bytes_like(item).map_err(|_| {
-                let name = ctx.type_name(item);
-                type_error(format!(
-                    "sequence item {i}: expected a bytes-like object, {} found",
-                    &name[..name.floor_char_boundary(80)]
-                ))
-            })?,
-        };
+        let buffer = ctx.native_buffer_bytes(item).map_err(|_| {
+            let name = ctx.type_name(item);
+            type_error(format!(
+                "sequence item {i}: expected a bytes-like object, {} found",
+                &name[..name.floor_char_boundary(80)]
+            ))
+        })?;
         size = size.checked_add(buffer.len()).ok_or_else(too_long)?;
         buffers.push(buffer);
     }
