@@ -117,7 +117,7 @@ impl Context {
         })
     }
 
-    fn error_from_instance(&self, instance: Id) -> Error {
+    pub(super) fn error_from_instance(&self, instance: Id) -> Error {
         let Value::Raised(error) = self.heap.get(instance) else {
             unreachable!("expected a normalized exception instance")
         };

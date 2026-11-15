@@ -26,7 +26,11 @@ pub(super) fn read(ctx: &mut Context, kind: Kind, field: &str, object: Id) -> Re
     };
     match kind {
         Kind::BaseException => Ok(super::builtins::boolean(error.suppresses_context())),
-        Kind::AttributeError => Ok(NONE),
+        Kind::AttributeError => Ok(error
+            .trace
+            .as_ref()
+            .and_then(|trace| trace.attribute_fields[usize::from(field == "obj")])
+            .unwrap_or(NONE)),
         Kind::UnicodeEncodeError | Kind::UnicodeDecodeError => {
             if let Some(state) = &error.decode {
                 return Ok(match field {
@@ -138,13 +142,18 @@ pub(super) fn write(
                 ctx.heap.weak_edge_removed(id);
             }
         }
-        Kind::AttributeError => return Err(ctx.missing_attribute(object, field)),
-        Kind::NameError => {
+        Kind::AttributeError | Kind::NameError => {
             let Value::Raised(error) = ctx.heap.get_mut(object) else {
                 unreachable!()
             };
             if value.is_some() || error.trace.is_some() {
-                let old = std::mem::replace(&mut error.tracing().name_error_name, value);
+                let trace = error.tracing();
+                let slot = if kind == Kind::NameError {
+                    &mut trace.name_error_name
+                } else {
+                    &mut trace.attribute_fields[usize::from(field == "obj")]
+                };
+                let old = std::mem::replace(slot, value);
                 if let Some(old) = old
                     && Some(old) != value
                 {

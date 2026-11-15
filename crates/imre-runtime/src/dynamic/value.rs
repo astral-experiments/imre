@@ -195,6 +195,7 @@ pub(super) struct Trace {
     pub import_names: [Option<Id>; 3],
     pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
+    pub attribute_fields: [Option<Id>; 2],
     pub dictionary: Option<Id>,
     stop_value: Id,
     head: Id,
@@ -365,6 +366,7 @@ impl Error {
                             .chain(group.sequence_repr)
                     }))
                     .chain(trace.name_error_name)
+                    .chain(trace.attribute_fields.into_iter().flatten())
                     .chain(trace.dictionary)
                     .chain((trace.head != NONE).then_some(trace.head))
             }))

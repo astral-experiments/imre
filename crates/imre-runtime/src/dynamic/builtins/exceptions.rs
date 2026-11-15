@@ -161,7 +161,7 @@ pub(super) fn initialize(
     if owner == "OSError" && !class.is_some_and(|id| ctx.deferred_os_init(id)) {
         return Ok(NONE);
     }
-    if owner != "ImportError" && !kwargs.is_empty() {
+    if !matches!(owner, "ImportError" | "AttributeError") && !kwargs.is_empty() {
         return Err(type_error(format!("{kind}() takes no keyword arguments")));
     }
     let _ = ctx.import_error_message(object, None);
@@ -183,6 +183,11 @@ pub(super) fn initialize(
     error.message = initialized.message;
     if owner == "ImportError" {
         initialize_import(error, args, kwargs)?;
+    } else if owner == "AttributeError" {
+        let dropped = initialize_attribute(error, kwargs)?;
+        for old in dropped.into_iter().flatten() {
+            ctx.heap.weak_edge_removed(old);
+        }
     } else if owner == "SystemExit" {
         let old = error.exit_code;
         error.initialize_exit_code(args);
@@ -193,27 +198,28 @@ pub(super) fn initialize(
     Ok(NONE)
 }
 
+/// Replace the optional name and receiver only after all keyword arguments bind.
+pub(super) fn initialize_attribute(
+    error: &mut Error,
+    kwargs: &[(String, Id)],
+) -> Result<[Option<Id>; 2]> {
+    let fields = exception_keywords("AttributeError", ["name", "obj"], kwargs)?;
+    if kwargs.is_empty() && error.trace.is_none() {
+        return Ok([None; 2]);
+    }
+    Ok(std::mem::replace(
+        &mut error.tracing().attribute_fields,
+        fields,
+    ))
+}
+
 /// Set ImportError's independent message and keyword fields after args is replaced.
 pub(super) fn initialize_import(
     error: &mut Error,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<()> {
-    if kwargs.len() > IMPORT_KEYWORDS.len() {
-        return Err(type_error(format!(
-            "ImportError() takes at most 3 keyword arguments ({} given)",
-            kwargs.len()
-        )));
-    }
-    let mut names = [None; IMPORT_KEYWORDS.len()];
-    for (key, value) in kwargs {
-        let Some(index) = IMPORT_KEYWORDS.iter().position(|&name| name == key) else {
-            return Err(type_error(format!(
-                "ImportError() got an unexpected keyword argument '{key}'"
-            )));
-        };
-        names[index] = Some(*value);
-    }
+    let names = exception_keywords("ImportError", IMPORT_KEYWORDS, kwargs)?;
     let trace = error.tracing();
     trace.import_message = Some(match args {
         [one] => *one,
@@ -221,6 +227,30 @@ pub(super) fn initialize_import(
     });
     trace.import_names = names;
     Ok(())
+}
+
+/// Bind the keyword-only fields of a concrete built-in exception.
+fn exception_keywords<const N: usize>(
+    kind: &str,
+    keys: [&str; N],
+    kwargs: &[(String, Id)],
+) -> Result<[Option<Id>; N]> {
+    if kwargs.len() > N {
+        return Err(type_error(format!(
+            "{kind}() takes at most {N} keyword arguments ({} given)",
+            kwargs.len()
+        )));
+    }
+    let mut fields = [None; N];
+    for (key, value) in kwargs {
+        let Some(index) = keys.iter().position(|&name| name == key) else {
+            return Err(type_error(format!(
+                "{kind}() got an unexpected keyword argument '{key}'"
+            )));
+        };
+        fields[index] = Some(*value);
+    }
+    Ok(fields)
 }
 
 impl Context {
