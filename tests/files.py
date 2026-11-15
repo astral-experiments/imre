@@ -20,6 +20,7 @@ from textwrap import dedent
 from fixture_entry import imported_fixture
 
 ACCEPTED = {
+    "module_rebind": 'import sys\nsys.argv = ["replacement"]\nprint(sys.argv)',
     "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "typing_member": "from typing import Any\nvalue: Any = 1",
     "whole_regular_file": """
@@ -743,7 +744,6 @@ REJECTED = {
     "unknown_sys_member": "import sys\nprint(sys.missing_path_member)",
     "io_unknown_member": "from io import TextCapture\nTextCapture()",
     "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
-    "module_rebind": 'import sys\nsys.argv = ["replacement"]',
     "alias_rebind": 'from sys import argv\nargv = ["replacement"]',
     "parameter_shadow": "import sys\ndef f(sys: int) -> int:\n    return sys",
     "optional_access": "from typing import TextIO\nstream: TextIO | None = None\nstream.read()",
