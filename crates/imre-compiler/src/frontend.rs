@@ -9180,12 +9180,15 @@ impl<'a> Checker<'a> {
         if python_call {
             self.invalidate_called_bindings(expression, &checked);
         }
-        let value = checked?;
-        Ok(if matches!(value.ty, Type::StrLiteral(_)) {
-            literals::view(value, Type::Str)
-        } else {
-            value
-        })
+        let mut value = checked?;
+        if matches!(value.ty, Type::StrLiteral(_)) {
+            if self.registered_local_start.is_none() {
+                return Ok(literals::view(value, Type::Str));
+            }
+            // A Python frame already holds the string selected by its literal contract.
+            value.ty = Type::Str;
+        }
+        Ok(value)
     }
 
     fn object_runtime_export(&self, name: &str, node: &impl Ranged) -> Failure {
