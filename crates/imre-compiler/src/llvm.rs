@@ -6047,11 +6047,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
             Builtin::AsciiEscape => self.call("imre_ascii_escape", returns, &[&args[0].value]),
-            Builtin::MockCallList { mark } => Value {
+            Builtin::MarkMockCallList => Value {
                 ty: Type::Bool,
                 operand: self.instruction(format!(
-                    "call i1 @imre_seq_mock_call_list(ptr {}, i1 {})",
-                    args[0].value.operand, mark
+                    "call i1 @imre_seq_mock_call_list(ptr {}, i1 true)",
+                    args[0].value.operand
                 )),
                 small_integer: false,
             },

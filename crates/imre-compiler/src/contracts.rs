@@ -645,7 +645,7 @@ impl Builtin {
             | Self::IsBuiltinSubclass
             | Self::TryDigitSums(_)
             | Self::IsNone
-            | Self::MockCallList { .. }
+            | Self::MarkMockCallList
             | Self::JsonIsInt
             | Self::WallTime
             | Self::CacheNew

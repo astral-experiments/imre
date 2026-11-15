@@ -73,41 +73,6 @@ impl Checker<'_> {
         matches!(self.types.payload(ty).unwrap_or(ty), Type::Class(class) if self.bundled_mock_class(class, "_Call"))
     }
 
-    /// A recorded call has Python's tuple representation, including ordered keywords.
-    pub(super) fn mock_call_repr(
-        &mut self,
-        value: &Expr,
-        at: &impl Ranged,
-    ) -> Result<Option<Expr>, String> {
-        let (ty, name) = match value.ty {
-            Type::Class(_) => (Some(value.ty), "_represent"),
-            Type::Optional(_) => (self.types.payload(value.ty), "_represent"),
-            Type::List(_) => (self.types.element(value.ty), "_represent_list"),
-            _ => return Ok(None),
-        };
-        let Some(Type::Class(class)) = ty else {
-            return Ok(None);
-        };
-        if !self.bundled_mock_class(class, "_Call") {
-            return Ok(None);
-        }
-        let method = self.classes.methods[class]
-            .get(name)
-            .ok_or_else(|| error(self.source, at, "missing native mock call formatter"))?;
-        self.calls.insert(method.id);
-        Ok(Some(Expr {
-            ty: Type::Str,
-            kind: ExprKind::Call(
-                method.id,
-                ir::CallArgs::positional(vec![self.coerce(
-                    value.clone(),
-                    method.params[0].ty,
-                    at,
-                )?]),
-            ),
-        }))
-    }
-
     pub(super) fn mock_state_member(name: &str) -> bool {
         matches!(
             name,
