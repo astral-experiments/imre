@@ -511,6 +511,7 @@ impl Checker<'_> {
                     | Type::Bytes
                     | Type::ListInt
                     | Type::List(_)
+                    | Type::PlainObject
                     | Type::BytesIO
                     | Type::StringIO
             )
