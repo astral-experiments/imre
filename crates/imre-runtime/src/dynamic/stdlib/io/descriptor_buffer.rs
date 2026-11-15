@@ -384,7 +384,7 @@ pub(super) fn initialize(
     fd.drop_fallback = Some(Cell::new(owner != "BufferedReader"));
     // Do not close the caller's file if allocating the backing value fails.
     let pending = fd.buffer.take();
-    let value = files::BinaryFile::Descriptor(fd).into_value()?;
+    let value = files::BinaryFile::descriptor(fd)?;
     let Value::File(file) = &value else {
         unreachable!()
     };

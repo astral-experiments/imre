@@ -1305,6 +1305,12 @@ impl<T> BoxedFile<T> {
     }
 }
 
+impl<T> AsRef<T> for BoxedFile<T> {
+    fn as_ref(&self) -> &T {
+        &self.file
+    }
+}
+
 impl<T> std::ops::Deref for BoxedFile<T> {
     type Target = T;
 
@@ -1820,7 +1826,7 @@ pub(super) enum Value {
     ProcessHandle {
         child: Option<crate::objects::BoxedPopen>,
     },
-    File(BoxedFile<crate::Shared<super::stdlib::BinaryFile>>),
+    File(BoxedFile<super::stdlib::BinaryFile>),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,

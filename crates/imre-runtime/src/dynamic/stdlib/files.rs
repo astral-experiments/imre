@@ -1,11 +1,11 @@
 use super::{Context, Error, Id, NONE, Result, TRUE, Value, os_error};
+use crate::sys::StandardBuffer;
 
-/// Binary handles retain their access mode after close.
+#[derive(Clone)]
 pub(in crate::dynamic) enum BinaryFile {
-    Descriptor(super::io::BufferedFd),
-    // The original sys stream owns its encoder and the shared process binary buffer.
+    Descriptor(crate::Shared<super::io::BufferedFd>),
     Standard {
-        file: crate::objects::TextFile,
+        file: triomphe::Arc<StandardBuffer>,
         path: Id,
     },
 }
@@ -18,10 +18,19 @@ impl BinaryFile {
         }
     }
 
-    pub(in crate::dynamic) fn into_value(self) -> Result<Value> {
-        crate::shared::Shared::try_new(self)
-            .map(|file| Value::File(super::super::value::BoxedFile::new(file)))
-            .map_err(|_| Error::new("MemoryError", ""))
+    pub(super) fn descriptor(fd: super::io::BufferedFd) -> Result<Value> {
+        let fd = crate::Shared::try_new(fd).map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(Value::File(super::super::value::BoxedFile::new(
+            Self::Descriptor(fd),
+        )))
+    }
+
+    pub(super) fn standard(stderr: bool, path: Id) -> Result<Value> {
+        let file = triomphe::Arc::try_new(StandardBuffer::new(stderr))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(Value::File(super::super::value::BoxedFile::new(
+            Self::Standard { file, path },
+        )))
     }
 
     pub(in crate::dynamic) fn closed(&self) -> bool {
@@ -172,77 +181,82 @@ pub(super) fn buffered_offset(ctx: &mut Context, target: Id) -> Result<i64> {
 
 fn standard_buffer_method(
     ctx: &mut Context,
-    file: &crate::objects::TextFile,
+    file: &StandardBuffer,
     receiver: Id,
     name: &str,
     args: &[Id],
 ) -> Result<Id> {
-    if matches!((name, args), ("close", []) | ("__exit__", [_, _, _])) {
-        if !file.closed() {
-            if file.standard_writer()? {
+    const CLOSED: &str = "I/O operation on closed file.";
+    match (name, args) {
+        ("close", []) | ("__exit__", [_, _, _]) => {
+            if file.is_stderr() && !file.closed() {
                 ctx.check_thread_reporter_mutable()?;
             }
-            file.close_standard_buffer()?;
+            file.close()?;
+            Ok(NONE)
         }
-        return Ok(NONE);
-    }
-    match (name, args) {
         ("write", [value]) => {
             let data = output_bytes(ctx, *value)?;
-            if file.closed() {
-                return Err(Error::new("ValueError", "write to closed file"));
-            }
-            crate::sys::write_standard_buffer(file.standard_writer()?, data)?;
+            file.write(data)?;
             Ok(ctx.int(data.len() as i64))
         }
         ("flush", []) => {
-            if file.closed() {
-                return Err(Error::new("ValueError", "flush of closed file"));
-            }
-            crate::sys::flush_standard_buffer(file.standard_writer()?).map_err(os_error)?;
+            file.flush()?;
             Ok(NONE)
         }
-        ("tell" | "seekable", []) => {
-            let position = crate::sys::standard_buffer_position(file.standard_writer()?, None);
-            if name == "seekable" {
-                Ok(crate::dynamic::builtins::boolean(position.is_ok()))
-            } else {
-                Ok(ctx.int(position?))
-            }
-        }
+        ("tell", []) => Ok(ctx.int(file.position(None)?)),
+        ("seekable", []) => Ok(crate::dynamic::builtins::boolean(file.seekable(CLOSED)?)),
         ("seek", [target] | [target, _]) => {
             let whence = buffered_whence(ctx, args.get(1).copied())?;
-            if file.closed() {
-                return Err(Error::new("ValueError", "seek of closed file"));
-            }
-            if crate::sys::standard_buffer_position(file.standard_writer()?, None).is_err() {
+            if !file.seekable("seek of closed file")? {
                 return Err(Error::new(
                     "UnsupportedOperation",
                     "File or stream is not seekable.",
                 ));
             }
             let offset = buffered_offset(ctx, *target)?;
-            let pos = crate::sys::standard_buffer_position(
-                file.standard_writer()?,
-                Some((offset, whence)),
-            )?;
-            Ok(ctx.int(pos))
+            Ok(ctx.int(file.position(Some((offset, whence)))?))
         }
-        ("fileno", []) => Ok(ctx.int(if file.standard_writer()? { 2 } else { 1 })),
+        ("fileno", []) => Ok(ctx.int(i64::from(file.fileno(CLOSED)?))),
         ("writable", []) => {
-            file.standard_writer()?;
+            file.check_open(CLOSED)?;
             Ok(TRUE)
         }
         ("isatty", []) => Ok(crate::dynamic::builtins::boolean(
-            crate::objects::os::isatty(file.fileno()?),
+            crate::objects::os::isatty(file.fileno("I/O operation on closed file")?),
         )),
         ("__enter__", []) => {
-            file.standard_writer()?;
+            file.check_open(CLOSED)?;
             Ok(receiver)
         }
         _ => Err(Error::new(
             "TypeError",
             format!("invalid arguments to file.{name}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_the_native_standard_buffer_is_visible_through_its_boxed_alias() {
+        let Value::File(buffer) = BinaryFile::standard(true, NONE).unwrap() else {
+            unreachable!()
+        };
+        let BinaryFile::Standard { file, .. } = buffer.as_ref() else {
+            unreachable!()
+        };
+        let peer = file.clone();
+        assert!(!buffer.closed());
+        std::thread::spawn(move || {
+            assert_eq!(peer.fileno("closed").ok(), Some(libc::STDERR_FILENO));
+            assert!(peer.close().is_ok());
+        })
+        .join()
+        .unwrap();
+        assert!(buffer.closed());
+        assert!(file.close().is_ok());
     }
 }
