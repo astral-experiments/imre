@@ -33,6 +33,20 @@ impl Checker<'_> {
             if !matches!(ty, Type::Str | Type::Int | Type::Bool | Type::Bytes)
                 || !fields.iter().all(|&field| field == ty)
             {
+                if (key.ty == Type::PythonObject || fields.contains(&Type::PythonObject))
+                    && (self.placement_only
+                        || self
+                            .unrepresented
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(Failure::is_object))
+                {
+                    return Ok(registered::values::comparison(
+                        comparison,
+                        vec![key, tuple],
+                        None,
+                    ));
+                }
                 return Err(error(
                     self.source,
                     comparison,
