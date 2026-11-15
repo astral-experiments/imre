@@ -481,50 +481,6 @@ fn future_statement(stmt: &ast::Stmt) -> Option<&ast::StmtImportFrom> {
     (import.level == 0 && import.module.as_deref() == Some("__future__")).then_some(import)
 }
 
-/// Check future statement placement after the module's optional docstring.
-pub fn future_import_error(
-    body: &[ast::Stmt],
-) -> Option<(ruff_text_size::TextRange, &'static str)> {
-    use ast::visitor::Visitor;
-    struct Check(Option<ruff_text_size::TextRange>);
-    impl<'a> Visitor<'a> for Check {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if self.0.is_some() {
-                return;
-            }
-            if future_statement(stmt).is_some() {
-                self.0 = Some(stmt.range());
-            } else if ast::helpers::is_compound_statement(stmt) {
-                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                    ast::visitor::walk_stmt(self, stmt)
-                });
-            }
-        }
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
-    }
-    let mut check = Check(None);
-    for stmt in ast::helpers::body_without_leading_docstring(body)
-        .iter()
-        .skip_while(|stmt| future_statement(stmt).is_some())
-    {
-        check.visit_stmt(stmt);
-        if let Some(range) = check.0 {
-            // The symbol table visits the imported aliases before checking
-            // future placement, including a star in this same statement.
-            if let Some(star) = misplaced_star_import(body)
-                && star.start() < range.end()
-            {
-                return Some((star, "import * only allowed at module level"));
-            }
-            return Some((
-                range,
-                "from __future__ imports must occur at the beginning of the file",
-            ));
-        }
-    }
-    None
-}
-
 pub fn lower(body: &mut [ast::Stmt]) -> Names {
     lower_in(body, "", future_annotations(body))
 }
