@@ -273,6 +273,7 @@ pub(super) enum RegisteredCall {
     /// Condition.notify has already selected the waiter's bound release method.
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
+    Select(Vec<Id>),
     Recv(stdlib::socket::Recv),
 }
 
@@ -309,6 +310,14 @@ impl RegisteredCall {
                 Ok(NONE)
             }
             Self::Restore(wait) => Ok(wait.run()),
+            // SAFETY: the caller roots the frame and owns the context on this thread.
+            Self::Select(args) => {
+                let result = unsafe { stdlib::select::run(context, &args) };
+                // SAFETY: signal callbacks have returned to this execution.
+                result.map_err(|error| {
+                    stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
+                })
+            }
             // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Recv(recv) => unsafe { recv.run(context) },
         }
@@ -8435,6 +8444,7 @@ impl Context {
                 }
                 Value::Native(ref name) => {
                     let wait = match name.as_str() {
+                        "select.select" => return stdlib::select::prepare(args, &kwargs),
                         "_imre_thread.start" => {
                             return thread_worker::prepare_start(self, &args, &kwargs)
                                 .map(|start| RegisteredCall::Start(Box::new(start)))

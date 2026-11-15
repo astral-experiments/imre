@@ -79,7 +79,7 @@ pub(super) mod readiness;
 pub(super) mod regex;
 #[cfg(target_os = "linux")]
 mod resource;
-mod select;
+pub(super) mod select;
 #[cfg(unix)]
 pub(super) mod signal;
 pub(super) mod socket;
