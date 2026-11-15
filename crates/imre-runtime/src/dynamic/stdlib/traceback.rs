@@ -213,7 +213,7 @@ impl<'a> FrameLine<'a> {
             ctx.sources
                 .values()
                 .flatten()
-                .find(|module| Some(module.path.as_path()) == path)
+                .find(|module| Some(module.path.as_ref()) == path)
                 .and_then(|module| module.bundled_text)
                 .map(|text| std::str::from_utf8(text).expect("compiler-emitted Python is UTF-8"))
         } else {

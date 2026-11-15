@@ -1315,20 +1315,17 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
 
 fn register_source(
     ctx: &mut Context,
-    name: &str,
-    file: &Path,
+    name: &'static str,
+    file: &'static Path,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
 ) {
-    ctx.sources
-        .entry(name.to_owned())
-        .or_default()
-        .push(SourceModule {
-            path: file.into(),
-            code,
-            bundled_text,
-            single_inputs: None,
-        });
+    ctx.sources.entry(name).or_default().push(SourceModule {
+        path: file.into(),
+        code,
+        bundled_text,
+        single_inputs: None,
+    });
 }
 
 #[unsafe(no_mangle)]

@@ -145,7 +145,8 @@ impl MainModuleFrame {
 
 #[derive(Clone)]
 struct SourceModule {
-    path: PathBuf,
+    // Registrations borrow the executable's path. An issued file loader owns its chosen origin.
+    path: Cow<'static, Path>,
     code: ModuleInitializer,
     bundled_text: Option<&'static [u8]>,
     single_inputs: Option<Rc<Vec<SingleInput>>>,
@@ -382,7 +383,8 @@ pub(crate) struct Context {
     /// Last observed binding position for each name bucket, validated against the current scope.
     scope_name_slots: [std::cell::Cell<usize>; 16],
     native_type_dicts: NativeTypeDictionaries,
-    sources: HashMap<String, Vec<SourceModule>>,
+    // Most names have one provider. Conflicting registrations retain their lookup order.
+    sources: HashMap<&'static str, smallvec::SmallVec<[SourceModule; 1]>>,
     deque_comparison_repeats: usize,
 }
 
@@ -4303,7 +4305,7 @@ impl Context {
         };
         let initializer = source.code;
         let source = (
-            source.path.clone(),
+            source.path.to_path_buf(),
             importlib::SourceBody::Registered(initializer),
         );
         let packaged = packaged.map(str::to_owned);
@@ -5388,7 +5390,7 @@ impl Context {
         let source = source.or_else(|| {
             self.builtin_initializer(name).map(|body| {
                 (
-                    body.path.clone(),
+                    body.path.to_path_buf(),
                     importlib::SourceBody::Registered(body.code),
                     None,
                 )

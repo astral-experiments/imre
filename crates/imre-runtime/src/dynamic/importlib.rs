@@ -734,7 +734,7 @@ impl Context {
         let filename = self.import_path(origin)?;
         if let Some(source) = self.registered_file(self.str_value(name)?, &filename) {
             let source = super::SourceModule {
-                path: filename,
+                path: filename.into(),
                 single_inputs: None,
                 ..*source
             };
