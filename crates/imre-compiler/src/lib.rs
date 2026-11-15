@@ -2313,6 +2313,34 @@ print(is_number(3))
     }
 
     #[test]
+    fn a_nonreturning_rhs_leaves_the_handler_store_unconstrained() {
+        let source = concat!(
+            "def stop() -> None:\n",
+            "    raise AttributeError('from stop')\n",
+            "def work() -> None:\n",
+            "    try:\n",
+            "        lines = stop()\n",
+            "    except AttributeError:\n",
+            "        lines = ['value']\n",
+            "    print(lines)\n",
+            "work()\n",
+        );
+        super::check(source).unwrap();
+        let declared = source.replace("    try:", "    lines: str\n    try:");
+        assert!(
+            super::check(&declared)
+                .unwrap_err()
+                .contains("expected str, got list[str]")
+        );
+        let unbound = source.replace("lines = ['value']", "pass");
+        assert!(
+            super::check(&unbound)
+                .unwrap_err()
+                .contains("local may be uninitialized")
+        );
+    }
+
+    #[test]
     fn joins_only_falling_exception_handler_exits() {
         let source = "def choose(value: int) -> str:\n    try:\n        if value == 0:\n            raise ValueError('zero')\n        raise IndexError('one')\n    except ValueError:\n        word = 'zero'\n    except IndexError:\n        return 'one'\n    return word\n";
         super::check(source).unwrap();

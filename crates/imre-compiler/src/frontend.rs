@@ -3759,6 +3759,8 @@ struct Checker<'a> {
     inferred_containers: HashSet<usize>,
     /// Annotations constrain later assignments to the same lexical slot.
     declared_slots: HashMap<usize, TypeDeclaration>,
+    /// Fresh bindings mentioned only as targets of a non-returning RHS have no stored layout.
+    unstored_targets: HashSet<usize>,
     /// Fresh annotated lists whose inner lists may come from a document.
     document_list_sites: HashMap<usize, u32>,
     nullable_assignments: HashMap<String, Type>,
@@ -3883,6 +3885,7 @@ impl<'a> Checker<'a> {
             returns: Type::None,
             inferred_containers: HashSet::new(),
             declared_slots: HashMap::new(),
+            unstored_targets: HashSet::new(),
             document_list_sites: HashMap::new(),
             nullable_assignments: HashMap::new(),
             bound_flags: HashMap::new(),
@@ -4051,7 +4054,9 @@ impl<'a> Checker<'a> {
                 "rebinding a builtin, definition, or imported module is unsupported",
             ));
         }
-        if let Some(&slot) = self.names.get(name) {
+        if let Some(&slot) = self.names.get(name)
+            && !self.unstored_targets.remove(&slot)
+        {
             self.expect(self.locals[slot], ty, node)?;
             return Ok(slot);
         }
@@ -8474,7 +8479,11 @@ impl<'a> Checker<'a> {
                 "local assignment requires a name",
             ));
         };
-        let existing = self.names.get(name.id.as_str()).copied();
+        let existing = self
+            .names
+            .get(name.id.as_str())
+            .copied()
+            .filter(|slot| !self.unstored_targets.contains(slot));
         let value = if let Some(slot) = existing {
             // A pulled object replaces the value in the same unannotated Python
             // binding. An empty loop leaves its previous value there.
