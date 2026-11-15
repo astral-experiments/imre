@@ -451,10 +451,18 @@ impl Context {
                 checkpoint = current;
             }
         }
-        if error.context != NONE && error.context != active {
+        let Value::Raised(instance) = self.heap.get_mut(raised) else {
+            unreachable!("normalized exception")
+        };
+        let previous = [instance.context, error.context];
+        instance.context = active;
+        error.context = active;
+        if previous
+            .into_iter()
+            .any(|context| context != NONE && context != active)
+        {
             self.heap.collect_next_statement = true;
         }
-        error.context = active;
     }
 
     /// Snapshot active Python code without materializing Python frame objects.

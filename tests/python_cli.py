@@ -3588,6 +3588,17 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-IB", "-c", "from sys import exit\nexit(None)")
         compare(
             "-IB", "-c",
+            "cause = ValueError()\n"
+            "class Exit(SystemExit):\n"
+            "    @property\n"
+            "    def code(self): return 23 if self is saved and self.__context__ is cause else 99\n"
+            "saved = Exit()\n"
+            "try: raise cause\n"
+            "except ValueError: raise saved",
+            status=23,
+        )
+        compare(
+            "-IB", "-c",
             "phase = 'alive'\n"
             "class Code:\n"
             "    def __str__(self): return phase\n"
