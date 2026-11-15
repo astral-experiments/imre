@@ -50,13 +50,7 @@ class Flag:
         yield from members
 
     def __len__(self):
-        # Count the set bits without allocating a textual representation.
-        bits = abs(self._value_)
-        count = 0
-        while bits:
-            bits &= bits - 1
-            count += 1
-        return count
+        return self._value_.bit_count()
 
     def __str__(self):
         cls_name = self.__class__.__name__
