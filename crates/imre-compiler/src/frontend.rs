@@ -11172,12 +11172,11 @@ impl<'a> Checker<'a> {
                 if let Some(text) = self.testcase_class_text(attribute)? {
                     return Ok(text);
                 }
-                let receiver_binding = self.resolve(&attribute.value);
-                if receiver_binding == Some(Binding::Intrinsic(Intrinsic::StructTime)) {
+                if base_binding == Some(Binding::Intrinsic(Intrinsic::StructTime)) {
                     return self.struct_time_class_field(attribute);
                 }
                 if matches!(
-                    (receiver_binding, attribute.attr.as_str()),
+                    (base_binding, attribute.attr.as_str()),
                     (
                         Some(Binding::Intrinsic(Intrinsic::SplitResult { bytes: false })),
                         "_encoded_counterpart"
@@ -11190,7 +11189,7 @@ impl<'a> Checker<'a> {
                         self.scoped_builtin_error("urllib.parse result counterpart", attribute)
                     );
                 }
-                if let Some((origin, declaration)) = self.namedtuple_factory(receiver_binding) {
+                if let Some((origin, declaration)) = self.namedtuple_factory(base_binding) {
                     if matches!(origin, crate::types::TupleOrigin::Declaration(_))
                         && declaration
                             .fields
@@ -11206,20 +11205,20 @@ impl<'a> Checker<'a> {
                 if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
-                    && receiver_binding.is_none()
+                    && base_binding.is_none()
                 {
                     return Ok(inspect::descriptor(method));
                 }
                 if attribute.attr.as_str() == "join"
                     && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                     && !self.names.contains_key("str")
-                    && receiver_binding.is_none()
+                    && base_binding.is_none()
                 {
                     return Ok(self.string_join_value(None, attribute));
                 }
                 if let Some(Binding::Intrinsic(
                     stream @ (Intrinsic::Stdin | Intrinsic::OriginalStdout | Intrinsic::Stderr),
-                )) = receiver_binding
+                )) = base_binding
                     && matches!(attribute.attr.as_str(), "encoding" | "errors")
                 {
                     let descriptor = match stream {
@@ -11239,7 +11238,9 @@ impl<'a> Checker<'a> {
                         ),
                     });
                 }
-                if let Some(class) = self.class_reference(&attribute.value) {
+                if let Some(class) =
+                    self.class_reference_with_binding(&attribute.value, || base_binding)
+                {
                     if let Some(member) = self.enum_member(class, attribute.attr.as_str()) {
                         return Ok(member);
                     }
