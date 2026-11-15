@@ -3651,7 +3651,7 @@ pub(super) fn function_definition(function: &ast::StmtFunctionDef, header: Vec<E
     definition_value(site, &function.decorator_list, header)
 }
 
-fn class_definition(class: &ast::StmtClassDef, header: Vec<Expr>) -> Expr {
+pub(super) fn class_definition(class: &ast::StmtClassDef, header: Vec<Expr>) -> Expr {
     let site = ir::DefinitionSite::Class {
         start: class.start(),
         arguments: class

@@ -174,9 +174,7 @@ impl StatementLowering for Checker<'_> {
                 .map(|expr| self.expr(expr))
                 .collect::<Result<Vec<_>, _>>()?;
             let value = registered::function_definition(def, header);
-            let slot = self.declare(def.name.as_str(), Type::PythonObject, &def.name)?;
-            self.assigned_value(slot, &value);
-            return Ok(Some(Statement::Assign(slot, value)));
+            return Ok(Some(self.bind_local_definition(&def.name, value)?));
         }
         self.define_local_function(def)
     }
