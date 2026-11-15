@@ -80,11 +80,11 @@ impl Context {
                 1,
             )?;
         }
+        let [first, last] = self.heap.execution.asyncgen_hooks;
         let Value::AsyncGenerator { finalizer, .. } = self.heap.get_mut(object) else {
             unreachable!()
         };
         if finalizer.is_none() {
-            let [first, last] = self.threads.asyncgen_hooks;
             *finalizer = Some(last);
             self.heap.register_finalizer(object);
             if first != NONE {

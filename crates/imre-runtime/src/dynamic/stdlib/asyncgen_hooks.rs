@@ -6,10 +6,10 @@ fn set_hook(ctx: &mut Context, index: usize, value: Id) -> Result<()> {
         "sys.set_asyncgen_hook_finalizer",
     ];
     audit::event(ctx, events[index], &[])?;
-    let previous = std::mem::replace(&mut ctx.threads.asyncgen_hooks[index], value);
+    let previous = std::mem::replace(&mut ctx.heap.execution.asyncgen_hooks[index], value);
     if previous != value
         && previous != NONE
-        && (ctx.heap.observes_released_roots() || ctx.heap.borrowed_hooks.contains(&previous))
+        && (ctx.heap.observes_released_roots() || ctx.heap.borrows_asyncgen_hook(previous))
     {
         ctx.collect_unreachable();
     }
@@ -71,11 +71,15 @@ pub(super) fn set(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
     // A replacement can deallocate the old hook before the next audit runs.
     // Keep a non-owning handle that the sweep invalidates before slot reuse.
     ctx.heap
+        .execution
         .borrowed_hooks
         .try_reserve(1)
         .map_err(|_| Error::new("MemoryError", ""))?;
-    let saved = ctx.heap.borrowed_hooks.len();
-    ctx.heap.borrowed_hooks.push(ctx.threads.asyncgen_hooks[1]);
+    let saved = ctx.heap.execution.borrowed_hooks.len();
+    ctx.heap
+        .execution
+        .borrowed_hooks
+        .push(ctx.heap.execution.asyncgen_hooks[1]);
     let result = (|| {
         if let Some(value) = finalizer {
             set_hook(ctx, 1, value)?;
@@ -84,7 +88,7 @@ pub(super) fn set(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
             for root in error.roots() {
                 ctx.heap.keep(root);
             }
-            let previous = ctx.heap.borrowed_hooks[saved];
+            let previous = ctx.heap.execution.borrowed_hooks[saved];
             // The rollback audit can drop the last external reference as well.
             ctx.heap.keep(previous);
             set_hook(ctx, 1, previous)?;
@@ -92,6 +96,6 @@ pub(super) fn set(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Re
         }
         Ok(NONE)
     })();
-    ctx.heap.borrowed_hooks.pop();
+    ctx.heap.execution.borrowed_hooks.pop();
     result
 }

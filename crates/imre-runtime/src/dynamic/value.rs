@@ -498,7 +498,7 @@ impl Context {
 
     /// Capture code metadata at creation without extending the life of any caller frame.
     pub(super) fn coroutine_origin(&mut self) -> Id {
-        let depth = self.threads.coroutine_origin_depth as usize;
+        let depth = self.heap.execution.coroutine_origin_depth as usize;
         if depth == 0 {
             return NONE;
         }
@@ -3863,8 +3863,6 @@ pub(super) struct Heap {
     retained_paths: weak_roots::RetainedPaths,
     finalizer_roots: weak_roots::RootPaths,
     cyclic_finalizers: weak_roots::CycleRetention,
-    // Callback rollback can borrow a handle without extending the object's lifetime.
-    pub(super) borrowed_hooks: Vec<Id>,
     // Shutdown and detached workers observe the original streams without keeping them alive.
     pub(super) standard_outputs: [Option<Id>; 2],
     // A dead proxy is still observable after its registry entry disappears.
@@ -3949,6 +3947,10 @@ pub(super) struct Frame {
 pub(super) struct ExecutionState {
     frames: Vec<Frame>,
     pub(super) contexts: Vec<Id>,
+    pub(super) asyncgen_hooks: [Id; 2],
+    // Rollback after an audit callback can borrow a hook without extending its lifetime.
+    pub(super) borrowed_hooks: Vec<Id>,
+    pub(super) coroutine_origin_depth: u32,
     // Native buffer acquisitions remain outstanding while their execution is parked.
     pub(super) buffer_exports: Vec<Id>,
     pub(super) pending: Option<Error>,
@@ -3984,6 +3986,7 @@ impl ExecutionState {
             .iter()
             .chain(&self.buffer_exports)
             .copied()
+            .chain(self.asyncgen_hooks)
             .chain(self.pending.iter().flat_map(Error::roots))
             .chain(
                 self.frames
@@ -4050,6 +4053,11 @@ impl Heap {
     pub(super) fn buffer_exports(&self) -> impl Iterator<Item = Id> + '_ {
         self.executions()
             .flat_map(|state| state.buffer_exports.iter().copied())
+    }
+
+    pub(super) fn borrows_asyncgen_hook(&self, hook: Id) -> bool {
+        self.executions()
+            .any(|state| state.borrowed_hooks.contains(&hook))
     }
 
     pub(super) fn context_is_entered(&self, context: Id) -> bool {
@@ -4285,7 +4293,6 @@ impl Heap {
             retained_paths: Default::default(),
             finalizer_roots: Default::default(),
             cyclic_finalizers: Default::default(),
-            borrowed_hooks: Vec::new(),
             standard_outputs: [None; 2],
             has_weak_values: false,
             collect_next_statement: false,
@@ -7785,7 +7792,10 @@ impl Heap {
         for stream in &mut self.standard_outputs {
             *stream = stream.filter(|&id| self.traces[id as usize].get() != UNMARKED);
         }
-        for id in &mut self.borrowed_hooks {
+        for id in std::iter::once(&mut self.execution)
+            .chain(self.parked_executions.iter_mut().flatten())
+            .flat_map(|state| &mut state.borrowed_hooks)
+        {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;
             }
@@ -7848,7 +7858,7 @@ mod tests {
     #[test]
     fn pending_syntax_error_traces_the_same_members_as_its_raised_instance() {
         fn assert_send<T: Send>() {}
-        assert_send::<(Vec<Frame>, Option<Error>)>();
+        assert_send::<ExecutionState>();
 
         let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let mark = ctx.heap.temporary_mark();
@@ -7896,6 +7906,55 @@ mod tests {
         assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), TRUE);
         ctx.call(reset, vec![token], vec![]).unwrap();
         assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
+    }
+
+    #[test]
+    fn parked_asyncgen_hooks_keep_their_callables_and_clear_dead_rollback_slots() {
+        let mut ctx = super::super::ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let sys = ctx.module("sys").unwrap();
+        let set = ctx.lookup_attr(sys, "set_asyncgen_hooks").unwrap();
+        let set_depth = ctx
+            .lookup_attr(sys, "set_coroutine_origin_tracking_depth")
+            .unwrap();
+        let mark = ctx.heap.temporary_mark();
+        let receiver = ctx.alloc(Value::List(Vec::new()));
+        let hook = ctx.lookup_attr(receiver, "append").unwrap();
+        let watch = ctx.heap.native_weak_reference(hook).unwrap();
+        ctx.call(set, vec![hook], vec![]).unwrap();
+        let depth = ctx.int(3);
+        ctx.call(set_depth, vec![depth], vec![]).unwrap();
+
+        // An audit callback can park with a borrowed handle to a displaced finalizer.
+        let previous = ctx.lookup_attr(receiver, "clear").unwrap();
+        ctx.heap.execution.borrowed_hooks.push(previous);
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(watch);
+
+        let slot = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        assert_eq!(ctx.heap.execution.asyncgen_hooks, [NONE; 2]);
+        assert_eq!(ctx.heap.execution.coroutine_origin_depth, 0);
+        assert!(ctx.heap.execution.borrowed_hooks.is_empty());
+        assert!(ctx.heap.borrows_asyncgen_hook(previous));
+        ctx.collect_unreachable();
+        ctx.heap.execution = ExecutionState::default();
+        ctx.heap.resume_execution(slot);
+
+        assert_eq!(ctx.heap.execution.asyncgen_hooks, [hook, NONE]);
+        assert_eq!(ctx.heap.execution.coroutine_origin_depth, 3);
+        assert_eq!(ctx.heap.execution.borrowed_hooks.pop(), Some(NONE));
+        assert_eq!(
+            ctx.heap.get(watch).weak_reference().unwrap().target,
+            Some(hook)
+        );
+        ctx.call(hook, vec![TRUE], vec![]).unwrap();
+        assert!(matches!(ctx.heap.get(receiver), Value::List(items) if items == &[TRUE]));
+        ctx.call(set, vec![NONE], vec![]).unwrap();
+        ctx.collect_unreachable();
+        assert_eq!(ctx.heap.get(watch).weak_reference().unwrap().target, None);
     }
 
     #[test]
@@ -7949,7 +8008,13 @@ mod tests {
 
         unsafe extern "C" fn return_self(raw: *mut Context, scope: Id) -> Id {
             // SAFETY: the registered entry runs with exclusive access to its bound scope.
-            unsafe { &mut *raw }.lookup(scope, "self").unwrap_or(NONE)
+            let ctx = unsafe { &mut *raw };
+            let receiver = ctx.lookup(scope, "self").unwrap();
+            let state = ctx.lookup_attr(receiver, "shared").unwrap();
+            let append = ctx.lookup_attr(state, "append").unwrap();
+            ctx.call(append, vec![ctx.heap.execution.asyncgen_hooks[0]], vec![])
+                .unwrap();
+            receiver
         }
 
         fn check_depth(ctx: &Context, depth: usize) {
@@ -7968,6 +8033,8 @@ mod tests {
         let class = ctx
             .allocate_class("Reader".into(), namespace, vec![])
             .unwrap();
+        let shared = ctx.alloc(Value::List(Vec::new()));
+        let mut expected = Vec::new();
         let mut parked = Vec::new();
         for (method, line, depth) in [("outer", 11, 1), ("inner", 23, 2)] {
             check_depth(&ctx, 0);
@@ -7988,7 +8055,10 @@ mod tests {
                 .unwrap();
             ctx.set_attr(class, method, function).unwrap();
             let receiver = ctx.instance(class, None);
+            ctx.set_attr(receiver, "shared", shared).unwrap();
             let bound = ctx.lookup_attr(receiver, method).unwrap();
+            ctx.heap.execution.asyncgen_hooks[0] = bound;
+            expected.extend(std::iter::repeat_n(bound, depth));
             let inherited = ctx.alloc(Value::Raised(Error::new("LookupError", method)));
             ctx.heap.restore_caught(inherited);
             let mut entries = Vec::new();
@@ -8029,6 +8099,7 @@ mod tests {
             }
             ctx.heap.execution = ExecutionState::default();
         }
+        assert!(matches!(ctx.heap.get(shared), Value::List(items) if items == &expected));
     }
 
     #[test]
