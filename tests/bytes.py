@@ -210,11 +210,6 @@ def main() -> None:
                 "panicked" not in result.stderr
                 and "AddressSanitizer" not in result.stderr
             ), (name, result.stderr)
-            if "recursion" in name:
-                assert "recursive calls are unsupported" in result.stderr, (
-                    name,
-                    result.stderr,
-                )
             checks += 1
     print(
         f"Passed {checks} bytes and binary-file checks ({len(rejected)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"

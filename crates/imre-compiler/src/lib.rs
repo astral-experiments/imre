@@ -1810,7 +1810,7 @@ print("result", call(b=2, a=1))
                 ),
                 (
                     "recursive.py",
-                    "1:1: Imre: cannot infer function return type; add an annotation; recursive calls remain unsupported",
+                    "1:1: Imre: cannot infer function return type; add an annotation",
                 ),
             ] {
                 let path = directory.join(file).canonicalize().unwrap();

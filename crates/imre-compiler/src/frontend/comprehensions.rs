@@ -31,7 +31,6 @@ pub(super) struct Helper {
     pub function: ir::Function,
     pub calls: HashSet<usize>,
     pub class_reads: HashSet<DefinitionId>,
-    pub recursion_error: String,
     /// Local functions and lambdas own frames; implementation helpers run in the caller.
     pub source_frame: bool,
 }
@@ -860,10 +859,6 @@ impl Checker<'_> {
                     calls: helper.calls,
                     class_reads: helper.class_reads.into_inner(),
                     source_frame: false,
-                    recursion_error: self.graph.modules[self.module].error(
-                        expression,
-                        "recursive calls are unsupported in this prototype",
-                    ),
                 },
             );
         }
@@ -1290,13 +1285,13 @@ def values() -> list[int]:
     }
 
     #[test]
-    fn helper_calls_participate_in_recursion_validation() {
+    fn recursive_comprehension_calls_share_a_stack_growth_entry() {
         let source = r#"
 def recur(count: int) -> list[int]:
     return [len(recur(item)) for item in range(count)]
 "#;
-        let diagnostic = check(source).unwrap_err();
-        assert!(diagnostic.contains("recursive calls"), "{diagnostic}");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call void @imre_on_call_stack(").count(), 1);
     }
 
     #[test]

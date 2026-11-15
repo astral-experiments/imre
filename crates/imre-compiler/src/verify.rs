@@ -854,6 +854,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: Vec::new(),
             entry: Function {
                 params: Vec::new(),

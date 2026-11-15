@@ -552,6 +552,8 @@ pub(crate) struct Module {
     pub globals: Vec<Type>,
     /// Source functions and entry in emission order. Synthetic helpers have no frame.
     pub source_frames: Vec<Option<SourceFrame>>,
+    /// Entries at which a cycle in the checked call graph can grow the native stack.
+    pub recursive_functions: std::collections::HashSet<usize>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }

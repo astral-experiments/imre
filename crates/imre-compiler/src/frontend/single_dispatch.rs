@@ -365,8 +365,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
             },
         );

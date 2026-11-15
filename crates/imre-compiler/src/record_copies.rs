@@ -385,6 +385,11 @@ impl Copies<'_> {
 
 /// Return each newly generated reader's original function for code-unit ownership.
 pub(crate) fn scalarize(module: &mut Module) -> Vec<usize> {
+    // A scalarized copy skips its Python method and constructor. Keep both calls
+    // when entering their frames can raise at the recursion limit.
+    if !module.source_frames.is_empty() {
+        return Vec::new();
+    }
     let methods: Vec<_> = module.functions.iter().map(|f| copy(f, module)).collect();
     if methods.iter().all(Option::is_none) {
         return Vec::new();
@@ -502,5 +507,14 @@ mod tests {
             2,
             "the list escape and two-use local retain their copies"
         );
+
+        let tracked = format!(
+            "{source}\ndef down(n: int) -> int:\n    return down(n - 1) if n else 1\nprint(down(2))\n"
+        );
+        let graph = crate::modules::SourceGraph::single(&tracked).unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        assert!(!module.source_frames.is_empty());
+        assert!(scalarize(&mut module).is_empty());
+        crate::verify::module(&module).unwrap();
     }
 }

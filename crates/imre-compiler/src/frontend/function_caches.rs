@@ -410,10 +410,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive indirect cache applications are unsupported",
-                ),
                 function: build_wrapper(
                     self.types,
                     &params,

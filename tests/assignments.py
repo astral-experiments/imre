@@ -10,7 +10,7 @@ from pathlib import Path
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comprehensions import BOOTSTRAP, cases, require_result, run, snapshot, write_files
+from comprehensions import BOOTSTRAP, cases, check_programs, require_result, run, snapshot, write_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "assignments"
 
@@ -60,6 +60,9 @@ REJECTED = {
     "loop_type_change": "def scale(value: int) -> float:\n    while value > 0:\n        value: float = float(value)\n    return float(value)\n",
     "captured_type_change": "def scale(value: int) -> float:\n    def read() -> int:\n        return value\n    value: float = float(value)\n    return float(read())\n",
     "shadowed_class_operand": "def test(bytes: int) -> bool:\n    return isinstance(4, bytes)\n",
+}
+
+CHECKED = {
     "recursive_comprehension": "def recurse() -> list[int]:\n    saved = 0\n    return [(saved := recurse()[0]) for index in range(0)]\n",
 }
 
@@ -107,6 +110,7 @@ def main(
     thinlto_build_timeout: int = 60,
     build_timeouts: dict[str, int] | None = None,
     require_imported: bool = False,
+    checked: dict[str, str | dict[str, str]] | None = None,
     check_rejection: Callable[[str, str], None] | None = None,
 ) -> None:
     """Run a fixture suite using the shared output, filesystem, and failure oracle."""
@@ -193,6 +197,8 @@ def main(
                 )
                 binary.unlink()
                 checks += 1
+        if checked:
+            checks += check_programs(compiler, temporary, checked)
         rejected = {name: {"main.py": source} for name, source in rejections.items()}
         rejected.update(imported_rejections)
         for name, files in rejected.items():
@@ -207,11 +213,6 @@ def main(
                 "panicked" not in result.stderr
                 and "AddressSanitizer" not in result.stderr
             ), (name, result.stderr)
-            if "recursion" in name:
-                assert "recursive calls are unsupported" in result.stderr, (
-                    name,
-                    result.stderr,
-                )
             if check_rejection is not None:
                 check_rejection(name, result.stderr)
             checks += 1
@@ -221,4 +222,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    main(checked=CHECKED)

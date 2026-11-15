@@ -382,7 +382,7 @@ impl RegisteredFrame {
     /// `context` must point to the exclusively executing Context which prepared this frame.
     /// It must stay in place on this thread until the linked entry and finalization return.
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
-        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+        crate::sys::on_call_stack(|| {
             // SAFETY: the caller owns the entered frame and keeps the linked entry loaded.
             let result = unsafe { Context::run_code_frame(context, self.entry, false) };
             // SAFETY: the entry has returned, leaving the live Context exclusively with the caller.
@@ -9773,9 +9773,7 @@ impl Context {
             self.heap.enter(local, code, owner);
             return Ok(RegisteredCall::Native(RegisteredFrame { entry, returning }));
         }
-        let result = stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            self.execute(code, local, owner)
-        });
+        let result = crate::sys::on_call_stack(|| self.execute(code, local, owner));
         self.finish_function(returning, result)
             .map(RegisteredCall::Returned)
     }

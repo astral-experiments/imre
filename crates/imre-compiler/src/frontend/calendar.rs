@@ -416,7 +416,6 @@ impl Checker<'_> {
         }
         self.graph.needs_object_runtime.set(true);
         let parser = self.builtin_callable(
-            attr,
             None,
             Builtin::Calendar(Op::FromIsoFormat),
             vec![Type::Str],

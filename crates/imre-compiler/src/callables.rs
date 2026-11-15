@@ -361,6 +361,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![function(vec![Statement::Expr(Expr {
                 ty: first,
                 kind: ExprKind::Scope {

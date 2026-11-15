@@ -31,9 +31,7 @@ struct Context<'a> {
 }
 
 /// Removes fallibility only after every operation and callee is proved safe.
-/// Starting pessimistically also leaves unexpected recursive cycles fallible;
-/// the current frontend rejects them, and its acyclic graph reaches a fixed
-/// point after at most one successful transition per function.
+/// Recursive cycles stay fallible. Each function can change to infallible at most once.
 pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     let targets = Context {
         calls: targets,
@@ -306,6 +304,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             entry: function(Vec::new()),
         };
         assert_eq!(analyze(&module).functions, [true, true, false, false]);
@@ -356,6 +355,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Return(Expr::integer(1))]),
@@ -418,6 +418,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -481,6 +482,7 @@ def integers(values: list[int]) -> int:
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Raise(None)]),

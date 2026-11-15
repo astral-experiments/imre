@@ -372,7 +372,7 @@ impl Pending {
             Diagnostic::at(
                 source,
                 function,
-                "cannot infer function return type; add an annotation; recursive calls remain unsupported".to_owned(),
+                "cannot infer function return type; add an annotation".to_owned(),
             )
         };
         Some(report.in_module(graph, module))
