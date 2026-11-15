@@ -660,6 +660,15 @@ impl Checker<'_> {
         field: &ast::ExprAttribute,
         receiver: Expr,
     ) -> Result<Expr, String> {
+        if self.placing_module_call(call)
+            && let Some(method) = self.graph.modules[self.module]
+                .registered_values()
+                .operands(self.source, self.graph.python_optimization())
+                .direct_method(call)
+        {
+            let value = method_target(method).prepare(call, receiver, |arg| self.expr(arg))?;
+            return Ok(self.expression_at(call.range(), value));
+        }
         if let Some(result) = self.discarded_call(Type::PythonObject) {
             self.check_discarded_arguments(call, 0)?;
             return Ok(result);

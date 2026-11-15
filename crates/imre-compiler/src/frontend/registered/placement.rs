@@ -28,6 +28,64 @@ mod tests {
     }
 
     #[test]
+    fn checked_file_argument_reads_the_class_installed_by_its_declaration() {
+        let text = concat!(
+            "class State(str): pass\n",
+            "def read(cls) -> str: return cls.__name__\n",
+            "print(read(State))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let (_, mut initializers) = graph.take_registered_functions();
+        let entry = initializers.remove(&graph.entry).unwrap();
+        assert!(
+            entry
+                .fixed_sites
+                .iter()
+                .any(|range| &text[*range] == "State")
+        );
+        let original = entry.function.body.as_ptr();
+        let module = &graph.modules[graph.entry];
+        let operations = HashMap::new();
+        let mut prepare =
+            SuitePreparation::new(&operations, module.registered_values().context(text), true);
+        let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
+        assert_eq!(suite.checked.function.body.as_ptr(), original);
+        assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+    }
+
+    #[test]
+    fn checked_file_calls_the_live_class_and_its_method() {
+        let text = concat!(
+            "class State(str):\n",
+            "    def read(self): return 1\n",
+            "print(State().read())\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(&entry, text).unwrap();
+        let mut graph = SourceGraph::load(&entry, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let (_, mut initializers) = graph.take_registered_functions();
+        let body = initializers.remove(&graph.entry).unwrap();
+        let written: Vec<_> = body.fixed_sites.iter().map(|range| &text[*range]).collect();
+        assert_eq!(
+            written,
+            [
+                "print(State().read())",
+                "print(State().read())",
+                "print",
+                "State().read()",
+                "State()",
+                "State",
+            ]
+        );
+    }
+
+    #[test]
     fn module_binds_the_checked_call_after_its_declarations() {
         let text = concat!(
             "import json\n",
