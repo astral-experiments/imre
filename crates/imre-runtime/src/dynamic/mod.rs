@@ -4051,7 +4051,7 @@ impl Context {
         } else {
             None
         };
-        if self.import_registry_installed {
+        let loaded = if self.import_registry_installed {
             let path = match parent {
                 Some((parent_key, parent, _)) => {
                     let path = self.parent_import_path(name, key, parent)?;
@@ -4076,19 +4076,22 @@ impl Context {
             if spec == NONE {
                 return Ok(None);
             }
-            let module = self.meta_call(source_globals, "_load_unlocked", vec![spec])?;
-            self.bind_import_child(name, source_globals, module)?;
-            return Ok(Some(module));
+            Some(self.meta_call(source_globals, "_load_unlocked", vec![spec])?)
+        } else {
+            // Bootstrap initializers and live sys.modules hooks can reenter Python.
+            stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
+                self.load_bootstrap_module(
+                    name,
+                    key,
+                    parent.map(|(_, id, child)| (id, child)),
+                    source_globals,
+                )
+            })?
+        };
+        if let (Some((parent_key, _, child)), Some(module)) = (parent, loaded) {
+            self.bind_import_child(parent_key, child, source_globals, module)?;
         }
-        // Bootstrap initializers and live sys.modules hooks can reenter Python.
-        stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, || {
-            self.load_bootstrap_module(
-                name,
-                key,
-                parent.map(|(_, id, child)| (id, child)),
-                source_globals,
-            )
-        })
+        Ok(loaded)
     }
 
     /// Import site before the entry, publishing __main__ first if a startup hook will run.
@@ -4310,31 +4313,33 @@ impl Context {
         self.heap.keep(loaded);
         let modules = self.public_modules()?;
         self.put_item(modules, key, loaded)?;
-        self.bind_import_child(name, source_globals, loaded)?;
         Ok(Some(loaded))
     }
 
-    fn bind_import_child(&mut self, name: &str, source_globals: Id, loaded: Id) -> Result<()> {
-        if let Some((parent_name, child)) = name.rsplit_once('.') {
-            let modules = self.public_modules()?;
-            let parent_key = self.text(parent_name);
-            let parent = self.get_item(modules, parent_key)?;
-            if let Err(error) = self.set_attr(parent, child, loaded) {
-                if !self.is_attribute_error(&error) {
-                    return Err(error);
-                }
-                let exception = self.raised_instance(error);
-                self.with_import_exception(exception, |ctx| {
-                    ctx.warn_child_binding(
-                        source_globals,
-                        &format!(
-                            "Cannot set an attribute on {} for child module {}",
-                            string_repr(parent_name),
-                            string_repr(child)
-                        ),
-                    )
-                })?;
+    fn bind_import_child(
+        &mut self,
+        parent_key: Id,
+        child: &str,
+        source_globals: Id,
+        loaded: Id,
+    ) -> Result<()> {
+        let modules = self.public_modules()?;
+        let parent = self.get_item(modules, parent_key)?;
+        if let Err(error) = self.set_attr(parent, child, loaded) {
+            if !self.is_attribute_error(&error) {
+                return Err(error);
             }
+            let exception = self.raised_instance(error);
+            self.with_import_exception(exception, |ctx| {
+                ctx.warn_child_binding(
+                    source_globals,
+                    &format!(
+                        "Cannot set an attribute on {} for child module {}",
+                        string_repr(ctx.str_value(parent_key)?),
+                        string_repr(child)
+                    ),
+                )
+            })?;
         }
         Ok(())
     }
