@@ -953,7 +953,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             let attribute = frame.fixed_attribute(range);
             use crate::frontend::FixedAttribute;
             let position = match attribute {
-                Some(FixedAttribute::Operation { position, .. }) => *position,
+                Some(FixedAttribute::Load(name)) => name.range.start(),
                 Some(FixedAttribute::Call(_, site)) => {
                     site.method_name_start().unwrap_or(range.start())
                 }
@@ -976,12 +976,12 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                         CheckedFrame::source_callee,
                     );
                 }
-                if let Some(FixedAttribute::Operation { operation, .. }) = attribute {
+                if let Some(FixedAttribute::Load(name)) = attribute {
                     let operands = expr
                         .attribute_operands()
-                        .expect("placed attribute has its checked operands");
+                        .expect("placed attribute operands");
                     return CheckedBody::registered(frame.reborrow())
-                        .builtin(operation, operands, expr.ty, usage);
+                        .load_attribute(operands, name, range, usage);
                 }
                 CheckedBody::registered(frame.reborrow()).emit_operation(
                     expr,
@@ -1217,6 +1217,26 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         }
     }
 
+    fn load_attribute(
+        &mut self,
+        operands: &[Expr],
+        name: &ruff_python_ast::Identifier,
+        range: TextRange,
+        usage: ValueUse,
+    ) -> CheckedValue {
+        let [receiver] = operands else {
+            unreachable!("checked attribute receiver")
+        };
+        let mark = usage.operand_mark(self.python());
+        let unwind = self.python().begin_operand_scope();
+        let receiver = self.rooted_operand(receiver);
+        let frame = self.python();
+        let value = frame.attribute_value(receiver.rooted_handle(), name, range);
+        usage.retained_operand(frame.keep_operands(&mark, &value, "0"));
+        frame.finish_operand_scope(&mark, unwind);
+        CheckedValue::handle(value)
+    }
+
     /// Placed operations and registered expressions evaluate the same checked operands.
     fn builtin(
         &mut self,
@@ -1230,19 +1250,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 action: ir::AttributeAction::Load,
                 name,
                 range,
-            } => {
-                let [receiver] = args else {
-                    unreachable!("checked attribute receiver")
-                };
-                let mark = usage.operand_mark(self.python());
-                let unwind = self.python().begin_operand_scope();
-                let receiver = self.rooted_operand(receiver);
-                let frame = self.python();
-                let value = frame.attribute_value(receiver.rooted_handle(), name, *range);
-                usage.retained_operand(frame.keep_operands(&mark, &value, "0"));
-                frame.finish_operand_scope(&mark, unwind);
-                CheckedValue::handle(value)
-            }
+            } => self.load_attribute(args, name, *range, usage),
             Builtin::ListGet(_)
             | Builtin::TupleGet
             | Builtin::TupleIndex

@@ -298,8 +298,7 @@ mod tests {
         assert_eq!(positions, ["return self.name", "self.name", "self"]);
         let attributes = body.fixed_attributes.as_ref().unwrap();
         assert!(
-            matches!(&attributes[&body.fixed_sites[1]], FixedAttribute::Operation { operation, .. }
-            if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "name"))
+            matches!(&attributes[&body.fixed_sites[1]], FixedAttribute::Load(name) if name == "name")
         );
         assert!(matches!(&body.inputs, FrameInputs::Protocol { sites }
             if matches!(sites.as_ref(), [FrameSite::Method(method)]

@@ -5831,8 +5831,7 @@ print(clean(CompletedProcess([], 0, " data ")))
         ));
         let attributes = body.fixed_attributes.as_ref().unwrap();
         assert!(attributes.values().any(|field| matches!(field,
-            FixedAttribute::Operation { operation, .. }
-            if matches!(&**operation, Builtin::RegisteredAttribute { name, .. } if name == "stdout"))));
+            FixedAttribute::Load(name) if name == "stdout")));
         assert!(attributes.values().any(|field| matches!(field,
             FixedAttribute::Call(None, site)
                 if matches!(&site.target, ir::RegisteredCallTarget::Method { name, .. } if name == "strip"))));
