@@ -250,8 +250,6 @@ pub(crate) struct Context {
     fault_file: Option<Id>,
     fault_user_files: HashMap<i32, Id>,
     exit_callbacks: Vec<Id>,
-    // The active stack roots suspended contexts while Context.run executes native code.
-    contexts: Vec<Id>,
     // A buffer export pins its bytearray's size while Python callbacks run.
     buffer_exports: Vec<Id>,
     // Container ancestors visible to a reentrant Python __repr__.
