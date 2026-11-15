@@ -2210,9 +2210,6 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn required_refusal(&self, root: RegionRoot<'_>) -> Option<PreparedRefusal> {
-        if self.declaration_refusals.is_empty() && self.literal_refusals.is_none() {
-            return None;
-        }
         self.check_required_sites(root, false).err()
     }
 
@@ -2222,8 +2219,12 @@ impl<'a> SuitePreparation<'a> {
         root: RegionRoot<'_>,
         physical: bool,
     ) -> StdResult<bool, PreparedRefusal> {
+        let has_refusals = !self.declaration_refusals.is_empty() || self.literal_refusals.is_some();
+        if !physical && !has_refusals {
+            return Ok(true);
+        }
         let mut refusal = None;
-        let mut visit = |site| {
+        let mut visit = has_refusals.then_some(|site| {
             refusal = refusal.or_else(|| match site {
                 RequiredSite::Definition(start)
                 | RequiredSite::DefinitionAfterInputs(start)
@@ -2245,7 +2246,7 @@ impl<'a> SuitePreparation<'a> {
                     .then_some(PreparedRefusal::ExecLiteral(site)),
                 _ => None,
             });
-        };
+        });
         let continues = match root {
             RegionRoot::Suite(block) => {
                 RequiredSite::visit_block(block, physical, self.literal_refusals, &mut visit)

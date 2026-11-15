@@ -64,8 +64,9 @@ impl RequiredSite {
     pub(crate) fn visit_operand(
         value: &Expr,
         literals: Option<&LiteralSites>,
-        visit: &mut impl FnMut(RequiredSite),
+        visit: &mut Option<impl FnMut(RequiredSite)>,
     ) {
+        let Some(visit) = visit else { return };
         ir::walk_operand_expressions(value, &mut |expr| {
             visit_expression_site(expr, literals, visit)
         });
@@ -77,7 +78,7 @@ impl RequiredSite {
         literals: Option<&LiteralSites>,
         visit: &mut impl FnMut(RequiredSite),
     ) -> bool {
-        Self::visit_block(statements, false, literals, visit)
+        Self::visit_block(statements, false, literals, &mut Some(visit))
     }
 
     /// A block stops emitting after a transfer. Unreachable declaration bodies must
@@ -86,7 +87,7 @@ impl RequiredSite {
         statements: &[Statement],
         physical: bool,
         literals: Option<&LiteralSites>,
-        visit: &mut impl FnMut(RequiredSite),
+        visit: &mut Option<impl FnMut(RequiredSite)>,
     ) -> bool {
         for stmt in statements {
             match stmt {
@@ -119,9 +120,11 @@ impl RequiredSite {
                     }
                 }
                 _ => {
-                    ir::walk_expressions(std::slice::from_ref(stmt), &mut |expr| {
-                        visit_expression_site(expr, literals, visit)
-                    });
+                    if let Some(visit) = visit {
+                        ir::walk_expressions(std::slice::from_ref(stmt), &mut |expr| {
+                            visit_expression_site(expr, literals, visit)
+                        });
+                    }
                     if matches!(
                         stmt,
                         Statement::Return(_)
