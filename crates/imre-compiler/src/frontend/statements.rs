@@ -337,11 +337,16 @@ impl StatementLowering for Checker<'_> {
         } else {
             let source_result = !terminates
                 && self.checked_call_contracts
-                && self.returns.builtin_scalar_name().is_some()
                 && value.ty == Type::PythonObject
-                && ret.value.as_deref().is_some_and(|expression| {
-                    self.graph.session.scalar_type(self.module, expression) == Some(self.returns)
-                });
+                && if self.returns.builtin_scalar_name().is_some() {
+                    ret.value.as_deref().is_some_and(|expression| {
+                        self.graph.session.scalar_type(self.module, expression)
+                            == Some(self.returns)
+                    })
+                } else {
+                    // The source check for this Python frame enforces its declared return.
+                    self.registered.is_some() && self.return_declaration.is_some()
+                };
             if !terminates && !source_result {
                 value = self
                     .coerce(value, self.returns, &origin)
