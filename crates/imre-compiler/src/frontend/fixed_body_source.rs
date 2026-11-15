@@ -148,6 +148,7 @@ pub(super) enum FixedNode {
     String(Box<str>),
     Positive(Type),
     Binary(Binary, Type),
+    Comparison(ast::CmpOp),
     Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
     Path(ir::PathOperation, usize, Type),
@@ -189,6 +190,7 @@ impl FixedNode {
                 ExprKind::Bytes(value) => {
                     return matches!(self, Self::Scalar(ir::Constant::Bytes(expected)) if expected == value);
                 }
+                ExprKind::Compare(..) if expr.ty != Type::PythonObject => return false,
                 ExprKind::Invoke { .. } => {
                     return if let Self::Invocation(call, ty) = self {
                         *ty == expr.ty && expr.python_call() == Some(call.as_ref())
@@ -291,6 +293,13 @@ impl FixedNode {
                 }
                 ExprKind::Unary(ast::UnaryOp::UAdd, _) => Self::Positive(expr.ty),
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Compare(ref values, ref ops)
+                    if let [op] = ops.as_slice()
+                        && ir::Compare::from_operator(*op).is_some()
+                        && ir::Compare::integer_pair(values) =>
+                {
+                    Self::Comparison(*op)
+                }
                 ExprKind::Builtin(
                     Builtin::Process(ir::ProcessOperation::Copy(op), _),
                     ref operands,
@@ -628,13 +637,14 @@ impl SourceSites {
         }
     }
 
-    /// The fixed branch converts the written local to bool. Its Python entry tests the same handle.
+    /// Keep the truth operation around the checked value that the source condition produced.
     pub(super) fn branch_test(&mut self, source: &ast::Expr, test: &Expr) {
-        if source.is_name_expr()
-            && let ExprKind::Builtin(Builtin::Bool, args) = &test.kind
+        if let ExprKind::Builtin(Builtin::Bool, args) = &test.kind
             && let [value] = args.as_slice()
-            && matches!(value.kind, ExprKind::Local(_))
-            && let Some(site) = self.statement_site(source.range())
+            && let Some(site) = self.current
+            && let Some((range, Some(original))) = self.sites.get(site.index + 1)
+            && *range == source.range()
+            && original.matches(&ir::Node::Expression(value))
         {
             let node = FixedNode::checked(&ir::Node::Expression(test));
             self.sites.insert(site.index + 1, (source.range(), node));

@@ -1316,6 +1316,11 @@ pub(crate) enum Compare {
 }
 
 impl Compare {
+    pub(crate) fn integer_pair(values: &[Expr]) -> bool {
+        matches!(values, [a, b]
+            if a.checked_operand_type() == Type::Int && b.checked_operand_type() == Type::Int)
+    }
+
     /// Object results, identity, and membership preserve Python operand semantics.
     pub(crate) fn uses_python_protocol(ty: Type, ops: &[CmpOp]) -> bool {
         ty == Type::PythonObject
