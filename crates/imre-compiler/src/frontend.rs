@@ -11002,6 +11002,21 @@ impl<'a> Checker<'a> {
                             "ModuleSpec rich comparison requires dynamic attribute protocol support",
                         ));
                     }
+                    // Equality can read lists with different element layouts in the Python frame.
+                    if ty != right
+                        && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                        && matches!(
+                            (self.types.element(ty), self.types.element(right)),
+                            (Some(Type::PythonObject), Some(_))
+                                | (Some(_), Some(Type::PythonObject))
+                        )
+                    {
+                        self.require_registered_operation(expression)?;
+                        return Ok(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Compare(values, vec![op]),
+                        });
+                    }
                     // Counters compare counts even when their key representations differ.
                     if self.types.is_counter(ty)
                         && self.types.is_counter(right)

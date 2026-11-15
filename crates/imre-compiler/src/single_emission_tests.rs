@@ -679,6 +679,29 @@ fn required_object_call_keeps_its_admission_reason() {
 }
 
 #[test]
+fn list_equality_with_python_elements_keeps_its_bool_contract() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("app.py");
+    std::fs::write(
+        &entry,
+        r#"from importlib.metadata import metadata
+
+def need(n: int) -> int:
+    return n * 2
+
+md = metadata('reporting')
+print(need(list(md)[:4] == ['nAmE']))
+"#,
+    )
+    .unwrap();
+    assert_source_diagnostic(
+        &check_file(&entry, None).unwrap_err(),
+        &entry,
+        ":7:12: Imre: expected int, got bool; annotations are enforced contracts",
+    );
+}
+
+#[test]
 fn interleaved_import_preserves_another_modules_list_contract() {
     let project = tempfile::tempdir().unwrap();
     let entry = project.path().join("app.py");
