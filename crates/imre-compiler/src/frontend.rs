@@ -13560,8 +13560,11 @@ impl<'a> Checker<'a> {
         if binding == Some(Binding::Intrinsic(Intrinsic::CheckOutput)) {
             return self.process_check_output(call);
         }
-        if let ast::Expr::Attribute(attr) = call.func.as_ref() {
-            let base = self.resolve(&attr.value);
+        let attribute = call
+            .func
+            .as_attribute_expr()
+            .map(|attr| (attr, self.resolve(&attr.value)));
+        if let Some((attr, base)) = attribute {
             if let Some(Binding::Intrinsic(
                 mapping @ (Intrinsic::Environ | Intrinsic::EnvironBytes),
             )) = base
@@ -13759,25 +13762,24 @@ impl<'a> Checker<'a> {
             }
             return self.invoke(call, callable);
         }
-        if let ast::Expr::Attribute(attribute) = &*call.func {
+        if let Some((attribute, base)) = attribute {
             if let Some(method) = ir::StrDescriptor::named(attribute.attr.as_str())
                 && matches!(&*attribute.value, ast::Expr::Name(n) if n.id == "str")
                 && !self.names.contains_key("str")
-                && self.resolve(&attribute.value).is_none()
+                && base.is_none()
             {
                 return self.invoke_descriptor(call, inspect::descriptor(method), method);
             }
-            if let Some(class) = self.class_reference(&attribute.value) {
+            if let Some(class) = self.class_reference_with_binding(&attribute.value, || base) {
                 if let Some(e) = self.exception_alias_call(call, attribute, class, None)? {
                     return Ok(e);
                 }
                 return self.class_method_call(call, attribute, class, None);
             }
-            if binding.is_none()
-                && self.resolve(&attribute.value)
-                    == Some(Binding::IntrinsicModule(
-                        crate::modules::IntrinsicModule::Threading,
-                    ))
+            if base
+                == Some(Binding::IntrinsicModule(
+                    crate::modules::IntrinsicModule::Threading,
+                ))
             {
                 return Err(error(
                     self.source,
