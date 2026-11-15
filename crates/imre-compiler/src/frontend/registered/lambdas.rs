@@ -1,7 +1,7 @@
 //! Prepare the binding expression in the enclosing scope and the return in its own frame.
 
 use super::*;
-use crate::frontend::function_scope::{CallableMetadata, FunctionScope};
+use crate::frontend::function_scope::CallableMetadata;
 
 pub(crate) struct RegisteredLambda {
     pub(crate) metadata: CallableMetadata,
@@ -23,7 +23,7 @@ impl RegisteredLambda {
     pub(super) fn prepare(
         lambda: &ast::ExprLambda,
         source: values::RegisteredSource<'_>,
-        scope: &mut FunctionScope,
+        string_annotations: bool,
         owner: RegisteredScope,
         yields: bool,
     ) -> Self {
@@ -45,7 +45,7 @@ impl RegisteredLambda {
             )
         };
         Self {
-            metadata: CallableMetadata::lambda(lambda.parameters.as_deref(), scope, yields),
+            metadata: CallableMetadata::lambda(lambda, string_annotations, yields),
             binding: std::rc::Rc::new(binding),
             body,
         }
@@ -218,7 +218,7 @@ async def factory(seed, rows, mark):
                 lambdas: Some(&sites),
                 ..source
             },
-            &mut FunctionScope::lambda(residual, false),
+            false,
             owner,
             false,
         );
@@ -255,7 +255,7 @@ async def factory(seed, rows, mark):
         let plan = RegisteredLambda::prepare(
             lambda,
             literals.context(&module.source),
-            &mut FunctionScope::lambda(lambda, false),
+            false,
             RegisteredScope::Function { is_async: true },
             false,
         );
@@ -353,13 +353,7 @@ async def factory(seed, rows, mark):
         };
         let suspended = values::Region::SuspendedOperand;
         assert!(suspended.operand(&expression, source).is_none());
-        let plan = RegisteredLambda::prepare(
-            lambda,
-            source,
-            &mut FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
-            false,
-        );
+        let plan = RegisteredLambda::prepare(lambda, source, false, RegisteredScope::Module, false);
         let sites = HashMap::from([(lambda.start(), plan)]);
         let source = values::RegisteredSource {
             lambdas: Some(&sites),
@@ -428,13 +422,7 @@ async def factory(seed, rows, mark):
             lambdas: None,
             private_names: None,
         };
-        let plan = RegisteredLambda::prepare(
-            lambda,
-            source,
-            &mut FunctionScope::lambda(lambda, false),
-            RegisteredScope::Module,
-            false,
-        );
+        let plan = RegisteredLambda::prepare(lambda, source, false, RegisteredScope::Module, false);
         let nested = values::lambda_defaults(lambda)
             .nth(1)
             .unwrap()

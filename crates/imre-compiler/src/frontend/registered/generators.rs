@@ -35,8 +35,7 @@ impl LexicalOperands {
                 }
             }
             LexicalSite::Lambda(lambda, owner, yields) => {
-                let mut scope = FunctionScope::lambda(lambda, strings);
-                let plan = RegisteredLambda::prepare(lambda, source, &mut scope, owner, yields);
+                let plan = RegisteredLambda::prepare(lambda, source, strings, owner, yields);
                 if let Some(expressions) = &mut self.expressions {
                     expressions.register_lexical(lambda.into(), std::rc::Rc::clone(&plan.binding));
                 }
