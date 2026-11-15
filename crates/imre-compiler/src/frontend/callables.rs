@@ -17,7 +17,7 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
             .any(|ty| contains_callable(ty, types))
 }
 
-fn invalid_aggregate(ty: Type, types: &Types) -> bool {
+pub(super) fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(
         ty,
         Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_) | Type::CmpKey(..)
