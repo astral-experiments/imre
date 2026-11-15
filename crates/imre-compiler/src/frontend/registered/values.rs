@@ -725,7 +725,15 @@ impl Checker<'_> {
             .operands(self.source, self.graph.python_optimization());
         let (selection, receiver) = source.call_target(call);
         let target = registered_value(receiver, source).map_or_else(|| self.expr(receiver), Ok)?;
-        Ok(self.scoped_call(bound_call(call, selection, target, operands)))
+        let value = self.scoped_call(bound_call(call, selection, target, operands));
+        if self.namespace.is_none()
+            && let Some(sites) = &mut self.fixed_sites
+            && let ExprKind::Invoke { args, .. } = &value.kind
+            && sites.has_written_arguments(call, &args.values)
+        {
+            sites.invoked(call, &value);
+        }
+        Ok(value)
     }
 
     /// Bind the Python method and check its operands in source order. A fixed

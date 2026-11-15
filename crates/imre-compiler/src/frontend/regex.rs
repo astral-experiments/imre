@@ -482,6 +482,12 @@ impl Checker<'_> {
                     Type::Bytes,
                 )
             }
+            _ if self.fixed_sites.is_some() => {
+                let operands = registered::values::call_arguments(call, |arg| self.expr(arg))?;
+                let value = self.call_import_with_operands(call, operands)?;
+                self.require_builtin_scope(name, call);
+                return Ok(value);
+            }
             _ => return Err(self.scoped_builtin_error(name, call)),
         };
         let program = pattern
