@@ -2076,13 +2076,50 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn a_rejected_set_layout_keeps_the_first_declared_return_on_its_graph() {
+        let root = tempfile::tempdir().unwrap();
+        let script = root.path().join("__main__.py");
+        let source = format!(
+            "{INFERRED_SET_GATHER}def left() -> int:\n    return 'left'\n\
+             def right() -> str:\n    return 207\nprint(gather('a'), left(), right())\n"
+        );
+        std::fs::write(&script, source).unwrap();
+        for path_entry in [false, true] {
+            let entry = if path_entry { root.path() } else { &script };
+            let options = CompileOptions {
+                module_entry: path_entry.then(|| "__main__".into()),
+                path_entry,
+                script_startup: Some((Default::default(), "imre".into())),
+                ..Default::default()
+            };
+            let mut passes = 0;
+            let error = super::object_fallback(
+                None,
+                super::ProgramEntry::File(entry, None),
+                &options,
+                Default::default(),
+                None,
+                |graph, cache, call_error| {
+                    assert!(graph.modules[graph.entry].checks_source_contracts());
+                    passes += 1;
+                    super::checked_lower_with(graph, cache, call_error)
+                },
+            )
+            .map(drop)
+            .unwrap_err();
+            assert!(error.contains("__main__.py:7:12"), "{error}");
+            assert_eq!(passes, 1);
+        }
+    }
+
+    #[test]
     fn set_layout_retry_uses_the_resolved_source() {
         use super::modules::LayoutHint;
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
         let source = format!(
-            "{INFERRED_SET_GATHER}def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n"
+            "{INFERRED_SET_GATHER}def update(items):\n    items.append(1)\n    return items\nprint(update(gather('a')))\n"
         );
         std::fs::write(&path, &source).unwrap();
         let options = CompileOptions::default();

@@ -1496,7 +1496,7 @@ impl Inference {
                         && matches!(&diagnostic, Failure::Diagnostic(report)
                             if report.kind == Kind::ReturnType && report.operand_declaration().is_some())
                     {
-                        layout_refusal = Some((body_revision, errors.len()));
+                        layout_refusal = Some(body_revision);
                     }
                     errors.push((*module, owner, diagnostic));
                 } else {
@@ -1623,7 +1623,7 @@ impl Inference {
                     Err(diagnostic) => {
                         if matches!(&diagnostic, Failure::Diagnostic(report) if report.entry_operand().is_some())
                         {
-                            layout_refusal = Some((entry_revision, errors.len()));
+                            layout_refusal = Some(entry_revision);
                         }
                         errors.push((graph.entry, None, diagnostic));
                         None
@@ -1817,7 +1817,7 @@ impl Inference {
             {
                 method_returns.clear();
                 checked_bodies.clear();
-            } else if let Some((revision, index)) = layout_refusal
+            } else if let Some(revision) = layout_refusal
                 && retries_failed_layout(graph)
                 && !graph.needs_object_runtime.get()
                 && !skipped
@@ -1825,15 +1825,10 @@ impl Inference {
                 && revision == self.revision.get()
                 && !self.unresolved()
             {
-                let (module, function, failure) = errors.swap_remove(index);
-                if function.is_none() {
-                    // The entry rejected a settled layout. Reconsider inferred returns before
-                    // placing functions, preserving their declarations and checked parameters.
-                    graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
-                    self.layout_changed();
-                } else if !graph.registered_startup {
-                    return Err(failure.terminal_in(graph, module));
-                }
+                // Reconsider inferred returns in this graph before placing functions.
+                // Declarations and checked parameters keep their existing contracts.
+                graph.layout_hint.set(crate::modules::LayoutHint::Disabled);
+                self.layout_changed();
             }
         };
         for (_, _, signature) in definitions.iter_mut() {
