@@ -6,7 +6,9 @@ pub(super) use annotations::ParameterReads;
 mod callable;
 pub(crate) use callable::{CallableMetadata, NamedFunction};
 mod class_metadata;
-pub(super) use class_metadata::{display_bindings, expression_reads, parameter_reads};
+pub(super) use class_metadata::{
+    display_bindings, expression_bindings, expression_reads, parameter_reads,
+};
 pub(crate) mod classes;
 mod type_parameters;
 

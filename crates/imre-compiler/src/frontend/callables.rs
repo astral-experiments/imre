@@ -542,7 +542,7 @@ impl Checker<'_> {
                 "lambda parameter count does not match its Callable context",
             ));
         }
-        let mut bound = narrowing::expression_assignments(&lambda.body);
+        let (reads, mut bound) = function_scope::expression_bindings(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
         let variadics = declared
             .into_iter()
@@ -561,7 +561,7 @@ impl Checker<'_> {
             })
             .collect::<Vec<_>>();
         bound.extend(variadics.iter().map(|(param, _)| param.name.to_string()));
-        let mut captures = function_scope::expression_reads(&lambda.body)
+        let mut captures = reads
             .into_iter()
             .filter(|name| !bound.contains(name))
             .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))

@@ -108,9 +108,16 @@ pub(in crate::frontend) fn display_bindings(
 
 /// Resolve free names through nested expression scopes.
 pub(in crate::frontend) fn expression_reads(expression: &ast::Expr) -> BTreeSet<String> {
+    expression_bindings(expression).0
+}
+
+/// Names read by an expression and assignment targets bound in its enclosing scope.
+pub(in crate::frontend) fn expression_bindings(
+    expression: &ast::Expr,
+) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut uses = Uses::default();
     uses.visit_expr(expression);
-    uses.reads.enclosing(None)
+    (uses.reads.enclosing(None), uses.walrus)
 }
 
 /// Reads that reach the containing function and assignment expressions that bind there.

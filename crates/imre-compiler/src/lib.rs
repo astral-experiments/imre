@@ -1522,6 +1522,17 @@ make()
         }
         std::fs::write(
             &entry,
+            "def choose(enabled: bool):
+    if enabled:
+        value = 7
+    return (lambda: ((lambda arg=(value := 12): arg)(), value))()
+print(choose(False), choose(True))
+",
+        )
+        .unwrap();
+        super::check_file(&entry, None).unwrap();
+        std::fs::write(
+            &entry,
             "def fail(): raise ValueError('header')\ndef get(callback=fail()): return callback\n",
         )
         .unwrap();
