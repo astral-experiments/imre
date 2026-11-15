@@ -3845,6 +3845,8 @@ pub(super) struct Heap {
     pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
     pub(super) execution: ExecutionState,
     parked_executions: Vec<Option<ExecutionState>>,
+    #[cfg(test)]
+    pub(super) parked_count_probe: Option<Arc<std::sync::atomic::AtomicUsize>>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
@@ -4066,6 +4068,8 @@ impl Heap {
             slots.len() - 1
         };
         slots[slot] = Some(std::mem::take(&mut self.execution));
+        #[cfg(test)]
+        self.record_parked_count();
         Ok(slot)
     }
 
@@ -4075,6 +4079,18 @@ impl Heap {
         self.execution = slots[slot].take().unwrap();
         while slots.last().is_some_and(Option::is_none) {
             slots.pop();
+        }
+        #[cfg(test)]
+        self.record_parked_count();
+    }
+
+    #[cfg(test)]
+    fn record_parked_count(&self) {
+        if let Some(count) = &self.parked_count_probe {
+            count.store(
+                self.parked_executions.iter().flatten().count(),
+                std::sync::atomic::Ordering::Release,
+            );
         }
     }
 }
@@ -4251,6 +4267,8 @@ impl Heap {
             linked_sources: HashMap::new(),
             execution: ExecutionState::new(reserved),
             parked_executions: Vec::new(),
+            #[cfg(test)]
+            parked_count_probe: None,
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
             next_collection: FIRST_DYNAMIC_SLOT + 4096,

@@ -107,14 +107,18 @@ pub(super) enum Lock {
 
 pub(super) enum NativeWait<'a> {
     Acquire(Option<Duration>, Id, &'a mut Lock),
-    Join(Option<Deadline>, &'a super::thread_worker::Handle),
+    Join(
+        Option<Deadline>,
+        &'a super::thread_worker::Handle,
+        super::thread_worker::Completion,
+    ),
 }
 
 impl NativeWait<'_> {
-    fn wait(&self, limit: Option<Duration>, phase: WaitPhase) -> bool {
+    fn wait(&self, limit: Option<Duration>, phase: WaitPhase) -> Result<bool> {
         match self {
-            Self::Acquire(_, _, lock) => lock.acquire(true, limit, phase),
-            Self::Join(_, handle) => handle.wait_for_exit(limit),
+            Self::Acquire(_, _, lock) => Ok(lock.acquire(true, limit, phase)),
+            Self::Join(_, handle, completion) => handle.wait_for_exit(limit, *completion),
         }
     }
 
@@ -129,10 +133,14 @@ impl NativeWait<'_> {
         phase: WaitPhase,
     ) -> Result<bool> {
         if limit == Some(Duration::ZERO) {
-            return Ok(self.wait(limit, phase));
+            match self {
+                Self::Acquire(..) => return self.wait(limit, phase),
+                Self::Join(_, handle, _) if handle.join_pending() => return Ok(false),
+                Self::Join(..) => {}
+            }
         }
         // SAFETY: the native wait uses its lock or join handle and never borrows the heap.
-        unsafe { super::value::ParkedExecution::wait(context, || self.wait(limit, phase)) }
+        unsafe { super::value::ParkedExecution::wait(context, || self.wait(limit, phase)) }?
     }
 
     /// # Safety
@@ -150,7 +158,7 @@ impl NativeWait<'_> {
                     ctx.heap.keep(receiver);
                     (timeout.map(Deadline::after), Some((mark, receiver)))
                 }
-                Self::Join(deadline, _) => (deadline, None),
+                Self::Join(deadline, ..) => (deadline, None),
             };
             let interval = Duration::from_millis(50);
             let mut phase = WaitPhase::Initial;
@@ -202,7 +210,7 @@ impl NativeWait<'_> {
         }
         let limit = match &self {
             Self::Acquire(timeout, ..) => *timeout,
-            Self::Join(deadline, _) => deadline.map(Deadline::remaining),
+            Self::Join(deadline, ..) => deadline.map(Deadline::remaining),
         };
         // SAFETY: the worker owns its execution until the native operation returns.
         unsafe { self.wait_parked(_context, limit, WaitPhase::Initial) }

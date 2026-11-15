@@ -89,14 +89,15 @@ pub(super) fn method(
     match name {
         "_get_ident" => Ok(ctx.int(handle.ident() as i64)),
         "is_done" => {
-            let done = handle.is_done();
+            let done = handle.is_done(ctx)?;
             if done {
                 ctx.reap_thread_operands();
             }
             Ok(builtins::boolean(done))
         }
         "_set_done" => {
-            handle.set_done()?;
+            // SAFETY: detach may contend with a join already waiting for pthread teardown.
+            unsafe { super::value::ParkedExecution::wait(ctx, move || handle.set_done()) }??;
             Ok(NONE)
         }
         _ => unreachable!("registered thread handle method"),

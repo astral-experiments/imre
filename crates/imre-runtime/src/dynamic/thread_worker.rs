@@ -54,14 +54,20 @@ pub(super) struct Join {
     deadline: Option<Deadline>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Completion {
+    Join,
+    Shutdown,
+}
+
 impl Join {
     /// # Safety
     /// The registered caller owns this context on the current thread through wait and resumption.
     #[inline(never)]
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         // SAFETY: the registered caller owns the interrupted frame through signal dispatch.
-        let result = unsafe { NativeWait::Join(self.deadline, &self.handle).run(context) }
-            .and_then(|done| self.handle.join_result(done));
+        let result =
+            unsafe { NativeWait::Join(self.deadline, &self.handle, Completion::Join).run(context) };
         // SAFETY: the native wait and any signal callback have returned to their owner.
         let ctx = unsafe { &mut *context };
         result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
@@ -159,16 +165,24 @@ impl Handle {
         self.state.lock().unwrap().worker_pending()
     }
 
-    fn running(&self) -> bool {
-        *self.state.lock().unwrap() == State::Running
+    pub(super) fn join_pending(&self) -> bool {
+        self.state.lock().unwrap().join_pending()
     }
 
-    pub(super) fn is_done(&self) -> bool {
+    fn observed_state(&self, ctx: &mut Context) -> Result<State> {
         let state = *self.state.lock().unwrap();
         if state == State::Done {
-            drop(self.joined());
+            // SAFETY: the state guard is gone. The observer may block in pthread teardown.
+            unsafe { ParkedExecution::wait(ctx, || drop(self.joined())) }?;
         }
-        matches!(state, State::Done | State::Detached)
+        Ok(state)
+    }
+
+    pub(super) fn is_done(&self, ctx: &mut Context) -> Result<bool> {
+        Ok(matches!(
+            self.observed_state(ctx)?,
+            State::Done | State::Detached
+        ))
     }
 
     pub(super) fn set_done(&self) -> Result<()> {
@@ -203,12 +217,8 @@ impl Handle {
         native
     }
 
-    fn alive(&self) -> bool {
-        if self.running() {
-            return true;
-        }
-        drop(self.joined());
-        false
+    fn alive(&self, ctx: &mut Context) -> Result<bool> {
+        Ok(self.observed_state(ctx)? == State::Running)
     }
 
     fn wait(&self, timeout: Option<Duration>, pending: fn(State) -> bool) -> bool {
@@ -225,19 +235,35 @@ impl Handle {
         !pending(*state)
     }
 
-    pub(super) fn wait_for_exit(&self, timeout: Option<Duration>) -> bool {
-        self.wait(timeout, State::join_pending)
-    }
-
     fn join(&self, timeout: Option<Duration>) -> Result<()> {
-        self.join_result(self.wait_for_exit(timeout))
+        self.wait_for_exit(timeout, Completion::Join).map(drop)
     }
 
-    fn join_result(&self, completed: bool) -> Result<()> {
-        if completed && let Some((kind, message)) = self.joined().failure.take() {
-            return Err(Error::new(kind, message));
+    // The timeout applies to exit publication. Once published, even a zero-timeout
+    // observer synchronizes with pthread teardown before returning to Python.
+    pub(super) fn wait_for_exit(
+        &self,
+        timeout: Option<Duration>,
+        completion: Completion,
+    ) -> Result<bool> {
+        if !self.wait(timeout, State::join_pending) {
+            return Ok(false);
         }
-        Ok(())
+        match completion {
+            Completion::Join => {
+                if let Some((kind, message)) = self.joined().failure.take() {
+                    return Err(Error::new(kind, message));
+                }
+            }
+            Completion::Shutdown => self.finish_shutdown(),
+        }
+        Ok(true)
+    }
+
+    fn finish_shutdown(&self) {
+        // Detach releases Python joiners, but shutdown waits for actual worker exit.
+        self.wait(None, State::worker_pending);
+        drop(self.joined());
     }
 
     pub(super) fn prepare_join(
@@ -519,10 +545,7 @@ impl Registry {
 
     fn join_non_daemon(&self) {
         for handle in self.shutdown_handles() {
-            // Explicit detach completes Python joins before the real worker exits.
-            // Non-daemon shutdown still waits for its final bootstrap references.
-            handle.wait(None, State::worker_pending);
-            drop(handle.joined());
+            handle.finish_shutdown();
         }
     }
 }
@@ -577,6 +600,26 @@ pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::Regist
 pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
     // SAFETY: preparation returned the context to the registered caller on this thread.
     unsafe { &mut *context }.reap_thread_operands();
+    // SAFETY: joins park and resume this caller before reporting signals or failures.
+    let result = unsafe { join_shutdown_handles(context) };
+    // SAFETY: the native joins and any signal handler returned to this caller.
+    let ctx = unsafe { &mut *context };
+    match result {
+        Ok(()) => ctx.reap_thread_operands(),
+        Err(error) => super::unraisable::report(
+            ctx,
+            error,
+            false,
+            None,
+            "Exception ignored while joining a thread in _thread._shutdown()",
+        ),
+    }
+    Ok(NONE)
+}
+
+/// # Safety
+/// The shutdown caller owns the context through any signal callback between waits.
+unsafe fn join_shutdown_handles(context: *mut Context) -> Result<()> {
     loop {
         // SAFETY: only this thread accesses its registry. Clone the handle so the
         // borrow ends here, before a signal handler can change the registry.
@@ -589,22 +632,7 @@ pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
         let Some(handle) = handle else { break };
         // SAFETY: the registered caller owns the context through signal dispatch.
         // Only the owned native handle crosses the wait.
-        if let Err(error) = unsafe { NativeWait::Join(None, &handle).run(context) } {
-            // SAFETY: the wait and raising handler have returned to the caller. The
-            // unraisable hook can now run with exclusive access to the same context.
-            let ctx = unsafe { &mut *context };
-            super::unraisable::report(
-                ctx,
-                error,
-                false,
-                None,
-                "Exception ignored while joining a thread in _thread._shutdown()",
-            );
-            return Ok(NONE);
-        }
-        // Detaching completes a Python join before the worker has actually exited.
-        handle.wait(None, State::worker_pending);
-        drop(handle.joined());
+        unsafe { NativeWait::Join(None, &handle, Completion::Shutdown).run(context) }?;
     }
     // Other workers may have published completion during an interruptible wait.
     // Finish their native joins, which can still block in native thread teardown.
@@ -616,12 +644,17 @@ pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
         .shutdown_handles()
         .cloned()
         .collect();
-    for handle in handles {
-        drop(handle.joined());
+    if !handles.is_empty() {
+        // SAFETY: the snapshot owns only native handles. No registry borrow crosses the joins.
+        unsafe {
+            ParkedExecution::wait(context, move || {
+                for handle in handles {
+                    drop(handle.joined());
+                }
+            })
+        }?;
     }
-    // SAFETY: the native joins returned to the registered caller on this thread.
-    unsafe { &mut *context }.reap_thread_operands();
-    Ok(NONE)
+    Ok(())
 }
 
 /// Reject new work before binding or moving its Python callback operands.
@@ -1041,7 +1074,7 @@ pub(super) fn call(
                 return Err(Error::new("TypeError", "expected a thread handle"));
             };
             let worker = Arc::clone(worker);
-            Ok(boolean(worker.alive()))
+            Ok(boolean(worker.alive(ctx)?))
         }
         ("attach_current", &[handle]) => {
             let Value::ThreadHandle(handle) = ctx.heap.get(handle) else {
