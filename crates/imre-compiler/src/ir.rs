@@ -513,13 +513,6 @@ pub(crate) enum SourceFrame {
     Module(String),
 }
 
-/// Loader identity and payload selected for one module initializer.
-pub(crate) struct ModuleRegistration<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) file: &'a std::path::Path,
-    pub(crate) loader: ModuleLoader<'a>,
-}
-
 pub(crate) enum ModuleLoader<'a> {
     Source {
         builtin: bool,

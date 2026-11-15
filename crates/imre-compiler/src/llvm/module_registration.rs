@@ -2,7 +2,7 @@
 
 use super::body::{begin_main, end_main};
 use super::registered::{ABI, Output};
-use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
+use crate::ir::{ModuleLoader, PhysicalModuleKind};
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -44,22 +44,10 @@ impl ModuleLauncher {
     }
 
     // The name and file precede every initializer's constants, including a stored error.
-    fn module_operands(&mut self, name: &str, file: &Path) -> (String, String) {
-        (
-            self.output.data(name.as_bytes()),
-            self.output.data(file.as_os_str().as_encoded_bytes()),
-        )
-    }
-
-    pub(crate) fn module_registration<'a>(
-        &mut self,
-        registration: &'a ModuleRegistration<'_>,
-    ) -> ModuleOperands<'a> {
-        let (name, file) = self.module_operands(registration.name, registration.file);
+    pub(crate) fn module_operands(&mut self, name: &str, file: &Path) -> ModuleOperands {
         ModuleOperands {
-            name,
-            file,
-            loader: &registration.loader,
+            name: self.output.data(name.as_bytes()),
+            file: self.output.data(file.as_os_str().as_encoded_bytes()),
         }
     }
 
@@ -111,7 +99,7 @@ impl ModuleLauncher {
         parse_error: bool,
         digest: Option<&[u8; 32]>,
     ) {
-        let (name, file) = self.module_operands(name, file);
+        let ModuleOperands { name, file } = self.module_operands(name, file);
         let message = self.output.data(message.as_bytes());
         let position = self.output.position(position);
         let text = self.output.data(source.as_bytes());
@@ -170,18 +158,22 @@ impl ProviderBody {
 }
 
 /// The loader payload follows the initializer's constants in each output.
-pub(crate) struct ModuleOperands<'a> {
+pub(crate) struct ModuleOperands {
     pub(crate) name: String,
     pub(crate) file: String,
-    loader: &'a ModuleLoader<'a>,
 }
 
-impl ModuleOperands<'_> {
-    pub(crate) fn write_call(&self, launcher: &mut ModuleLauncher, code: &str) {
+impl ModuleOperands {
+    pub(crate) fn write_call(
+        &self,
+        launcher: &mut ModuleLauncher,
+        loader: &ModuleLoader<'_>,
+        code: &str,
+    ) {
         let name = &self.name;
         let file = &self.file;
         let mut declared_path = String::new();
-        let ((function, parameters), data, argument) = match self.loader {
+        let ((function, parameters), data, argument) = match loader {
             ModuleLoader::Source { builtin, text } => {
                 let function = if *builtin {
                     "imre_dyn_register_builtin_source"
