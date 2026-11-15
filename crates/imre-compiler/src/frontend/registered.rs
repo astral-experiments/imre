@@ -3071,6 +3071,7 @@ pub(super) fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAtt
         action,
         name: field.attr.clone(),
         range: field.range(),
+        hint: None,
     }
 }
 

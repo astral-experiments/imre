@@ -708,6 +708,15 @@ impl Expr {
         Option<Type>,
     )> {
         match &self.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredAttribute {
+                    action: AttributeAction::Load,
+                    name,
+                    range,
+                    hint,
+                },
+                _,
+            ) => Some((*range, name.range.start(), *hint)),
             ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, hint), _) => {
                 Some((*range, *anchor, *hint))
             }
@@ -725,6 +734,15 @@ impl Expr {
         &mut self,
     ) -> Option<(ruff_text_size::TextRange, &mut Option<Type>)> {
         match &mut self.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredAttribute {
+                    action: AttributeAction::Load,
+                    range,
+                    hint,
+                    ..
+                },
+                _,
+            ) => Some((*range, hint)),
             ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) => {
                 Some((*range, hint))
             }
@@ -2545,6 +2563,7 @@ pub(crate) enum Builtin {
         action: AttributeAction,
         name: ruff_python_ast::Identifier,
         range: ruff_text_size::TextRange,
+        hint: Option<Type>,
     },
     /// In source order, each pair consumes a key and value, and each unpack one mapping.
     /// The registered frame owns these operands through dictionary construction.
