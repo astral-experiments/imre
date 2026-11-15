@@ -1,3 +1,4 @@
+import pprint
 from types import FunctionType, MethodType
 from unittest.util import safe_repr
 
@@ -32,7 +33,7 @@ class _CallList(list):
         return False
 
     def __repr__(self):
-        return _format_list([repr(value) for value in self], True)
+        return pprint.pformat(list(self))
 
 
 def _call_parts(value, size, name=""):
