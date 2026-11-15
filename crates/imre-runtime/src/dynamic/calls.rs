@@ -278,6 +278,7 @@ pub(super) enum RegisteredCall {
     Start(Box<thread_worker::Start>),
     StartDetached(super::lowlevel_threads::Start),
     Join(thread_worker::Join),
+    Observe(Arc<thread_worker::Handle>, thread_worker::Status),
     ShutdownWorkers,
     Acquire(thread_lock::Acquire),
     /// Condition.notify has already selected the waiter's bound release method.
@@ -317,6 +318,8 @@ impl RegisteredCall {
             }
             // SAFETY: the interrupted caller remains rooted in this exclusively executing context.
             Self::Join(join) => unsafe { join.run(context) },
+            // SAFETY: the registered observer owns its interrupted execution through pthread teardown.
+            Self::Observe(handle, status) => unsafe { status.wait(context, handle) },
             // SAFETY: the registered caller keeps its context live on this thread through
             // the interruptible joins and any Python signal handlers they dispatch.
             Self::ShutdownWorkers => unsafe { thread_worker::shutdown_workers(context) },
@@ -8715,6 +8718,12 @@ impl Context {
                             if args.is_empty() && kwargs.is_empty() =>
                         {
                             return Ok(RegisteredCall::ShutdownWorkers);
+                        }
+                        "_thread._ThreadHandle.is_done" => {
+                            return thread_worker::Status::IsDone.prepare(self, &args, &kwargs);
+                        }
+                        "_imre_thread.alive" => {
+                            return thread_worker::Status::Alive.prepare(self, &args, &kwargs);
                         }
                         "_thread._ThreadHandle.join" => {
                             return thread_handle::prepare_join(self, &args, &kwargs);

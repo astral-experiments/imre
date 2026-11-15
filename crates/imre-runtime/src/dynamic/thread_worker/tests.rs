@@ -1,6 +1,11 @@
 use super::*;
 use crate::dynamic::ffi;
 
+fn status(ctx: &mut Context, handle: &Arc<Handle>, query: Status) -> bool {
+    let receiver = ctx.alloc(Value::ThreadHandle(Arc::clone(handle)));
+    query.call(ctx, &[receiver], &[]).unwrap() == boolean(true)
+}
+
 fn context() -> Context {
     ffi::new_context(
         serde_json::json!({"paths": []}),
@@ -257,7 +262,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         )
         .unwrap();
         handle.join(Some(Duration::ZERO)).unwrap();
-        assert!(handle.alive(&mut ctx).unwrap());
+        assert!(status(&mut ctx, &handle, Status::Alive));
         assert!(ctx.heap.workers.entries[0].handle.awaiting_exit());
         assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 1);
         assert_eq!(ident, handle.ident());
@@ -272,8 +277,8 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     });
     handle.join(None).unwrap();
     handle.join(None).unwrap();
-    assert!(!handle.alive(&mut ctx).unwrap());
     assert!(!ctx.heap.workers.entries[0].handle.awaiting_exit());
+    assert!(!status(&mut ctx, &handle, Status::Alive));
     assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
 
@@ -564,7 +569,7 @@ fn failed_startup_release_skips_the_blocking_acquire() {
     assert_eq!(error.kind, "RuntimeError");
     assert_eq!(error.message, "RuntimeError: release unlocked lock");
     handle.join(Some(Duration::from_secs(2))).unwrap();
-    assert!(handle.is_done(&mut ctx).unwrap());
+    assert!(status(&mut ctx, &handle, Status::IsDone));
     assert!(!body.locked());
     assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
@@ -606,7 +611,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     ctx.collect_unreachable();
     assert!(matches!(ctx.heap.get(weak_owner), Value::Weak(wr) if wr.target == Some(owner)));
     assert!(matches!(ctx.heap.get(input), Value::Bytes(data) if data == b"abc"));
-    assert!(handle.alive(&mut ctx).unwrap());
+    assert!(status(&mut ctx, &handle, Status::Alive));
     assert_ne!(ident, thread_ident());
     assert!(ctx.check_thread_reporter_mutable().is_ok());
 
@@ -665,7 +670,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         )
         .unwrap();
         joined.join(Some(Duration::from_secs(5))).unwrap();
-        assert!(!joined.alive(&mut ctx).unwrap());
+        assert!(!status(&mut ctx, &joined, Status::Alive));
         ctx.reap_thread_operands();
         assert!(!ctx.heap.workers.roots().any(|&id| id == owner));
         ctx.heap.release_temporaries_since(mark);
@@ -734,12 +739,12 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
         .unwrap();
 
     handle.join(Some(Duration::ZERO)).unwrap();
-    assert!(handle.alive(&mut ctx).unwrap());
+    assert!(status(&mut ctx, &handle, Status::Alive));
     end_body.send(()).unwrap();
     at_exit.recv_timeout(timeout).unwrap();
     thread::scope(|scope| {
         let observer = Arc::clone(&handle);
-        scope.spawn(move || assert!(!observer.alive(&mut context()).unwrap()));
+        scope.spawn(move || assert!(!status(&mut context(), &observer, Status::Alive)));
         let deadline = std::time::Instant::now() + timeout;
         while handle.native.try_lock().is_ok() {
             assert!(std::time::Instant::now() < deadline);
@@ -894,8 +899,14 @@ fn registered_observers_park_through_native_tls_teardown() {
         if !shutdown {
             at_exit.recv_timeout(timeout).unwrap();
         }
+        let call = ctx.prepare_call(callable, args.into(), vec![]).unwrap();
+        assert!(
+            matches!(observation.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "{name} joined the native thread during preparation"
+        );
+        // SAFETY: preparation has returned and the observing caller is still active.
         assert_eq!(
-            ctx.call(callable, args, vec![]).unwrap(),
+            unsafe { call.run(&raw mut ctx) }.unwrap(),
             expected,
             "{name}"
         );
@@ -954,7 +965,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
     let owner = ctx.instance(object, None);
     let handle = Arc::<Handle>::default();
     assert_eq!(handle.ident(), 0);
-    assert!(!handle.is_done(&mut ctx).unwrap());
+    assert!(!status(&mut ctx, &handle, Status::IsDone));
     assert!(handle.set_done().is_err());
     let active = while_lock_held(|gate| {
         let (ident, _) = launch(
@@ -974,7 +985,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         let receiver = ctx.alloc(Value::ThreadHandle(handle.clone()));
         let join = ctx.lookup_attr(receiver, "join").unwrap();
         assert_eq!(ctx.call(join, vec![], vec![]).unwrap(), NONE);
-        assert!(handle.is_done(&mut ctx).unwrap());
+        assert!(status(&mut ctx, &handle, Status::IsDone));
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();
         assert_eq!(ctx.heap.workers.entries.len(), 1);
@@ -997,6 +1008,6 @@ fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
     assert!(handle.native.lock().unwrap().thread.is_some());
     handle.set_done().unwrap();
     assert!(handle.native.lock().unwrap().thread.is_none());
-    assert!(handle.is_done(&mut ctx).unwrap());
+    assert!(status(&mut ctx, &handle, Status::IsDone));
     handle.join(None).unwrap();
 }

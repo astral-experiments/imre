@@ -1,5 +1,6 @@
 //! Native worker startup and creator-heap ownership for joinable and detached calls.
 
+use super::calls::RegisteredCall;
 use super::thread_callback::Callback;
 use super::thread_lock::NativeWait;
 use super::value::{Heap, ParkedExecution};
@@ -73,6 +74,85 @@ impl Join {
         result.map_err(|error| super::stdlib::io::qualify_error(ctx, error, None))?;
         ctx.reap_thread_operands();
         Ok(NONE)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum Status {
+    IsDone,
+    Alive,
+}
+
+impl Status {
+    fn result(self, ctx: &mut Context, state: State) -> Id {
+        match self {
+            Self::IsDone => {
+                let done = matches!(state, State::Done | State::Detached);
+                if done {
+                    ctx.reap_thread_operands();
+                }
+                boolean(done)
+            }
+            Self::Alive => boolean(state == State::Running),
+        }
+    }
+
+    pub(super) fn prepare(
+        self,
+        ctx: &mut Context,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<RegisteredCall> {
+        let receiver = match self {
+            Self::IsDone => super::builtins::noargs_method_receiver(
+                ctx,
+                super::thread_handle::CLASS,
+                "is_done",
+                args,
+                kwargs,
+            )?,
+            Self::Alive => {
+                if !kwargs.is_empty() {
+                    return Err(Error::new(
+                        "TypeError",
+                        "alive() takes no keyword arguments",
+                    ));
+                }
+                ctx.reap_thread_operands();
+                let &[receiver] = args else {
+                    return Err(Error::new("TypeError", "invalid arguments for alive()"));
+                };
+                receiver
+            }
+        };
+        let Value::ThreadHandle(handle) = ctx.heap.get(receiver) else {
+            return Err(Error::new("TypeError", "expected a thread handle"));
+        };
+        let state = *handle.state.lock().unwrap();
+        if state == State::Done {
+            return Ok(RegisteredCall::Observe(Arc::clone(handle), self));
+        }
+        Ok(RegisteredCall::Returned(self.result(ctx, state)))
+    }
+
+    /// # Safety
+    /// The caller owns the observing execution through native teardown and resumption.
+    pub(super) unsafe fn wait(self, context: *mut Context, handle: Arc<Handle>) -> Result<Id> {
+        // SAFETY: the OS join touches only the selected native handle and leaves its failure for join().
+        unsafe { ParkedExecution::wait(context, move || drop(handle.joined())) }?;
+        // SAFETY: the observer is active again and may now release its creator-side roots.
+        Ok(self.result(unsafe { &mut *context }, State::Done))
+    }
+
+    pub(super) fn call(
+        self,
+        ctx: &mut Context,
+        args: &[Id],
+        kwargs: &[(String, Id)],
+    ) -> Result<Id> {
+        let call = self.prepare(ctx, args, kwargs)?;
+        // SAFETY: direct runtime callers execute synchronously in the context that prepared the observation.
+        unsafe { call.run(ctx) }
     }
 }
 
@@ -169,22 +249,6 @@ impl Handle {
         self.state.lock().unwrap().join_pending()
     }
 
-    fn observed_state(&self, ctx: &mut Context) -> Result<State> {
-        let state = *self.state.lock().unwrap();
-        if state == State::Done {
-            // SAFETY: the state guard is gone. The observer may block in pthread teardown.
-            unsafe { ParkedExecution::wait(ctx, || drop(self.joined())) }?;
-        }
-        Ok(state)
-    }
-
-    pub(super) fn is_done(&self, ctx: &mut Context) -> Result<bool> {
-        Ok(matches!(
-            self.observed_state(ctx)?,
-            State::Done | State::Detached
-        ))
-    }
-
     pub(super) fn set_done(&self) -> Result<()> {
         let mut native = self.native.lock().unwrap();
         let mut state = self.state.lock().unwrap();
@@ -215,10 +279,6 @@ impl Handle {
             };
         }
         native
-    }
-
-    fn alive(&self, ctx: &mut Context) -> Result<bool> {
-        Ok(self.observed_state(ctx)? == State::Running)
     }
 
     fn wait(&self, timeout: Option<Duration>, pending: fn(State) -> bool) -> bool {
@@ -1067,6 +1127,9 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "alive" {
+        return Status::Alive.call(ctx, args, kwargs);
+    }
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -1076,13 +1139,6 @@ pub(super) fn call(
     ctx.reap_thread_operands();
     match (name, args) {
         ("join", [_, _]) => super::thread_handle::method(ctx, "join", args, kwargs),
-        ("alive", &[handle]) => {
-            let Value::ThreadHandle(worker) = ctx.heap.get(handle) else {
-                return Err(Error::new("TypeError", "expected a thread handle"));
-            };
-            let worker = Arc::clone(worker);
-            Ok(boolean(worker.alive(ctx)?))
-        }
         ("attach_current", &[handle]) => {
             let Value::ThreadHandle(handle) = ctx.heap.get(handle) else {
                 return Err(Error::new("TypeError", "expected a thread handle"));
