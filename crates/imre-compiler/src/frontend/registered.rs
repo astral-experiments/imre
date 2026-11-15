@@ -874,7 +874,7 @@ pub(super) fn capture(
             Ok(body) => (body, HashMap::new()),
             Err(attributes) => (None, attributes),
         };
-        let placed = if method.is_some() && !checked {
+        let placed = if prepared.is_some() || method.is_some() && !checked {
             let body = prepared.or_else(|| {
                 let mut fixed = checker();
                 fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
