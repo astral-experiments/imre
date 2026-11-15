@@ -1737,6 +1737,7 @@ fn lower_graph(
                     {
                         // Earlier native callees can supply their checked operands to the
                         // Python frame selected by this caller.
+                        let caller = signature.id;
                         for id in checked.calls {
                             let Some((module, callee, signature)) = definitions.get(id) else {
                                 continue;
@@ -1755,15 +1756,21 @@ fn lower_graph(
                             }
                             let mut checker = checker_for(*module);
                             checker.nonreturning_functions = &completed_calls;
-                            if let Ok(Some((_, frame))) = registered::prepare_checked_definition(
-                                &checker,
-                                callee,
-                                signature,
-                                inference,
-                                Some(inputs),
-                                false,
-                            ) {
-                                frame.retain_for_launch(graph, &inference.source_checks, false);
+                            if let Ok(Some((checked, frame))) =
+                                registered::prepare_checked_definition(
+                                    &checker,
+                                    callee,
+                                    signature,
+                                    inference,
+                                    Some(inputs),
+                                    false,
+                                )
+                            {
+                                frame.retain_for_launch(
+                                    graph,
+                                    &inference.source_checks,
+                                    id < caller && checked.calls.is_empty(),
+                                );
                             }
                         }
                     }
