@@ -981,7 +981,8 @@ pub(super) fn capture(
             Some(PreparedBody::Python(frame)) => (None, HashMap::new(), Some(frame)),
             None => (None, HashMap::new(), None),
         };
-        let placed = if prepared.is_some() || method.is_some() && !checked {
+        let check_method = method.is_some() && !checked && attributes.is_empty();
+        let placed = if prepared.is_some() || check_method {
             let body = prepared.or_else(|| {
                 let mut fixed = checker();
                 fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));

@@ -1604,7 +1604,7 @@ fn lower_graph(
         checker.python_method_frame =
             checker.placement_only && signature.method.is_some() && signature.physical_frame;
         let mut attributes = HashMap::new();
-        if signature.method.is_none()
+        if (signature.method.is_none() || checker.python_method_frame)
             && prepare_sites
             && checker.fixed_sites.is_some()
             && cache.is_none()
@@ -1687,7 +1687,15 @@ fn lower_graph(
             }
             lower_body(checker, definition, signature)
         };
+        // Recovery can reuse a method's checked operands when its body lost native
+        // placement under the same call facts, without a Python fallback.
         if !attributes.is_empty()
+            && (signature.method.is_none()
+                || result.as_ref().is_ok_and(|(body, _)| body.source.is_none())
+                    && completed_calls.len() == classes.nonreturning_functions.len()
+                    && !graph.needs_object_runtime.get()
+                    && !graph.has_object_constructor_fallback.get()
+                    && graph.deferred_object_error.borrow().is_none())
             && let Some(prepared) = pending_capture.borrow_mut().as_mut()
         {
             prepared.insert(signature.id, PreparedBody::Attributes(attributes));
