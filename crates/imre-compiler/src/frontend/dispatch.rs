@@ -117,6 +117,20 @@ impl Checker<'_> {
                     .iter()
                     .all(|(_, expr)| self.types.join(expr.ty, ty) == Some(ty))
         });
+        let union_result = union_result.or_else(|| {
+            // A checked Python call contributes its result contract without a fixed slot.
+            // Concrete overrides must still agree with each other on their result layout.
+            let homogeneous = |unrepresented| {
+                let mut types = alternatives.iter().filter_map(|(_, expr)| {
+                    (matches!(expr.kind, ExprKind::Builtin(Builtin::UnrepresentedCall, _))
+                        == unrepresented)
+                        .then_some(expr.ty)
+                });
+                let ty = types.next()?;
+                types.all(|other| other == ty).then_some(ty)
+            };
+            self.types.join(homogeneous(true)?, homogeneous(false)?)
+        });
         let Some((_, mut value)) = alternatives.pop() else {
             return Err(error(
                 self.source,
