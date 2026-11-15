@@ -15721,16 +15721,6 @@ impl<'a> Checker<'a> {
                 });
             }
         }
-        if name == "print" && args.len() == 1 && args[0].ty == Type::ObjectValue {
-            let text = Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Str, args),
-            };
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::Print, vec![text]),
-            });
-        }
         if cfg!(unix)
             && let [value] = args.as_slice()
             && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
@@ -16071,7 +16061,8 @@ impl<'a> Checker<'a> {
                         scalar(arg.ty)
                             || matches!(
                                 arg.ty,
-                                Type::Exception
+                                Type::ObjectValue
+                                    | Type::Exception
                                     | Type::NamedException(_)
                                     | Type::ImportException
                                     | Type::TimeoutExpired
