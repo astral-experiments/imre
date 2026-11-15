@@ -2802,7 +2802,6 @@ pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
             |ctx| {
                 let values = live_handles(values, positional + keywords);
                 let (args, named) = values.split_at(positional);
-                let args = copy_ids(args)?;
                 let mut kwargs = Vec::new();
                 kwargs
                     .try_reserve_exact(keywords)

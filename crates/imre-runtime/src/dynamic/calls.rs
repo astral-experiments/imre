@@ -254,7 +254,10 @@ fn non_callable_error(name: &str) -> Error {
     Error::new_static("TypeError", message)
 }
 
-fn method_arguments(receiver: Id, mut args: Vec<Id>) -> Result<Vec<Id>> {
+fn method_arguments(receiver: Id, args: Cow<'_, [Id]>) -> Result<Vec<Id>> {
+    let Cow::Owned(mut args) = args else {
+        return concat_ids(&[receiver], &args);
+    };
     args.try_reserve_exact(1)
         .map_err(|_| Error::new("MemoryError", ""))?;
     args.insert(0, receiver);
@@ -8420,7 +8423,7 @@ impl Context {
                     receiver,
                     ..
                 } => {
-                    args = method_arguments(receiver, owned_ids(args)?)?.into();
+                    args = method_arguments(receiver, args)?.into();
                     callable = target;
                 }
                 Value::StaticMethod {
