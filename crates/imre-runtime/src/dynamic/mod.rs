@@ -2108,6 +2108,18 @@ impl Context {
         self.collect_garbage();
     }
 
+    /// Consume the iterable completely, keeping its items alive across Python callbacks.
+    fn collect_iterable_items(&mut self, source: Id) -> Result<Vec<Id>> {
+        let iterator = self.iterator(source)?;
+        self.heap.keep(iterator);
+        let mut items = Vec::new();
+        while let Some(item) = self.next_item(iterator)? {
+            self.heap.keep(item);
+            items.push(item);
+        }
+        Ok(items)
+    }
+
     /// Keep the completed snapshot or exception, releasing iterator temporaries
     /// before the caller can invoke another Python callback.
     fn collect_iterable(&mut self, source: Id, tuple: bool) -> Result<Id> {
