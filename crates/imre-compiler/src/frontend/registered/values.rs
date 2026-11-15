@@ -297,7 +297,7 @@ fn argument_layout(args: &ast::Arguments, expanded: bool) -> ir::RegisteredArgum
     }
 }
 
-fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
+pub(in crate::frontend) fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
     if args.keywords.is_empty() {
         ir::RegisteredArguments::Positional
     } else {
