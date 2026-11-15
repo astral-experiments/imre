@@ -20,21 +20,27 @@ impl FixedBodySource {
         if self.local_names.len() != function.locals.len() {
             return Err(self.attributes);
         }
-        let mut remaining = Some(self.sites.as_slice());
-        ir::walk_nodes(&function.body, &mut |node, _| {
+        let mut sites = self.sites.into_iter();
+        let mut fixed_sites = Vec::with_capacity(sites.len());
+        let complete = ir::all_nodes(&function.body, &mut |node, _| {
             if !node.has_fixed_site() {
-                return;
+                return true;
             }
-            remaining = remaining.and_then(|sites| {
-                let ((_, expected), rest) = sites.split_first()?;
-                expected.as_ref()?.matches(&node).then_some(rest)
-            });
+            let Some((range, Some(expected))) = sites.next() else {
+                return false;
+            };
+            if !expected.matches(&node) {
+                return false;
+            }
+            fixed_sites.push(range);
+            true
         });
-        if !matches!(remaining, Some([])) {
+        if !complete || sites.len() != 0 {
             return Err(self.attributes);
         }
+        drop(sites);
         let mut frame = RegisteredFunction {
-            fixed_sites: self.sites.into_iter().map(|(range, _)| range).collect(),
+            fixed_sites: fixed_sites.into_boxed_slice(),
             inputs: match self.method {
                 Some(method) => FrameInputs::Protocol {
                     sites: Box::new([FrameSite::Method(method)]),
@@ -111,7 +117,7 @@ impl FixedNode {
         Self::Indexed(std::mem::discriminant(kind), index, ty)
     }
 
-    /// Borrow the checked spelling when a source literal is placed on its final instruction.
+    /// Compare owned payloads against the final instruction without copying them.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
         if let ir::Node::Expression(expr) = node {
             match &expr.kind {
@@ -120,6 +126,10 @@ impl FixedNode {
                 }
                 ExprKind::Bytes(value) => {
                     return matches!(self, Self::Scalar(ir::Constant::Bytes(expected)) if expected == value);
+                }
+                ExprKind::Invoke { .. } => {
+                    return matches!(self, Self::Invocation(call, ty)
+                        if *ty == expr.ty && expr.python_call() == Some(call.as_ref()));
                 }
                 _ => {}
             }
