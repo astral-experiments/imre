@@ -632,7 +632,7 @@ fn object_fallback(
                 matches!(
                     kind,
                     LoweringKind::ReturnType | LoweringKind::DeclaredArgument
-                ) || g.imports_struct_decorator()
+                ) || g.modules.iter().any(|module| !module.value_structs.is_empty())
             }))
     {
         return fallback(checked_graph);
@@ -1426,6 +1426,46 @@ mod tests {
         );
         assert_eq!(result, Err("invalid second"));
         assert!(output.compilation.units.is_empty());
+    }
+
+    #[test]
+    fn an_unused_struct_import_allows_registered_code() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("main.py");
+        std::fs::write(
+            &entry,
+            "from imre import struct as layout\nimport email.errors\nprint(73)\n",
+        )
+        .unwrap();
+        super::check_file(&entry, None).unwrap();
+    }
+
+    #[test]
+    fn nested_struct_decorators_follow_their_lexical_binding() {
+        let root = tempfile::tempdir().unwrap();
+        let entry = root.path().join("main.py");
+        let source = r#"from imre import struct
+def make():
+    @struct
+    class Point:
+        x: float
+    return Point
+class Label(str):
+    pass
+make()
+"#;
+        std::fs::write(&entry, source).unwrap();
+        let error = super::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("main.py:7:13: Imre: str subclasses requires object lowering"),
+            "{error}"
+        );
+        std::fs::write(
+            &entry,
+            source.replace("def make():", "def make(struct=lambda cls: cls):"),
+        )
+        .unwrap();
+        super::check_file(&entry, None).unwrap();
     }
 
     #[test]

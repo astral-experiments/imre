@@ -2158,6 +2158,61 @@ impl Session {
             })
     }
 
+    /// Return the class sites whose decorator uses a selected module binding.
+    pub(crate) fn classes_with_module_decorator(
+        &self,
+        module: usize,
+        parsed: &ParsedModuleRef,
+        selected: impl Fn(&Expr) -> bool,
+    ) -> std::collections::HashSet<TextSize> {
+        use ty_python_core::scope::{NodeWithScopeKind, ScopeKind};
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        let applies = |decorator: &ruff_python_ast::Decorator| {
+            let target = match &decorator.expression {
+                Expr::Call(call) => &*call.func,
+                expression => expression,
+            };
+            if !selected(target) {
+                return false;
+            }
+            let mut root = target;
+            while let Expr::Attribute(attribute) = root {
+                root = &attribute.value;
+            }
+            let Some(name) = root.as_name_expr() else {
+                return false;
+            };
+            let scope = index.expression_scope_id(root);
+            let table = index.place_table(scope);
+            let Some(symbol) = table.symbol_id(name.id.as_str()) else {
+                return false;
+            };
+            index.symbol_resolves_to_global_scope(symbol, scope)
+                || index.scope(scope).kind() == ScopeKind::Class
+                    && table.symbol(symbol).is_local()
+                    && index.try_expression_use_id(root.into()).is_some_and(|use_id| {
+                        index.use_def_map(scope).bindings_at_use(use_id).any(|binding| {
+                            binding.binding.definition().is_none()
+                        })
+                    })
+        };
+        index
+            .scope_ids()
+            .filter_map(|scope| {
+                let NodeWithScopeKind::Class(class) = scope.node(&self.db) else {
+                    return None;
+                };
+                let class = class.node(parsed);
+                class
+                    .decorator_list
+                    .iter()
+                    .any(applies)
+                    .then_some(class.start())
+            })
+            .collect()
+    }
+
     /// Only an assignment through an explicit global can replace the module's binding.
     pub(crate) fn nested_global_writes(
         &self,
