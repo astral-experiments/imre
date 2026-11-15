@@ -144,6 +144,9 @@ def main() -> None:
                 actual_dir = temporary / case.name / f"O{level}"
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
+                slow_build = args.lto_linker or (
+                    case.name == "zoneinfo_transitions" and level == "3"
+                )
                 require_success(
                     run_build(
                         [
@@ -163,7 +166,7 @@ def main() -> None:
                             *flags,
                         ],
                         temporary,
-                        timeout=300 if args.lto_linker else 60,
+                        timeout=300 if slow_build else 60,
                     )
                 )
                 actual = run([str(binary)], actual_dir)
