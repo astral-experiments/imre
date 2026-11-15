@@ -2466,7 +2466,7 @@ pub(crate) enum Builtin {
     /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
     RegisteredAttribute {
         action: AttributeAction,
-        name: String,
+        name: ruff_python_ast::Identifier,
         range: ruff_text_size::TextRange,
     },
     /// In source order, each pair consumes a key and value, and each unpack one mapping.

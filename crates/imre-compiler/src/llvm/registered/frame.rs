@@ -39,19 +39,18 @@ impl<'a> SourcePositions<'a> {
         self
     }
 
-    /// CPython counts back from the end of a continued method name by the number
+    /// CPython counts back from the end of a continued attribute name by the number
     /// of Unicode characters in its normalized, unmangled spelling. It omits
     /// the columns when this width would cross the start of the line.
-    pub(in crate::llvm) fn method_ranges(
+    fn attribute_range(
         &self,
         attribute: TextRange,
         name_start: TextSize,
         binding: &str,
-        call: TextRange,
-    ) -> Option<(TextRange, TextRange)> {
+    ) -> Option<TextRange> {
         let (_, column) = self.line_and_column(attribute.end());
         if usize::from(attribute.len()) <= column {
-            return Some((attribute, call));
+            return Some(attribute);
         }
         let name = self
             .names
@@ -61,10 +60,23 @@ impl<'a> SourcePositions<'a> {
             return None;
         }
         let start = attribute.end() - TextSize::new(width as u32);
-        Some((
-            TextRange::new(start, attribute.end()),
-            TextRange::new(start, call.end()),
-        ))
+        Some(TextRange::new(start, attribute.end()))
+    }
+
+    pub(in crate::llvm) fn method_ranges(
+        &self,
+        attribute: TextRange,
+        name_start: TextSize,
+        binding: &str,
+        call: TextRange,
+    ) -> Option<(TextRange, TextRange)> {
+        let lookup = self.attribute_range(attribute, name_start, binding)?;
+        let call = if lookup == attribute {
+            call
+        } else {
+            TextRange::new(lookup.start(), call.end())
+        };
+        Some((lookup, call))
     }
 }
 
@@ -1644,30 +1656,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         result
     }
 
-    fn store_attribute(
-        &mut self,
-        name: &str,
-        range: ruff_text_size::TextRange,
-        rhs: &Expr,
-        receiver: impl FnOnce(&mut Self) -> String,
-    ) {
-        let value = self.evaluate_handle(rhs);
-        let write = |code: &mut Self| {
-            let receiver = receiver(code);
-            code.write_attribute(&receiver, name, range, Some(&value));
-        };
-        // A permanent RHS adds no roots. The enclosing mutation already unwinds the receiver.
-        if permanent_handle(rhs).is_some() {
-            write(self);
-        } else {
-            let mark = self.temporary_mark();
-            self.unwind_operands(&mark, |code| {
-                write(code);
-                code.discard_truth(&mark);
-            });
-        }
-    }
-
     fn unwind_with<T>(
         &mut self,
         release: impl FnOnce(&mut RegisteredFrame<'a, 'p>),
@@ -1887,17 +1875,15 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         let (action, range) = (*action, *range);
         let first = operands.next().expect("attribute operand");
         let mark = self.temporary_mark();
-        self.unwind_operands(&mark, |code| {
-            match action {
+        self.unwind_stack_operands(&mark, |code| {
+            let (receiver, value) = match action {
                 AttributeAction::Store => {
-                    code.store_attribute(name, range, first, |code| {
-                        code.evaluate_handle(operands.next().expect("attribute receiver"))
-                    });
+                    let value = code.evaluate_handle(first);
+                    let receiver =
+                        code.evaluate_handle(operands.next().expect("attribute receiver"));
+                    (receiver, Some(value))
                 }
-                AttributeAction::Delete => {
-                    let receiver = code.evaluate_handle(first);
-                    code.write_attribute(&receiver, name, range, None);
-                }
+                AttributeAction::Delete => (code.evaluate_handle(first), None),
                 AttributeAction::InPlace(op) => {
                     let receiver = code.evaluate_handle(first);
                     let right_mark = code.temporary_mark();
@@ -1905,20 +1891,16 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
                         let left = code.attribute_value(&receiver, name, range);
                         let right = code.evaluate_handle(operands.next().expect("in-place RHS"));
                         let value = code.inplace(op, &left, &right);
-                        // The binary operation consumed both operands before STORE_ATTR.
                         code.keep_operands(&right_mark, &value, "0");
                         value
                     });
                     // STORE_ATTR consumes its receiver before the value being stored.
-                    let receiver_mark = code.keep_operands(&mark, &value, &receiver);
-                    code.unwind_operands(&receiver_mark, |code| {
-                        code.write_attribute(&receiver, name, range, Some(&value));
-                        code.discard_truth(&receiver_mark);
-                    });
+                    code.keep_operands(&mark, &value, &receiver);
+                    (receiver, Some(value))
                 }
-                AttributeAction::Load => unreachable!(),
-            }
-            code.discard_truth(&mark);
+                AttributeAction::Load => unreachable!("attribute mutation"),
+            };
+            code.write_attribute(&receiver, name, range, value.as_deref(), &mark);
         });
         if action == AttributeAction::Store {
             self.release_target();
@@ -2066,18 +2048,34 @@ impl RegisteredFrame<'_, '_> {
         self.attr(receiver, name)
     }
 
-    pub(crate) fn write_attribute(
+    fn write_attribute(
         &mut self,
         receiver: &str,
-        name: &str,
-        range: ruff_text_size::TextRange,
+        name: &ruff_python_ast::Identifier,
+        range: TextRange,
         value: Option<&str>,
-    ) -> String {
-        self.attribute_position(range);
-        match value {
-            Some(value) => self.named_op("setattr", receiver, name, value),
-            None => self.named_op("delattr", receiver, name, "0"),
-        }
+        mark: &str,
+    ) {
+        let span = self
+            .positions
+            .attribute_range(range, name.range.start(), name)
+            .map_or_else(
+                || {
+                    let line = self.positions.line(range.end());
+                    [line, line, u32::MAX as usize, u32::MAX as usize]
+                },
+                |site| self.call_position_span(site),
+            );
+        let position = self.output.position(Some(span));
+        self.output.intern_identifier(name);
+        let bytes = self.output.data(name.as_bytes());
+        self.take_matching_check();
+        self.line(&format!(
+            "call void @imre_dyn_mutate_attribute_at(ptr %ctx, i64 {receiver}, ptr {bytes}, i64 {}, i1 {}, ptr {position}, i64 {mark})",
+            value.unwrap_or("0"),
+            value.is_none(),
+        ));
+        self.check_error();
     }
 
     /// Resolve the descriptor before evaluating the call arguments. A direct target

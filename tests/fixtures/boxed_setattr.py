@@ -52,3 +52,17 @@ def current():
             write(*args)
         except (TypeError, AttributeError) as e:
             print(e.args)
+
+    import traceback
+
+    try:
+        raise ValueError("caught before the store")
+    except ValueError:
+        pass
+    try:
+        (
+            obj
+        ).blocked = 1
+    except LookupError as error:
+        writer = traceback.extract_tb(error.__traceback__)[0]
+        print(writer.lineno, writer.end_lineno, writer.colno, writer.end_colno)

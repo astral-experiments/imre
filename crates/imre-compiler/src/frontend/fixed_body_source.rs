@@ -203,9 +203,7 @@ impl FixedNode {
                         range,
                     },
                     ref operands,
-                ) if operands.len() == 1 => {
-                    Self::Name(ruff_python_ast::name::Name::new(name), Some(range), expr.ty)
-                }
+                ) if operands.len() == 1 => Self::Name(name.id.clone(), Some(range), expr.ty),
                 ExprKind::Invoke { .. } => {
                     Self::Invocation(Box::new(expr.python_call()?.clone()), expr.ty)
                 }

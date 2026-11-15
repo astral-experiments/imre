@@ -3031,7 +3031,7 @@ pub(super) fn attribute_statement(
 pub(super) fn attribute_opcode(action: ir::AttributeAction, field: &ast::ExprAttribute) -> Builtin {
     Builtin::RegisteredAttribute {
         action,
-        name: field.attr.to_string(),
+        name: field.attr.clone(),
         range: field.range(),
     }
 }

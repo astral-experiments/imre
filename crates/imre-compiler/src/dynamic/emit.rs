@@ -7429,7 +7429,11 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
             let mut output = Output::default();
             let file = output.data(b"remove.py");
             prepared.emit(&mut output, 0, &file).unwrap();
-            for op in ["delname", "delattr", "delitem"] {
+            assert!(output.functions.lines().any(|line| {
+                line.contains("call void @imre_dyn_mutate_attribute_at(")
+                    && line.contains("i1 true,")
+            }));
+            for op in ["delname", "delitem"] {
                 let symbol = output.strings.get_index_of(op.as_bytes()).unwrap();
                 assert!(
                     output.functions.contains(&format!("ptr @str{symbol},")),
