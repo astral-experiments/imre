@@ -16,6 +16,7 @@ pub(crate) enum Kind {
     MissingFormatter(DefinitionId),
     UnsupportedRepresentation,
     FrameSuspension,
+    InferredMethodReceiver(usize),
     UnresolvedLayout(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
     RegisteredExecution,

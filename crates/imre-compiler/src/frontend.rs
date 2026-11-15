@@ -14832,8 +14832,21 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                return Err(error(
-                    self.source,
+                let kind = match receiver.kind {
+                    ExprKind::Local(slot)
+                        if self.inference.is_some()
+                            && !self.declared_slots.contains_key(&slot)
+                            && self
+                                .graph
+                                .session
+                                .is_dynamic_receiver(self.module, &attribute.value) =>
+                    {
+                        Kind::InferredMethodReceiver(slot)
+                    }
+                    _ => Kind::Ordinary,
+                };
+                return Err(self.classified_error(
+                    kind,
                     call,
                     "supported value methods are typed-list append/pop, dict.get, set.add/discard, and str.split()",
                 ));

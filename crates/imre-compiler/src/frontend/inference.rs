@@ -1368,6 +1368,18 @@ impl Inference {
                 }
                 let mut result = checker.finish_region(result);
                 if let Err(diagnostic) = &mut result {
+                    if let Failure::Diagnostic(report) = diagnostic
+                        && let Kind::InferredMethodReceiver(index) = report.kind
+                        && physical
+                        && let Some(parameter) = signature.params.get(index)
+                        && checker.names.get(&parameter.name) == Some(&index)
+                        && self.pending.borrow()[signature.id].inferred_params[index]
+                        && self.parameter(signature.id, index) != Some(Type::PythonObject)
+                    {
+                        // This incoming layout cannot supply the live method of the bound parameter.
+                        self.widen_parameter(signature.id, index, Type::PythonObject);
+                        continue;
+                    }
                     // A completed return check can still require Python operations. Only the
                     // registered frame may own that body, after its ordinary source check.
                     if checked_return
@@ -2174,6 +2186,23 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_late_bound_method_keeps_the_other_parameter_contract() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "def invoke(receiver, n: int): return receiver.render(n)\n",
+            "class Reader:\n    def render(self, n: int) -> int: return n\n",
+            "try: invoke(0, 1)\nexcept AttributeError: pass\n",
+            "print(invoke(Reader(), 2))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        crate::check_file(&file, None).unwrap();
+        std::fs::write(&file, source.replace("Reader(), 2", "Reader(), 'bad'")).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
 
     #[test]
     fn an_imported_native_leaf_keeps_its_settled_return() {
