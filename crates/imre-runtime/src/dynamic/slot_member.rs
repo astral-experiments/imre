@@ -585,6 +585,11 @@ impl Context {
         Ok(class)
     }
 
+    /// A date subtype keeps its native calendar payload separate from its Python instance slots.
+    pub(super) fn is_date_allocation_base(&self, base: Id) -> bool {
+        self.builtins.get("datetime.date") == Some(&base)
+    }
+
     /// Extension types need their physical layout modeled before accepting a dynamic subtype.
     pub(super) fn check_namespace_layouts(&self, bases: &[Id]) -> Result<()> {
         for &base in bases {
@@ -593,6 +598,7 @@ impl Context {
                 Value::Native(name) if super::builtins::is_exception(name) => bases.len() == 1,
                 Value::Native(name) => {
                     super::builtins::is_exported_type(name)
+                        || self.is_date_allocation_base(owner)
                         || matches!(
                             name.as_str(),
                             "module"
