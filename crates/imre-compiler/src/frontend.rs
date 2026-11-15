@@ -10620,6 +10620,16 @@ impl<'a> Checker<'a> {
                         (Type::Str, Builtin::StringTupleContains)
                     } else if self.types.element(receiver.ty) == Some(Type::Str) {
                         (Type::Str, Builtin::StringListContains)
+                    } else if self.placement_only
+                        && self.types.element(receiver.ty).is_some_and(|element| {
+                            key.ty == Type::PythonObject || element == Type::PythonObject
+                        })
+                    {
+                        return Ok(registered::values::comparison(
+                            compare,
+                            vec![key, receiver],
+                            None,
+                        ));
                     } else if receiver.ty == Type::PythonObject {
                         return Err(self.scoped_builtin_error("membership", expression));
                     } else {
