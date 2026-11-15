@@ -210,12 +210,23 @@ impl NativeWait<'_> {
 }
 
 impl Lock {
-    fn backing(ctx: &Context, receiver: Id) -> Self {
-        match ctx.heap.get(receiver) {
-            Value::PrimitiveLock(lock) => Self::Primitive(Arc::clone(lock)),
-            Value::HandlerLock(lock) => Self::Reentrant(Arc::clone(lock)),
-            _ => unreachable!("lock receiver checked before conversion"),
+    pub(super) fn from_value(value: &Value) -> Option<Self> {
+        match value {
+            Value::PrimitiveLock(lock) => Some(Self::Primitive(Arc::clone(lock))),
+            Value::HandlerLock(lock) => Some(Self::Reentrant(Arc::clone(lock))),
+            _ => None,
         }
+    }
+
+    pub(super) fn into_value(self) -> Value {
+        match self {
+            Self::Primitive(lock) => Value::PrimitiveLock(lock),
+            Self::Reentrant(lock) => Value::HandlerLock(lock),
+        }
+    }
+
+    fn backing(ctx: &Context, receiver: Id) -> Self {
+        Self::from_value(ctx.heap.get(receiver)).expect("registered lock receiver")
     }
 
     fn acquire(&self, blocking: bool, timeout: Option<Duration>, phase: WaitPhase) -> bool {
