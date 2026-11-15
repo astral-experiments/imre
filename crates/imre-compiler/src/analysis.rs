@@ -262,18 +262,21 @@ pub(crate) struct IndexedFileInput {
 }
 
 impl<'session> OperandTypes<'session> {
-    /// Class scopes can mangle names. Type parameter scopes can diagnose duplicate bindings.
-    pub(crate) fn has_name_scopes(self) -> bool {
+    /// Type parameter scopes need binding checks even when no private name can be mangled.
+    pub(crate) fn needs_name_lowering(self, source: &str) -> bool {
         use ty_python_core::scope::ScopeKind;
         let db = &self.session.db;
         let index =
             ty_python_core::semantic_index(db, db.program_file(self.session.files[self.module]));
-        index.scope_ids().any(|id| {
-            matches!(
-                index.scope(id.file_scope_id(db)).kind(),
-                ScopeKind::Class | ScopeKind::TypeParams
-            )
-        })
+        // Non-ASCII identifiers can normalize to a name starting with two underscores.
+        let may_mangle = std::cell::LazyCell::new(|| source.contains("__") || !source.is_ascii());
+        index
+            .scope_ids()
+            .any(|id| match index.scope(id.file_scope_id(db)).kind() {
+                ScopeKind::TypeParams => true,
+                ScopeKind::Class => *may_mangle,
+                _ => false,
+            })
     }
 
     pub(crate) fn indexed_input(self, parsed: &ParsedModuleRef) -> IndexedFileInput {

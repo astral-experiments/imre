@@ -836,7 +836,7 @@ fn imports_from_body(
         Cow::Borrowed(suite) if getter.is_none() => Some(*suite),
         _ => None,
     };
-    let names = if checked.is_some_and(|types| !types.has_name_scopes()) {
+    let names = if checked.is_some_and(|types| !types.needs_name_lowering(normalized)) {
         let mut names = imre_ast::Names::default();
         names.string_annotations = string_annotations;
         names
