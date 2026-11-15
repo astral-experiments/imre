@@ -636,13 +636,37 @@ impl Checker<'_> {
     pub(super) fn extend_list(
         &mut self,
         receiver: Expr,
-        source: &ast::Expr,
-        node: &impl Ranged,
+        method: &ast::ExprAttribute,
+        node: &ast::ExprCall,
         append: Builtin,
     ) -> Result<Expr, String> {
         self.keep_module_list_layout(&receiver);
+        let source = &node.arguments.args[0];
         let element = self.types.element(receiver.ty).unwrap();
-        let mut input = self.expansion_input(source, Some(element))?;
+        let mut input = match self.expansion_source(source, Some(element))? {
+            ExpansionSource::Value(value)
+            | ExpansionSource::Iteration(Iteration::Container {
+                iterable: value,
+                items: false,
+                start: None,
+            }) if self.checked_call_contracts
+                && (value.ty == receiver.ty || value.ty == Type::PythonObject)
+                && matches!(append, Builtin::Append) =>
+            {
+                self.frame_arguments = FrameArguments::Python;
+                let value = self.graph.modules[self.module]
+                    .registered_values()
+                    .operands(self.source, self.graph.python_optimization())
+                    .located(source, value);
+                return Ok(registered::values::bound_call(
+                    node,
+                    registered::values::method_target(method),
+                    receiver,
+                    vec![value],
+                ));
+            }
+            input => input.into_iteration(self, source)?,
+        };
         if let Iteration::Container {
             mut iterable,
             items: false,

@@ -14896,13 +14896,25 @@ impl<'a> Checker<'a> {
                 Builtin::Append
             };
             if attribute.attr.as_str() == "extend" && call.arguments.args.len() == 1 {
-                return self.extend_list(receiver, &call.arguments.args[0], call, append);
+                return self.extend_list(receiver, attribute, call, append);
             }
             let declaration = self.value_declaration(&receiver);
             let mut args = Vec::new();
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     let arg = &call.arguments.args[0];
+                    let live = self.checked_call_contracts && matches!(append, Builtin::Append);
+                    let coerce_item =
+                        |checker: &Self, value: Expr, expected: Type, site: &ast::Expr| {
+                            if live
+                                && value.ty == Type::PythonObject
+                                && value.checked_operand_type() == expected
+                            {
+                                Ok(value)
+                            } else {
+                                checker.coerce(value, expected, site)
+                            }
+                        };
                     let value = if let Some(inference) = self.inference
                         && let Some(ValueSource::InferredList(owner)) = self.value_source(&receiver)
                     {
@@ -14917,7 +14929,7 @@ impl<'a> Checker<'a> {
                                 {
                                     inference.layout_changed();
                                 }
-                                checker.coerce(value, expected, site)
+                                coerce_item(checker, value, expected, site)
                             },
                             declaration,
                         )?
@@ -14937,7 +14949,7 @@ impl<'a> Checker<'a> {
                         }
                         self.coerce(value, element, arg)?
                     } else {
-                        match self.expr_expected_from(arg, element, declaration) {
+                        match self.expr_in_context(arg, element, |_, _| false, coerce_item, declaration) {
                             Err(Failure::Diagnostic(report))
                                 if let Some(owner) = declaration
                                     && owner.module == self.module
