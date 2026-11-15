@@ -9691,7 +9691,7 @@ impl<'a> Checker<'a> {
                 // including its particular closure and its Python identity.
                 let failure = self.scoped_builtin_error("a local function value", expression);
                 if self.missing_operation(&failure) {
-                    return Ok(registered::values::name_binding(name.id.clone()));
+                    return Ok(Expr::unrepresented());
                 }
                 return Err(failure);
             }
