@@ -15746,15 +15746,6 @@ impl<'a> Checker<'a> {
                 );
             }
             "type"
-                if let [exception] = args.as_slice()
-                    && matches!(exception.ty, Type::Exception | Type::NamedException(_))
-                    && self.unshadowed_builtin(&call.func, name)
-                    && registered::values::fixed_positional_arguments(call) =>
-            {
-                // A handler can catch a subclass of its declared exception.
-                return Ok(self.registered_builtin_call(call, name, args));
-            }
-            "type"
                 if args.len() == 1
                     && args[0].ty == Type::Hash
                     && self.unshadowed_builtin(&call.func, "type") =>
@@ -15950,9 +15941,10 @@ impl<'a> Checker<'a> {
                 || imre_ast::providers::BUILTIN_TYPES.contains(&name))
                 && self.unshadowed_builtin(&call.func, name)
                 && registered::values::fixed_positional_arguments(call)
-                && args
-                    .iter()
-                    .any(|value| self.types.stores_python_object(value.ty)) =>
+                && ((name == "type" && args.len() == 1)
+                    || args
+                        .iter()
+                        .any(|value| self.types.stores_python_object(value.ty))) =>
             {
                 return Ok(self.registered_builtin_call(call, name, args));
             }

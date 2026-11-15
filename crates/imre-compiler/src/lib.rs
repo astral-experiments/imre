@@ -2758,7 +2758,7 @@ def present_after_exhaustion(value: int | None) -> int:
         let path = directory.path().join("main.py");
         std::fs::write(
             &path,
-            "try:\n    int('bad')\nexcept ValueError as error:\n    cls = type(error)\n    print(cls is ValueError, cls.__name__)\n",
+            "try:\n    int('bad')\nexcept ValueError as error:\n    cls = type(error)\n    print(cls is ValueError, cls.__name__)\n    print(type(error.__cause__).__name__)\n",
         )
         .unwrap();
         super::IncrementalCompiler::default()
