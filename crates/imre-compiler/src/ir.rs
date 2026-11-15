@@ -739,6 +739,22 @@ impl Expr {
             .unwrap_or(self.ty)
     }
 
+    /// A direct coroutine captures its bound arguments in a private tuple.
+    pub(crate) fn coroutine_arguments(&self) -> Option<&[Expr]> {
+        let ExprKind::Builtin(Builtin::Process(ProcessOperation::Coroutine { .. }, _), args) =
+            &self.kind
+        else {
+            return None;
+        };
+        let [frame] = args.as_slice() else {
+            return None;
+        };
+        match &frame.kind {
+            ExprKind::Tuple(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
     /// Written operands available to a direct named call. A module read has no call site.
     pub(crate) fn named_call_arguments(&self) -> Option<&[Expr]> {
         match &self.kind {

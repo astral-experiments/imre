@@ -1224,7 +1224,7 @@ mod tests {
             std::fs::write(&path, &program).unwrap();
             crate::check(&program).unwrap();
             crate::check_file(&path, None).unwrap();
-            if callback == "factory" {
+            if callback != "cold" {
                 let caller = dir.path().join("main.py");
                 std::fs::write(
                     &caller,
@@ -1238,17 +1238,27 @@ mod tests {
                     .iter()
                     .position(|module| module.name == "callbacks")
                     .unwrap();
-                let start =
-                    ruff_text_size::TextSize::try_from(program.find("async def cold").unwrap())
-                        .unwrap();
                 let (functions, _) = imported.take_registered_functions();
-                let body = &functions[&id][&start];
-                let sites: Vec<_> = body
-                    .fixed_sites
-                    .iter()
-                    .map(|&site| &program[site])
-                    .collect();
-                assert_eq!(sites, ["return x", "x"]);
+                let body = |declaration| {
+                    let start =
+                        ruff_text_size::TextSize::try_from(program.find(declaration).unwrap())
+                            .unwrap();
+                    &functions[&id][&start]
+                };
+                let sites = |declaration| {
+                    body(declaration)
+                        .fixed_sites
+                        .iter()
+                        .map(|&site| &program[site])
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(sites("async def cold"), ["return x", "x"]);
+                assert_eq!(sites("def factory"), ["return cold(x)", "cold(x)", "x"]);
+                let factory = body("def factory");
+                assert!(matches!(factory.fixed_attribute(factory.fixed_sites[1]),
+                    Some(crate::frontend::FixedAttribute::Call(Some(callee), _))
+                    if matches!(&callee.without_location().kind,
+                        ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "cold")));
             }
         }
         let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");

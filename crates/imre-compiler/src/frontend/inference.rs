@@ -1525,7 +1525,7 @@ impl Inference {
                         // A written global callee will be looked up again by the Python frame.
                         && source.as_ref().map_or(!signature.physical_frame, |source| {
                             source.attributes.values().all(|attribute| match attribute {
-                                FixedAttribute::Load(_) | FixedAttribute::Store(_) => true,
+                                FixedAttribute::Load(_) | FixedAttribute::Store(_) | FixedAttribute::UnhighlightedCall(_) => true,
                                 FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
                                     ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
                                 FixedAttribute::CallValue(_) | FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
