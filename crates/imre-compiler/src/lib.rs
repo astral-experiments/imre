@@ -2548,7 +2548,7 @@ def twice(value: int) -> int:
     return 2 * value
 
 cursor = map(twice, [1, 2], strict=True)
-print(next(cursor))
+print(next(cursor), bytes(cursor))
 "#;
         let mut compiler = super::IncrementalCompiler::default();
         std::fs::write(&path, source).unwrap();

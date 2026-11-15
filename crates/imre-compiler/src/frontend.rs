@@ -15184,6 +15184,9 @@ impl<'a> Checker<'a> {
                 value.ty,
                 Type::Int | Type::ListInt | Type::Bytes | Type::ByteArray
             ) {
+                if value.ty == Type::PythonObject {
+                    return Ok(self.registered_builtin_call(call, name, vec![value]));
+                }
                 return Err(error(
                     self.source,
                     call,
