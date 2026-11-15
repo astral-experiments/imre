@@ -842,9 +842,25 @@ impl Checker<'_> {
                 &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
             ));
         }
-        let python_frame = self.inference.is_none() && self.unrepresented.borrow().is_some();
+        let capture = match captures.as_slice() {
+            [slot] if materialize && !signature.asynchronous && stable_callbacks.contains(slot) => {
+                Some(*slot)
+            }
+            _ => None,
+        };
+        let bound_capture = capture.is_some()
+            && !self.graph.registered_startup
+            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled;
+        let captured_method = !bound_capture
+            && capture
+                .and_then(|slot| self.narrowed.get(&slot))
+                .and_then(|&ty| self.saved_method(ty))
+                .is_some_and(|(method, _)| !method.asynchronous);
+        let python_frame =
+            self.inference.is_none() && (self.unrepresented.borrow().is_some() || captured_method);
         let first_helper = self.helpers.len();
         if python_frame {
+            helper.checked_call_contracts = captured_method;
             helper.registered = Some(self.graph.modules[self.module].registered_values());
             helper.registered_local_start = Some(signature.params.len());
             for &slot in &params {
@@ -880,13 +896,6 @@ impl Checker<'_> {
             ));
         }
         helper.finish_region(Ok(()))?;
-        // Native bound adapters take their context first. The source arguments
-        // keep their evaluation order at direct calls to the same lifted body.
-        let bound_capture = materialize
-            && !self.graph.registered_startup
-            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled
-            && !signature.asynchronous
-            && matches!(captures.as_slice(), [slot] if stable_callbacks.contains(slot));
         if python_frame && let Some(statements) = body.take() {
             // The Python binder installs only source parameters. Captured names use the
             // original closure cells each time the checked body reads or assigns them.

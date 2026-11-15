@@ -172,7 +172,14 @@ impl Signature {
     }
 }
 
-impl Checker<'_> {
+impl<'a> Checker<'a> {
+    /// A saved method keeps the source signature that originally bound its receiver.
+    pub(super) fn saved_method(&self, ty: Type) -> Option<(&'a Signature, Option<Type>)> {
+        let (class, index, receiver) = self.types.source_method_site(ty)?;
+        let method = &self.classes.declarations.definitions[class].methods[index];
+        Some((&self.classes.methods[class][method.name.as_str()], receiver))
+    }
+
     /// Give a native method a positional signature and capture its receiver when present.
     pub(super) fn builtin_callable(
         &mut self,
@@ -767,9 +774,7 @@ impl Checker<'_> {
         if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
             return Ok(result);
         }
-        if let Some((class, index, receiver)) = self.types.source_method_site(callable.ty) {
-            let method = &self.classes.declarations.definitions[class].methods[index];
-            let signature = &self.classes.methods[class][method.name.as_str()];
+        if let Some((signature, receiver)) = self.saved_method(callable.ty) {
             // A required positional instance call already has its receiver-bound ABI.
             let bind_declaration = receiver.is_none_or(|ty| ty == Type::BuiltinClass)
                 || !call.arguments.keywords.is_empty()

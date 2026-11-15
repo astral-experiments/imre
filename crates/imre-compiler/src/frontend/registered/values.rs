@@ -1512,14 +1512,31 @@ impl Checker<'_> {
             }
             return Ok(Some(source.located(node, value)));
         }
-        if let ast::Expr::Call(call) = node
-            && let Some(name) = call.func.as_name_expr()
-            && let Some(&slot) = self.names.get(name.id.as_str())
-            && self.locals[slot] != Type::PythonObject
-        {
-            // The fixed call checker binds the positional signature and result type.
-            return Ok(None);
-        }
+        let declaration = match node.as_call_expr() {
+            Some(call)
+                if let Some(name) = call.func.as_name_expr()
+                    && let Some(&slot) = self.names.get(name.id.as_str()) =>
+            {
+                if self.locals[slot] != Type::PythonObject {
+                    // The fixed call checker binds the positional signature and result type.
+                    return Ok(None);
+                }
+                self.narrowed
+                    .get(&slot)
+                    .filter(|_| self.checked_call_contracts && self.inference.is_none())
+                    .and_then(|&ty| self.saved_method(ty))
+                    .filter(|(method, _)| !method.asynchronous)
+                    .map(|(method, receiver)| (Some(method), usize::from(receiver.is_some()), None))
+            }
+            Some(call)
+                if self.checked_call_contracts
+                    && let Some(Binding::Definition(id)) = self.resolve(&call.func)
+                    && !self.classes.declarations.ids.contains_key(&id) =>
+            {
+                Some((self.functions.get(&id), 0, Some(id)))
+            }
+            _ => None,
+        };
         if let ast::Expr::Named(named) = node {
             let value = self.named_expression(named, None)?;
             return Ok(Some(source.located(node, value)));
@@ -1561,18 +1578,16 @@ impl Checker<'_> {
             }
             return Ok(Some(source.located_operation(node, value)));
         }
-        if self.checked_call_contracts
+        if let Some((signature, skip, definition)) = declaration
             && let ast::Expr::Call(call) = node
-            && let Some(Binding::Definition(id)) = self.resolve(&call.func)
-            && !self.classes.declarations.ids.contains_key(&id)
         {
             let refused = || self.scoped_builtin_error("declared Python call", call);
-            let signature = self.functions.get(&id).ok_or_else(refused)?;
+            let signature = signature.ok_or_else(refused)?;
             if !call.func.is_name_expr() {
                 return Err(refused());
             }
-            let indices =
-                calls::checked_parameter_indices(call, &signature.params).ok_or_else(refused)?;
+            let indices = calls::checked_parameter_indices(call, &signature.params[skip..])
+                .ok_or_else(refused)?;
             let target = self.expr(&call.func)?;
             // A live Python argument can satisfy an inferred layout only at dispatch.
             // Forward it unchanged and leave the result untyped on that edge.
@@ -1580,7 +1595,7 @@ impl Checker<'_> {
             // Positional calls use their written order. Keyword calls already have a slot per operand.
             let mut indices = indices.into_iter().chain(0..call.arguments.len());
             let value = callable_target(call).prepare(call, target, |arg| {
-                let index = indices.next().expect("checked parameter for each argument");
+                let index = skip + indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
                 let actual = value.checked_operand_type();
@@ -1592,9 +1607,10 @@ impl Checker<'_> {
                     if actual != Type::PythonObject {
                         return Err(error.expected_from(declaration, arg.range()));
                     }
-                    let contract = declaration
-                        .filter(|decl| decl.module == id.module && expected == parameter.ty)
-                        .and_then(|decl| {
+                    let contract = definition
+                        .zip(declaration)
+                        .filter(|(id, decl)| decl.module == id.module && expected == parameter.ty)
+                        .and_then(|(id, decl)| {
                             self.graph
                                 .session
                                 .operand_types(self.module)
@@ -1617,11 +1633,14 @@ impl Checker<'_> {
                 Ok(value)
             })?;
             let mut located = source.located_operation(node, self.scoped_call(value));
-            if fixed_result
+            let fixed_result = fixed_result
                 && !signature.asynchronous
-                && !self.classes.generators.contains(&signature.id)
-                && let Some((_, hint)) = located.source_hint_mut()
-            {
+                && !self.classes.generators.contains(&signature.id);
+            if definition.is_none() {
+                if fixed_result {
+                    located.ty = signature.returns;
+                }
+            } else if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
                 *hint = Some(self.enter_source_call(call, signature)?);
             } else {
                 self.calls.insert(signature.id);
