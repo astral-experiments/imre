@@ -29,8 +29,19 @@ def current():
             events.append("bomb")
             raise ValueError("compared")
 
+    class Row(tuple):
+        pass
+
     match = Match()
     bomb = Bomb()
+    assert contains(Row(("only",)), (Row((match,)),))
+    assert events == ["only", "truth"]
+    events.clear()
+    assert not contains(("first", "extra"), ((match,),))
+    assert events == ["first", "truth"]
+    events.clear()
+    assert not contains(["first", "extra"], ([match],))
+    assert events == []
     assert contains("present", ("absent", match, bomb))
     assert events == ["present", "truth"]
     assert contains("early", ("early", bomb)) and events == ["present", "truth"]
