@@ -48,22 +48,36 @@ pub struct ClassCells {
 
 impl ClassCells {
     pub fn of(body: &[ast::Stmt], string_annotations: bool) -> Self {
-        Self::with_method_cells(body, string_annotations, None)
+        Self::in_body(body, string_annotations, None)
     }
 
-    /// Collect methods that close over the class while resolving the class's own cells.
-    pub fn with_method_cells(
+    /// Report completed nested classes while collecting the methods that capture each class.
+    pub fn collect(
         body: &[ast::Stmt],
         string_annotations: bool,
-        methods: Option<&mut HashSet<TextSize>>,
+        methods: &mut HashSet<TextSize>,
+        nested: &mut dyn FnMut(&ast::StmtClassDef, ClassCells),
+    ) -> Self {
+        let definitions = Definitions { methods, nested };
+        Self::in_body(body, string_annotations, Some(definitions))
+    }
+
+    fn in_body(
+        body: &[ast::Stmt],
+        string_annotations: bool,
+        definitions: Option<Definitions<'_>>,
     ) -> Self {
         let mut scope = Scope {
-            methods,
+            definitions,
             class: true,
             string_annotations,
             ..Scope::default()
         };
         scope.visit_body(body);
+        Self::from_scope(&scope)
+    }
+
+    fn from_scope(scope: &Scope<'_>) -> Self {
         let needed = scope.nested | (scope.annotation & (!scope.shadows | scope.nonlocal));
         Self {
             class: needed & CLASS != 0,
@@ -109,9 +123,14 @@ fn function_scope(
     }
 }
 
+struct Definitions<'s> {
+    methods: &'s mut HashSet<TextSize>,
+    nested: &'s mut dyn FnMut(&ast::StmtClassDef, ClassCells),
+}
+
 #[derive(Default)]
 struct Scope<'s> {
-    methods: Option<&'s mut HashSet<TextSize>>,
+    definitions: Option<Definitions<'s>>,
     class: bool,
     string_annotations: bool,
     shadows: u8,
@@ -130,6 +149,13 @@ impl Scope<'_> {
             ..Self::default()
         }
     }
+    fn visit_declaration(&mut self, mut child: Self, body: &[ast::Stmt]) -> Self {
+        child.definitions = self.definitions.take();
+        child.visit_body(body);
+        self.definitions = child.definitions.take();
+        child
+    }
+
     fn free(&self) -> u8 {
         let reads = if self.class {
             self.direct
@@ -182,12 +208,12 @@ impl<'a> Visitor<'a> for Scope<'_> {
                 }
                 let mut method = self.child();
                 method.shadows = cells(f.parameters.iter().map(|arg| arg.name().as_str()));
-                method.visit_body(&f.body);
-                let free = method.free();
-                if free & CLASS != 0
-                    && let Some(methods) = &mut self.methods
+                let free = self.visit_declaration(method, &f.body).free();
+                if self.class
+                    && free & CLASS != 0
+                    && let Some(defs) = &mut self.definitions
                 {
-                    methods.insert(f.start());
+                    defs.methods.insert(f.start());
                 }
                 for default in f
                     .parameters
@@ -216,16 +242,19 @@ impl<'a> Visitor<'a> for Scope<'_> {
                 }
                 let mut inner = self.child();
                 inner.class = true;
-                inner.visit_body(&c.body);
+                let cells = ClassCells::from_scope(&self.visit_declaration(inner, &c.body));
                 let mut generic = c.type_params.as_deref().map(|p| self.type_params(p));
                 let parent = generic.as_mut().unwrap_or(self);
                 if let Some(args) = &c.arguments {
                     parent.visit_arguments(args);
                 }
                 // The inner class's methods capture it. Its body can capture the outer class.
-                parent.nested |= inner.free();
+                parent.nested |= cells.enclosing;
                 if let Some(generic) = generic {
                     self.add_annotation(generic);
+                }
+                if let Some(defs) = &mut self.definitions {
+                    (defs.nested)(c, cells);
                 }
             }
             ast::Stmt::AnnAssign(a) => {
