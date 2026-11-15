@@ -603,7 +603,9 @@ pub(super) fn prepare_checked_definition(
         &values,
     );
     checker.nonreturning_functions = original.nonreturning_functions;
-    checker.infer_python_call_result = infer_result;
+    if infer_result {
+        checker.python_result_tail = definition.body.last().map(Ranged::start);
+    }
     checker.checked_call_contracts = true;
     checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;
@@ -894,9 +896,11 @@ pub(super) fn capture(
         let checked = matches!(source, Capture::Solved(Some(ids)) if ids.contains(&slot));
         // A revision can invalidate a physical method's last check. Check its settled
         // signature before trying the registered return convention.
-        let (prepared, mut attributes) = match prepared.transpose() {
-            Ok(body) => (body, HashMap::new()),
-            Err(attributes) => (None, attributes),
+        let (prepared, mut attributes, lexical) = match prepared {
+            Some(PreparedBody::Fixed(body)) => (Some(body), HashMap::new(), None),
+            Some(PreparedBody::Attributes(attributes)) => (None, attributes, None),
+            Some(PreparedBody::Python(frame)) => (None, HashMap::new(), Some(frame)),
+            None => (None, HashMap::new(), None),
         };
         let placed = if prepared.is_some() || method.is_some() && !checked {
             let body = prepared.or_else(|| {
@@ -922,6 +926,14 @@ pub(super) fn capture(
             None
         };
         let body = placed.or_else(|| {
+            // No parameters distinguish the two binders here. Keep the original return
+            // when the selected caller needs neither fixed attributes nor callback coercion.
+            if !checked
+                && signature.params.is_empty()
+                && let Some(frame) = lexical
+            {
+                return Some(frame.frame);
+            }
             let mut signature = signature.clone();
             signature.returns = Type::PythonObject;
             let mut checker = checker();

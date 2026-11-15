@@ -1240,6 +1240,7 @@ impl Inference {
                     )?
                     .map(|(_, placement)| placement.place(graph, &self.source_checks)))
                 };
+                let mut lexical = None;
                 let mut placement = (physical
                     && function.is_async
                     && signature.method.is_none()
@@ -1268,7 +1269,14 @@ impl Inference {
                         .map(|placed| {
                             placed
                                 .filter(|(body, _)| body.calls.is_empty() && !body.cannot_return)
-                                .map(|(_, placement)| placement.place(graph, &self.source_checks))
+                                .and_then(|(body, placement)| {
+                                    if body.python_call_result {
+                                        Some(placement.place(graph, &self.source_checks))
+                                    } else {
+                                        lexical = Some(placement);
+                                        None
+                                    }
+                                })
                         }),
                     );
                 }
@@ -1405,6 +1413,15 @@ impl Inference {
                         false
                     };
                 }
+                if result.is_ok()
+                    && let Some(frame) = lexical
+                    && revision == body_revision + 1
+                    && self.pending.borrow()[signature.id].returns.is_some()
+                {
+                    // Only publishing this definition's return advanced inference. A later
+                    // signature or nonreturning change discards it with the other prepared bodies.
+                    method_returns.insert(signature.id, PreparedBody::Python(frame));
+                }
                 if retained {
                     suspended_bodies.insert(signature.id);
                     checked_bodies.insert(signature.id);
@@ -1452,7 +1469,10 @@ impl Inference {
                             && let Some(sites) = checker.settled_attributes.take()
                             && !sites.is_empty()
                         {
-                            method_returns.insert(signature.id, Err(std::mem::take(sites)));
+                            method_returns.insert(
+                                signature.id,
+                                PreparedBody::Attributes(std::mem::take(sites)),
+                            );
                         }
                         if let Some(dependencies) = &mut fixed_dependencies
                             && (!signature.physical_frame
@@ -1510,7 +1530,7 @@ impl Inference {
                         } else {
                             &mut method_returns
                         };
-                        returns.insert(signature.id, Ok(checker.completed_body(params, body, Some(source), false)));
+                        returns.insert(signature.id, PreparedBody::Fixed(checker.completed_body(params, body, Some(source), false)));
                     }
                     if superseded_returns
                         && !graph.session.call_may_return_implicitly(*module, function)
@@ -1769,15 +1789,19 @@ impl Inference {
                 checked_bodies.clear();
             }
         }
-        if needs_registered_entry {
-            // These completed method checks survived the last signature revision.
-            checked_bodies.extend(
-                method_returns
-                    .iter()
-                    .filter_map(|(&id, body)| body.is_ok().then_some(id)),
-            );
+        for (id, body) in method_returns {
+            if needs_registered_entry && matches!(&body, PreparedBody::Fixed(_)) {
+                checked_bodies.insert(id);
+            }
+            match body {
+                PreparedBody::Python(frame) if !graph.registered_startup => {
+                    frame.retain_for_launch(graph, &self.source_checks);
+                }
+                body => {
+                    local_returns.insert(id, body);
+                }
+            }
         }
-        local_returns.extend(method_returns);
         Ok(Solution {
             method_returns: local_returns,
             registered_parameters: registered,

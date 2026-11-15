@@ -127,6 +127,49 @@ mod tests {
     }
 
     #[test]
+    fn a_settled_return_keeps_the_live_parser_call() {
+        let text = concat!(
+            "import argparse\nfrom pathlib import Path\n",
+            "def options() -> argparse.Namespace:\n",
+            "    parser = argparse.ArgumentParser()\n",
+            "    parser.add_argument('--manifest', type=Path, required=True)\n",
+            "    return parser.parse_args()\n",
+            "print(options())\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let start = TextSize::try_from(text.find("def options").unwrap()).unwrap();
+        for named in [false, true] {
+            let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+            graph.registered_startup = named;
+            let program = crate::checked_lower(&mut graph).unwrap();
+            let admitted = graph.registered_functions();
+            let was_admitted = admitted
+                .get(&graph.entry)
+                .is_some_and(|functions| functions.contains_key(&start));
+            drop(admitted);
+            let (functions, _) = graph.take_registered_functions();
+            let body = &functions[&graph.entry][&start];
+            assert_eq!(was_admitted, named);
+            if named {
+                assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+            } else {
+                let crate::CheckedProgram::Native(fixed) = program else {
+                    panic!("expected a fixed namespace result");
+                };
+                assert!(matches!(fixed.ir.0.functions[0].returns, Type::Class(_)));
+            }
+            let Some(Statement::Return(value)) = body.function.body.last() else {
+                panic!("expected the live return");
+            };
+            let call = value.without_location().python_call().unwrap();
+            assert_eq!(&text[call.range], "parser.parse_args()");
+            assert_eq!(body.function.returns, Type::PythonObject);
+        }
+    }
+
+    #[test]
     fn a_python_return_preserves_the_checked_scalar_and_its_live_caller() {
         let text = concat!(
             "import argparse\n",

@@ -1495,13 +1495,24 @@ fn lower_graph(
             || !needs_registered_entry
                 && (signature.method.is_none() || python_method)
                 && signature.physical_frame;
-        let inferred = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
-            if prepare_sites && prepared.get(&signature.id)?.is_ok() {
-                prepared.remove(&signature.id)?.ok()
-            } else {
-                None
+        let source_function = cache.is_none() && signature.method.is_none();
+        let physical_function = source_function && signature.physical_frame;
+        let prepared = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
+            use std::collections::hash_map::Entry;
+            let Entry::Occupied(entry) = prepared.entry(signature.id) else {
+                return None;
+            };
+            match entry.get() {
+                PreparedBody::Fixed(_) if prepare_sites => Some(entry.remove()),
+                PreparedBody::Attributes(_) if named && physical_function => Some(entry.remove()),
+                _ => None,
             }
         });
+        let (inferred, mut callable_inputs) = match prepared {
+            Some(PreparedBody::Fixed(body)) => (Some(body), None),
+            Some(PreparedBody::Attributes(inputs)) => (None, Some(inputs)),
+            _ => (None, None),
+        };
         // A later entry refusal can still place the provider's original definition.
         let provider_frame = !needs_registered_entry
             && cache.is_none()
@@ -1523,19 +1534,10 @@ fn lower_graph(
         {
             checker.settled_attributes = Some(&mut attributes);
         }
-        let source_function = cache.is_none() && signature.method.is_none();
-        let physical_function = source_function && signature.physical_frame;
         let named_scalar = named
             && source_function
             && definition.returns.is_some()
             && signature.returns.builtin_scalar_name().is_some();
-        let mut callable_inputs = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
-            if named && physical_function && matches!(prepared.get(&signature.id), Some(Err(_))) {
-                prepared.remove(&signature.id)?.err()
-            } else {
-                None
-            }
-        });
         let result = if let Some(body) = inferred {
             Ok(body)
         } else if place_procedures
@@ -1603,7 +1605,7 @@ fn lower_graph(
         if !attributes.is_empty()
             && let Some(prepared) = pending_capture.borrow_mut().as_mut()
         {
-            prepared.insert(signature.id, Err(attributes));
+            prepared.insert(signature.id, PreparedBody::Attributes(attributes));
         }
         let cannot_return = match &result {
             Ok((body, _)) => body.cannot_return,
@@ -1643,7 +1645,8 @@ fn lower_graph(
                                 {
                                     continue;
                                 }
-                                let Some(Err(inputs)) = prior.get_mut(&id) else {
+                                let Some(PreparedBody::Attributes(inputs)) = prior.get_mut(&id)
+                                else {
                                     continue;
                                 };
                                 if inputs.is_empty() {
@@ -1685,7 +1688,7 @@ fn lower_graph(
                 && let Some(prepared) = pending_capture.borrow_mut().as_mut()
             {
                 source.arguments = FrameArguments::Python;
-                prepared.insert(signature.id, Ok((body, sums)));
+                prepared.insert(signature.id, PreparedBody::Fixed((body, sums)));
             }
             continue;
         }
@@ -2304,6 +2307,7 @@ fn registered_entry(
 
 #[derive(Clone)]
 struct LoweredBody {
+    python_call_result: bool,
     cannot_return: bool,
     frame_arguments: FrameArguments,
     wrapper_link: bool,
@@ -2330,7 +2334,11 @@ impl From<Failure> for BodyRefusal {
 }
 
 type BodyResult = StdResult<CompletedBody, BodyRefusal>;
-type PreparedBody = StdResult<CompletedBody, HashMap<TextRange, FixedAttribute>>;
+enum PreparedBody {
+    Fixed(CompletedBody),
+    Attributes(HashMap<TextRange, FixedAttribute>),
+    Python(registered::CheckedPlacement),
+}
 
 type FunctionDefinition<'a> = (ModuleId, Cow<'a, ast::StmtFunctionDef>, Signature);
 
@@ -2501,7 +2509,7 @@ fn lower_function(
             }
         }
     }
-    if checker.infer_python_call_result && falls_through {
+    if checker.python_result_tail.is_some() && falls_through {
         return Err(checker
             .classified_error(
                 Kind::ScopedObject,
@@ -3795,8 +3803,9 @@ struct Checker<'a> {
     python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
-    /// Keep a Python result only when the returned operation already produces that representation.
-    infer_python_call_result: bool,
+    /// A result trial can finish its last statement even when the native result
+    /// still needs inference. An earlier refusal must stop before checking siblings.
+    python_result_tail: Option<TextSize>,
     /// Resolved operations from a fixed source that the live frame can still use.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     nonreturning_functions: &'a HashSet<usize>,
@@ -3902,6 +3911,7 @@ impl<'a> Checker<'a> {
     ) -> CompletedBody {
         (
             LoweredBody {
+                python_call_result: self.python_result_tail.is_some(),
                 cannot_return,
                 frame_arguments: self.frame_arguments,
                 wrapper_link: self.wrapper_link.get(),
@@ -3937,7 +3947,7 @@ impl<'a> Checker<'a> {
             placement_only: false,
             python_method_frame: false,
             checked_call_contracts: false,
-            infer_python_call_result: false,
+            python_result_tail: None,
             settled_attributes: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
@@ -5565,7 +5575,7 @@ impl<'a> Checker<'a> {
     }
 
     fn value_source(&self, value: &Expr) -> Option<ValueSource> {
-        let value = if self.infer_python_call_result {
+        let value = if self.python_result_tail.is_some() {
             let operand = value.without_location();
             if let Some(call) = operand.python_call()
                 && !self.classes.parsers.has_fixed_call(self.module, call.range)
