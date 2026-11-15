@@ -2348,6 +2348,12 @@ impl Session {
         shipped_exports::binding_at_use(&self.db, file, expression)
     }
 
+    pub(crate) fn reads_parameter(&self, module: usize, expr: &Expr) -> bool {
+        let file = self.files[module];
+        self.parameter_read(file, &self.parsed(file), expr)
+            .is_some()
+    }
+
     /// The read must reach one assignment in this method's defining class.
     pub(crate) fn class_assignment_value<'a>(
         &self,

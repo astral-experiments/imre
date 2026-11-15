@@ -144,16 +144,32 @@ impl Checker<'_> {
                 node,
                 "local class metadata requires one fixed base and no decorators, metaclass or type parameters",
             );
-            return Err(
-                if self.graph.modules[self.module]
-                    .value_structs
-                    .contains(&node.start())
-                {
-                    failure.classify(Kind::UnsupportedRepresentation)
-                } else {
-                    failure
-                },
-            );
+            let module = &self.graph.modules[self.module];
+            if module.value_structs.contains(&node.start()) {
+                return Err(failure.classify(Kind::UnsupportedRepresentation));
+            }
+            if !node.decorator_list.is_empty()
+                && node.arguments.iter().all(|args| args.is_empty())
+                && node.decorator_list.iter().all(|decorator| {
+                    let value = &decorator.expression;
+                    value
+                        .as_name_expr()
+                        .and_then(|name| self.names.get(name.id.as_str()))
+                        .is_some_and(|&slot| self.locals[slot] == Type::PythonObject)
+                        && self.graph.session.reads_parameter(self.module, value)
+                })
+            {
+                let failure = failure.classify(Kind::ScopedObject);
+                if !self.missing_operation(&failure) {
+                    return Err(failure);
+                }
+                // A decorated class binds the decorator's result in this scope.
+                self.local_classes.remove(name);
+                let slot = self.declare(name, Type::PythonObject, &node.name)?;
+                self.assigned_value(slot, &Expr::unrepresented());
+                return Ok(());
+            }
+            return Err(failure);
         }
         let mut fixed_base = None;
         let mut abstract_methods = HashSet::new();

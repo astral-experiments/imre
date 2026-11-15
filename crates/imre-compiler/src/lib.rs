@@ -1482,6 +1482,26 @@ make()
     }
 
     #[test]
+    fn a_lambda_default_is_checked_at_the_function_definition() {
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("main.py");
+        for body in ["return callback", "return forward(callback)"] {
+            let source = format!(
+                "def forward(value): return value\ndef get(callback=lambda item: item):\n    {body}\nprint(get()(17))\n"
+            );
+            std::fs::write(&entry, source).unwrap();
+            super::check_file(&entry, None).unwrap();
+        }
+        std::fs::write(
+            &entry,
+            "def fail(): raise ValueError('header')\ndef get(callback=fail()): return callback\n",
+        )
+        .unwrap();
+        let error = super::check_file(&entry, None).unwrap_err();
+        assert!(error.contains("2:18: Imre: defaults must be"), "{error}");
+    }
+
+    #[test]
     fn selected_disk_source_uses_physical_bytes_and_decoded_spans() {
         use ruff_text_size::Ranged;
         use sha2::{Digest, Sha256};

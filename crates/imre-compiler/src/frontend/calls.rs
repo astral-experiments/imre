@@ -244,6 +244,12 @@ pub(super) struct Parameter {
     pub sign_only: bool,
 }
 
+impl Parameter {
+    pub(super) fn has_python_default(&self) -> bool {
+        self.default.as_ref().is_some_and(Expr::is_unrepresented)
+    }
+}
+
 /// A source call binds the declaration's parameters after any bound receiver.
 pub(super) enum CallParameters<'a> {
     Source {
