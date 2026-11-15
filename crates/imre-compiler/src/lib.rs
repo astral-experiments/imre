@@ -754,9 +754,7 @@ fn object_fallback(
                     .as_deref()
                     .map(|g| (g, &registered.provider_sources)),
                 refusal.as_ref(),
-                cache
-                    .filter(|_| checking)
-                    .map(|compiler| &mut compiler.cache),
+                cache.map(|compiler| (&mut compiler.cache, checking)),
             )?;
             registered.layouts.extend(layouts);
             if registered

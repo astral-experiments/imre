@@ -39,6 +39,12 @@ pub(crate) fn unambiguous_file_module(name: &str) -> bool {
 fn passive(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::FunctionDef(f) => passive_declaration(f),
+        Stmt::ClassDef(class) => {
+            class.arguments.is_none()
+                && class.type_params.is_none()
+                && class.decorator_list.is_empty()
+                && after_docstring(&class.body).iter().all(inert_declaration)
+        }
         Stmt::Assign(a) => {
             a.targets.iter().all(Expr::is_name_expr) && crate::modules::inert_literal(&a.value)
         }
@@ -134,7 +140,7 @@ struct InitializerStatement<'a, 'db> {
     model: &'a SemanticModel<'db>,
     stmt: &'a Stmt,
     guard_start: TextSize,
-    imports: &'a [(TextRange, usize)],
+    imports: &'a [(TextRange, InitializerSource<'a>)],
     progress: &'a HashMap<usize, Option<TextSize>>,
     entered_function: &'a std::cell::Cell<Option<(usize, TextRange)>>,
 }
@@ -271,18 +277,17 @@ impl Session {
                 } else {
                     stmt.range()
                 };
-                if owner.declares_signatures {
-                    if let Some(captures) = captures.as_deref_mut()
-                        && stmt.is_import_from_stmt()
-                    {
-                        self.capture_function_sources(
-                            &bindings,
-                            (owner.module, owner.path),
-                            &mut captures.entry(module).or_default().functions,
-                        );
-                    }
-                    imports.push((site, owner.module));
+                if owner.declares_signatures
+                    && let Some(captures) = captures.as_deref_mut()
+                    && stmt.is_import_from_stmt()
+                {
+                    self.capture_function_sources(
+                        &bindings,
+                        (owner.module, owner.path),
+                        &mut captures.entry(module).or_default().functions,
+                    );
                 }
+                imports.push((site, owner));
             }
             for (i, stmt) in suite.iter().enumerate().skip(start) {
                 progress.insert(module, Some(stmt.start()));
@@ -373,9 +378,12 @@ impl Session {
                     && assign.targets.iter().all(Expr::is_name_expr)
                     && assign.value.is_name_expr()
                     && self
-                        .reaching_binding(module, &assign.value)
+                        .copied_name_binding(module, &parsed, &assign.value)
                         .is_some_and(|def| {
-                            matches!(def.kind(&self.db), DefinitionKind::Function(_))
+                            matches!(
+                                def.kind(&self.db),
+                                DefinitionKind::Function(_) | DefinitionKind::ImportFrom(_)
+                            )
                         })
                 {
                     continue;
@@ -387,6 +395,22 @@ impl Session {
             progress.insert(module, None);
         }
         None
+    }
+
+    fn copied_name_binding(
+        &self,
+        module: usize,
+        parsed: &ruff_db::parsed::ParsedModuleRef,
+        value: &Expr,
+    ) -> Option<Definition<'_>> {
+        let original = super::execution::assigned_value(
+            &self.db,
+            self.files[module],
+            parsed,
+            value,
+            Expr::is_name_expr,
+        )?;
+        self.reaching_binding(module, original)
     }
 
     fn passive_import_binding<'db>(
@@ -539,14 +563,14 @@ impl Session {
             }
         }
         let mut binding = binding.filter(|binding| binding.file(&self.db) == file)?;
+        if attr.is_none()
+            && let DefinitionKind::Assignment(copy) = binding.kind(&self.db)
+            && copy.unpack().is_none()
+        {
+            binding = self.copied_name_binding(module, parsed, copy.value(parsed))?;
+        }
         let member = match (binding.kind(&self.db), attr) {
             (DefinitionKind::Function(_), None) => None,
-            (DefinitionKind::Assignment(copy), None) if copy.unpack().is_none() => {
-                let value = copy.value(parsed);
-                value.as_name_expr()?;
-                binding = self.reaching_binding(module, value)?;
-                None
-            }
             (DefinitionKind::Import(import), Some(attr)) => {
                 Some((import.alias(parsed).range(), attr))
             }
@@ -556,15 +580,16 @@ impl Session {
             )),
             _ => return None,
         };
-        let (def, owner_module) = if let Some((import_site, name)) = member {
+        let (def, source) = if let Some((import_site, name)) = member {
             let owner = site.imports.iter().find(|(r, _)| *r == import_site)?.1;
             (
-                self.initialized_member(owner, name, site.progress[&owner])?,
+                self.initialized_member(owner.module, name, site.progress[&owner.module])?,
                 owner,
             )
         } else {
-            (binding, module)
+            (binding, InitializerSource::application(site.source))
         };
+        let owner_module = source.module;
         let DefinitionKind::Function(function) = def.kind(&self.db) else {
             return None;
         };
@@ -579,6 +604,35 @@ impl Session {
             return None;
         }
         let bound = crate::frontend::fixed_call_arguments(call, &function.parameters)?;
+        if !source.declares_signatures {
+            if !iterated
+                && !function.is_async
+                && function.returns.is_some()
+                && !generator()?
+                && self.unconditional_module_operand(module, site.guard_start, call.range())
+            {
+                let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
+                let scope =
+                    index.node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function));
+                // This import and invocation selected one definition in its physical module.
+                let checked = super::CheckedFile::new(
+                    &self.db,
+                    owner,
+                    &[][..],
+                    &[][..],
+                    super::FileChecks::DeclaredSignatures,
+                    false,
+                    self.explicit_check,
+                    None,
+                    &[scope][..],
+                );
+                let error = super::file_errors(&self.db, checked).first()?;
+                return Some(Err(
+                    Diagnostic::plain(error.rendered.clone()).classified(Kind::RegisteredExecution)
+                ));
+            }
+            return None;
+        }
         let owner_model = SemanticModel::new(&self.db, self.db.program_file(owner));
         let supplied = bound.iter().zip(actuals.iter().copied());
         for ((p, value), actual) in supplied.clone() {
@@ -677,8 +731,10 @@ impl Session {
         }
         let owner = self.files[module];
         let def = self.final_module_binding(owner, name)?;
-        let function = match def.kind(&self.db) {
-            DefinitionKind::Function(function) => function,
+        let parsed = self.parsed(owner);
+        let range = match def.kind(&self.db) {
+            DefinitionKind::Function(function) => function.node(&parsed).range(),
+            DefinitionKind::Class(class) => class.node(&parsed).range(),
             // A completed initializer published its final assigned value. During a cycle
             // that store may still be ahead of the import. Special attributes can run descriptors.
             DefinitionKind::Assignment(_) if before.is_none() && !name.starts_with("__") => {
@@ -686,8 +742,6 @@ impl Session {
             }
             _ => return None,
         };
-        let parsed = self.parsed(owner);
-        let range = function.node(&parsed).range();
         if before.is_some_and(|at| range.end() > at) {
             return None;
         }
