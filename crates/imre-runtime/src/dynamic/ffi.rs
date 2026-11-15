@@ -3531,6 +3531,9 @@ pub(super) unsafe extern "C" fn imre_dyn_keep_operands(
 ) -> usize {
     // SAFETY: these live handles and the mark belong to the current generated frame.
     let ctx = unsafe { &mut *ctx };
+    if second == NONE && ctx.heap.keeps_single_operand(mark, first) {
+        return mark + 1;
+    }
     ctx.discard_temporaries(
         mark,
         std::iter::once(first).chain((second != NONE).then_some(second)),
