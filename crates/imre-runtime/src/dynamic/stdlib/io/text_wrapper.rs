@@ -970,7 +970,6 @@ pub(super) fn call(
         ));
     }
     if name == "set_chunk_size" {
-        let w = Rc::clone(w);
         w.binary()?;
         let Some(&value) = args.first() else {
             return Err(Error::new("AttributeError", "cannot delete attribute"));
@@ -990,7 +989,10 @@ pub(super) fn call(
                 "a strictly positive integer is required",
             ));
         }
-        w.chunk_size.set(size as usize);
+        // __index__ may have reinitialized this same Python wrapper.
+        Wrapper::current(ctx, receiver)?
+            .chunk_size
+            .set(size as usize);
         return Ok(NONE);
     }
     super::argument_count("TextIOWrapper", name, args.len())?;
