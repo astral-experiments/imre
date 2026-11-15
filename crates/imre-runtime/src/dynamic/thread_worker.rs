@@ -926,7 +926,14 @@ impl Start {
         let receiver = match &self.registration {
             Registration::Thread {
                 handle_id, thread, ..
-            } => Some((thread.owner, *handle_id)),
+            } => {
+                // The call consumes this wrapper even if the receiver's field is rebound.
+                // SAFETY: the creator owns this frame through startup and publication.
+                let ctx = unsafe { &mut *context };
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(*handle_id);
+                Some((thread.owner, *handle_id))
+            }
             Registration::Detached(_) => None,
         };
         let ready = match launch(self) {
