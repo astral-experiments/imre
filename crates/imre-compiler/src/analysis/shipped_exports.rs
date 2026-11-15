@@ -3,6 +3,7 @@ use super::*;
 use crate::modules::Binding;
 use ruff_db::files::FileRange;
 use ruff_python_ast::name::Name;
+use std::borrow::Cow;
 use ty_python_core::definition::{Definition, DefinitionKind, DefinitionState};
 use ty_python_semantic::types::TypeDefinition;
 
