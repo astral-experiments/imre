@@ -6928,7 +6928,14 @@ impl<'a> Checker<'a> {
             imre_ast::unhighlighted_call(statement),
         );
         let result = self.lower_statement(statement, output);
-        self.unhighlighted_call = enclosing;
+        if let Some(call) = std::mem::replace(&mut self.unhighlighted_call, enclosing)
+            && let Some(sites) = &mut self.fixed_sites
+            && matches!(sites.attributes.get(&call), Some(FixedAttribute::Call(..)))
+        {
+            sites
+                .attributes
+                .insert(statement.range(), FixedAttribute::UnhighlightedCall(call));
+        }
         if let Err(error) = &result {
             // A boxed operation in a checked source file must not hide a bad call in
             // another function, whether this operation is deferred or stops lowering.

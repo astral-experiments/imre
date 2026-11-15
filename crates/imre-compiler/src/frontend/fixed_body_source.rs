@@ -23,8 +23,10 @@ impl FixedBodySource {
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
         let mut python_arguments = self.arguments == FrameArguments::Python;
-        let complete = ir::all_nodes(&function.body, &mut |node, _| {
-            if !node.has_fixed_site() {
+        let complete = ir::all_nodes(&function.body, &mut |node, parent| {
+            if parent.is_some_and(|expr| expr.coroutine_arguments().is_some())
+                || !node.has_fixed_site()
+            {
                 return true;
             }
             let Some((range, Some(expected))) = sites.next() else {
@@ -88,6 +90,8 @@ impl FixedBodySource {
 
 #[derive(Clone)]
 pub(crate) enum FixedAttribute {
+    /// The statement owns this whole call's traceback display.
+    UnhighlightedCall(TextRange),
     Store(ir::FieldUse),
     CallValue(Box<registered::values::CheckedCall>),
     /// A placed module read retains its native slot in the IR and its Python name here.
@@ -106,10 +110,13 @@ impl FixedAttribute {
         if let (None, ExprKind::Invoke { callable, args }) = (target, &expr.kind) {
             return Some((callable, &args.values));
         }
-        let values = expr.named_call_arguments()?;
         match target.as_deref() {
-            Some(target) => Some((target, values)),
-            None => values.split_first(),
+            Some(target) => Some((
+                target,
+                expr.named_call_arguments()
+                    .or_else(|| expr.coroutine_arguments())?,
+            )),
+            None => expr.named_call_arguments()?.split_first(),
         }
     }
 }
@@ -270,6 +277,15 @@ impl FixedNode {
                 ExprKind::Local(slot) | ExprKind::Field(_, slot) | ExprKind::Bind(slot, _) => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
+                ExprKind::Builtin(
+                    Builtin::Process(ir::ProcessOperation::Coroutine { function, .. }, _),
+                    _,
+                ) => Self::NamedCall(
+                    std::mem::discriminant(&expr.kind),
+                    function,
+                    expr.coroutine_arguments()?.len(),
+                    expr.ty,
+                ),
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
@@ -528,7 +544,11 @@ impl SourceSites {
         target: impl FnOnce() -> Option<Expr>,
     ) {
         if let Some(site) = self.site_at(call.range())
-            && let Some(args) = value.named_call_arguments()
+            && let Some(args) = value.named_call_arguments().or_else(|| {
+                value
+                    .coroutine_arguments()
+                    .filter(|fields| self.has_written_arguments(call, fields))
+            })
             && args.len() == call.arguments.args.len()
             && registered::values::fixed_positional_arguments(call)
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))

@@ -1322,7 +1322,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     );
                     return;
                 }
-                (_, Some(range)) => frame.statement_site(range, None),
+                (_, Some(range)) => {
+                    let simple = match frame.fixed_attribute(range) {
+                        Some(crate::frontend::FixedAttribute::UnhighlightedCall(call)) => {
+                            Some(*call)
+                        }
+                        _ => None,
+                    };
+                    frame.statement_site(range, simple);
+                }
                 (_, None) => {}
             }
         }

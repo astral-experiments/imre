@@ -89,7 +89,11 @@ impl<'a> RegisteredRegion<'a> {
     ) -> Option<FrameSlots> {
         let mut slots = std::collections::BTreeSet::new();
         let mut cursors = HashMap::new();
-        let mut visit = |node: ir::Node<'a>, _: Option<&'a Expr>| {
+        let mut visit = |node: ir::Node<'a>, parent: Option<&'a Expr>| {
+            // The Python call consumes the fields of the native argument record directly.
+            if parent.is_some_and(|expr| expr.coroutine_arguments().is_some()) {
+                return true;
+            }
             match &node {
                 ir::Node::Statement(Statement::Scope { clear, .. })
                 | ir::Node::Expression(Expr {
