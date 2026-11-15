@@ -1,4 +1,6 @@
 //! Report uncaught exceptions through the interpreter's current sys.excepthook.
+use std::io::Write as _;
+
 use super::stdlib::{audit, traceback};
 use super::{Context, Error, Id, NONE, Result, Value, ffi, unraisable};
 
@@ -40,16 +42,22 @@ pub(super) fn default_hook(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(NONE)
 }
 
-fn write_stderr(ctx: &mut Context, message: &str) {
-    let written = ctx.sys_binding("stderr").and_then(|stream| {
-        let writer = ctx.lookup_attr(stream.unwrap_or(NONE), "write")?;
+pub(super) fn write_stderr(ctx: &mut Context, message: &str) {
+    let mark = ctx.heap.temporary_mark();
+    let file = ctx.sys_binding("stderr").ok().flatten().unwrap_or(NONE);
+    ctx.heap.keep(file);
+    let before_writer = ctx.heap.temporary_mark();
+    let written = ctx.lookup_attr(file, "write").and_then(|writer| {
         ctx.heap.keep(writer);
         let text = ctx.text(message);
         ctx.call(writer, vec![text], Vec::new())
     });
-    if written.is_err() {
-        eprint!("{message}");
+    let failed = ctx.release_with_result(before_writer, written).is_err();
+    ctx.discard_temporaries(before_writer, None);
+    if failed {
+        let _ = std::io::stderr().write_all(message.as_bytes());
     }
+    ctx.discard_temporaries(mark, None);
 }
 
 /// Publish the original exception before the audit event or hook can run Python.

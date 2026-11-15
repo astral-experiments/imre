@@ -1549,33 +1549,22 @@ pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
         return integer.exit_status();
     }
     ctx.heap.keep(code);
-    if let Some(file) = ctx
-        .sys_binding("stderr")
-        .ok()
-        .flatten()
-        .filter(|&f| f != NONE)
-    {
+    if let Ok(stream) = ctx.sys_binding("stderr") {
+        let file = stream.unwrap_or(NONE);
         ctx.heap.keep(file);
-        if let Ok(writer) = ctx.lookup_attr(file, "write") {
-            ctx.heap.keep(writer);
-            if let Ok(text) = builtins::call(ctx, "str", &[code], &[]) {
-                let _ = ctx.call(writer, vec![text], Vec::new());
-            }
+        let mark = ctx.heap.temporary_mark();
+        if file != NONE {
+            let _ = builtins::write_object(ctx, file, code);
+        } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
+            && let Ok(text) = ctx.str_value(text)
+        {
+            // PyObject_Print writes strict UTF-8 directly to the C stream.
+            let _ = std::io::stderr().write_all(text.as_bytes());
         }
-    } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
-        && let Ok(bytes) = ctx.encode_utf8_codepoints(text, false, "backslashreplace")
-    {
-        let _ = crate::sys::stderr_writer().write_all(&bytes);
+        ctx.discard_temporaries(mark, None);
     }
-    // The message's __str__ or the stream's write method may have replaced stderr.
-    let newline = ctx.text("\n");
-    let written = ctx.sys_binding("stderr").and_then(|file| {
-        let writer = ctx.lookup_attr(file.unwrap_or(NONE), "write")?;
-        ctx.call(writer, vec![newline], Vec::new())
-    });
-    if written.is_err() {
-        let _ = crate::sys::stderr_writer().write_all(b"\n");
-    }
+    // Formatting or releasing the write result can replace stderr before the newline.
+    super::excepthook::write_stderr(ctx, "\n");
     1
 }
 

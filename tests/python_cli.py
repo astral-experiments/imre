@@ -3589,6 +3589,20 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "class Result:\n"
+            "    def __del__(self): sys.stderr = sys.__stderr__\n"
+            "class Stream:\n"
+            "    def write(self, text): print(repr(text)); return Result()\n"
+            "    def flush(self): pass\n"
+            "sys.stderr = Stream()\n"
+            "raise SystemExit('payload')",
+            status=1, stderr=b"\n",
+        )
+        compare("-IB", "-c", r"import sys; sys.stderr = None; raise SystemExit('\udc80')",
+                status=1, stderr=b"\n")
         cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
         compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
 
