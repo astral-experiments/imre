@@ -140,16 +140,22 @@ pub(super) fn component(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let receiver = noargs_method_receiver(ctx, "float", field, args, kwargs)?;
-    let storage = ctx.scalar_value(receiver);
-    let Value::Float(value) = *ctx.heap.get(storage) else {
-        unreachable!("validated float receiver")
-    };
     match field {
-        "real" if receiver == storage => Ok(receiver),
-        "real" => Ok(ctx.alloc(Value::Float(value))),
+        "real" => Ok(exact_value(ctx, receiver, ctx.scalar_value(receiver))),
         "imag" => Ok(ctx.alloc(Value::Float(0.0))),
         _ => unreachable!("registered float component"),
     }
+}
+
+/// An unchanged float result retains an exact receiver and copies a subclass's value.
+pub(super) fn exact_value(ctx: &mut Context, receiver: Id, storage: Id) -> Id {
+    if receiver == storage {
+        return receiver;
+    }
+    let Value::Float(value) = *ctx.heap.get(storage) else {
+        unreachable!("validated float receiver")
+    };
+    ctx.alloc(Value::Float(value))
 }
 
 /// Return the reduced integer ratio of the receiver's stored binary64 value.
@@ -276,7 +282,7 @@ pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Re
     if let Some(method) = ctx.bound_slot(value, "__float__")? {
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let scalar = ctx.scalar_value(result);
-        if let Value::Float(number) = *ctx.heap.get(scalar) {
+        if matches!(ctx.heap.get(scalar), Value::Float(_)) {
             if result != scalar {
                 ctx.heap.reserve_temporaries(1)?;
                 ctx.heap.keep(result);
@@ -291,9 +297,8 @@ pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Re
                     ),
                     1,
                 )?;
-                return Ok(Some(ctx.alloc(Value::Float(number))));
             }
-            return Ok(Some(result));
+            return Ok(Some(exact_value(ctx, result, scalar)));
         }
         return Err(type_error(format!(
             "{}.__float__ returned non-float (type {})",
