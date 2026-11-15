@@ -942,8 +942,7 @@ fn lower_graph(
                         &function.decorator_list,
                         graph,
                         defaults,
-                        classes.declarations,
-                        &types,
+                        &classes,
                         None,
                         inference,
                     ) {
@@ -1115,8 +1114,7 @@ fn lower_graph(
                 &method.decorator_list,
                 graph,
                 defaults,
-                classes.declarations,
-                &types,
+                &classes,
                 Some(context),
                 inference,
             )
@@ -2669,11 +2667,12 @@ fn signature(
     decorators: &[ast::Decorator],
     graph: &SourceGraph,
     defaults: keyword_forwarding::Defaults,
-    classes: &Classes,
-    types: &Types,
+    class_info: &ClassInfo,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
 ) -> StdResult<Signature, String> {
+    let classes = class_info.declarations;
+    let types = class_info.types;
     let module = defaults.module;
     let source = &graph.modules[module].source;
     let owner = method.map(|context| context.class);

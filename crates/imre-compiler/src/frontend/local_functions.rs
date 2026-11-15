@@ -482,8 +482,7 @@ impl Checker<'_> {
             decorators,
             self.graph,
             keyword_forwarding::Defaults::local(self.module),
-            self.classes.declarations,
-            self.types,
+            self.classes,
             None,
             &inference::Inference::default(),
         )?;
