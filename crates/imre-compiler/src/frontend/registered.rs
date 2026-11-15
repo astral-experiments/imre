@@ -2989,6 +2989,10 @@ pub(crate) struct AttributeEffect<'a> {
 }
 
 impl<'a> AttributeEffect<'a> {
+    pub(super) fn statement(&self, operands: Vec<Expr>) -> Statement {
+        attribute_statement(self.action, self.field, operands)
+    }
+
     pub(crate) fn operands(&self) -> impl Iterator<Item = &'a ast::Expr> {
         let receiver = Some(self.field.value.as_ref());
         if self.action == ir::AttributeAction::Store {
@@ -3061,7 +3065,7 @@ pub(super) fn context_site(source: &str, manager: &ast::Expr, is_async: bool) ->
     }
 }
 
-fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
+pub(super) fn attribute_write(stmt: &ast::Stmt) -> Option<AttributeEffect<'_>> {
     use ir::AttributeAction::{InPlace, Store};
     let (target, action, value) = match stmt {
         ast::Stmt::Assign(assign) => {
@@ -3217,19 +3221,17 @@ impl statements::StatementLowering for SourceScope<'_> {
     ) -> StdResult<bool, ()> {
         let (statements, continues) = match stmt {
             ast::Stmt::AugAssign(assign) => {
-                if let Some(effect) = attribute_write(stmt) {
+                let statement = if let Some(effect) = attribute_write(stmt) {
                     let values = effect
                         .operands()
                         .map(|node| self.ordinary_operand(node))
                         .collect::<Option<_>>()
                         .ok_or(())?;
-                    let statement = attribute_statement(effect.action, effect.field, values);
-                    output.push(statement);
-                    return Ok(true);
-                }
-                let statement = self
-                    .augmented_assignment(assign, |input, scope| input.lower(scope))
-                    .ok_or(())?;
+                    effect.statement(values)
+                } else {
+                    self.augmented_assignment(assign, |input, scope| input.lower(scope))
+                        .ok_or(())?
+                };
                 output.push(statement);
                 return Ok(true);
             }
