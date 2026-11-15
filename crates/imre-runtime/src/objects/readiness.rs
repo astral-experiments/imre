@@ -75,7 +75,8 @@ impl Poll {
         let count = wait(timeout, check_signals, |remaining| {
             let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
             // SAFETY: nfds is the length of this owned, initialized snapshot.
-            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
+            let count = unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) };
+            syscall_result(count)
         });
         handle.borrow_mut().running = false;
         if count? == 0 {
@@ -181,27 +182,32 @@ pub(crate) fn checked_fd(fd: i32) -> Result<i32> {
     Ok(fd)
 }
 
+// Capture errno on the thread that made the syscall.
+fn syscall_result(count: i32) -> io::Result<i32> {
+    if count < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(count)
+    }
+}
+
 // Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait<E: From<Error>>(
+fn wait<T: Default, E: From<Error>>(
     timeout: Option<Duration>,
     mut check_signals: impl FnMut() -> std::result::Result<(), E>,
-    mut call: impl FnMut(Option<Duration>) -> i32,
-) -> std::result::Result<i32, E> {
+    mut call: impl FnMut(Option<Duration>) -> io::Result<T>,
+) -> std::result::Result<T, E> {
     let deadline = timeout.map(Deadline::after);
     let mut remaining = timeout;
     loop {
-        let n = call(remaining);
-        if n >= 0 {
-            return Ok(n);
+        match call(remaining) {
+            Ok(ready) => return Ok(ready),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => check_signals()?,
+            Err(e) => return Err(errno_error(e).into()),
         }
-        let err = io::Error::last_os_error();
-        if err.kind() != io::ErrorKind::Interrupted {
-            return Err(errno_error(err).into());
-        }
-        check_signals()?;
         remaining = deadline.map(Deadline::remaining);
         if remaining == Some(Duration::ZERO) {
-            return Ok(0);
+            return Ok(T::default());
         }
     }
 }
@@ -332,6 +338,7 @@ pub unsafe extern "C" fn imre_poll_wait(
 }
 
 /// The three checked descriptor sets used by one POSIX select call.
+#[derive(Clone, Copy)]
 pub(crate) struct SelectFds {
     sets: [libc::fd_set; 3],
     max: i32,
@@ -373,30 +380,34 @@ impl SelectFds {
         timeout: Option<Duration>,
         check_signals: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<bool, E> {
-        let mut ready = self.sets;
-        let count = wait(timeout, check_signals, |remaining| {
-            ready = self.sets;
-            let [r, w, x] = &mut ready;
-            let mut tv = remaining.map(|d| {
-                let us = d.as_nanos().div_ceil(1_000);
-                libc::timeval {
-                    tv_sec: (us / 1_000_000) as _,
-                    tv_usec: (us % 1_000_000) as _,
-                }
-            });
-            // SAFETY: all sets and optional timeval are writable for the syscall.
-            unsafe {
-                libc::select(
-                    self.max + 1,
-                    r,
-                    w,
-                    x,
-                    tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
-                )
-            }
+        let ready = wait(timeout, check_signals, |remaining| {
+            self.wait_once(remaining)
         })?;
-        self.sets = if count == 0 { Self::new().sets } else { ready };
-        Ok(count != 0)
+        *self = ready.unwrap_or_else(Self::new);
+        Ok(ready.is_some())
+    }
+
+    /// A single kernel wait owns only the descriptor bits. Preserve the input for retries.
+    pub(crate) fn wait_once(mut self, remaining: Option<Duration>) -> io::Result<Option<Self>> {
+        let [r, w, x] = &mut self.sets;
+        let mut tv = remaining.map(|d| {
+            let us = d.as_nanos().div_ceil(1_000);
+            libc::timeval {
+                tv_sec: (us / 1_000_000) as _,
+                tv_usec: (us % 1_000_000) as _,
+            }
+        });
+        // SAFETY: all sets and the optional timeval belong to this invocation.
+        let count = unsafe {
+            libc::select(
+                self.max + 1,
+                r,
+                w,
+                x,
+                tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
+            )
+        };
+        Ok((syscall_result(count)? != 0).then_some(self))
     }
 
     /// Test an original descriptor against its ready set.
