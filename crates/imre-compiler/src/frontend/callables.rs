@@ -1230,6 +1230,32 @@ mod tests {
             std::fs::write(&path, &program).unwrap();
             crate::check(&program).unwrap();
             crate::check_file(&path, None).unwrap();
+            if callback == "factory" {
+                let caller = dir.path().join("main.py");
+                std::fs::write(
+                    &caller,
+                    "import asyncio\nimport callbacks\nprint(asyncio.run(callbacks.run()))\n",
+                )
+                .unwrap();
+                let mut imported = SourceGraph::load(&caller, None, &[]).unwrap();
+                crate::checked_lower(&mut imported).unwrap();
+                let id = imported
+                    .modules
+                    .iter()
+                    .position(|module| module.name == "callbacks")
+                    .unwrap();
+                let start =
+                    ruff_text_size::TextSize::try_from(program.find("async def cold").unwrap())
+                        .unwrap();
+                let (functions, _) = imported.take_registered_functions();
+                let body = &functions[&id][&start];
+                let sites: Vec<_> = body
+                    .fixed_sites
+                    .iter()
+                    .map(|&site| &program[site])
+                    .collect();
+                assert_eq!(sites, ["return x", "x"]);
+            }
         }
         let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");
         let module = lower(&SourceGraph::single(&direct).unwrap()).unwrap();
