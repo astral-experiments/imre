@@ -425,10 +425,10 @@ pub(super) struct ExpressionScope {
 pub(crate) trait PreparedSuiteEmitter<'a, 'p>:
     std::ops::DerefMut<Target = RegisteredFrame<'a, 'p>>
 {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites);
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>);
     fn place_declaration(&mut self, site: TextSize);
-    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace;
-    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition;
+    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace<'p>;
+    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition<'p>;
     fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String;
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec>;
 }

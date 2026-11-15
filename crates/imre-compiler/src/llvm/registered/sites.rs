@@ -12,21 +12,21 @@ pub(crate) enum CallableSite {
 
 /// The body's identity is compiled once. Defaults, decorators and the defining scope
 /// are the current activation's handles each time the declaration executes.
-pub(crate) struct CompiledDefinition {
+pub(crate) struct CompiledDefinition<'p> {
     pub(crate) code: String,
     pub(crate) signature: String,
     pub(crate) qualname: String,
     /// Byte offset of the unqualified name within the qualified name.
     pub(crate) name_start: usize,
-    pub(crate) doc: Option<String>,
+    pub(crate) doc: Option<&'p str>,
     pub(crate) provider: Option<Box<Self>>,
     pub(crate) annotation_scope: bool,
-    pub(crate) default_names: std::sync::Arc<[String]>,
+    pub(crate) default_names: &'p [String],
     pub(crate) format_evaluator: bool,
     pub(crate) class_header: Option<TextRange>,
 }
 
-impl CompiledDefinition {
+impl CompiledDefinition<'_> {
     pub(crate) fn new(
         code: String,
         signature: String,
@@ -45,7 +45,7 @@ impl CompiledDefinition {
             annotation_scope,
             doc: None,
             provider: None,
-            default_names: Default::default(),
+            default_names: &[],
             format_evaluator: false,
             class_header: None,
         }
@@ -89,10 +89,7 @@ impl CompiledDefinition {
         defaults: &[String],
     ) -> String {
         assert_eq!(self.default_names.len(), defaults.len());
-        let doc = self
-            .doc
-            .as_ref()
-            .map_or_else(|| "0".into(), |doc| frame.text(doc));
+        let doc = self.doc.map_or_else(|| "0".into(), |doc| frame.text(doc));
         let annotate = self.provider.as_ref().map_or_else(
             || "0".into(),
             |provider| provider.bind_defaults(frame, scope, &[]),
@@ -129,19 +126,19 @@ impl CompiledDefinition {
     }
 }
 
-pub(crate) type CompiledTypeParameters =
-    Result<Vec<RegisteredTypeParameter<CompiledDefinition>>, String>;
+pub(crate) type CompiledTypeParameters<'p> =
+    Result<Vec<RegisteredTypeParameter<CompiledDefinition<'p>>>, String>;
 
 /// The generic header evaluates its bases before it instantiates this namespace.
-pub(crate) struct CompiledClassNamespace {
-    pub(crate) definition: CompiledDefinition,
-    pub(crate) parameters: CompiledTypeParameters,
+pub(crate) struct CompiledClassNamespace<'p> {
+    pub(crate) definition: CompiledDefinition<'p>,
+    pub(crate) parameters: CompiledTypeParameters<'p>,
     pub(crate) range: TextRange,
 }
 
-pub(crate) struct Declaration {
-    pub(crate) definition: CompiledDefinition,
-    pub(crate) type_params: Option<CompiledTypeParameters>,
+pub(crate) struct Declaration<'p> {
+    pub(crate) definition: CompiledDefinition<'p>,
+    pub(crate) type_params: Option<CompiledTypeParameters<'p>>,
 }
 
 #[derive(Clone)]
@@ -152,11 +149,11 @@ pub(crate) struct CompiledExec {
 }
 
 #[derive(Default)]
-pub(crate) struct CheckedSites {
-    pub(crate) declarations: Vec<(TextSize, Result<Declaration, String>)>,
+pub(crate) struct CheckedSites<'p> {
+    pub(crate) declarations: Vec<(TextSize, Result<Declaration<'p>, String>)>,
 }
 
-impl CheckedSites {
+impl<'p> CheckedSites<'p> {
     /// Most declarations follow the last written site. An exception handler or a
     /// replayed suite can revisit an earlier position in the same frame.
     pub(crate) fn position(&self, site: TextSize) -> Result<usize, usize> {
@@ -169,11 +166,11 @@ impl CheckedSites {
         }
     }
 
-    fn placed(&self, site: TextSize) -> &Result<Declaration, String> {
+    fn placed(&self, site: TextSize) -> &Result<Declaration<'p>, String> {
         &self.declarations[self.position(site).expect("a placed declaration")].1
     }
 
-    pub(crate) fn declaration(&self, site: TextSize) -> &Declaration {
+    pub(crate) fn declaration(&self, site: TextSize) -> &Declaration<'p> {
         self.placed(site)
             .as_ref()
             .expect("a function or class declaration")
@@ -255,7 +252,7 @@ impl RegisteredFrame<'_, '_> {
     pub(crate) fn bind_type_parameters(
         &mut self,
         outer: &str,
-        parameters: &CompiledTypeParameters,
+        parameters: &CompiledTypeParameters<'_>,
         class: bool,
     ) -> Option<String> {
         let params = match parameters {
