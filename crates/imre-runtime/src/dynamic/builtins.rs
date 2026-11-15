@@ -1913,6 +1913,9 @@ pub(super) fn call(
         return match owner {
             "super" => ctx.super_getattribute(object, &text),
             "type" => ctx.default_attr(object, attr, AttributeLookup::Value),
+            _ if ctx.is_type_object(object) => {
+                ctx.default_attr(object, attr, AttributeLookup::Object)
+            }
             _ => ctx.default_object_attribute(object, attr, ObjectAttribute::Get),
         };
     }

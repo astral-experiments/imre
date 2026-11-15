@@ -59,6 +59,7 @@ pub(super) enum AttributeLookup<'a> {
     Value,
     Method(Option<&'a mut Id>),
     ListedClassMember,
+    Object,
 }
 
 #[derive(Default)]
@@ -3192,30 +3193,37 @@ impl Context {
         )
     }
 
+    fn inherited_object_member(&self, class: Id, declaring: Id, stored: Id) -> bool {
+        self.builtins.get("object") == Some(&declaring)
+            && matches!(self.heap.get(class), Value::Native(owner)
+                if self.str_value(stored).is_ok_and(|field| NativeTypeMethods::inherits_from_object(owner, field)))
+    }
+
     /// Resolve a Python name object against immutable native type dictionaries.
     fn native_attribute_with_key(
         &mut self,
         obj: Id,
-        class: Id,
-        receiver: Id,
-        key: Id,
+        (class, receiver, key): (Id, Id, Id),
         spelling: &str,
+        lookup: &AttributeLookup,
     ) -> Result<Id> {
         let meta = self.builtin("type");
         let meta_member = if receiver == NONE {
             self.class_dictionary_member(meta, key)
-                .map(|(_, _, member)| member)
         } else {
             None
         };
-        if let Some(member) = meta_member
-            && self.readable_data_descriptor(member)
+        if let Some((declaring, stored, member)) = meta_member
+            && (self.readable_data_descriptor(member)
+                || *lookup == AttributeLookup::Object
+                    && self.inherited_object_member(meta, declaring, stored))
         {
             return self.bind_attribute(member, obj, meta);
         }
         if let Some((base, stored, member)) = self.class_dictionary_member(class, key) {
-            if base == class
-                && matches!(self.heap.get(member), Value::Native(symbol)
+            if self.inherited_object_member(class, base, stored)
+                || base == class
+                    && matches!(self.heap.get(member), Value::Native(symbol)
                     if BuiltinDescriptor::lookup(symbol).is_some())
             {
                 return self.bind_attribute(member, receiver, class);
@@ -3225,7 +3233,7 @@ impl Context {
             let name = self.str_value(stored)?.to_owned();
             return self.default_get_attr(obj, &name);
         }
-        if let Some(member) = meta_member {
+        if let Some((_, _, member)) = meta_member {
             return self.bind_attribute(member, obj, meta);
         }
         Err(self.missing_attribute(obj, spelling))
@@ -3257,12 +3265,12 @@ impl Context {
             ) => Some((self.exact_type(obj)?, obj, key)),
             _ => None,
         };
-        if let Some((class, receiver, key)) = native_key
+        if let Some(native @ (class, _, _)) = native_key
             && (name == "__getattribute__" || self.class_attr(class, name).is_some_and(|member| {
                 matches!(self.heap.get(member), Value::Native(symbol) if BuiltinDescriptor::lookup(symbol).is_some())
             }))
         {
-            return self.native_attribute_with_key(obj, class, receiver, key, name);
+            return self.native_attribute_with_key(obj, native, name, &lookup);
         }
         if name == "__dict__"
             && matches!(self.heap.get(obj), Value::Native(symbol) if builtins::exception_kind(symbol).is_some())
@@ -6394,17 +6402,32 @@ impl Context {
         {
             return Ok(NONE);
         }
-        if let Some((class, receiver, key)) = native_key {
-            return self.native_attribute_with_key(obj, class, receiver, key, name);
+        if let Some(native) = native_key {
+            return self.native_attribute_with_key(obj, native, name, &lookup);
         }
-        if self.heap.get(obj).intrinsic_type_name().is_some() {
-            let class = self.exact_type(obj)?;
-            if self.native_type_dicts.get(&class).is_some() {
+        let value = self.heap.get(obj);
+        let native_type = match value {
+            Value::Native(owner) => Some(owner.as_str()),
+            _ => value.intrinsic_type_name(),
+        };
+        let inherited = native_type
+            .is_some_and(|owner| NativeTypeMethods::inherits_from_object(owner, name))
+            && attr.nonexact_key(self).is_none();
+        if inherited || value.intrinsic_type_name().is_some() {
+            let class_access =
+                inherited && self.is_type_object(obj) && lookup != AttributeLookup::Object;
+            let (class, receiver) = if class_access {
+                (obj, NONE)
+            } else {
+                (self.exact_type(obj)?, obj)
+            };
+            if inherited || self.native_type_dicts.get(&class).is_some() {
                 let key = attr.key(self);
                 if let Some((declaring, _, member)) = self.class_dictionary_member(class, key)
-                    && declaring == class
+                    && (declaring == class
+                        || inherited && self.builtins.get("object") == Some(&declaring))
                 {
-                    return self.bind_attribute(member, obj, class);
+                    return self.bind_attribute(member, receiver, class);
                 }
             }
         }
