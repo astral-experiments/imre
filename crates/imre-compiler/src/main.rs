@@ -301,9 +301,8 @@ fn run() -> Result<ExitCode, String> {
         };
     let split =
         !whole_program && (native.is_some() || (native_objects && options.address_sanitizer));
-    if split && !options.address_sanitizer {
-        options.bundled_provider_archive =
-            bundled_native.and_then(|toolchain| toolchain.provider_archive(&optimization));
+    if split && linux && !options.address_sanitizer {
+        options.bundled_provider_archive = build_cache::provider_archive(&optimization);
     }
     let run_image = |directory, boxed_imports| {
         #[cfg(unix)]

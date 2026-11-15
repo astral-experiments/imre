@@ -86,6 +86,16 @@ pub struct NativeToolchain {
     bundle: Option<PathBuf>,
 }
 
+/// The installed provider archive can also be linked by the native system toolchain.
+pub fn provider_archive(optimization: &OsStr) -> Option<PathBuf> {
+    let path = super::installation_file("imre-toolchain")
+        .ok()?
+        .join("lib/imre-stdlib")
+        .join(format!("O{}", optimization.to_str()?))
+        .join("providers.a");
+    path.is_file().then_some(path)
+}
+
 impl NativeToolchain {
     pub fn bundled() -> Option<Self> {
         if !cfg!(target_os = "linux") {
@@ -98,15 +108,6 @@ impl NativeToolchain {
             lld: Some(root.join("bin/ld.lld")),
             bundle: Some(root),
         })
-    }
-
-    pub fn provider_archive(&self, optimization: &OsStr) -> Option<PathBuf> {
-        let root = self.bundle.as_ref()?;
-        let path = root
-            .join("lib/imre-stdlib")
-            .join(format!("O{}", optimization.to_str()?))
-            .join("providers.a");
-        path.is_file().then_some(path)
     }
 
     pub fn driver(&self) -> Command {
