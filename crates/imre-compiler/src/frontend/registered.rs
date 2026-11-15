@@ -1074,25 +1074,17 @@ impl ParameterEvaluator {
 pub(super) fn registered_import(
     stmt: &ast::Stmt,
     private_names: Option<&imre_ast::Names>,
-) -> Option<Expr> {
+) -> Option<Statement> {
     let import = match stmt {
         ast::Stmt::Import(import) => ir::NamespaceImport::Modules(
             import
                 .names
                 .iter()
-                .map(|alias| {
-                    let name = alias.name.as_str();
-                    let root = name.split('.').next().unwrap_or(name);
-                    ir::ModuleImport {
-                        name: name.to_owned(),
-                        binding: alias
-                            .asname
-                            .as_ref()
-                            .map_or(root, ast::Identifier::as_str)
-                            .to_owned(),
-                        bind_leaf: alias.asname.is_some()
-                            && !private_names.is_some_and(|names| names.imports_root(&alias.name)),
-                    }
+                .map(|alias| ir::ModuleImport {
+                    name: alias.name.id.clone(),
+                    asname: alias.asname.as_ref().map(|name| name.id.clone()),
+                    bind_leaf: alias.asname.is_some()
+                        && !private_names.is_some_and(|names| names.imports_root(&alias.name)),
                 })
                 .collect(),
         ),
@@ -1116,11 +1108,11 @@ pub(super) fn registered_import(
         },
         _ => return None,
     };
-    Some(operation(
+    Some(Statement::Expr(operation(
         Builtin::RegisteredImport(import),
         Type::None,
         vec![],
-    ))
+    )))
 }
 
 #[derive(Clone, Copy)]
@@ -3315,9 +3307,10 @@ impl statements::StatementLowering for SourceScope<'_> {
                     .ok_or(())?;
                 Ok((body, true))
             }
-            _ => registered_import(stmt, self.source.private_names)
-                .map(|import| (vec![Statement::Expr(import)], true))
-                .ok_or(()),
+            _ => {
+                output.push(registered_import(stmt, self.source.private_names).ok_or(())?);
+                return Ok(true);
+            }
         }?;
         statements::append_block(output, statements);
         Ok(continues)
@@ -5205,7 +5198,9 @@ else:
             .body;
         let names = imre_ast::lower(&mut body);
         let class = body[0].as_class_def_stmt().unwrap();
-        let import = registered_import(&class.body[0], Some(&names)).unwrap();
+        let Some(Statement::Expr(import)) = registered_import(&class.body[0], Some(&names)) else {
+            panic!("expected an import statement");
+        };
         let ExprKind::Builtin(Builtin::RegisteredImport(ir::NamespaceImport::Modules(modules)), _) =
             import.kind
         else {
@@ -5215,7 +5210,7 @@ else:
             panic!("expected one module")
         };
         assert_eq!(module.name, "__pkg.child");
-        assert_eq!(module.binding, "_C__pkg");
+        assert_eq!(module.asname.as_deref(), Some("_C__pkg"));
         assert!(!module.bind_leaf);
     }
 

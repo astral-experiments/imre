@@ -1088,13 +1088,15 @@ impl<'p> RegisteredFrame<'_, 'p> {
             ir::NamespaceImport::Modules(modules) => {
                 for item in modules {
                     let mut module = self.import_name(&item.name, "0", 0);
+                    let mut parts = item.name.split('.');
+                    let root = parts.next().unwrap_or(&item.name);
                     if item.bind_leaf {
-                        for part in item.name.split('.').skip(1) {
+                        for part in parts {
                             let member = self.code_name(part);
                             module = self.op("from", &[&module, &member]);
                         }
                     }
-                    self.bind(&item.binding, &module);
+                    self.bind(item.asname.as_deref().unwrap_or(root), &module);
                 }
             }
             ir::NamespaceImport::From {
