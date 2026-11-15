@@ -28,6 +28,8 @@ ACCEPTED = {
     "continuation_padding": 'def message() -> str:\n    \t# This comment does not start a statement.\n    return (\n\tf"{4}"\n    )\nprint(message())\n',
     "blank_line_padding": 'if True:\n\t\f\n    print(f"{4}")\n',
     "shadowed_ascii": 'def ascii(value: str) -> str:\n    return "shadow: " + value\nprint(ascii("é"))\nprint(f"{\'é\'!a}")\n',
+    "descriptor_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(repr([Item()]))\n',
+    "nested_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(ascii([Item()]))\n',
     "ascii_conversion": 'print(f"{1!a}")\n',
     "repr_conversion": 'print(f"{1!r}:{True!r}:{None!r}")\n',
     "literal_control_characters": 'value = 7\nprint(f"""first\n\tliteral tab {value}\n\fliteral form feed\nlast""")\n',
@@ -44,8 +46,6 @@ ACCEPTED = {
 }
 
 REJECTED = {
-    "descriptor_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(repr([Item()]))\n',
-    "nested_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(ascii([Item()]))\n',
     "decimal_float": 'print(f"{1.5:+}")\n',
     "decimal_conversion": 'print(f"{1!r:+d}")\n',
     "numeric_string_conversion": 'print(f"{1!s:.2f}")\n',
@@ -85,10 +85,6 @@ def rejection_message(name: str) -> str:
         return "numeric format specifications require an unconverted int, float, or bool"
     if name == "builtin_rebinding":
         return "rebinding a builtin, definition, or imported module is unsupported"
-    if name == "nested_user_repr":
-        return "ascii requires a supported representation"
-    if name == "descriptor_user_repr":
-        return "generated repr cannot format"
     if name.startswith("surrogate_"):
         return "surrogate string escapes are unsupported"
     if name == "form_feed_expression_indentation":
