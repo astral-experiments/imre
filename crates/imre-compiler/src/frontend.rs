@@ -5943,7 +5943,7 @@ impl<'a> Checker<'a> {
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor, emit: bool) -> Result<statements::Block, String> {
-        let mut input = if loop_.is_async || self.registered.is_some() {
+        let input = if loop_.is_async || self.registered.is_some() {
             self.iteration_input(&loop_.iter, None, registered::for_pull(loop_))?
         } else if let ast::Expr::Call(call) = loop_.iter.as_ref()
             && self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::GroupBy))
@@ -5959,22 +5959,24 @@ impl<'a> Checker<'a> {
             let input = self.iteration_input(&loop_.iter, self.split_guard(loop_), None)?;
             self.fuse_split(input)
         };
-        if let Iteration::Container {
-            iterable,
-            items: false,
-            start: None,
-        } = &input
-            && let Some(fields) = self.types.fields(iterable.ty)
-            && fields.windows(2).any(|pair| pair[0] != pair[1])
-            && fields.len() <= 8
-            && let ast::Expr::Name(target) = loop_.target.as_ref()
-            && !self.names.contains_key(target.id.as_str())
-            && let [ast::Stmt::If(guard)] = loop_.body.as_slice()
-            && guard.elif_else_clauses.is_empty()
-            && matches!(guard.body.as_slice(), [ast::Stmt::Return(_)])
-        {
-            return self.tuple_search(loop_, target, iterable.clone(), &fields);
-        }
+        let mut input = match input {
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if let Some(fields) = self.types.fields(iterable.ty)
+                && fields.windows(2).any(|pair| pair[0] != pair[1])
+                && fields.len() <= 8
+                && let ast::Expr::Name(target) = loop_.target.as_ref()
+                && !self.names.contains_key(target.id.as_str())
+                && let [ast::Stmt::If(guard)] = loop_.body.as_slice()
+                && guard.elif_else_clauses.is_empty()
+                && matches!(guard.body.as_slice(), [ast::Stmt::Return(_)]) =>
+            {
+                return self.tuple_search(loop_, target, iterable, &fields, emit);
+            }
+            input => input,
+        };
         let mut item_strings = None;
         if let Iteration::Container {
             iterable,
@@ -6048,33 +6050,37 @@ impl<'a> Checker<'a> {
         target: &ast::ExprName,
         iterable: Expr,
         fields: &[Type],
+        emit: bool,
     ) -> Result<(Vec<Statement>, bool), String> {
         let captured = self.hidden(iterable.ty);
-        let mut body = vec![Statement::Assign(captured, iterable)];
-        let mut clear = vec![captured];
+        let mut scope = emit.then(|| (vec![Statement::Assign(captured, iterable)], vec![captured]));
         for (index, &ty) in fields.iter().enumerate() {
             let slot = self.declare(target.id.as_str(), ty, target)?;
             self.assigned.insert(slot);
-            body.push(Statement::Assign(
-                slot,
-                Expr {
-                    ty,
-                    kind: ExprKind::Field(Box::new(self.local(captured)), index),
-                },
-            ));
-            body.extend(self.block(&loop_.body)?.0);
+            let output = scope.as_mut().map(|(body, _)| {
+                body.push(Statement::Assign(
+                    slot,
+                    Expr {
+                        ty,
+                        kind: ExprKind::Field(Box::new(self.local(captured)), index),
+                    },
+                ));
+                body
+            });
+            self.lower_block(&loop_.body, output)?;
             if index + 1 < fields.len() {
-                body.push(Statement::Clear(slot));
-                clear.push(slot);
+                if let Some((body, clear)) = &mut scope {
+                    body.push(Statement::Clear(slot));
+                    clear.push(slot);
+                }
                 self.names.remove(target.id.as_str());
                 self.assigned.remove(&slot);
                 self.narrowed.remove_mut(&slot);
             }
         }
-        let mut result = vec![Statement::Scope { body, clear }];
-        let (orelse, falls) = self.block(&loop_.orelse)?;
-        result.extend(orelse);
-        Ok((result, falls))
+        let mut result = scope.map(|(body, clear)| vec![Statement::Scope { body, clear }]);
+        let falls = self.lower_block(&loop_.orelse, result.as_mut())?;
+        Ok((result.unwrap_or_default(), falls))
     }
 
     /// An unpacked enumerate over a known list needs only its live cursor.
