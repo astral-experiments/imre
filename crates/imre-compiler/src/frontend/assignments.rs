@@ -1032,7 +1032,11 @@ mod tests {
     fn subcommand_fields_stay_inside_their_conditional_arm() {
         let source = include_str!("../../../../tests/fixtures/argparse/commands.py");
         let checked = |expr: &str| crate::check(&source.replace("    print(args.label)", expr));
-        checked("    print(args.text if args.command == 'write' else args.label)").unwrap();
+        let (result, lowered) = crate::frontend::caller_cache::observe_lowerings(|| {
+            checked("    print(args.text if args.command == 'write' else args.label)")
+        });
+        result.unwrap();
+        assert_eq!(lowered.iter().filter(|name| *name == "read").count(), 1);
         for expr in [
             "    print(args.text if args.command == 'write' else args.text)",
             "    print(args.command == 'write' and args.text != '')\n    print(args.text)",
