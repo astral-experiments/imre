@@ -69,6 +69,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use ruff_python_ast::name::Name;
+use ruff_python_ast::visitor::Visitor;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
@@ -115,6 +116,13 @@ pub fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = 
     parameters
         .iter_non_variadic_params()
         .filter_map(|parameter| parameter.default.as_deref())
+}
+
+/// Visit the defaults evaluated when the enclosing scope creates a lambda.
+pub fn visit_lambda_defaults<'a>(visitor: &mut impl Visitor<'a>, lambda: &'a ast::ExprLambda) {
+    if let Some(parameters) = &lambda.parameters {
+        visitor.visit_parameters(parameters);
+    }
 }
 
 pub fn decorator_expressions(decorators: &[ast::Decorator]) -> impl Iterator<Item = &ast::Expr> {

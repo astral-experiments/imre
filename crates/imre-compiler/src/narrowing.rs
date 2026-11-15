@@ -98,15 +98,16 @@ pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> 
     struct Writes(HashSet<String>);
     impl<'a> Visitor<'a> for Writes {
         fn visit_expr(&mut self, expression: &'a ast::Expr) {
-            if matches!(expression, ast::Expr::Lambda(_)) {
-                return;
+            match expression {
+                ast::Expr::Named(value) => {
+                    if let Some(name) = value.target.as_name_expr() {
+                        self.0.insert(name.id.to_string());
+                    }
+                    self.visit_expr(&value.value);
+                }
+                ast::Expr::Lambda(lambda) => imre_ast::visit_lambda_defaults(self, lambda),
+                _ => walk_expr(self, expression),
             }
-            if let ast::Expr::Named(value) = expression
-                && let ast::Expr::Name(name) = &*value.target
-            {
-                self.0.insert(name.id.to_string());
-            }
-            walk_expr(self, expression);
         }
     }
     let mut writes = Writes(HashSet::new());
@@ -122,7 +123,6 @@ pub(crate) fn guaranteed_assignments(
     truth: Option<bool>,
 ) -> HashSet<String> {
     match expression {
-        ast::Expr::Lambda(_) => HashSet::new(),
         ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
                 && call.arguments.args.len() == 1
@@ -168,10 +168,9 @@ pub(crate) fn guaranteed_assignments(
             names.extend(yes.intersection(&no).cloned());
             names
         }
-        ast::Expr::ListComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::SetComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::DictComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::Generator(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
+            guaranteed_assignments(plan.outer, None)
+        }
         _ => {
             struct Children(HashSet<String>);
             impl<'a> Visitor<'a> for Children {
@@ -180,7 +179,10 @@ pub(crate) fn guaranteed_assignments(
                 }
             }
             let mut children = Children(HashSet::new());
-            walk_expr(&mut children, expression);
+            match expression {
+                ast::Expr::Lambda(lambda) => imre_ast::visit_lambda_defaults(&mut children, lambda),
+                _ => walk_expr(&mut children, expression),
+            }
             children.0
         }
     }
