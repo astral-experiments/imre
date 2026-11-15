@@ -6502,7 +6502,12 @@ impl<'a> Checker<'a> {
     }
 
     fn discarded_function_body(&self) -> bool {
-        self.placement_only && self.block_depth == 1 && self.fixed_sites.is_none()
+        self.block_depth == 1
+            && self.fixed_sites.is_none()
+            && (self.placement_only
+                || self.registered.is_none()
+                    && matches!(self.frame, LexicalFrame::Named(_))
+                    && self.unrepresented.borrow().is_some())
     }
 
     /// Control flow and bindings are still checked when this frame has lost its output.
