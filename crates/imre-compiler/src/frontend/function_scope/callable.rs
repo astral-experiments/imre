@@ -131,6 +131,9 @@ impl NamedFunction<'_> {
         if !suspended && let Some(ty) = scalar("return") {
             signature["return_type"] = json!(ty);
         }
+        // A Python protocol frame reads the caller's live annotations when it binds a scalar.
+        let checked = checked
+            .filter(|body| !matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. }));
         for (position, parameter) in def.parameters.iter_non_variadic_params().enumerate() {
             let name = parameter.parameter.name.as_str();
             if let Some(ty) = scalar(name) {
