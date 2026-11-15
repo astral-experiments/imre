@@ -177,7 +177,6 @@ impl<'p> Frame<'_, '_, 'p> {
                     self.release_target();
                     if let Some(name) = binding {
                         self.clear_handler_target(name);
-                        self.flush_check();
                     }
                     self.jump(&done);
                     self.label(&done);
