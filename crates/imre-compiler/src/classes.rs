@@ -1918,7 +1918,10 @@ fn check_initializer(
         }
         let assignment = match statement {
             ast::Stmt::Assign(assignment) => assignment,
-            ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
+            ast::Stmt::Expr(value)
+                if value.value.is_string_literal_expr()
+                    || value.value.is_ellipsis_literal_expr() =>
+            {
                 continue;
             }
             ast::Stmt::Expr(value)

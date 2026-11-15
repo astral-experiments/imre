@@ -6,6 +6,11 @@ class Empty:
     """A record with no fields."""
 
 
+@dataclass
+class ExplicitInit:
+    def __init__(self, x: int, num: int) -> None: ...
+
+
 @dataclass(slots=True)
 class ScalarDefaults:
     name: str
@@ -35,6 +40,7 @@ def argument(label: str, value: int) -> int:
 
 
 print(Empty())
+print(ExplicitInit(1, 2))
 print(ScalarDefaults("λ"))
 print(ScalarDefaults("literal", optional="kept", marker=4))
 print(Keywords(argument("positional", 1), second=argument("second", 3), name="named"))

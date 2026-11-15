@@ -170,6 +170,7 @@ Cell(1).copy({"unknown": 2})
     "constructor_self_escape": CELL.replace("self.value = value", "self.value = escape(self)")
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
+    "constructor_ellipsis_call": CELL.replace("self.value = value", "...()\n        self.value = value"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
