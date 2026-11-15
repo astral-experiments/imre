@@ -983,6 +983,12 @@ impl Inference {
                 .iter()
                 .all(|p| !p.inferred_params.contains(&true)))
         .then_some(0);
+        // A written return can still need its body to select a concrete layout.
+        // Try those definitions first when every parameter already has a declaration.
+        let mut declared_layouts = first_open_return.is_some()
+            && self.pending.borrow().iter().zip(definitions.iter()).all(
+                |(slot, (_, function, _))| slot.returns.is_some() || function.returns.is_some(),
+            );
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
@@ -1064,11 +1070,13 @@ impl Inference {
                         }
                         // Methods and generators can still supply a prepared frame.
                         // Leave ordinary physical functions to their consuming body check.
-                        if *slot == signatures.len()
+                        if (*slot == signatures.len()
+                            || declared_layouts && signatures[signature.id].returns.is_some())
                             && signature.physical_frame
                             && signature.method.is_none()
                             && !graph.session.is_generator_definition(*module, function)
                         {
+                            skipped |= *slot < signatures.len();
                             continue;
                         }
                     }
@@ -1521,6 +1529,7 @@ impl Inference {
                 let resolved = |(slot, _): &(usize, _)| self.pending.borrow()[*slot].is_resolved();
                 // Reproduce the canonical diagnostic pass if discovery stalls.
                 if skipped && self.unresolved() {
+                    declared_layouts = false;
                     self.revisit_checked_returns();
                     continue;
                 }
@@ -2292,6 +2301,29 @@ mod tests {
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(
             error.contains("main.py:5:12: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_typed_callback_reports_the_inferred_return_at_the_argument() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "from typing import Callable\n",
+            "import argparse\n",
+            "def invoke(f: Callable[[list[str]], str]) -> str:\n    return f([])\n",
+            "def exercise() -> None:\n    print(invoke(produce))\n",
+            "def produce(x: list[str]) -> argparse.Namespace:\n",
+            "    p = argparse.ArgumentParser()\n",
+            "    p.add_argument('--size', default='4')\n",
+            "    return p.parse_args(x)\n",
+            "exercise()\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("main.py:6:18: Imre: expected Callable[[list[str]], str], got Callable[[list[str]], main.Namespace]"),
             "{error}"
         );
     }
