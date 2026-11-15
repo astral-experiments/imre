@@ -903,6 +903,7 @@ pub(super) fn capture(
                 let mut fixed = checker();
                 fixed.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
                 fixed.placement_only = true;
+                fixed.python_method_frame = true;
                 fixed.settled_attributes = Some(&mut attributes);
                 graph.try_registered_body(id, || lower_body(fixed, function, signature).ok())
             });
