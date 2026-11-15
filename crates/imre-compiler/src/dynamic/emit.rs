@@ -149,7 +149,7 @@ impl crate::ProgramOutput {
                     }
                     Initializer::Archived(_) => (true, 0, &[][..]),
                 };
-                let registration = prepared.registration(bundled, future_flags);
+                let loader = prepared.loader(bundled, future_flags);
                 let check_archive = bundled && !providers.is_empty();
                 let mut placed = None;
                 let mut whole_entry = None;
@@ -163,7 +163,7 @@ impl crate::ProgramOutput {
                     let mut fork = None;
                     let target = if separate && !check_archive && whole_requested {
                         let launcher = whole.as_mut().unwrap_or_else(|| fork.insert(root.clone()));
-                        let module = launcher.module_registration(&registration);
+                        let module = launcher.module_operands(name, path);
                         let (_, entry) = whole_entry.insert((module, String::new()));
                         Some((&mut launcher.output, unit, entry))
                     } else {
@@ -189,7 +189,7 @@ impl crate::ProgramOutput {
                     let (module, code) = if let Some(entry) = entry {
                         entry
                     } else {
-                        let module = launcher.module_registration(&registration);
+                        let module = launcher.module_operands(name, path);
                         let code = match (symbol, initializer) {
                             (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
                                 launcher.external(symbol)
@@ -200,7 +200,7 @@ impl crate::ProgramOutput {
                         };
                         (module, code)
                     };
-                    module.write_call(launcher, &code);
+                    module.write_call(launcher, &loader, &code);
                     Ok(module.name)
                 };
                 let owner = register(root, external.as_deref(), None)?;
@@ -270,12 +270,12 @@ pub(super) struct PreparedBody<'a> {
 }
 
 impl<'a> PreparedUnit<'a> {
-    fn registration(&self, bundled: bool, future_flags: u32) -> crate::ir::ModuleRegistration<'a> {
-        use crate::ir::{ModuleLoader, ModuleRegistration, PhysicalModuleKind};
+    fn loader(&self, bundled: bool, future_flags: u32) -> crate::ir::ModuleLoader<'a> {
+        use crate::ir::{ModuleLoader, PhysicalModuleKind};
         use sha2::{Digest, Sha256};
 
-        let (name, path, original_source) = self.module;
-        let loader = if let Some(&digest) = self.zip {
+        let (_, _, original_source) = self.module;
+        if let Some(&digest) = self.zip {
             ModuleLoader::Physical {
                 kind: PhysicalModuleKind::Zip,
                 digest,
@@ -295,11 +295,6 @@ impl<'a> PreparedUnit<'a> {
                 builtin: self.builtin,
                 text: bundled.then_some(original_source.as_bytes()),
             }
-        };
-        ModuleRegistration {
-            name,
-            file: path,
-            loader,
         }
     }
 }
