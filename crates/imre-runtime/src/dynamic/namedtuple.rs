@@ -297,18 +297,6 @@ pub(super) fn getter_method(
     }
 }
 
-/// Consume the complete iterable before inspecting its length, including errors from its iterator.
-fn collect(ctx: &mut Context, source: Id) -> Result<Vec<Id>> {
-    let iterator = ctx.iterator(source)?;
-    ctx.heap.keep(iterator);
-    let mut items = Vec::new();
-    while let Some(item) = ctx.next_item(iterator)? {
-        ctx.heap.keep(item);
-        items.push(item);
-    }
-    Ok(items)
-}
-
 fn string(ctx: &mut Context, object: Id) -> Result<String> {
     let constructor = ctx.builtin("str");
     let value = ctx.call(constructor, vec![object], Vec::new())?;
@@ -401,7 +389,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     validate_fields(&typename, &names, rename)?;
     let has_defaults = defaults.is_some_and(|id| id != NONE);
     let defaults = match defaults {
-        Some(id) if id != NONE => collect(ctx, id)?,
+        Some(id) if id != NONE => ctx.collect_iterable_items(id)?,
         _ => Vec::new(),
     };
     if defaults.len() > names.len() {

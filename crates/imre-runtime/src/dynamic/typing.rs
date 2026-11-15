@@ -3031,18 +3031,16 @@ impl Context {
         let Some(slots) = slots else {
             return Ok(None);
         };
-        let mut items = Vec::new();
-        if self.string_storage(slots).is_some() {
-            items.push(slots);
-        } else {
-            let iterator = self.iterator(slots)?;
-            self.heap.keep(iterator);
-            while let Some(slot) = self.next_item(iterator)? {
-                self.heap.keep(slot);
-                items.push(slot);
+        let collected;
+        let items = match self.heap.get(slots) {
+            Value::Tuple(items) => items.as_slice(),
+            _ if self.string_storage(slots).is_some() => std::slice::from_ref(&slots),
+            _ => {
+                collected = self.collect_iterable_items(slots)?;
+                &collected
             }
-        }
-        Ok(Some(self.checked_slot_names(base, &items)?.into()))
+        };
+        Ok(Some(self.checked_slot_names(base, items)?.into()))
     }
 
     /// Preserve the actual direct bases as well as the immutable C3 tuple exposed by type.
