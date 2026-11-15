@@ -427,3 +427,21 @@ def report_display(items):
 
 
 report_display(map(int, ("7", "bad")))
+
+
+released = []
+
+
+class MissingKey:
+    def __del__(self):
+        released.append((sys.exception(), globals().get("caught", "missing")))
+
+
+try:
+    raise OSError("enclosing")
+except OSError as outer:
+    try:
+        {}[MissingKey()]
+    except KeyError as caught:
+        pass
+    assert released == [(outer, None)]
