@@ -1855,6 +1855,21 @@ fn check_initializer(
     let mut called_super = false;
     let mut called_exception_base = false;
     for (index, statement) in initializer.body.iter().enumerate() {
+        // A fully initialized receiver can enter ordinary conditional method calls.
+        // Keep receiver writes and explicit initialization under the layout checks below.
+        if !exception_layout
+            && matches!(statement, ast::Stmt::If(_) | ast::Stmt::Try(_))
+            && (inherited.is_empty() || called_super)
+            && declared.is_subset(&initialized)
+            && !ruff_python_ast::helpers::any_over_body(&initializer.body[index..], |expr| {
+                matches!(expr, ast::Expr::Attribute(attr) if attr.ctx != ast::ExprContext::Load || attr.attr.as_str() == "__init__")
+                    || matches!(expr, ast::Expr::Name(name) if name.ctx != ast::ExprContext::Load && name.id == receiver)
+            })
+        {
+            let mut exposed = SelfUse(receiver, None, &initialized);
+            exposed.visit_body(&initializer.body[index..]);
+            return Ok(exposed.1.is_some());
+        }
         if index + 1 == initializer.body.len()
             && (inherited.is_empty() || called_super)
             && let ast::Stmt::Expr(s) = statement
