@@ -1,7 +1,3 @@
-class DocTestCase(_DocTestCase):
-    pass
-
-
 def _checked_example(test: DocTest, index: int, source: str) -> Example:
     example = test.examples[index]
     if example.source != source:
