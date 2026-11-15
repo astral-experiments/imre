@@ -470,8 +470,7 @@ fn ini<'a>(source: &'a str, filename: &str) -> Result<Sections<'a>> {
         if let Some(pos) = text.find(['=', ':'])
             && pos != 0
         {
-            let key = super::super::text::lowercase(text[..pos].trim_end())
-                .map_err(|_| Error::allocation())?;
+            let key = super::super::case_map(text[..pos].trim_end(), super::super::Case::Lower)?;
             let options = sections.get_mut(section).unwrap();
             if options.contains_key(&key) {
                 return Err(ini_error(format_args!(

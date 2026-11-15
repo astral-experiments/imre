@@ -331,8 +331,7 @@ pub(crate) fn netloc_property(
         lower[..name.len()].make_ascii_lowercase();
         lower
     } else {
-        let mut lower = super::lowercase::lowercase(std::str::from_utf8(name).unwrap())
-            .map_err(|_| Error::allocation())?;
+        let mut lower = super::case_map(std::str::from_utf8(name).unwrap(), super::Case::Lower)?;
         if let Some(zone) = zone {
             lower
                 .try_reserve(1 + zone.len())
