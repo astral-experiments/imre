@@ -1663,7 +1663,7 @@ pub(in crate::dynamic) fn builtin_slot(
         if method == "__index__" {
             return Ok(integer::exact_value(ctx, object));
         }
-        if method == "__str__" {
+        if method == "__str__" && owner == "str" {
             return ctx.unchanged_string(object, storage);
         }
         let text = match ctx.heap.get(storage) {

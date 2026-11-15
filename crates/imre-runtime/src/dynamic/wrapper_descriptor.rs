@@ -430,7 +430,6 @@ impl BuiltinDescriptor {
             "functools.partial.__repr__" => (stdlib::functools::PARTIAL_CLASS, "__repr__"),
             "method_descriptor.__get__" => ("method_descriptor", "__get__"),
             "wrapper_descriptor.__get__" => ("wrapper_descriptor", "__get__"),
-            "bytes.__repr__" => ("bytes", "__repr__"),
             "tuple.__repr__" => ("tuple", "__repr__"),
             "types.SimpleNamespace.__init__" => (super::namespace::CLASS, "__init__"),
             "types.SimpleNamespace.__repr__" => (super::namespace::CLASS, "__repr__"),
@@ -795,9 +794,10 @@ impl BuiltinDescriptor {
             }
             "__doc__" if self.name == "__hash__" => ctx.text("Return hash(self)."),
             "__doc__" if self.name == "__repr__" => ctx.text("Return repr(self)."),
+            "__doc__" if self.name == "__str__" => ctx.text("Return str(self)."),
             "__doc__" if self.name == "__iter__" => ctx.text("Implement iter(self)."),
             "__doc__" if self.name == "__next__" => ctx.text("Implement next(self)."),
-            "__text_signature__" if matches!(self.name, "__hash__" | "__iter__" | "__next__" | "__repr__") => {
+            "__text_signature__" if matches!(self.name, "__hash__" | "__iter__" | "__next__" | "__repr__" | "__str__") => {
                 ctx.text("($self, /)")
             }
             "__doc__" if self.name == "__contains__" => ctx.text("Return bool(key in self)."),
