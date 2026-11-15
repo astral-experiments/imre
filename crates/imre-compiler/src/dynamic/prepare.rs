@@ -14,6 +14,7 @@ pub(crate) type ModuleSource<'a> = (String, PathBuf, Cow<'a, str>);
 pub(super) enum Shipped<'a> {
     Checked(Result<(), String>),
     Archived(&'a str),
+    Parsed(ruff_db::parsed::ParsedModuleRef),
 }
 
 #[derive(Default)]
@@ -119,33 +120,35 @@ pub(super) fn units<'a>(
                 && checked.is_none_or(|unit| unit.run_path.is_none())
                 && literals.is_none()
                 && types.is_none();
+            let shipped = shipped_checks.remove(&unit).filter(|_| standalone);
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {
                 Err(error.as_ref())
-            } else if standalone && let Some(shipped) = shipped_checks.remove(&unit) {
-                match shipped {
-                    Shipped::Checked(check) => return check.map(|()| None),
-                    Shipped::Archived(symbol) => Ok(Initializer::Archived(symbol)),
-                }
+            } else if let Some(Shipped::Checked(check)) = shipped {
+                return check.map(|()| None);
+            } else if let Some(Shipped::Archived(symbol)) = shipped {
+                Ok(Initializer::Archived(symbol))
             } else {
                 // Preserve the loader's digest while compiling its normalized source.
                 let (text, syntax) = if let Some(entry) = discovered {
                     (entry.text, Some(entry.parsed))
+                } else if let Some(file) = physical {
+                    let kind = file.source_kind.unwrap_or(crate::SourceKind::File);
+                    (crate::normalize_source(source, kind)?, None)
+                } else if zip.is_some()
+                    || physical_files
+                        .get(path)
+                        .is_some_and(|file| file.digest.is_some())
+                {
+                    (
+                        crate::normalize_source(source, crate::SourceKind::DecodedFile)?,
+                        None,
+                    )
                 } else {
-                    let text = if let Some(file) = physical {
-                        crate::normalize_source(
-                            source,
-                            file.source_kind.unwrap_or(crate::SourceKind::File),
-                        )?
-                    } else if zip.is_some()
-                        || physical_files
-                            .get(path)
-                            .is_some_and(|file| file.digest.is_some())
-                    {
-                        crate::normalize_source(source, crate::SourceKind::DecodedFile)?
-                    } else {
-                        Cow::Borrowed(source.as_ref())
+                    let parsed = match &shipped {
+                        Some(Shipped::Parsed(parsed)) => Some(Cow::Borrowed(&**parsed)),
+                        _ => None,
                     };
-                    (text, None)
+                    (Cow::Borrowed(source.as_ref()), parsed)
                 };
                 let types = types.filter(|types| types.matches_source(&text));
                 let indexed = types.map(|types| types.parsed());

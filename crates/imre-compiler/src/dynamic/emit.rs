@@ -342,7 +342,8 @@ impl<'a> PreparedBody<'a> {
     fn original_fixture_suite(&self) -> Result<ast::Suite, String> {
         let path = self.source.path.as_ref();
         let text = self.source.text.as_ref();
-        let mut body = module_source::into_body(ParsedModule::parse(path, text.into())?.parsed);
+        let mut body =
+            module_source::into_body(ParsedModule::parse(path, text.into())?.parsed).into_owned();
         let names = imre_ast::lower(&mut body);
         module_source::validate_names(path, text, &body, &names)?;
         Ok(body)
@@ -529,12 +530,12 @@ impl<'a> PreparedBody<'a> {
         );
         let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
         let (body, private_names) = match normalized {
-            Some(super::LoweredRoot::Complete(body, names)) => (body, names),
+            Some(super::LoweredRoot::Complete(body, names)) => (Cow::Owned(body), names),
             Some(super::LoweredRoot::Unchanged(names)) => (module_source::into_body(parsed), names),
             None => {
                 let mut body = module_source::into_body(parsed);
                 let names = imre_ast::lower_in(
-                    &mut body,
+                    body.to_mut(),
                     "",
                     future_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0,
                 );
@@ -4065,7 +4066,7 @@ mod tests {
         let withdrawn = module.standalone().unwrap();
         assert!(withdrawn.1.contains("setup_module_annotations"));
         let parsed = ParsedModule::parse(path, source.into()).unwrap();
-        module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        module.syntax = Some(module_source::into_body(parsed.parsed));
         assert_eq!(module.standalone().unwrap(), withdrawn);
         module.syntax.as_mut().unwrap().to_mut().clear();
         assert_eq!(module.standalone().unwrap(), withdrawn);
@@ -4521,7 +4522,7 @@ mod tests {
         let mut prepared =
             PreparedBody::module("scan", path, text, 0, ModuleOrigin::Program(None)).unwrap();
         let parsed = ParsedModule::parse(path, text.into()).unwrap();
-        prepared.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+        prepared.syntax = Some(module_source::into_body(parsed.parsed));
         let function = prepared.syntax.as_ref().unwrap()[0]
             .as_function_def_stmt()
             .unwrap();
@@ -5322,7 +5323,7 @@ mod tests {
 
             // Exercise the same plan through the entry used by modules with residual code.
             let parsed = ParsedModule::parse(path, source.into()).unwrap();
-            module.syntax = Some(Cow::Owned(module_source::into_body(parsed.parsed)));
+            module.syntax = Some(module_source::into_body(parsed.parsed));
             assert!(module.standalone().unwrap() == entry);
         }
     }
@@ -5670,7 +5671,7 @@ second = t'{client.lookup(*args)}{(lambda v: v)(values)}'",
         let original = prepared.standalone().unwrap();
 
         let parsed = ParsedModule::parse(path, source.into()).unwrap();
-        let mut body = module_source::into_body(parsed.parsed);
+        let mut body = module_source::into_body(parsed.parsed).into_owned();
         let withdraw = WithdrawAliases {
             definitions: &prepared.source.type_aliases,
             count: Default::default(),
