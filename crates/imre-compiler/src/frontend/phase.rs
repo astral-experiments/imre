@@ -19,7 +19,8 @@ pub(crate) enum Kind {
     InferredMethodReceiver(usize),
     UnresolvedLayout(ModuleId, ruff_text_size::TextSize),
     ExecutionOperand(ModuleId),
-    RegisteredExecution,
+    /// The registered initializer checks this operation after the program's source contracts.
+    RegisteredInitializer,
     ExactType,
     DeclaredArgument,
     ReturnType,

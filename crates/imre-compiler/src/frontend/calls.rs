@@ -152,12 +152,40 @@ fn bind_fixed<'a, P, E, B>(
     Ok(ControlFlow::Continue(order))
 }
 
-/// Return the explicit fixed operands of a proved source declaration. Dynamic
-/// expansion or collection by a variadic parameter stays with the actual call.
+type SourceArgument<'a> = (&'a ast::ParameterWithDefault, &'a ast::Expr);
+
+pub(crate) struct FixedArguments<T, P> {
+    pub(crate) supplied: Vec<T>,
+    pub(crate) missing: Option<P>,
+}
+
+impl<T, P> FixedArguments<T, P> {
+    fn complete(self) -> Option<Vec<T>> {
+        self.missing.is_none().then_some(self.supplied)
+    }
+}
+
+pub(crate) fn missing_required_argument(
+    source: &str,
+    call: &ast::ExprCall,
+    name: &str,
+) -> Diagnostic {
+    Diagnostic::at(source, call, format!("missing required argument {name:?}"))
+}
+
+/// Return the supplied operands only when all required formals bind.
 pub(crate) fn fixed_call_arguments<'a>(
     call: &'a ast::ExprCall,
     parameters: &'a ast::Parameters,
-) -> Option<Vec<(&'a ast::ParameterWithDefault, &'a ast::Expr)>> {
+) -> Option<Vec<SourceArgument<'a>>> {
+    bind_source_arguments(call, parameters)?.complete()
+}
+
+/// Bind the written operands of a proved declaration before checking its omitted formals.
+pub(crate) fn bind_source_arguments<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+) -> Option<FixedArguments<SourceArgument<'a>, &'a ast::ParameterWithDefault>> {
     if has_unpacking(call) {
         return None;
     }
@@ -170,19 +198,19 @@ pub(crate) fn fixed_call_arguments<'a>(
         call,
         &fixed,
         |(p, k)| (p.name().as_str(), *k),
-        |(p, _)| p.default.is_some(),
+        |(p, _)| p.default.is_none().then_some(*p),
         |i, arg| (fixed[i].0, arg),
     )
 }
 
-/// Return the supplied values in evaluation order after verifying every required parameter.
-fn supplied_fixed_parameters<'a, P, T>(
+/// Keep the first missing formal alongside the supplied values in evaluation order.
+fn supplied_fixed_parameters<'a, P, T, M>(
     call: &'a ast::ExprCall,
     parameters: &[P],
     shape: impl Fn(&P) -> (&str, ParameterKind),
-    has_default: impl Fn(&P) -> bool,
+    required: impl Fn(&P) -> Option<M>,
     mut value: impl FnMut(usize, &'a ast::Expr) -> T,
-) -> Option<Vec<T>> {
+) -> Option<FixedArguments<T, M>> {
     let mut supplied = Vec::with_capacity(call.arguments.len());
     let order = bind_fixed(
         call,
@@ -197,14 +225,12 @@ fn supplied_fixed_parameters<'a, P, T>(
     )
     .ok()?
     .continue_value()?;
-    if parameters
+    let missing = parameters
         .iter()
         .zip(order)
-        .any(|(p, slot)| slot == usize::MAX && !has_default(p))
-    {
-        return None;
-    }
-    Some(supplied)
+        .filter(|(_, slot)| *slot == usize::MAX)
+        .find_map(|(p, _)| required(p));
+    Some(FixedArguments { supplied, missing })
 }
 
 /// Map written keyword operands to their checked parameters. Positional calls use their source indices.
@@ -225,9 +251,10 @@ pub(super) fn checked_parameter_indices(
         call,
         parameters,
         |p| (p.name.as_str(), p.kind),
-        |p| p.default.is_some(),
+        |p| p.default.is_none().then_some(()),
         |index, _| index,
-    )
+    )?
+    .complete()
 }
 
 /// A builtin parameter that accepts either a positional or a keyword argument.
@@ -1125,11 +1152,7 @@ impl Checker<'_> {
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
                 let default = parameter.default.as_ref().ok_or_else(|| {
-                    error(
-                        self.source,
-                        call,
-                        &format!("missing required argument {:?}", parameter.name),
-                    )
+                    missing_required_argument(self.source, call, &parameter.name)
                 })?;
                 order[index + offset] = values.len();
                 self.record_default_read(default, default_owner, index);
