@@ -68,7 +68,7 @@ pub(crate) fn write(directory: &Path) -> Result<(), String> {
             .and_then(|input| prepare::shipped_body(name, path, input, 0))
             .and_then(|body| {
                 body.has_body_statements
-                    .then(|| body.provider_body(None))
+                    .then(|| body.provider_body(name, None))
                     .transpose()
             });
         match compiled {
