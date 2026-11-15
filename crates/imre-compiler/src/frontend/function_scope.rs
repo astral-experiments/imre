@@ -19,7 +19,7 @@ use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use serde_json::json;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Default)]
 struct ClosureNames {
@@ -482,6 +482,7 @@ impl<'p> ScopeFacts<'p> {
             names,
             scope: Scope::Module,
             suite_scope: None,
+            method_cells: HashSet::new(),
             attribute_class: None,
             yields: false,
             body_yields: false,
@@ -526,6 +527,8 @@ struct Collector<'s, 'p, 'a> {
     names: &'s imre_ast::Names,
     scope: Scope,
     suite_scope: Option<Scope>,
+    // Consumed at the same method declaration while visiting the enclosing class.
+    method_cells: HashSet<TextSize>,
     // The enclosing class whose nested code records self attribute stores.
     attribute_class: Option<TextSize>,
     yields: bool,
@@ -574,12 +577,15 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     (true, true) => ASYNC_GENERATOR,
                 };
                 // A module supplies globals. A generic function has its own type-parameter scope.
-                let may_capture_class = def.type_params.is_some()
-                    || match self.scope {
-                        Scope::Module => false,
-                        Scope::Class(site) => self.scopes.classes[&site].cells.class,
-                        Scope::Function { .. } | Scope::Lambda => true,
-                    };
+                let captures_class = match self.scope {
+                    Scope::Class(_) => self.method_cells.remove(&def.start()),
+                    Scope::Module if def.type_params.is_none() => false,
+                    _ => imre_ast::class_cell::function_needed(
+                        &def.body,
+                        Some(&def.parameters),
+                        strings,
+                    ),
+                };
                 let names = std::mem::replace(&mut self.function_names, parent_names);
                 let mut annotations =
                     crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref())
@@ -595,7 +601,7 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     def,
                     self.names,
                     names,
-                    may_capture_class,
+                    captures_class,
                     suspension_flags,
                     reads,
                 );
@@ -617,7 +623,12 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                 };
                 self.scopes.classes.insert(
                     start,
-                    classes::ClassScope::prepare(class, self.names, enclosing_class),
+                    classes::ClassScope::prepare(
+                        class,
+                        self.names,
+                        enclosing_class,
+                        &mut self.method_cells,
+                    ),
                 );
                 self.suite_scope = Some(Scope::Class(start));
             }
