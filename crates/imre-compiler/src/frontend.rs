@@ -6786,6 +6786,28 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
+    /// Keep Python's in-place update when the result can retain its operand's identity.
+    fn defer_in_place_addition(
+        &self,
+        op: ast::Operator,
+        left: Type,
+        right: Type,
+        source: &impl Ranged,
+    ) -> Result<bool, String> {
+        if op == ast::Operator::Add
+            && (left == Type::PythonObject
+                || right == Type::PythonObject
+                || (left == right && self.types.element(left).is_some()))
+        {
+            let failure = self.scoped_builtin_error("in-place addition", source);
+            if !self.missing_operation(&failure) {
+                return Err(failure);
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     fn missing_operation(&self, failure: &Failure) -> bool {
         if !failure.is_representation() || !self.graph.modules[self.module].is_program_source() {
             return false;
@@ -7240,6 +7262,15 @@ impl<'a> Checker<'a> {
                         })?;
                         (Type::Int, element)
                     };
+                    let index = if matches!(list.ty, Type::Deque(_)) {
+                        self.integer_index(&target.slice)?
+                    } else {
+                        self.expr_expected(&target.slice, key)?
+                    };
+                    let value = self.expr(&assign.value)?;
+                    if self.defer_in_place_addition(assign.op, element, value.ty, target)? {
+                        return Ok((Vec::new(), true));
+                    }
                     if !matches!(element, Type::Int | Type::Float) {
                         return Err(error(
                             self.source,
@@ -7247,12 +7278,6 @@ impl<'a> Checker<'a> {
                             "augmented items require int or float storage",
                         ));
                     }
-                    let index = if matches!(list.ty, Type::Deque(_)) {
-                        self.integer_index(&target.slice)?
-                    } else {
-                        self.expr_expected(&target.slice, key)?
-                    };
-                    let value = self.expr(&assign.value)?;
                     let value = Self::integer_addend(assign.op, value, element);
                     let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
                     self.expect(element, result, statement)?;
@@ -7336,17 +7361,7 @@ impl<'a> Checker<'a> {
                         return Ok((suite, true));
                     }
                     let right = self.expr(&assign.value)?;
-                    if assign.op == ast::Operator::Add
-                        && (left.ty == Type::PythonObject
-                            || right.ty == Type::PythonObject
-                            || (left.ty == right.ty && self.types.element(left.ty).is_some()))
-                    {
-                        // The registered name store owns __iadd__ and its result. Even
-                        // two lists with the same layout must preserve the original alias.
-                        let failure = self.scoped_builtin_error("in-place addition", statement);
-                        if !self.missing_operation(&failure) {
-                            return Err(failure);
-                        }
+                    if self.defer_in_place_addition(assign.op, left.ty, right.ty, statement)? {
                         if let Some(&slot) = self.names.get(name.id.as_str()) {
                             self.assigned_value(slot, &Expr::unrepresented());
                         }
