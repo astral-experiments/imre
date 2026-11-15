@@ -354,6 +354,15 @@ def main():
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
+        source.write_text(
+            "import argparse\n"
+            "def parse(choices: list[str]) -> argparse.Namespace:\n"
+            "    parser = argparse.ArgumentParser(prog='parser')\n"
+            "    parser.add_argument('--item', default=['first'], nargs='+')\n"
+            "    return parser.parse_args(choices)\n"
+            "print(parse([]))\n"
+        )
+        subprocess.run([args.compiler, "check", source], check=True)
     print(
         f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
     )

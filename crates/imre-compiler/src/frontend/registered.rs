@@ -6899,7 +6899,7 @@ publish(5, callback)
             Ok(crate::CheckedProgram::Registered(None)) => {}
             Err(error) | Ok(crate::CheckedProgram::Runtime(error)) => {
                 assert!(
-                    matches!(error.kind, Kind::UnresolvedParameter(owner, start)
+                    matches!(error.kind, Kind::UnresolvedLayout(owner, start)
                     if owner == graph.entry && start == TextSize::default()),
                     "{error}"
                 );

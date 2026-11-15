@@ -586,7 +586,7 @@ fn object_fallback(
     // Admit an unresolved fixed signature only when its own definition has checked IR
     // for the registered calling convention. Other inference diagnostics still apply.
     if let Some(error) = &mut refusal
-        && let LoweringKind::UnresolvedParameter(owner, start) = error.kind
+        && let LoweringKind::UnresolvedLayout(owner, start) = error.kind
         && let Some(graph) = graph.as_ref()
         && graph
             .registered_functions()
