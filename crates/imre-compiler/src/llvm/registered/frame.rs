@@ -1845,11 +1845,8 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
     /// A producer that releases its own intermediates can place its result
     /// directly above the preceding arguments and return that root boundary.
     pub(in crate::llvm) fn kept_call_value(&mut self, expr: &Expr, next: &mut String) -> String {
-        use crate::llvm::operations::CheckedBody;
         let retained = std::cell::OnceCell::new();
-        let value = CheckedBody::registered(self.reborrow())
-            .value_for(expr, ValueUse::CallOperand(next, &retained));
-        let value = self.materialize_owned(value);
+        let value = self.handle_for(expr, ValueUse::RootedOperand(next, Some(&retained)));
         if let Some(boundary) = retained.into_inner() {
             *next = boundary;
         } else if permanent_handle(expr).is_none() {
@@ -1895,7 +1892,7 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         self.unwind_stack_operands(&mark, |code| {
             let (receiver, value) = match action {
                 AttributeAction::Store => {
-                    let value = code.evaluate_handle(first);
+                    let value = code.handle_for(first, ValueUse::RootedOperand(&mark, None));
                     let receiver =
                         code.evaluate_handle(operands.next().expect("attribute receiver"));
                     (receiver, Some(value))
