@@ -1030,7 +1030,7 @@ fn fail(kind: &str, message: &str) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_finish_stdio() -> i32 {
     let stderr = sys::flush_stderr();
-    objects::exceptions::status_after_flush(0, flush_stdout(), stderr)
+    objects::exceptions::finish_native_stdio(0, flush_stdout(), stderr)
 }
 
 /// Reads a compiler-provided UTF-8 byte span without taking ownership.
