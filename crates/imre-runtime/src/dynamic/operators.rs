@@ -195,7 +195,7 @@ impl FormatPart {
 }
 
 /// Count normalized positions without traversing the slice or negating a minimum stride.
-pub(super) fn slice_count(start: i64, end: i64, step: i64) -> usize {
+pub(crate) fn slice_count(start: i64, end: i64, step: i64) -> usize {
     let distance = if step > 0 {
         end.saturating_sub(start)
     } else {
@@ -3900,8 +3900,7 @@ impl Context {
             // Assigning an empty buffer deletes even the non-contiguous positions.
             remove_slice_positions(target, start, end, step);
         } else {
-            let positions = slice_positions(start, end, step);
-            let count = positions.clone().count();
+            let count = slice_count(start, end, step);
             if count != data.len() {
                 return Err(Error::new(
                     "ValueError",
@@ -3911,7 +3910,7 @@ impl Context {
                     ),
                 ));
             }
-            for (i, byte) in positions.zip(data) {
+            for (i, byte) in slice_positions(start, end, step).zip(data) {
                 target[i] = byte;
             }
         }
