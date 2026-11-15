@@ -10275,7 +10275,7 @@ impl<'a> Checker<'a> {
                         value.ty
                     }
                 };
-                return Ok(Expr::unary(unary.op, value, ty));
+                return Ok(self.expression_at(expression.range(), Expr::unary(unary.op, value, ty)));
             }
             ast::Expr::BoolOp(boolean) => {
                 return self.boolean_value(boolean, None);

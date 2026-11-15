@@ -868,9 +868,6 @@ impl Expr {
     }
 
     pub(crate) fn unary(op: UnaryOp, operand: Self, ty: Type) -> Self {
-        if op == UnaryOp::UAdd && matches!(ty, Type::Int | Type::Float) && operand.ty == ty {
-            return operand;
-        }
         Self {
             ty,
             kind: ExprKind::Unary(op, Box::new(operand)),

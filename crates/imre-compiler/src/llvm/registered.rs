@@ -369,6 +369,9 @@ pub(crate) fn frame_inputs(
                     }
             }
             ExprKind::Unary(op, operand) => {
+                if *op == UnaryOp::UAdd && source.is_some() {
+                    read_scalar_protocol(operand);
+                }
                 if expr.ty == Type::PythonObject {
                     operand.ty == Type::PythonObject
                 } else {

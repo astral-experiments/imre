@@ -139,6 +139,7 @@ pub(super) enum FixedNode {
     Integer(i64),
     Scalar(ir::Constant),
     String(Box<str>),
+    Positive(Type),
     Binary(Binary, Type),
     Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
@@ -272,6 +273,7 @@ impl FixedNode {
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
+                ExprKind::Unary(ast::UnaryOp::UAdd, _) => Self::Positive(expr.ty),
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
                 ExprKind::Builtin(
                     Builtin::Process(ir::ProcessOperation::Copy(op), _),
@@ -1196,7 +1198,7 @@ mod tests {
     }
 
     #[test]
-    fn original_source_sites_cover_rebinding_and_decline_erased_syntax() {
+    fn original_source_sites_cover_rebinding_and_unary_positive() {
         let text = concat!(
             "class Receiver:\n    def read(self, value: int) -> int:\n        return value\n",
             "def combine(left: int, right: int) -> int:\n",
@@ -1204,9 +1206,9 @@ mod tests {
             "    total + left\n",
             "    total = right\n",
             "    return total\n",
-            "def erase(value: int) -> int:\n",
+            "def positive(value: int) -> int:\n",
             "    return +value\n",
-            "print(erase(combine(2, 3)))\n",
+            "print(positive(combine(2, 3)))\n",
         );
         let mut graph = SourceGraph::single(text).unwrap();
         let crate::CheckedProgram::Native(program) = crate::checked_lower(&mut graph).unwrap()
@@ -1214,7 +1216,7 @@ mod tests {
             panic!("expected native program")
         };
         let sources = &program.frame_sources;
-        assert_eq!(sources.len(), 1);
+        assert_eq!(sources.len(), 2);
         let (0, _, source) = &sources[0] else {
             panic!("expected the first function")
         };
@@ -1249,12 +1251,17 @@ mod tests {
             source.sites[13].1,
             Some(FixedNode::Indexed(kind, 2, Type::Int)) if kind == std::mem::discriminant(&ExprKind::Local(2))
         ));
+        let (1, _, positive) = &sources[1] else {
+            panic!("expected the unary function")
+        };
+        assert!(positive.sites.iter().map(|(range, _)| &text[*range]).eq([
+            "return +value",
+            "+value",
+            "value"
+        ]));
         assert!(matches!(
-            program.ir.0.functions[1].body.as_slice(),
-            [Statement::Return(Expr {
-                kind: ExprKind::Local(_),
-                ..
-            })]
+            positive.sites[1].1,
+            Some(FixedNode::Positive(Type::Int))
         ));
     }
 }
