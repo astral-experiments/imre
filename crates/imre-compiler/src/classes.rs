@@ -1337,6 +1337,17 @@ fn collect_class<'syntax>(
                 );
                 return Err(error.classified(Kind::ClassLayout));
             }
+            ast::Stmt::Assign(assign)
+                if module.bundled
+                    && !graph.entry_profile.requires_fixed_entry()
+                    && matches!(assign.targets.as_slice(), [ast::Expr::Name(_)])
+                    && let ast::Expr::Name(value) = assign.value.as_ref()
+                    && class_bindings.contains(value.id.as_str()) =>
+            {
+                return Err(module
+                    .diagnostic(value, "class namespace aliases require object lowering")
+                    .classified(Kind::ScopedClassLayout));
+            }
             _ => {
                 return Err(module.diagnostic(
                     statement,
