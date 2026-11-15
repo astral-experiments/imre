@@ -5758,7 +5758,8 @@ impl<'a> Checker<'a> {
 
     fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
         match self.value_source(value)? {
-            ValueSource::Declaration(declaration) => Some(declaration),
+            ValueSource::Declaration(declaration)
+            | ValueSource::CoroutineCallback(declaration, _) => Some(declaration),
             ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
@@ -5772,7 +5773,15 @@ impl<'a> Checker<'a> {
             .declared_slots
             .get(&slot)
             .copied()
-            .map(ValueSource::Declaration)
+            .map(|declaration| {
+                if self.types.has_cold_callback_abi(value.ty)
+                    && let Some(target) = value.unbound_function()
+                {
+                    ValueSource::CoroutineCallback(declaration, target)
+                } else {
+                    ValueSource::Declaration(declaration)
+                }
+            })
             .or_else(|| self.value_source(value));
         self.assigned.set_value_source(slot, source);
         if self.module_scope {

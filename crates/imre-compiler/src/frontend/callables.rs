@@ -129,6 +129,8 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
     }
 }
 
+pub(super) const EAGER_CALLBACK_ABI: &str = "an Awaitable callback must be defined with async def";
+
 pub(super) fn validate_targets(
     functions: &[ir::Function],
     types: &Types,
@@ -144,8 +146,7 @@ pub(super) fn validate_targets(
                 .any(|target| functions[target.function].returns == returns)
         {
             return Err(
-                Diagnostic::from("an Awaitable callback must be defined with async def")
-                    .classified(Kind::UnsupportedRepresentation),
+                Diagnostic::from(EAGER_CALLBACK_ABI).classified(Kind::UnsupportedRepresentation)
             );
         }
     }
@@ -894,6 +895,12 @@ impl<'a> Checker<'a> {
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let cold_frame = registered_site.is_none() && matches!(returns, Type::Coroutine(_));
+        // Resolve the loaded callable before an argument can replace its slot.
+        let eager = cold_frame
+            && self.asynchronous
+            && self.registered.is_none()
+            && matches!(self.value_source(&callable), Some(ValueSource::CoroutineCallback(_, target))
+                if self.types.coroutine_target(target).is_none());
         let mut values = Vec::with_capacity(call.arguments.args.len() + usize::from(cold_frame));
         let source = self.source;
         // An omitted expression may have a source contract of its own. The ordinary
@@ -973,6 +980,16 @@ impl<'a> Checker<'a> {
         }
         if let Some(expr) = registered_site {
             return Ok(self.located_callback(expr, call, callable, values));
+        }
+        if eager {
+            let failure =
+                self.classified_error(Kind::UnsupportedRepresentation, call, EAGER_CALLBACK_ABI);
+            if self.missing_operation(&failure) {
+                return Ok(Expr {
+                    ty: returns,
+                    ..Expr::unrepresented()
+                });
+            }
         }
         if cold_frame {
             return Ok(self.indirect_coroutine(callable, values, returns));
@@ -1223,7 +1240,10 @@ mod tests {
                 assert_eq!(error.kind, Kind::UnsupportedRepresentation);
                 assert_eq!(
                     error.to_string(),
-                    "an Awaitable callback must be defined with async def"
+                    format!(
+                        "{}:8:18: Imre: an Awaitable callback must be defined with async def",
+                        graph.modules[graph.entry].path.display()
+                    )
                 );
             }
             std::fs::write(&path, &program).unwrap();
@@ -1276,6 +1296,16 @@ mod tests {
                     if matches!(&callee.without_location().kind,
                         ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "cold")));
             }
+        }
+        for tail in ["return 7", "cb = cold\n    return await cb(7)"] {
+            let source = format!(
+                "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = factory\n    {tail}\n"
+            );
+            let mut graph = SourceGraph::single(&source).unwrap();
+            let Err(failure) = lower_with_caller_cache(&mut graph, None, None) else {
+                panic!("the stored factory still needs graph validation");
+            };
+            assert_eq!(failure.to_string(), super::EAGER_CALLBACK_ABI);
         }
         let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");
         let module = lower(&SourceGraph::single(&direct).unwrap()).unwrap();

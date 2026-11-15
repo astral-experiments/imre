@@ -233,14 +233,7 @@ impl Checker<'_> {
 
 /// Identify a freshly constructed unbound function or its module-level singleton.
 fn direct_source(expr: &Expr, types: &Types) -> Option<usize> {
-    let id = match &expr.kind {
-        ExprKind::Callable {
-            function,
-            receiver: None,
-        } => *function,
-        ExprKind::Builtin(Builtin::StaticFunction(id), _) => *id,
-        _ => return None,
-    };
+    let id = expr.unbound_function()?;
     (types.function_site(id).is_some()
         && types.dispatcher(expr.ty).is_none()
         && types.cache_adapter(id).is_none()
