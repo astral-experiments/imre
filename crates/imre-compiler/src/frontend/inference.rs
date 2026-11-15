@@ -1168,7 +1168,8 @@ impl Inference {
                         && registered::physical_method(signature, function, classes).is_some()
                         || signature.method.is_none()
                             && physical
-                            && signature.physical_frame
+                            && graph.modules[*module].is_program_source()
+                            && fixed_frame_entry(function)
                             && (signature.returns.builtin_scalar_name().is_some()
                                 || types.is_plain_tuple(signature.returns)
                                 || types.element(signature.returns).is_some())
@@ -1182,11 +1183,14 @@ impl Inference {
                                 false,
                                 |_| false,
                             ));
-                checker.placement_only = true;
+                // A settled native body needs its instructions even without Python operand sites.
+                checker.placement_only = !keep_return || signature.physical_frame;
                 let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
-                    checker.fixed_sites = Some(fixed_body_source::SourceSites::new(true));
+                    checker.fixed_sites = signature
+                        .physical_frame
+                        .then(|| fixed_body_source::SourceSites::new(true));
                     (Vec::new(), Vec::new())
                 });
                 let statements = checker.function_statements(function);
@@ -1515,14 +1519,16 @@ impl Inference {
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
                         && checker.unrepresented.borrow().is_none()
                         && method_storage == Some((helpers.len(), globals.types().len()))
-                        && let Some(source) = checker.fixed_body_source(function, signature, statements.len(), &body)
+                        && let source = checker.fixed_body_source(function, signature, statements.len(), &body)
                         // Module storage and method targets belong to the graph that selected them.
                         // A written global callee will be looked up again by the Python frame.
-                        && source.attributes.values().all(|attribute| match attribute {
-                            FixedAttribute::Operation { operation, .. } => matches!(**operation, Builtin::RegisteredAttribute { .. }),
-                            FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
-                                ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
-                            FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
+                        && source.as_ref().map_or(!signature.physical_frame, |source| {
+                            source.attributes.values().all(|attribute| match attribute {
+                                FixedAttribute::Operation { operation, .. } => matches!(**operation, Builtin::RegisteredAttribute { .. }),
+                                FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
+                                    ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
+                                FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
+                            })
                         })
                     {
                         let returns = if signature.method.is_none() {
@@ -1530,7 +1536,7 @@ impl Inference {
                         } else {
                             &mut method_returns
                         };
-                        returns.insert(signature.id, PreparedBody::Fixed(checker.completed_body(params, body, Some(source), false)));
+                        returns.insert(signature.id, PreparedBody::Fixed(checker.completed_body(params, body, source, false)));
                     }
                     if superseded_returns
                         && !graph.session.call_may_return_implicitly(*module, function)
@@ -2158,6 +2164,17 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_imported_native_leaf_keeps_its_settled_return() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/inference/imported");
+        let mut graph = SourceGraph::load(&root.join("main.py"), Some(&root), &[]).unwrap();
+        let (program, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Native(_)));
+        assert!(!lowered.iter().any(|name| name == "increment"));
+    }
 
     #[test]
     fn named_scalar_leaf_keeps_its_settled_return() {

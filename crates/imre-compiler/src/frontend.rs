@@ -1506,7 +1506,9 @@ fn lower_graph(
                 return None;
             };
             match entry.get() {
-                PreparedBody::Fixed(_) if prepare_sites => Some(entry.remove()),
+                PreparedBody::Fixed((body, _)) if prepare_sites || body.source.is_none() => {
+                    Some(entry.remove())
+                }
                 PreparedBody::Attributes(_) if named && physical_function => Some(entry.remove()),
                 _ => None,
             }
