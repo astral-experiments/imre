@@ -72,7 +72,7 @@ use ruff_python_ast::name::Name;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
 /// Interactive input accepts one compound statement or one logical line of simple statements.
 pub fn check_single_input(
@@ -226,38 +226,81 @@ pub fn sequence_pattern_plan(patterns: &[ast::Pattern]) -> SequencePatternPlan {
     SequencePatternPlan { length, items }
 }
 
-/// Wildcard imports can only publish names in a module body, including its conditional suites.
-pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
-    #[derive(Default)]
-    struct Scopes {
-        nested: bool,
-        invalid: Option<ruff_text_size::TextRange>,
-    }
-    impl<'a> ast::visitor::Visitor<'a> for Scopes {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if self.invalid.is_some() {
-                return;
-            }
-            if self.nested
-                && let ast::Stmt::ImportFrom(import) = stmt
-                && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
-            {
-                self.invalid = Some(alias.range());
-                return;
-            }
-            let outer = self.nested;
-            self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
+#[derive(Default)]
+struct ScopedImports<'a> {
+    bindings: Option<&'a mut BTreeSet<String>>,
+    nested: bool,
+    check_nested: bool,
+    invalid: Option<TextRange>,
+}
+
+impl<'a> ast::visitor::Visitor<'a> for ScopedImports<'_> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if self.invalid.is_some() {
+            return;
+        }
+        if self.nested
+            && let ast::Stmt::ImportFrom(import) = stmt
+            && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
+        {
+            self.invalid = Some(alias.range());
+            return;
+        }
+        let outer = self.nested;
+        self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
+        if !self.nested || self.check_nested {
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
                 ast::visitor::walk_stmt(self, stmt)
             });
-            self.nested = outer;
         }
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        self.nested = outer;
     }
-    let mut scopes = Scopes::default();
+
+    fn visit_alias(&mut self, alias: &'a ast::Alias) {
+        if !self.nested
+            && let Some(bindings) = &mut self.bindings
+        {
+            let name = alias.asname.as_ref().map_or_else(
+                || alias.name.as_str().split('.').next().unwrap(),
+                |asname| asname.as_str(),
+            );
+            bindings.insert(name.to_owned());
+        }
+    }
+
+    fn visit_expr(&mut self, _: &'a ast::Expr) {}
+}
+
+/// Validate wildcard imports and optionally collect the names bound in the module.
+pub fn check_import_scopes(
+    body: &[ast::Stmt],
+    bindings: Option<&mut BTreeSet<String>>,
+) -> Option<TextRange> {
     use ast::visitor::Visitor;
-    scopes.visit_body(body);
-    scopes.invalid
+    let mut imports = ScopedImports {
+        bindings,
+        check_nested: true,
+        ..Default::default()
+    };
+    imports.visit_body(body);
+    imports.invalid
+}
+
+/// Wildcard imports can only publish names in a module body.
+pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<TextRange> {
+    check_import_scopes(body, None)
+}
+
+/// Names imported by the module scope disable method binding even after reassignment.
+pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
+    use ast::visitor::Visitor;
+    let mut names = BTreeSet::new();
+    ScopedImports {
+        bindings: Some(&mut names),
+        ..Default::default()
+    }
+    .visit_body(body);
+    names
 }
 
 /// A display of literal values is held by the code's constant table in CPython.
@@ -268,36 +311,6 @@ pub mod async_generators;
 pub mod class_attributes;
 pub mod class_cell;
 pub mod code_flags;
-
-/// Names imported by the module scope disable method binding even after reassignment.
-pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
-    use ast::visitor::{Visitor, walk_stmt};
-
-    struct Imports(BTreeSet<String>);
-    impl<'a> Visitor<'a> for Imports {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            let names = match stmt {
-                ast::Stmt::Import(node) => &node.names,
-                ast::Stmt::ImportFrom(node) => &node.names,
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => return,
-                _ => return walk_stmt(self, stmt),
-            };
-            for alias in names {
-                let name = alias.asname.as_ref().map_or_else(
-                    || alias.name.as_str().split('.').next().unwrap(),
-                    |asname| asname.as_str(),
-                );
-                self.0.insert(name.to_owned());
-            }
-        }
-
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
-    }
-
-    let mut imports = Imports(BTreeSet::new());
-    imports.visit_body(body);
-    imports.0
-}
 
 /// Return the attribute for calls where CPython defers a method descriptor's receiver check.
 pub fn direct_method<'a>(
