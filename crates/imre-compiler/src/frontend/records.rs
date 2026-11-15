@@ -832,6 +832,14 @@ impl Checker<'_> {
     /// Classes exist only at compile time. `cls` can name its concrete owner in
     /// constructor calls and schema arguments without becoming a storable value.
     pub(super) fn class_reference(&self, expression: &ast::Expr) -> Option<usize> {
+        self.class_reference_with_binding(expression, || self.resolve(expression))
+    }
+
+    pub(super) fn class_reference_with_binding(
+        &self,
+        expression: &ast::Expr,
+        binding: impl FnOnce() -> Option<Binding>,
+    ) -> Option<usize> {
         if self.is_class_receiver(expression) {
             return self.class;
         }
@@ -844,7 +852,7 @@ impl Checker<'_> {
         {
             return self.classes.declarations.ids.get(def).copied();
         }
-        match self.resolve(expression) {
+        match binding() {
             Some(Binding::Definition(definition)) => {
                 self.classes.declarations.ids.get(&definition).copied()
             }
