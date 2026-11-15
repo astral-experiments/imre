@@ -12620,6 +12620,19 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
     }
 
     #[test]
+    fn optional_float_real_returns_the_incoming_owner() {
+        let body = function_body(
+            "def project(value: float | None) -> float | None:\n    if value is None:\n        return None\n    return value.real\n",
+        );
+        assert!(body.contains("store i64 %arg0, ptr %local0"));
+        assert!(body.lines().filter_map(|line| {
+            line.trim().strip_suffix(" = load i64, ptr %local0")
+        }).any(|owner| body.contains(&format!(
+            "call void @imre_float_box_retain(i64 {owner})\n  store i64 {owner}, ptr %function_return"
+        ))), "{body}");
+    }
+
+    #[test]
     fn exact_integer_owners_keep_nullable_record_and_optional_cleanup_separate() {
         let exact =
             function_body("def keep(value: int) -> int:\n    value = value\n    return value\n");
