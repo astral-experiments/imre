@@ -494,12 +494,11 @@ fn prepared_arguments<E>(
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<(ir::RegisteredArguments, Vec<Expr>), E> {
     let mut expanded = false;
-    let values = imre_ast::call_operands(&call.arguments)
-        .map(|(arg, unpack)| {
-            expanded |= unpack;
-            child(arg)
-        })
-        .collect::<StdResult<_, _>>()?;
+    let mut values = Vec::with_capacity(call.arguments.len());
+    for (arg, unpack) in imre_ast::call_operands(&call.arguments) {
+        expanded |= unpack;
+        values.push(child(arg)?);
+    }
     Ok((argument_layout(&call.arguments, expanded), values))
 }
 
