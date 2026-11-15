@@ -856,17 +856,9 @@ impl Checker<'_> {
         self.coerce(value, optional, node)
     }
 
-    /// CPython turns a missing or incompatible split('\n') into a catchable TypeError.
-    pub(super) fn dedent_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let source = match (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) {
-            ([arg], []) => arg,
-            ([], [kw]) if kw.arg.as_deref() == Some("text") => &kw.value,
-            _ => return self.text_function(call, "text", TextOperation::Dedent),
-        };
-        let value = self.expr(source)?;
+    /// A fixed string can enter the source body. Exact non-string layouts fail
+    /// before the first split, after evaluating the supplied value.
+    pub(super) fn dedent_text(&mut self, value: Expr, site: &ast::Expr) -> Result<Expr, String> {
         let name = match value.ty {
             Type::None => "NoneType",
             Type::Int => "int",
@@ -877,13 +869,7 @@ impl Checker<'_> {
             Type::Dict(_) => "dict",
             Type::Set(_) => "set",
             Type::Tuple(_) => "tuple",
-            _ => {
-                let value = self.coerce(value, Type::Str, source)?;
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Text(TextOperation::Dedent), vec![value]),
-                });
-            }
+            _ => return self.coerce(value, Type::Str, site),
         };
         let exception = Expr {
             ty: Type::Exception,
@@ -894,22 +880,16 @@ impl Checker<'_> {
                 )))),
             },
         };
-        Ok(Expr {
-            ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
-        })
-    }
-
-    /// Binds standard-library functions taking one positional or named string.
-    pub(super) fn text_function(
-        &mut self,
-        call: &ast::ExprCall,
-        name: &str,
-        operation: TextOperation,
-    ) -> Result<Expr, String> {
-        let parameters = [parameter(name, Type::Str, None)];
-        let arguments = self.arguments(call, &parameters, None)?;
-        Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
+        let held = self.hidden(value.ty);
+        let cause = Expr::absent(self.types.optional(Type::Exception));
+        Ok(Expr::scope(
+            vec![
+                Statement::Assign(held, value),
+                Statement::raise_at(exception, Some(cause), None),
+            ],
+            unpacking::string(""),
+            vec![held],
+        ))
     }
 }
 

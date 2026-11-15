@@ -1050,7 +1050,6 @@ pub(crate) enum Intrinsic {
     AbstractSet,
     TomllibLoad,
     TomlDecodeError,
-    Dedent,
     ZlibError,
     Adler32,
     JsonDecode,
@@ -2479,7 +2478,6 @@ impl IntrinsicModule {
             (Self::CollectionsAbc, "Set") => Intrinsic::AbstractSet,
             (Self::Tomllib, "load") => Intrinsic::TomllibLoad,
             (Self::Tomllib, "TOMLDecodeError") => Intrinsic::TomlDecodeError,
-            (Self::Textwrap, "dedent") => Intrinsic::Dedent,
             (Self::Zlib, "compressobj") => Intrinsic::ScopedObjectExport("zlib.compressobj"),
             (Self::Zlib, "ZLIB_VERSION" | "ZLIB_RUNTIME_VERSION") => {
                 Intrinsic::StringConstant(imre_ast::zlib::VERSION)
@@ -3622,6 +3620,12 @@ impl SourceGraph {
 
     pub(crate) fn checked_diagnostic_count(&self, module: ModuleId) -> usize {
         self.checked_diagnostics.borrow()[module].len()
+    }
+
+    pub(crate) fn is_textwrap_dedent(&self, id: DefinitionId) -> bool {
+        let owner = &self.modules[id.module];
+        owner.is_bundled(TEXTWRAP_FUNCTIONS)
+            && owner.bindings.get("dedent") == Some(&Binding::Definition(id))
     }
 
     pub(crate) fn is_unittest_main(&self, id: DefinitionId) -> bool {
@@ -4771,7 +4775,7 @@ const TEXTWRAP_WRAPPER: &str = "__imre_textwrap_wrapper__";
 
 fn textwrap_implementation(name: &str) -> Option<&'static str> {
     match name {
-        "indent" => Some(TEXTWRAP_FUNCTIONS),
+        "indent" | "dedent" => Some(TEXTWRAP_FUNCTIONS),
         "TextWrapper" | "wrap" | "fill" | "shorten" => Some(TEXTWRAP_WRAPPER),
         _ => None,
     }

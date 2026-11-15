@@ -264,9 +264,6 @@ impl Emitter<'_, '_> {
                 "call ptr @imre_str_translate(ptr {source}, ptr {})",
                 args[1].value.operand
             )),
-            TextOperation::Dedent => {
-                self.instruction(format!("call ptr @imre_str_dedent(ptr {source})"))
-            }
             TextOperation::UrlQuote | TextOperation::UrlQuotePlus => {
                 let function = if matches!(operation, TextOperation::UrlQuotePlus) {
                     "imre_url_quote_plus"

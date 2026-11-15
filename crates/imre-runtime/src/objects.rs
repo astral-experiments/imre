@@ -133,7 +133,7 @@ mod structs;
 mod sumprod;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use imre_ast::strings::{dedent, is_line_boundary, python_whitespace};
+pub(crate) use imre_ast::strings::{is_line_boundary, python_whitespace};
 pub(crate) use text::{codepoint_search_window, hexadecimal, indexed_search_bounds, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;

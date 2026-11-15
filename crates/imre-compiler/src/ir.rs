@@ -3112,7 +3112,6 @@ pub(crate) enum TextOperation {
     UrlTranscode {
         encode: bool,
     },
-    Dedent,
     ShlexSplit,
     ShlexQuote,
 }

@@ -218,8 +218,7 @@ impl Builtin {
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
-                    | TextOperation::Find
-                    | TextOperation::Dedent => false,
+                    | TextOperation::Find => false,
                 },
                 PreservesLists,
             ),

@@ -20,7 +20,7 @@ use std::fmt::Write;
 use std::mem::ManuallyDrop;
 
 use super::exceptions::{Error, Kind, Result, finish};
-use super::{Int, Object, Str, Words, dedent, fail, python_whitespace};
+use super::{Int, Object, Str, Words, fail, python_whitespace};
 
 #[derive(Clone, Copy)]
 pub(crate) enum UrlInput<'a> {
@@ -558,18 +558,6 @@ pub(crate) fn python_isupper(chars: impl Iterator<Item = char>) -> bool {
 pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
     // SAFETY: the caller supplies a rooted, exact UTF-8 string.
     u32::from(python_isupper(unsafe { &*value }.chars()))
-}
-
-/// Removes the common space/tab prefix after the caller has evaluated its text.
-/// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
-///
-/// # Safety
-/// The caller roots the immutable string until this independently owned result returns.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
-    // SAFETY: the input stays live and no user code runs while it is borrowed.
-    let text = unsafe { &*text };
-    StrOwner::into_raw(StrOwner::new(dedent(text)))
 }
 
 thread_local! {
@@ -1514,35 +1502,6 @@ mod tests {
         let owner = try_owned_string("é").ok().unwrap();
         let cached = owned_string_with("é", |_| Err(())).unwrap();
         assert!(StrOwner::ptr_eq(&owner, &cached));
-    }
-
-    #[test]
-    fn dedent_preserves_content_and_normalizes_whitespace_only_lines() {
-        for (source, expected) in [
-            ("  x\r\n \t\u{a0}\u{1c}\r\n   y\r\n", "x\r\n\n y\r\n"),
-            ("\tx\n \ty\n\u{2003}\n", "\tx\n \ty\n\n"),
-            ("\t\u{a0}x\n\t x", "\u{a0}x\n x"),
-            ("\n\u{2002}\n\u{85}", "\n\n"),
-        ] {
-            let source = Str::from(source);
-            // SAFETY: the input lives through the call and the result transfers one owner.
-            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
-            assert_eq!(result.as_str(), expected);
-        }
-    }
-
-    #[test]
-    fn dedent_keeps_small_results_inline_after_removing_large_prefixes() {
-        for (text, expected) in [
-            (format!("{}x", " ".repeat(65_536)), "x"),
-            (format!("{}\n", "\u{2003}".repeat(21_000)), "\n"),
-        ] {
-            let source = Str::from(text);
-            // SAFETY: the source lives through the call and the result transfers one owner.
-            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
-            assert_eq!(result.as_str(), expected);
-            assert!(!result.is_heap_allocated());
-        }
     }
 
     #[test]
