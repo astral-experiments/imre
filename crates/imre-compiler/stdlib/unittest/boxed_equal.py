@@ -1,12 +1,4 @@
-# Fixed-layout programs specialize assertEqual in the frontend. Runtime-loaded
-# test classes compare the actual objects, including reflected __eq__.
-def _baseAssertEqual(self, first, second, msg=None):
-    if not first == second:
-        difference = _inequality_message(_safe_repr(first), _safe_repr(second))
-        msg = self._formatMessage(msg, difference)
-        raise self.failureException(msg)
-
-
+_baseAssertEqual.__annotations__ = {}
 assertMultiLineEqual = TestCase.assertMultiLineEqual
 # Keep the public Python signature while fixed callers use the class declaration.
 assertMultiLineEqual.__annotations__ = {}

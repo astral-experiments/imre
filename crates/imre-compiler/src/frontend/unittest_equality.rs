@@ -216,12 +216,35 @@ impl Checker<'_> {
             Type::Int
         };
         let optional_text = self.types.optional(Type::Str);
-        let right_can_be_optional_text = matches!(ty, Type::None | Type::Str | Type::StrLiteral(_))
-            && right
+        let text = matches!(ty, Type::Str | Type::StrLiteral(_));
+        let text_or_bytes = self.types.is_text_bytes_union(ty);
+        let right_type = if text || ty == Type::None || text_or_bytes {
+            right
                 .map(|arg| self.expr(arg))
                 .transpose()?
-                .is_some_and(|arg| arg.ty == optional_text);
-        if name == "assertEqual" && matches!(ty, Type::Str | Type::StrLiteral(_)) {
+                .map(|arg| arg.ty)
+        } else {
+            None
+        };
+        let right_can_be_optional_text = right_type == Some(optional_text);
+        // A bytes operand rules out the registered text comparator, even for a text lhs.
+        let bytes_pair =
+            ty == Type::Bytes || (text || text_or_bytes) && right_type == Some(Type::Bytes);
+        if name == "assertEqual"
+            && bytes_pair
+            && let Some(owner) = self.bundled_case_method_owner(class, "_baseAssertEqual")
+            && let Some(signature) = self
+                .graph
+                .bundled_definition("unittest", "_baseAssertEqual")
+                .and_then(|def| self.functions.get(&def))
+                .cloned()
+        {
+            let receiver = self.coerce(receiver.clone(), Type::Class(owner), call)?;
+            return self
+                .source_call(call, &signature, Some(receiver), 1)
+                .map(Some);
+        }
+        if name == "assertEqual" && text && !bytes_pair {
             if shadowed("assertMultiLineEqual") {
                 return Err(self.object_runtime_export("custom unittest text comparator", call));
             }
@@ -231,10 +254,6 @@ impl Checker<'_> {
             {
                 // Bind assertEqual's arguments before looking up the user's comparator.
                 // A mixed-type pair can select a different equality function altogether.
-                let right_type = right
-                    .map(|arg| self.expr(arg))
-                    .transpose()?
-                    .map(|arg| arg.ty);
                 if !matches!(right_type, Some(Type::Str | Type::StrLiteral(_))) {
                     return Err(self.object_runtime_export("custom unittest text comparator", call));
                 }
@@ -284,18 +303,13 @@ impl Checker<'_> {
             {
                 owner = base;
                 "_assertOptionalTextEqual"
-            } else if matches!(ty, Type::Str | Type::StrLiteral(_)) {
+            } else if text && !bytes_pair {
                 "assertMultiLineEqual"
-            } else if matches!(ty, Type::Bytes | Type::BuiltinClass)
+            } else if ty == Type::BuiltinClass
                 && let Some(base) = self.bundled_case_method_owner(class, "_baseAssertEqual")
             {
-                // Only specialize the bundled default. The private helper isn't a user hook.
                 owner = base;
-                if ty == Type::Bytes {
-                    "_assertBytesEqual"
-                } else {
-                    "_assertClassEqual"
-                }
+                "_assertClassEqual"
             } else if matches!(
                 ty,
                 Type::Calendar(ir::CalendarType::Date | ir::CalendarType::DateTime)

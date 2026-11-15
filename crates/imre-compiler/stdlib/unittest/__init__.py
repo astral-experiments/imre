@@ -312,11 +312,6 @@ class TestCase(_SuiteMember):
             return
         raise self.failureException(self._formatMessage(msg, difference))
 
-    def _assertBytesEqual(self, first: bytes, second: bytes, msg: str | None = None) -> None:
-        if first != second:
-            standard = _inequality_message(repr(first), repr(second))
-            raise self.failureException(self._formatMessage(msg, standard))
-
     def _assertDateEqual(self, first: date, second: date, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))
@@ -484,6 +479,13 @@ class TestCase(_SuiteMember):
 
     def tearDown(self) -> None:
         pass
+
+
+def _baseAssertEqual(self: TestCase, first: str | bytes, second: str | bytes, msg: str | None = None) -> None:
+    if not first == second:
+        difference = _inequality_message(_safe_repr(first), _safe_repr(second))
+        msg = self._formatMessage(msg, difference)
+        raise self.failureException(msg)
 
 
 def _validateCaseMethod(case: TestCase, methodName: str) -> None:

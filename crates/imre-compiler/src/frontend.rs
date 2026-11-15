@@ -10718,6 +10718,16 @@ impl<'a> Checker<'a> {
                         compare.ops[0] == ast::CmpOp::NotEq,
                     ));
                 }
+                if self.registered_local_start.is_none()
+                    && matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
+                    && let [left, right] = values.as_slice()
+                    && left.ty == right.ty
+                    && self.types.is_text_bytes_union(left.ty)
+                {
+                    // Both tags denote exact builtins. The object comparison unwraps the other
+                    // tagged word itself, so only one operand needs an owning view.
+                    values[0] = self.coerce(left.clone(), Type::ObjectValue, expression)?;
+                }
                 if values.iter().any(|value| value.ty == Type::ObjectValue) {
                     if !matches!(compare.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
                         || !values.iter().all(|v| {
@@ -14739,14 +14749,30 @@ impl<'a> Checker<'a> {
                     && let [arg] = call.arguments.args.as_slice()
                 {
                     let value = self.expr(arg)?;
-                    if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
-                        return Ok(Expr {
+                    let base_repr = |value| Expr {
+                        ty: Type::Str,
+                        kind: ExprKind::Builtin(Builtin::BaseObjectRepr, vec![value]),
+                    };
+                    if matches!(value.ty, Type::Str | Type::StrLiteral(_) | Type::Bytes) {
+                        return Ok(base_repr(Self::string_value(value)));
+                    }
+                    if self.types.is_text_bytes_union(value.ty)
+                        && let Some((slot, test, text, bytes)) =
+                            self.protocol_alternatives(value.ty)
+                    {
+                        let rendered = Expr {
                             ty: Type::Str,
-                            kind: ExprKind::Builtin(
-                                Builtin::BaseObjectRepr,
-                                vec![Self::string_value(value)],
+                            kind: ExprKind::Conditional(
+                                Box::new(test),
+                                Box::new(base_repr(text)),
+                                Box::new(base_repr(bytes)),
                             ),
-                        });
+                        };
+                        return Ok(Expr::scope(
+                            vec![Statement::Assign(slot, value)],
+                            rendered,
+                            vec![slot],
+                        ));
                     }
                 }
                 return Err(error(
