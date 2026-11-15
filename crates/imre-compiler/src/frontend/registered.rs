@@ -790,6 +790,36 @@ impl FixedFunctions {
         owners: &[ModuleId],
         mut accepted: impl FnMut(ModuleId, TextRange) -> bool,
     ) {
+        self.place(
+            graph,
+            owners,
+            |_| true,
+            |module, definition, frame| {
+                if accepted(module, definition) {
+                    graph.register_function(module, definition.start(), frame);
+                }
+            },
+        );
+    }
+
+    pub(super) fn retain_imported(self, graph: &SourceGraph, owners: &[ModuleId]) {
+        self.place(
+            graph,
+            owners,
+            |module| module != graph.entry && graph.modules[module].is_program_source(),
+            |module, definition, frame| {
+                graph.retain_lexical_function(module, definition.start(), frame);
+            },
+        );
+    }
+
+    fn place(
+        self,
+        graph: &SourceGraph,
+        owners: &[ModuleId],
+        selected: impl Fn(ModuleId) -> bool,
+        mut publish: impl FnMut(ModuleId, TextRange, RegisteredFunction),
+    ) {
         // Frame sources are recorded in slot order. Functions without a physical
         // source (including synthesized helpers) drop with the iterator.
         let mut functions = self.functions.into_iter();
@@ -799,15 +829,15 @@ impl FixedFunctions {
             next = slot + 1;
             let module = owners[slot];
             let start = definition.start();
-            if !graph
-                .registered_functions()
-                .get(&module)
-                .is_some_and(|entries| entries.contains_key(&start))
+            if selected(module)
+                && !graph
+                    .registered_functions()
+                    .get(&module)
+                    .is_some_and(|entries| entries.contains_key(&start))
                 && let Ok(mut placed) = source.place(function)
                 && (!graph.modules[module].bundled || placed.bind_python_arguments())
-                && accepted(module, definition)
             {
-                graph.register_function(module, start, placed);
+                publish(module, definition, placed);
             }
         }
     }

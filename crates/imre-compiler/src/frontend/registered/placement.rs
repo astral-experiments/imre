@@ -5,6 +5,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn imported_function_keeps_its_return_site_after_the_file_entry_declines() {
+        let dir = tempfile::tempdir().unwrap();
+        let helper = dir.path().join("helper.py");
+        let source = "def value(): return 7\n";
+        std::fs::write(&helper, source).unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(
+            &entry,
+            "from helper import value\nbuf = bytearray()\nbuf.append(value())\nprint(buf)\n",
+        )
+        .unwrap();
+        let mut graph = SourceGraph::load(&entry, None, &[]).unwrap();
+        let owner = graph.modules.iter().position(|m| m.path == helper).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        assert!(!graph.registered_functions().contains_key(&owner));
+        let (functions, _) = graph.take_registered_functions();
+        let body = &functions[&owner][&TextSize::default()];
+        assert_eq!(&source[body.fixed_sites[0]], "return 7");
+        assert_eq!(&source[body.fixed_sites[1]], "7");
+    }
+
+    #[test]
     fn module_binds_the_checked_call_after_its_declarations() {
         let text = concat!(
             "import json\n",
