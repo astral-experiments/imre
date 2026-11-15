@@ -1,7 +1,8 @@
 //! Branch plans and ownership transfers shared by fixed-layout values and Python frame entries.
 use super::{CheckedBody, CheckedValue, Entry, Value, ValueJoin, ValueUse};
 use crate::ir::control::{Context, Depth, Step, Steps, Target, needs_truth_plan, steps};
-use crate::ir::{Builtin, Expr, ExprKind, TruthPredicate, Type};
+use crate::ir::{Builtin, Compare, Expr, ExprKind, TruthPredicate, Type};
+use crate::llvm::registered::permanent;
 
 /// A logical plan owns the short-circuit edges and the selected value join.
 struct Logical {
@@ -105,7 +106,25 @@ impl Logical {
             join.jump(code.body(), done, value);
             return;
         }
-        let (value, truth) = code.logical_operand(input.value, input.predicate);
+        let take = yes == done;
+        let (value, truth) = if matches!(code.0, Entry::Registered(_))
+            && input.predicate.is_none()
+            && let ExprKind::Compare(_, ops) = &input.value.without_location().kind
+            && ops.iter().all(|&op| Compare::from_operator(op).is_none())
+        {
+            // Identity and containment return the bool singleton selected on this edge.
+            let selected = if take {
+                permanent::TRUE
+            } else {
+                permanent::FALSE
+            };
+            (
+                CheckedValue::handle(selected.to_string()),
+                code.test_operand(input.value),
+            )
+        } else {
+            code.logical_operand(input.value, input.predicate)
+        };
         if yes != done && no != done {
             code.release_input(value);
             code.end_roots(mark);
@@ -113,7 +132,6 @@ impl Logical {
             return;
         }
         code.transfer(&value);
-        let take = yes == done;
         let next = if take { no } else { yes };
         // A pure i1 can enter the join directly; there is no cleanup on its
         // continuation. Other values transfer ownership exclusively on selection.
