@@ -7578,7 +7578,19 @@ impl<'a> Checker<'a> {
             }
             ast::Stmt::With(with_) if !with_.is_async => {
                 if self.registered.is_some() {
-                    return self.checked_python_with(with_);
+                    return contexts::python_with(
+                        self,
+                        self.source,
+                        with_,
+                        |cx, source| {
+                            let manager = cx.expr(source)?;
+                            if manager.ty != Type::PythonObject {
+                                cx.require_registered_operation(source)?;
+                            }
+                            Ok(manager)
+                        },
+                        |cx, suite, output| cx.lower_block(suite, Some(output)),
+                    );
                 }
                 let keep_body = !self.discarded_function_body();
                 if !with_.body.iter().any(ast::Stmt::is_function_def_stmt) {
