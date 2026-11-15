@@ -1274,8 +1274,10 @@ fn lower_graph(
             } else {
                 continue;
             };
-            // The registered frame can return a handle even when the fixed layout fails.
-            // Keep the original diagnostic for callers that require the fixed contract.
+            // The solved body already checked this return in its selected Python convention.
+            if is_return && ty == Type::PythonObject && suspended_bodies.contains(&signature.id) {
+                continue;
+            }
             let diagnostic = graph.modules[*module].diagnostic(annotation, mismatch);
             if is_return && ty == Type::PythonObject && graph.modules[*module].is_program_source() {
                 capture();
@@ -1469,11 +1471,22 @@ fn lower_graph(
         // This graph will emit registered frames. Inference already checked this exact
         // definition with the settled signature; recovery owns its executable checked body.
         if (needs_registered_entry || unavailable.is_some())
-            && body_checks.is_some_and(|ids| ids.contains(&signature.id))
             && graph
                 .registered_functions()
                 .get(module_id)
-                .is_some_and(|bodies| bodies.contains_key(&definition.start()))
+                .and_then(|bodies| bodies.get(&definition.start()))
+                .is_some_and(|frame| {
+                    body_checks.is_some_and(|ids| ids.contains(&signature.id))
+                        || needs_registered_entry
+                            && !frame.fixed_sites.is_empty()
+                            && frame.function.returns == signature.returns
+                            && frame
+                                .function
+                                .params
+                                .iter()
+                                .map(|&slot| frame.function.locals[slot])
+                                .eq(signature.params.iter().map(|parameter| parameter.ty))
+                })
         {
             continue;
         }
@@ -4101,11 +4114,18 @@ impl<'a> Checker<'a> {
             || self.local_classes.contains_key(name)
             || self.class_receiver.as_deref() == Some(name)
         {
-            return Err(error(
+            let failure = error(
                 self.source,
                 node,
                 "rebinding a builtin, definition, or imported module is unsupported",
-            ));
+            );
+            if self.module_scope
+                && let Some(Binding::Definition(owner)) = self.graph.modules[self.module].bindings.get(name)
+                && self.functions.get(owner).is_some_and(|signature| signature.returns == Type::PythonObject)
+            {
+                return Err(failure.classify(Kind::ScopedObject));
+            }
+            return Err(failure);
         }
         if let Some(&slot) = self.names.get(name)
             && !self.unstored_targets.remove(&slot)
