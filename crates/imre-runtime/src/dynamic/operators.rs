@@ -725,12 +725,15 @@ impl Context {
                     continue 'walk;
                 }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
-                    (Value::List(_), right) if !matches!(right, Value::List(_)) => {
-                        break 'current false;
+                    (Value::List(left), Value::List(right)) if left.len() == right.len() => {
+                        Some(Children::Sequence(0))
                     }
-                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => {
-                        break 'current false;
-                    }
+                    (Value::List(_), _) | (_, Value::List(_)) => break 'current false,
+                    // Tuple equality compares the common prefix before deciding by length.
+                    (
+                        Value::Tuple(_) | Value::NamedTuple { .. },
+                        Value::Tuple(_) | Value::NamedTuple { .. },
+                    ) => Some(Children::Sequence(0)),
                     (
                         Value::Dict(x) | Value::DefaultDict { entries: x, .. },
                         Value::Dict(y) | Value::DefaultDict { entries: y, .. },
@@ -749,16 +752,8 @@ impl Context {
                         }
                         (!std::rc::Rc::ptr_eq(x, y)).then_some(Children::Context(0))
                     }
-                    _ => match (self.sequence_at(a, 0), self.sequence_at(b, 0)) {
-                        (Some((x, _)), Some((y, _))) => {
-                            if x != y {
-                                break 'current false;
-                            }
-                            Some(Children::Sequence(0))
-                        }
-                        _ if self.equal(a, b) => None,
-                        _ => break 'current false,
-                    },
+                    _ if self.equal(a, b) => None,
+                    _ => break 'current false,
                 };
                 if let Some(children) = children {
                     let memory = |_| Error::new("MemoryError", "");
