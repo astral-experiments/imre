@@ -621,15 +621,26 @@ impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
                     Scope::Class(site) => Some(site),
                     _ => None,
                 };
-                self.scopes.classes.insert(
-                    start,
-                    classes::ClassScope::prepare(
-                        class,
-                        self.names,
-                        enclosing_class,
+                let classes = &mut self.scopes.classes;
+                if let Some(prepared) = classes.get_mut(&start) {
+                    prepared.enclosing_class = enclosing_class;
+                } else {
+                    let cells = imre_ast::class_cell::ClassCells::collect(
+                        &class.body,
+                        strings,
                         &mut self.method_cells,
-                    ),
-                );
+                        &mut |child, cells| {
+                            classes.insert(
+                                classes::site(child),
+                                classes::ClassScope::prepare(child, None, cells),
+                            );
+                        },
+                    );
+                    classes.insert(
+                        start,
+                        classes::ClassScope::prepare(class, enclosing_class, cells),
+                    );
+                }
                 self.suite_scope = Some(Scope::Class(start));
             }
             ast::Stmt::TypeAlias(alias) => {

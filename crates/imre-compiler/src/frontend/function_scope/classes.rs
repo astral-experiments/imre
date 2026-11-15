@@ -1,6 +1,7 @@
 //! Class namespaces hide their own bindings from direct reads, while methods capture outer cells.
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
+use imre_ast::class_cell::ClassCells;
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
 use serde_json::{Value, json};
@@ -13,7 +14,7 @@ pub(crate) struct ClassScope {
     pub(crate) enclosing_class: Option<ruff_text_size::TextSize>,
     pub(crate) bindings: ClassBindings,
     pub(crate) namespace: FunctionScope,
-    pub(crate) cells: imre_ast::class_cell::ClassCells,
+    pub(crate) cells: ClassCells,
     /// Free names of the class’s written annotation fields.
     pub(crate) annotation_reads: BTreeSet<String>,
     pub(crate) static_attributes: BTreeSet<String>,
@@ -48,13 +49,10 @@ impl ClassScope {
 
     pub(crate) fn prepare(
         class: &ast::StmtClassDef,
-        names: &imre_ast::Names,
-        enclosing_class: Option<ruff_text_size::TextSize>,
-        method_cells: &mut HashSet<TextSize>,
+        enclosing_class: Option<TextSize>,
+        cells: ClassCells,
     ) -> Self {
-        let body = &class.body;
-        let string_annotations = names.string_annotations;
-        let declarations = ClosureNames::class_declarations(body);
+        let declarations = ClosureNames::class_declarations(&class.body);
         Self {
             body: None,
             enclosing_class,
@@ -69,11 +67,7 @@ impl ClassScope {
                 },
                 captures_class: false,
             },
-            cells: imre_ast::class_cell::ClassCells::with_method_cells(
-                body,
-                string_annotations,
-                Some(method_cells),
-            ),
+            cells,
             annotation_reads: BTreeSet::new(),
             static_attributes: BTreeSet::new(),
         }
