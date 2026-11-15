@@ -98,12 +98,12 @@ pub(super) fn declaration_reads<'a>(
 /// The body of a lifted display excludes its first iterable, which belongs to its caller.
 pub(in crate::frontend) fn display_bindings(
     plan: &imre_ast::comprehension::Plan<'_>,
-) -> (HashSet<String>, BTreeSet<String>) {
+) -> (HashSet<String>, BTreeSet<String>, BTreeSet<String>) {
     let mut uses = Uses::default();
     let targets: HashSet<String> = plan.scope_bindings(|expr| uses.visit_expr(expr));
     let mut reads = uses.reads.enclosing(None);
     reads.retain(|name| !targets.contains(name));
-    (targets, reads)
+    (targets, reads, uses.walrus)
 }
 
 /// Resolve free names through nested expression scopes.

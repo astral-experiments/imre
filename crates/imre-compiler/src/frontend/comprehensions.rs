@@ -633,26 +633,32 @@ impl Checker<'_> {
             }
         }
         let prepared = matches!(input, Iteration::Prepared(_));
-        // A prepared iterator stays inline and may be empty. Its writes only
-        // matter here when they can invalidate an enclosing narrowing.
-        let writes = if prepared && self.narrowed.is_empty() {
-            HashSet::new()
-        } else {
-            narrowing::expression_assignments(expression)
-        };
         if prepared
             // A typed await uses the enclosing coroutine's task and frame.
             || display.body_suspends()
-            || !writes.is_empty()
             || pipelines::is_pipeline_expression(self, display.outer)
-            || !self.local_functions.is_empty()
-                && function_scope::expression_reads(expression)
-                    .iter()
-                    .any(|name| self.local_functions.contains_key(name))
         {
+            let writes = if prepared && self.narrowed.is_empty() {
+                HashSet::new()
+            } else {
+                narrowing::expression_assignments(expression)
+            };
             return self.inline_comprehension(display, collector, input, writes);
         }
-        let (targets, captures) = function_scope::display_bindings(display);
+        // Only the body enters the helper. Its outer iterable was checked in the caller.
+        let (targets, captures, writes) = function_scope::display_bindings(display);
+        if !writes.is_empty()
+            || captures
+                .iter()
+                .any(|name| self.local_functions.contains_key(name))
+        {
+            return self.inline_comprehension(
+                display,
+                collector,
+                input,
+                writes.into_iter().collect(),
+            );
+        }
         let id = self.helpers.reserve();
         // Eager displays share the enclosing Python frame, even when lowered to a helper.
         let omitted_locals = self.omitted_assert_locals.clone();
