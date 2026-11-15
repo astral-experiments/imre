@@ -816,6 +816,18 @@ impl Checker<'_> {
             .iter()
             .position(|p| p.kind == ParameterKind::Variadic);
         if pack.is_none() && rest.is_none() && !has_unpacking(call) {
+            let mut written = (offset == 1
+                && self.settled_attributes.is_some()
+                && self
+                    .fixed_sites
+                    .as_ref()
+                    .is_some_and(|sites| sites.inside_site(call.range()))
+                && matches!(&values[0].kind, ExprKind::Local(_))
+                && call
+                    .func
+                    .as_attribute_expr()
+                    .is_some_and(|field| field.value.is_name_expr()))
+            .then(Vec::new);
             let source = self.source;
             let order = bind_fixed(
                 call,
@@ -823,7 +835,18 @@ impl Checker<'_> {
                 |p| (&p.name, p.kind),
                 offset,
                 |index, supplied| {
-                    let value = check(self, index, Supplied::Source(supplied))?;
+                    let mut value = check(self, index, Supplied::Source(supplied))?;
+                    if let Some(args) = &mut written {
+                        if let Some(arg) = self
+                            .fixed_sites
+                            .as_ref()
+                            .and_then(|sites| sites.written_literal(supplied, &mut value))
+                        {
+                            args.push(arg);
+                        } else {
+                            written = None;
+                        }
+                    }
                     if let Some(returns) = stop_return
                         && self.terminating_operand(&value)
                     {
@@ -853,6 +876,15 @@ impl Checker<'_> {
                 ControlFlow::Continue(order) => order,
                 ControlFlow::Break(stop) => return Ok(ControlFlow::Break(stop)),
             };
+            if let Some(written) = written
+                && let Some(sites) = &mut self.fixed_sites
+                && let std::collections::hash_map::Entry::Vacant(site) =
+                    sites.attributes.entry(call.range())
+                && let Some(method) =
+                    registered::values::CheckedCall::method(call, &mut values[0], written)
+            {
+                site.insert(FixedAttribute::CallValue(Box::new(method)));
+            }
             return self.complete_call_arguments(call, params, values, order, default_owner);
         }
         let mut order = vec![usize::MAX; params.len() + offset];
