@@ -1680,7 +1680,6 @@ impl Checker<'_> {
         }
         let first_local = self.registered_local_start;
         let python_frame = self.frame_arguments == FrameArguments::Python;
-        let declarations = &self.classes.declarations.definitions;
         let operands = graph.session.operand_types(owner);
         let is_bound_method = |callee: &ast::Expr| operands.is_bound_method(callee);
         let class = self.class;
@@ -1757,10 +1756,9 @@ impl Checker<'_> {
                 } else {
                     node.as_attribute_expr().is_some_and(|attribute| {
                         // A bound method reads this attribute on its live Python receiver.
-                        live_receiver = method_receiver(first_local, class, &attribute.value, operand);
-                        parameter
-                            || matches!((local, operand.ty), (Some(_), Type::Class(class))
-                                if declarations[class].fields.iter().any(|field| field.name == attribute.attr.as_str()))
+                        live_receiver =
+                            method_receiver(first_local, class, &attribute.value, operand);
+                        local.is_some()
                     })
                 }
             },
