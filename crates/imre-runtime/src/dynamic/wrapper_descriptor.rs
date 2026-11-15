@@ -426,6 +426,8 @@ impl BuiltinDescriptor {
             "function.__get__" => ("function", "__get__"),
             "method.__get__" => ("method", "__get__"),
             "classmethod.__get__" => ("classmethod", "__get__"),
+            "staticmethod.__get__" => ("staticmethod", "__get__"),
+            "staticmethod.__call__" => ("staticmethod", "__call__"),
             "functools.partial.__call__" => ("functools.partial", "__call__"),
             "functools.partial.__get__" => ("functools.partial", "__get__"),
             "functools.partial.__repr__" => (stdlib::functools::PARTIAL_CLASS, "__repr__"),
@@ -564,6 +566,7 @@ impl BuiltinDescriptor {
             "type" => ctx.is_type_object(receiver),
             "function" => matches!(ctx.heap.get(receiver), Value::Function { .. }),
             "classmethod" => matches!(ctx.heap.get(receiver), Value::ClassMethod { .. }),
+            "staticmethod" => matches!(ctx.heap.get(receiver), Value::StaticMethod { .. }),
             stdlib::functools::PARTIAL_CLASS => ctx.builtin_slot_accepts(receiver, self.owner),
             "functools.KeyWrapper" => matches!(ctx.heap.get(receiver), Value::KeyWrapper { .. }),
             super::namespace::CLASS => namespace::instance_class(ctx, receiver).is_some(),
@@ -1030,6 +1033,7 @@ pub(super) fn descriptor_get(
         Value::Cached { .. } if class == stdlib::functools::LRU_CACHE_CLASS => None,
         Value::Super { .. } if class == "super" => None,
         Value::ClassMethod { .. } if class == "classmethod" => None,
+        Value::StaticMethod { .. } if class == "staticmethod" => None,
         Value::Partial { .. } if class == "functools.partial" => None,
         member @ Value::HeapTypeMethod { .. } if member.intrinsic_type_name() == Some(class) => {
             None

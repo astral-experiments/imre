@@ -43,6 +43,23 @@ def current():
     assert vars(vars(Auto)["__class_getitem__"]) == {}
     assert vars(vars(Auto)["__init_subclass__"]) == {}
     raw = vars(Auto)["explicit"]
+    type_dict = type.__dict__["__dict__"].__get__
+    for wrapper in (raw, staticmethod(raw.__func__)):
+        kind = type(wrapper)
+        namespace = type_dict(kind)
+        member = namespace["__dict__"]
+        assert namespace is not type_dict(kind) and member is vars(kind)["__dict__"]
+        assert member.__objclass__ is kind and member.__get__(wrapper) is vars(wrapper)
+        assert member.__doc__ is None
+        for name in ("__func__", "__wrapped__"):
+            field = namespace[name]
+            assert getattr_static(wrapper, name) is field
+            assert field.__get__(wrapper) is raw.__func__ and field.__doc__ is None
+        assert ("__call__" in namespace) is (kind is staticmethod)
+        assert namespace["__get__"] is kind.__get__
+        assert namespace["__doc__"] == kind.__doc__ and kind.__doc__ is not kind.__doc__
+        generic = namespace["__class_getitem__"]
+        assert generic.__objclass__ is kind and generic.__get__(None, kind)(str) == kind[str]
     bound = Derived.explicit
     assert type(bound) is MethodType and type(raw) is classmethod
     assert Derived.slot.__self__ is Derived and Derived.slot.__func__ is object.__str__
