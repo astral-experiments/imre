@@ -980,6 +980,15 @@ impl Expr {
         value
     }
 
+    /// Read the local through its source position and representation-preserving string view.
+    pub(crate) fn viewed_local(&self) -> Option<usize> {
+        match &self.without_location().kind {
+            ExprKind::Local(slot) => Some(*slot),
+            ExprKind::Builtin(Builtin::LiteralStringView, args) => args[0].viewed_local(),
+            _ => None,
+        }
+    }
+
     /// Return a literal integer that fits the native tagged representation.
     pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
         let value = match &self.kind {

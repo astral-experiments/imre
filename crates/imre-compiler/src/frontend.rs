@@ -9279,13 +9279,9 @@ impl<'a> Checker<'a> {
         if python_call {
             self.invalidate_called_bindings(expression, &checked);
         }
-        let mut value = checked?;
+        let value = checked?;
         if matches!(value.ty, Type::StrLiteral(_)) {
-            if self.registered_local_start.is_none() {
-                return Ok(literals::view(value, Type::Str));
-            }
-            // A Python frame already holds the string selected by its literal contract.
-            value.ty = Type::Str;
+            return Ok(literals::view(value, Type::Str));
         }
         Ok(value)
     }
@@ -10670,9 +10666,10 @@ impl<'a> Checker<'a> {
                             Some(operand_types),
                         ));
                     }
-                    if !values.iter().any(|value| value.ty.builtin_scalar_name().is_some()
-                        && matches!(value.without_location().kind, ExprKind::Local(slot) if slot < first))
-                    {
+                    if !values.iter().any(|value| {
+                        value.ty.builtin_scalar_name().is_some()
+                            && value.viewed_local().is_some_and(|slot| slot < first)
+                    }) {
                         self.require_registered_operation(expression)?;
                     }
                 }
