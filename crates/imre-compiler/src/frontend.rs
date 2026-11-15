@@ -7669,7 +7669,9 @@ impl<'a> Checker<'a> {
                         continue;
                     }
                     let receiver = self.expr(&target.value)?;
-                    if self.registered.is_some() && receiver.ty == Type::PythonObject {
+                    if receiver.ty == Type::PythonObject
+                        && (self.registered.is_some() || self.is_module_namespace(&receiver))
+                    {
                         let key = registered::values::index_key(&target.slice, &mut |expr| {
                             self.expr(expr)
                         })?;
@@ -12152,6 +12154,16 @@ impl<'a> Checker<'a> {
                         "using this definition as a value requires object dispatch",
                     ));
                 }
+                if receiver.ty == Type::BuiltinClass
+                    && imre_ast::strings::STR_METHODS.contains(&attribute.attr.as_str())
+                    && self.graph.session.is_known_class(
+                        self.module,
+                        &attribute.value,
+                        ty_python_semantic::types::KnownClass::Str,
+                    )
+                {
+                    return Err(self.scoped_builtin_error("str method descriptor", attribute));
+                }
                 let (receiver, field, ty) = self.field_value(attribute, receiver)?;
                 if let Some(name) = attribute.value.as_name_expr()
                     && let Some(&slot) = self.names.get(name.id.as_str())
@@ -12225,11 +12237,17 @@ impl<'a> Checker<'a> {
             return self.call_live_target(call, callee);
         }
         if self.module_scope
-            && self.globals.registered_initializers
+            && (self.globals.registered_initializers
+                || self
+                    .unrepresented
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(Failure::is_object))
             && call.arguments.is_empty()
             && self.unshadowed_builtin(&call.func, "globals")
         {
-            // A registered initializer already owns the namespace returned by globals().
+            // A registered initializer owns this namespace, including when the fixed
+            // entry has already declined an operand and is checking the remaining stores.
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }
