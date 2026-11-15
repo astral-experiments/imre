@@ -2391,33 +2391,28 @@ impl Session {
 
     /// Check the reaching declaration of the original callee. A forwarded call can
     /// reuse an original call's index while substituting a different function.
-    pub(crate) fn calls_annotated_parameter(
+    pub(crate) fn original_callee_is_annotated_parameter(
         &self,
         module: usize,
         call: &ruff_python_ast::ExprCall,
         operand: TextRange,
         parsed: &ParsedModuleRef,
-    ) -> bool {
+    ) -> Option<bool> {
         let index =
             ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
-        if index
-            .try_expression_scope_id(&ruff_python_ast::ExprRef::Call(call))
-            .is_none()
-        {
-            return false;
-        }
+        index.try_expression_scope_id(&ruff_python_ast::ExprRef::Call(call))?;
         let ruff_python_ast::AnyRootNodeRef::Expr(Expr::Call(original)) =
             parsed.get_by_index(call.node_index.load())
         else {
-            return false;
+            return None;
         };
-        original.range() == call.range()
+        (original.range() == call.range()
             && original.func == call.func
-            && original.arguments.range().contains_range(operand)
-            && self.sole_binding(module, &original.func).is_some_and(|def| {
+            && original.arguments.range().contains_range(operand))
+            .then(|| self.sole_binding(module, &original.func).is_some_and(|def| {
                 matches!(def.kind(&self.db), ty_python_core::definition::DefinitionKind::Parameter(p)
                     if p.annotation(parsed).is_some())
-            })
+            }))
     }
 
     /// Only eager global reads with no reaching definition can fall back to a builtin here.
