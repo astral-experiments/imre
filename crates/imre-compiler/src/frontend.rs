@@ -11791,26 +11791,18 @@ impl<'a> Checker<'a> {
                     }
                     return self.namedtuple_instance_attribute(attribute, receiver, &declaration);
                 }
+                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
+                    return Ok(self.string_join_value(Some(receiver)));
+                }
                 if matches!(
                     receiver.ty,
                     Type::Str | Type::StrLiteral(_) | Type::StrEnum(_)
-                ) && ir::StrDescriptor::named(attribute.attr.as_str()).is_some_and(|method| {
-                    method.is_predicate()
-                        || matches!(
-                            method,
-                            ir::StrDescriptor::ZFill
-                                | ir::StrDescriptor::Capitalize
-                                | ir::StrDescriptor::Title
-                                | ir::StrDescriptor::SwapCase
-                        )
-                }) {
+                ) && imre_ast::strings::STR_METHODS.contains(&attribute.attr.as_str())
+                {
                     return Err(self.object_builtin_error(
                         &format!("bound str.{}", attribute.attr.as_str()),
                         attribute,
                     ));
-                }
-                if receiver.ty == Type::Str && attribute.attr.as_str() == "join" {
-                    return Ok(self.string_join_value(Some(receiver)));
                 }
                 if receiver.ty == Type::JsonDecoder && attribute.attr.as_str() == "decode" {
                     return self.json_load_callable(Some(receiver), None, attribute);
