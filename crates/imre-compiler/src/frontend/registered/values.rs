@@ -1614,6 +1614,18 @@ impl Checker<'_> {
                     inference.learn_parameter(signature.id, index, actual)
                 });
                 if let Err(error) = self.expect(expected, actual, arg) {
+                    // A fixed caller may keep only this integer's sign. A live Python
+                    // callable can observe its full value, including after rebinding.
+                    if parameter.sign_only
+                        && expected == Type::Float
+                        && (actual == Type::Int
+                            || actual == Type::PythonObject
+                                && self.graph.session.scalar_type(self.module, arg)
+                                    == Some(Type::Int))
+                    {
+                        fixed_result = false;
+                        return Ok(value);
+                    }
                     let declaration = signature.parameter_declaration(index);
                     let contract = definition
                         .zip(declaration)

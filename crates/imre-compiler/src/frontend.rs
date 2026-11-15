@@ -2563,7 +2563,8 @@ fn lower_function(
                     let ready = if cx.types.element(signature.returns).is_some() {
                         cx.helpers.caller_list_helpers_since(helpers, cx.types)
                     } else {
-                        cx.helpers.len() == helpers
+                        cx.helpers
+                            .only_direct_locals_since(helpers, &cx.local_functions)
                     };
                     if !ready
                         || cx.unrepresented.borrow().is_some()

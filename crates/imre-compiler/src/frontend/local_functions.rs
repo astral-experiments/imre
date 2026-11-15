@@ -62,6 +62,7 @@ pub(super) struct Binding {
     comparators: HashMap<u32, Comparator>,
     pub(super) overload_stub: bool,
     function: Option<Function>,
+    direct_only: bool,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
     later_writes: HashSet<String>,
@@ -164,6 +165,14 @@ impl Binding {
                 .generic
                 .as_ref()
                 .is_some_and(|f| comprehensions::function_reads(f).contains(name))
+    }
+
+    /// A plain nested definition read only at direct calls owns no value in the caller.
+    pub(super) fn direct_definition(&self) -> Option<usize> {
+        self.function
+            .as_ref()
+            .filter(|_| self.direct_only)
+            .map(|function| function.signature.id)
     }
 
     pub(super) fn is_bound(&self) -> bool {
@@ -346,6 +355,7 @@ impl Checker<'_> {
                     comparators: HashMap::new(),
                     overload_stub: false,
                     function: None,
+                    direct_only: false,
                     generic: None,
                     value_slot: None,
                     instances: HashMap::new(),
@@ -542,6 +552,18 @@ impl Checker<'_> {
             ));
         }
         let binding = self.local_functions.get_mut(name).unwrap();
+        // A Python frame builds its own local callable. Moving the caller may
+        // discard the checked helper only when no value or default was bound here.
+        binding.direct_only = !site.value_read
+            && object.is_none()
+            && function.captures.is_empty()
+            && !function.signature.asynchronous
+            && definition.decorator_list.is_empty()
+            && function
+                .signature
+                .params
+                .iter()
+                .all(|param| param.default.is_none());
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
         Ok(object.map(|(slot, value)| Statement::Assign(slot, value)))

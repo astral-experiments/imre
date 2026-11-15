@@ -6,6 +6,58 @@ mod tests {
     use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
+    fn a_direct_local_function_preserves_its_callers_checked_return() {
+        let source = concat!(
+            "def report(value: int) -> str:\n",
+            "    def clean(x: int) -> str:\n",
+            "        return str(x)\n",
+            "    return clean(value)\n",
+            "print(report(40))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+        let functions = graph.registered_functions();
+        let report = &functions[&graph.entry][&TextSize::default()];
+        assert_eq!(report.function.returns, Type::Str);
+    }
+
+    #[test]
+    fn a_direct_local_body_checks_the_element_type_before_placing_its_caller() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("__main__.py"),
+            concat!(
+                "def report(value: int) -> str:\n",
+                "    def clean(x: int) -> str:\n",
+                "        xs: list[int] = []\n",
+                "        flag: bool = True\n",
+                "        xs.append(flag)\n",
+                "        return str(x)\n",
+                "    return clean(value)\n",
+                "print(report(40))\n",
+            ),
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            path_entry: true,
+            module_entry: Some("__main__".into()),
+            script_startup: Some((Default::default(), "imre".into())),
+            ..Default::default()
+        };
+        let error = crate::compile_file(dir.path(), None, &options)
+            .err()
+            .expect("the nested append must enforce its annotated element type");
+        assert!(
+            error.contains("5:19: Imre: expected int, got bool"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn method_recovery_uses_the_operands_from_its_completed_fixed_check() {
         let text = concat!(
             "class Row:\n",
