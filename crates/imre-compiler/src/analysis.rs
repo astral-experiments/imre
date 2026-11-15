@@ -1016,6 +1016,21 @@ impl Session {
                 != ScopedReachabilityConstraintId::ALWAYS_FALSE
     }
 
+    /// Whether an outer raise rules out a normal exit from this source function.
+    pub(crate) fn nonreturning_function(
+        &self,
+        module: usize,
+        function: &ruff_python_ast::StmtFunctionDef,
+    ) -> bool {
+        function.decorator_list.is_empty()
+            && function
+                .body
+                .iter()
+                .any(ruff_python_ast::Stmt::is_raise_stmt)
+            && !self.call_may_return_implicitly(module, function)
+            && explicit_returns(function).is_empty()
+    }
+
     pub(crate) fn has_reachable_return(
         &self,
         module: usize,

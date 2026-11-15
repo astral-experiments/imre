@@ -1173,10 +1173,7 @@ fn lower_graph(
         // function's outer suite prevents a normal exit unless a return bypasses it.
         if let Cow::Borrowed(source) = function
             && graph.modules[*module].is_program_source()
-            && source.decorator_list.is_empty()
-            && source.body.iter().any(ast::Stmt::is_raise_stmt)
-            && !graph.session.call_may_return_implicitly(*module, source)
-            && crate::analysis::explicit_returns(source).is_empty()
+            && graph.session.nonreturning_function(*module, source)
         {
             classes.nonreturning_functions.insert(signature.id);
         }
