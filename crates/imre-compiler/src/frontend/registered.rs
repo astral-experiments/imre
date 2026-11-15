@@ -3470,14 +3470,16 @@ pub(crate) fn inline_operand(
         | ast::Expr::Tuple(_)
         | ast::Expr::Set(_)
         | ast::Expr::Dict(_)
-        | ast::Expr::Named(_) => {
+        | ast::Expr::Named(_)
+        | ast::Expr::TString(_) => {
             let reason = match expr {
                 ast::Expr::Dict(_) => "cannot compile this dictionary display ahead of time",
                 ast::Expr::Named(_) => "cannot compile this assignment expression ahead of time",
+                ast::Expr::TString(_) => "cannot compile this template ahead of time",
                 _ => "cannot compile this collection display ahead of time",
             };
             return RegisteredOperand::prepare_required(expr, source, kind, reason, |scope| {
-                if expr.is_named_expr() {
+                if expr.is_named_expr() || expr.is_t_string_expr() {
                     scope.report_child_refusals = true;
                 } else {
                     scope.suspending_operands = native_suspension;
