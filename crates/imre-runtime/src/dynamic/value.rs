@@ -5134,11 +5134,7 @@ impl Heap {
     /// A forwarded yield keeps its delegate in the parked frame and its value in the resumer.
     /// Dropping duplicate operand handles cannot make a finalizer or weak callback runnable.
     pub(super) fn forwarded_roots_survive(&self, delegate: usize, mark: usize, value: Id) -> bool {
-        if mark.checked_sub(1) != Some(delegate)
-            || self.full_collection_active()
-            || self.collection_requested()
-            || self.scheduled_unawaited
-        {
+        if mark.checked_sub(1) != Some(delegate) || self.release_work_pending() {
             return false;
         }
         let [.., caller, frame] = self.execution.frames.as_slice() else {
@@ -5241,6 +5237,16 @@ impl Heap {
 
     pub fn keep(&mut self, value: Id) {
         self.execution.current_mut().live.push(value);
+    }
+
+    /// Publishing this result leaves the entire operand stack in its current state.
+    pub(super) fn keeps_single_operand(&self, mark: usize, value: Id) -> bool {
+        self.execution.current().live.get(mark..) == Some(std::slice::from_ref(&value))
+            && !self.release_work_pending()
+    }
+
+    fn release_work_pending(&self) -> bool {
+        self.full_collection_active() || self.collection_requested() || self.scheduled_unawaited
     }
 
     /// Place restored lexical and operand roots below the frame's evaluation temporaries.
@@ -8126,6 +8132,24 @@ mod tests {
         assert!(parent.allocation_traces.get(worker.argv).is_none());
         assert!(!independent.allocation_traces.is_tracing());
         assert_ne!(independent.gc_thresholds()[0], 1);
+    }
+
+    #[test]
+    fn keep_one_operand_requires_the_same_slot_and_no_pending_release() {
+        let mut heap = Heap::new();
+        heap.keep(TRUE);
+        let mark = heap.temporary_mark();
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        heap.keep(TRUE);
+        assert!(heap.keeps_single_operand(mark, TRUE));
+        assert!(!heap.keeps_single_operand(mark, FALSE));
+        heap.keep(TRUE);
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        heap.release_temporaries_since(mark + 1);
+        heap.check_finalizers_next_statement = true;
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        assert!(heap.take_finalizer_check());
+        assert!(heap.keeps_single_operand(mark, TRUE));
     }
 
     #[test]
