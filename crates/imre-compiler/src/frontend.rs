@@ -234,6 +234,7 @@ impl Signature {
 type InitializerDefaults = HashMap<usize, Vec<(usize, Expr)>>;
 
 struct ClassInfo<'a> {
+    types: &'a Types,
     parsers: argparse::Parsers,
     declarations: &'a Classes<'a>,
     fields: Vec<Vec<Type>>,
@@ -257,7 +258,7 @@ impl<'a> ClassInfo<'a> {
     /// Resolves all nominal field types before checking constructors and methods.
     fn new(
         graph: &SourceGraph,
-        types: &Types,
+        types: &'a Types,
         declarations: &'a mut Classes<'a>,
     ) -> StdResult<(Self, InitializerDefaults), Diagnostic> {
         let mut initializer_defaults = InitializerDefaults::new();
@@ -503,6 +504,7 @@ impl<'a> ClassInfo<'a> {
         }
         let parsers = argparse::Parsers::collect(graph, types, declarations, &mut fields);
         let classes = Self {
+            types,
             parsers,
             truth_dispatch,
             methods: vec![HashMap::new(); fields.len()],
@@ -2083,10 +2085,10 @@ fn lower_graph(
                 .command_startup
                 .as_ref()
                 .map(|(flags, _)| flags.clone()),
-            types,
             class_metadata: dataclass_values::metadata(&classes, graph),
             list_builds,
             class_fields: classes.fields,
+            types,
             json_records,
             globals,
             source_frames,
