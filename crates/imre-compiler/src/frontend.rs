@@ -1481,13 +1481,9 @@ fn lower_graph(
         }
         // This graph will emit registered frames. Inference already checked this exact
         // definition with the settled signature; recovery owns its executable checked body.
-        if (needs_registered_entry || unavailable.is_some())
-            && body_checks.is_some_and(|ids| ids.contains(&signature.id))
-            && graph
-                .registered_functions()
-                .get(module_id)
-                .is_some_and(|bodies| bodies.contains_key(&definition.start()))
-        {
+        let registered_body = (needs_registered_entry || unavailable.is_some())
+            && graph.has_registered_function(*module_id, definition.start());
+        if registered_body && body_checks.is_some_and(|ids| ids.contains(&signature.id)) {
             continue;
         }
         // A bound wrapper with an unknown owner may need the method's Python
@@ -1620,6 +1616,9 @@ fn lower_graph(
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
             cache.body(checker, definition, signature)
         } else {
+            if registered_body {
+                checker.fixed_sites = None;
+            }
             lower_body(checker, definition, signature)
         };
         if !attributes.is_empty()

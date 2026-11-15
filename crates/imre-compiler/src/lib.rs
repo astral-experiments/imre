@@ -588,10 +588,7 @@ fn object_fallback(
     if let Some(error) = &mut refusal
         && let LoweringKind::UnresolvedLayout(owner, start) = error.kind
         && let Some(graph) = graph.as_ref()
-        && graph
-            .registered_functions()
-            .get(&owner)
-            .is_some_and(|functions| functions.contains_key(&start))
+        && graph.has_registered_function(owner, start)
     {
         error.kind = LoweringKind::ScopedObject;
     }

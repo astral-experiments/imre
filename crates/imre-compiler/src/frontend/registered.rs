@@ -828,12 +828,8 @@ impl FixedFunctions {
             let function = functions.nth(slot - next).expect("checked function slot");
             next = slot + 1;
             let module = owners[slot];
-            let start = definition.start();
             if selected(module)
-                && !graph
-                    .registered_functions()
-                    .get(&module)
-                    .is_some_and(|entries| entries.contains_key(&start))
+                && !graph.has_registered_function(module, definition.start())
                 && let Ok(mut placed) = source.place(function)
                 && (!graph.modules[module].bundled || placed.bind_python_arguments())
             {
@@ -902,11 +898,7 @@ pub(super) fn capture(
             _ => continue,
         };
         // Recovery may follow an owning definition that has already checked this site.
-        if graph
-            .registered_functions()
-            .get(&id)
-            .is_some_and(|bodies| bodies.contains_key(&function.start()))
-        {
+        if graph.has_registered_function(id, function.start()) {
             continue;
         }
         let contract = SourceChecks::cached(graph, id, function.range());
