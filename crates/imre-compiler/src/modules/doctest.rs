@@ -649,15 +649,24 @@ impl Loader<'_> {
             .and_then(crate::CompileOptions::python_startup)
             .map_or(0, |(flags, _)| flags.optimize);
         let mut cases = std::collections::BTreeMap::new();
-        let mut recorded = HashSet::new();
         let mut dependencies = Dependencies::default();
         for variable in uses.variables {
             if let Some(bindings) = uses.assignments.get(&variable) {
                 uses.targets.extend(bindings);
             }
         }
+        // The last suite for a qualified case name supplies its fixed runner.
+        // Keep that order while preparing each resolved module only once.
+        let mut sources = HashSet::new();
+        let mut intrinsics = HashSet::new();
+        uses.targets.reverse();
+        uses.targets.retain(|target| match target {
+            Binding::Module(id) => sources.insert(*id),
+            Binding::IntrinsicModule(module) => intrinsics.insert(*module),
+            _ => false,
+        });
         let executes = uses.executes;
-        for target in uses.targets {
+        for target in uses.targets.into_iter().rev() {
             if let Binding::IntrinsicModule(module) = target
                 && let Some(catalog) = sealed(module)
                 && catalog.entries.is_empty()
@@ -673,6 +682,7 @@ impl Loader<'_> {
                     Binding::IntrinsicModule(_) => None,
                     _ => continue,
                 };
+                let mut recorded = HashSet::new();
                 let mut prepared = Vec::new();
                 let mut record = |name: &str, sources: &[String], emit: bool| {
                     let mut imports = PromptImports {
@@ -706,7 +716,7 @@ impl Loader<'_> {
                 for (name, doc, _) in docs.iter() {
                     let sources = prompts(doc);
                     if !sources.is_empty() {
-                        let emit = optimization < 2 && recorded.insert((module, name.clone()));
+                        let emit = optimization < 2 && recorded.insert(name.clone());
                         let imports = record(name, &sources, emit);
                         cases.insert(name.clone(), (sources, target, imports));
                     }
@@ -720,7 +730,7 @@ impl Loader<'_> {
                 {
                     dictionary_strings(dict, true, &mut |key, value| {
                         let name = format!("{owner}.__test__.{key}");
-                        if recorded.insert((module, name.clone()))
+                        if recorded.insert(name.clone())
                             && let ast::Expr::StringLiteral(doc) = value
                         {
                             let sources = prompts(doc.value.to_str());
