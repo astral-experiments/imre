@@ -781,13 +781,9 @@ pub(super) struct ScannedModule {
 
 impl ScannedModule {
     fn from_input((module, lowered): emit::ParsedInput<'_, '_>) -> Option<Self> {
-        // An owned parser already contains the entire original suite.
+        // An unchanged suite can use its selected parser at preparation.
         let lowered = match lowered? {
-            LoweredRoot::Complete(_, names)
-                if matches!(module.parsed, Cow::Owned(_)) && !names.rewritten =>
-            {
-                LoweredRoot::Unchanged(names)
-            }
+            LoweredRoot::Complete(_, names) if !names.rewritten => LoweredRoot::Unchanged(names),
             root => root,
         };
         Some(Self {
