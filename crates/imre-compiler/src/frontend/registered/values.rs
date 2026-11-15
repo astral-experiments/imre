@@ -1224,16 +1224,9 @@ pub(super) fn operation<E>(
             value
         }
         ast::Expr::Name(name) => return Ok(Some(name_binding(name.id.clone()))),
-        ast::Expr::NumberLiteral(lit) => literals::number_literal(&lit.value, false),
-        ast::Expr::StringLiteral(lit) => {
-            return Ok(Some(
-                source.string(lit.value.iter().map(FStringLiteral::Adjacent)),
-            ));
+        literal if let Some(literal) = literal.as_literal_expr() => {
+            literals::scalar(literal, Some(source))
         }
-        ast::Expr::BytesLiteral(lit) => ExprKind::Bytes(lit.value.bytes().collect()),
-        ast::Expr::BooleanLiteral(lit) => ExprKind::Bool(lit.value),
-        ast::Expr::NoneLiteral(_) => ExprKind::None,
-        ast::Expr::EllipsisLiteral(_) => ExprKind::Builtin(Builtin::RegisteredEllipsis, vec![]),
         ast::Expr::Dict(dict) => {
             let mut entries = Vec::with_capacity(dict.items.len());
             for item in &dict.items {
