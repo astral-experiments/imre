@@ -977,11 +977,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     );
                 }
                 if let Some(FixedAttribute::Operation { operation, .. }) = attribute {
-                    let operands = match &expr.kind {
-                        ExprKind::Field(receiver, _) => std::slice::from_ref(receiver.as_ref()),
-                        ExprKind::Builtin(_, args) => args,
-                        _ => unreachable!("placed attribute has its checked operands"),
-                    };
+                    let operands = expr
+                        .attribute_operands()
+                        .expect("placed attribute has its checked operands");
                     return CheckedBody::registered(frame.reborrow())
                         .builtin(operation, operands, expr.ty, usage);
                 }

@@ -184,6 +184,20 @@ pub(crate) fn frame_inputs(
             protocol_reads += operands.iter().map(&protocol_parameter).sum::<usize>();
             return supported;
         }
+        if let Some(crate::frontend::FixedAttribute::Operation { operation, .. }) = attribute
+            && matches!(
+                &**operation,
+                Builtin::RegisteredAttribute {
+                    action: ir::AttributeAction::Load,
+                    ..
+                }
+            )
+            && let Some([receiver]) = expr.attribute_operands()
+        {
+            uses_python_protocol = true;
+            protocol_reads += protocol_parameter(receiver);
+            return true;
+        }
         if attribute.is_some() {
             return false;
         }

@@ -752,6 +752,15 @@ impl Expr {
         }
     }
 
+    /// A placed attribute uses the same field or builtin operands in either calling convention.
+    pub(crate) fn attribute_operands(&self) -> Option<&[Expr]> {
+        match &self.kind {
+            ExprKind::Field(receiver, _) => Some(std::slice::from_ref(receiver)),
+            ExprKind::Builtin(_, operands) => Some(operands),
+            _ => None,
+        }
+    }
+
     /// The checked call supplies its physical target and source-ordered arguments.
     pub(crate) fn python_call(&self) -> Option<&RegisteredCall> {
         match &self.kind {

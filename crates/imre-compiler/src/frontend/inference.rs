@@ -1769,6 +1769,14 @@ impl Inference {
                 checked_bodies.clear();
             }
         }
+        if needs_registered_entry {
+            // These completed method checks survived the last signature revision.
+            checked_bodies.extend(
+                method_returns
+                    .iter()
+                    .filter_map(|(&id, body)| body.is_ok().then_some(id)),
+            );
+        }
         local_returns.extend(method_returns);
         Ok(Solution {
             method_returns: local_returns,
