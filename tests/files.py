@@ -20,6 +20,7 @@ from textwrap import dedent
 from fixture_entry import imported_fixture
 
 ACCEPTED = {
+    "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "typing_member": "from typing import Any\nvalue: Any = 1",
     "whole_regular_file": """
         with open("large.bin", "wb") as output:
@@ -734,7 +735,6 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
     "generic_context": "with [1] as values:\n    print(values[0])",
