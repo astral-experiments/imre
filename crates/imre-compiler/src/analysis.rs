@@ -1894,11 +1894,13 @@ impl Session {
     }
 
     /// Borrow the declaration's indexed syntax while its physical parser input still matches.
-    pub(crate) fn declaration_parser(&self, path: &Path, source: &str) -> Option<ParsedModuleRef> {
+    pub(crate) fn declaration_parser(
+        &self,
+        path: &Path,
+        parser_input: &str,
+    ) -> Option<ParsedModuleRef> {
         let file = self.file_at_path(path, &self.declarations)?;
-        let text = crate::normalize_source(source, crate::SourceKind::DiskFile).ok()?;
-        let input = imre_ast::indentation::prepare(&text);
-        self.file_matches_parser_input(file, &input.text)
+        self.file_matches_parser_input(file, parser_input)
             .then(|| self.parsed(file))
             .filter(|parsed| parsed.has_no_syntax_errors())
     }
