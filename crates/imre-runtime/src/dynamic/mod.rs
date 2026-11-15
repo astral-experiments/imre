@@ -4178,13 +4178,11 @@ impl Context {
         Ok(loaded)
     }
 
-    /// Import site before the entry, publishing __main__ first if a startup hook will run.
+    /// Import site and execute its configured startup hooks before entering the FILE.
     fn initialize_startup_site(&mut self) -> Result<()> {
         if self.config["sitecustomize"] != true {
             return self.module("site").map(drop);
         }
-        let (main, _, _, _) = self.allocate_import_module("__main__", &[], None)?;
-        self.publish_module("__main__", main)?;
         let site = self.module("site")?;
         // site.venv processes the prefix early. The ordinary prefix pass runs after
         // the user site, so even an already visible directory reads its path files again.
@@ -4291,7 +4289,60 @@ impl Context {
         Ok(())
     }
 
-    fn prepare_main_module(&mut self) -> Result<Option<MainModuleFrame>> {
+    /// Select FILE's main module from the interpreter dictionary, including startup replacements.
+    fn main_module(&mut self) -> Result<(Id, Id, Id)> {
+        let name = self.text("__main__");
+        if let Some(module) = self.registered_module(name)?
+            && let Value::Module { scope, .. } = *self.heap.get(module)
+        {
+            self.heap.keep(module);
+            return Ok((module, scope, name));
+        }
+        let (module, scope, name, _) = self.allocate_import_module("__main__", &[], None)?;
+        self.put_item(self.modules, name, module)?;
+        Ok((module, scope, name))
+    }
+
+    /// Install missing FILE builtins, then capture the mapping visible when evaluation starts.
+    fn main_execution_scope(&mut self, scope: Id) -> Result<Id> {
+        let globals = self.module_globals(scope)?;
+        if self.lookup_dict_name(globals, "__builtins__")?.is_none() {
+            let builtins = self.default_source_builtins()?;
+            let key = self.heap.code_name("__builtins__");
+            self.put_item(globals, key, builtins)?;
+        }
+        let builtins = match self.lookup_dict_name(globals, "__builtins__")? {
+            Some(value) => self.definition_builtins(value)?,
+            None => self.default_source_builtins()?,
+        };
+        self.scope_with_builtins(scope, builtins)
+    }
+
+    /// Publish a FILE attribute before dropping the previous value and running its finalizers.
+    fn bind_main_attribute(&mut self, globals: Id, name: &str, value: Id) -> Result<()> {
+        let key = self.heap.code_name(name);
+        if self.store_binding_item(globals, key, value)? || self.heap.has_weak_values {
+            self.finish_binding_release();
+        }
+        Ok(())
+    }
+
+    /// Remove the FILE attributes this invocation added, even when application code replaced them.
+    fn clear_main_file_attributes(&mut self, globals: Id) {
+        for name in ["__file__", "__cached__"] {
+            let key = self.heap.code_name(name);
+            match builtins::remove_dict_item(self, globals, key) {
+                Ok(Some(removed)) => self.finalize_removed_dict_value(removed),
+                Ok(None) => {}
+                Err(error) => stdlib::traceback::report_chain(self, error),
+            }
+        }
+    }
+
+    fn prepare_main_module(
+        &mut self,
+        file_globals: &mut Option<Id>,
+    ) -> Result<Option<MainModuleFrame>> {
         let packaged = self.config["packaged_file_module"].as_str();
         // The compiler registers the selected FILE first, even when another search root
         // supplies a package or module with the same qualified name.
@@ -4303,22 +4354,42 @@ impl Context {
             return Ok(None);
         };
         let initializer = source.code;
-        let source = (
-            source.path.to_path_buf(),
-            importlib::SourceBody::Registered(initializer),
-        );
+        let path = source.path.to_path_buf();
         let packaged = packaged.map(str::to_owned);
-        let (module, scope, name, origin) =
-            self.allocate_import_module("__main__", &[], Some(&source))?;
-        self.publish_module("__main__", module)?;
-        let (module, scope) = if let Some(qualified) = packaged {
-            self.prepare_packaged_file(name, &qualified, &source.0)?
+        let (module, scope, name) = self.main_module()?;
+        let (module, scope, origin) = if let Some(qualified) = packaged {
+            let (module, scope) = self.prepare_packaged_file(name, &qualified, &path)?;
+            (module, scope, None)
         } else {
-            (module, scope)
+            let origin = if self.config["command"] != true {
+                let file = self.import_path_text(&path)?;
+                let globals = self.module_globals(scope)?;
+                if self.lookup_dict_name(globals, "__file__")?.is_none() {
+                    self.bind_main_attribute(globals, "__file__", file)?;
+                    self.bind_main_attribute(globals, "__cached__", NONE)?;
+                    // Only an invocation that installed both attributes removes them after reporting.
+                    self.heap.keep(globals);
+                    *file_globals = Some(globals);
+                }
+                if let Value::Module { origin, .. } = self.heap.get_mut(module) {
+                    *origin = Some(file);
+                }
+                if self.import_registry_installed {
+                    let mark = self.heap.temporary_mark();
+                    let result = self
+                        .source_file_loader(name, file)
+                        .and_then(|loader| self.bind_main_attribute(globals, "__loader__", loader));
+                    self.release_with_result(mark, result.map(|()| NONE))?;
+                }
+                Some(file)
+            } else {
+                None
+            };
+            (module, self.main_execution_scope(scope)?, origin)
         };
         let code = match origin {
-            Some(filename) => self.module_code_at(initializer, &source.0, filename),
-            None => self.module_code(initializer, &source.0),
+            Some(filename) => self.module_code_at(initializer, &path, filename),
+            None => self.module_code(initializer, &path),
         }
         .inspect_err(|_| {
             self.finish_initialization(module);
@@ -4339,11 +4410,20 @@ impl Context {
         source_globals: Id,
     ) -> Result<Option<Id>> {
         if name == "__main__" {
+            let mut file_globals = None;
             // SAFETY: a recursive bootstrap import synchronously runs the frame it just pushed.
-            return self
-                .prepare_main_module()?
-                .map(|frame| unsafe { frame.run(self) })
-                .transpose();
+            let result = self
+                .prepare_main_module(&mut file_globals)
+                .and_then(|frame| frame.map(|frame| unsafe { frame.run(self) }).transpose());
+            if let Some(globals) = file_globals {
+                if let Err(error) = &result {
+                    for root in error.roots() {
+                        self.heap.keep(root);
+                    }
+                }
+                self.clear_main_file_attributes(globals);
+            }
+            return result;
         }
         let mut locations = Vec::new();
         let source = if stdlib::is_module(name) || self.is_frozen(name) {
@@ -4435,33 +4515,6 @@ impl Context {
         source: Option<&(PathBuf, importlib::SourceBody)>,
     ) -> Result<(Id, Id, Id, Option<Id>)> {
         let main = name == "__main__";
-        // A package parent runs before the entry acquires its file and qualified spec.
-        let packaged_main = main && self.config["packaged_file_module"].is_string();
-        // A startup hook can populate or replace __main__. Execute the application
-        // in its current namespace, leaving any bindings the hook installed intact.
-        if main
-            && self.config["sitecustomize"] == true
-            && let Some((path, _)) = source
-        {
-            let key = self.text(name);
-            if let Some(module) = self.public_registered_module(key)?
-                && let Value::Module { scope, .. } = *self.heap.get(module)
-            {
-                // The script can delete the registry binding while its initializer is running.
-                self.heap.keep(module);
-                let origin = if self.config["command"] != true && !packaged_main {
-                    let file = self.import_path_text(path)?;
-                    if self.scope_name(scope, "__file__").is_none() {
-                        self.bind(scope, "__file__", file);
-                    }
-                    Some(file)
-                } else {
-                    None
-                };
-                return Ok((module, scope, key, origin));
-            }
-        }
-        let source = source.filter(|_| !packaged_main);
         let scope = self.scope(name, None);
         // CPython's private module publishes its ABCs under the public name.
         let name_id = self.text(if name == "_collections_abc" {
@@ -4524,8 +4577,8 @@ impl Context {
                 self.bind(scope, name, function);
             }
         }
-        if main && source.is_none() {
-            let loader = self.lookup_attr(self.bootstrap_module, "_NativeImporter")?;
+        if main && source.is_none() && self.import_registry_installed {
+            let loader = self.lookup_attr(self.bootstrap_module, "BuiltinImporter")?;
             self.bind(scope, "__loader__", loader);
         }
         let origin = match source {

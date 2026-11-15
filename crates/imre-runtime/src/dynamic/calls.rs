@@ -2857,17 +2857,22 @@ impl Context {
         let Some(chosen) = builtins else {
             return Ok((module, environment));
         };
+        Ok((module, self.scope_with_builtins(root, chosen)?))
+    }
+
+    /// Use the same module dictionary when execution captures different builtins.
+    pub(super) fn scope_with_builtins(&mut self, root: Id, chosen: Id) -> Result<Id> {
         let previous = self
             .scope_data(root)
             .exec_globals
             .map(|globals| globals.builtins)
             .or(self.source_builtins);
         if previous == Some(chosen) {
-            return Ok((module, root));
+            return Ok(root);
         }
         let globals = self.module_globals(root)?;
         let label = self.scope_data(root).module.clone();
-        Ok((module, self.function_environment(&label, globals, chosen)))
+        Ok(self.function_environment(&label, globals, chosen))
     }
 
     /// Return the builtins captured by a function's defining environment.

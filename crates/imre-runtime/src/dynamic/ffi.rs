@@ -1333,6 +1333,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     let _publication = crate::fault_handler::FramePublication::enter(&interpreter.finalizing);
     let mark = ctx.heap.temporary_mark();
     let mut failed_site = false;
+    let mut file_globals = None;
     // With unfrozen modules, importing site can execute a filesystem replacement for stat.
     // Preserve the existing hook-triggered startup in that mode.
     let startup_site = ctx.config["executable"].is_string()
@@ -1357,6 +1358,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
+        // Startup imports can retain or replace __main__ before the FILE gets its code.
+        let mark = ctx.heap.temporary_mark();
+        ctx.main_module()?;
+        ctx.heap.release_temporaries_since(mark);
         if ctx.config["warnoptions"]
             .as_array()
             .is_some_and(|options| !options.is_empty())
@@ -1378,7 +1383,7 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
         }
         let name = ctx.text("__main__");
-        ctx.prepare_main_module()?
+        ctx.prepare_main_module(&mut file_globals)?
             .ok_or_else(|| Context::missing_module("__main__", name))
     });
     let main = match frame {
@@ -1445,6 +1450,9 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             1
         }
     };
+    if let Some(globals) = file_globals {
+        ctx.clear_main_file_attributes(globals);
+    }
     let shutdown_mark = ctx.heap.temporary_mark();
     let shutdown = super::thread_worker::prepare_shutdown(&mut ctx);
     // SAFETY: finish owns the context and the shutdown frame until the call returns.

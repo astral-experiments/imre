@@ -117,6 +117,14 @@ impl Context {
         self.registered_source_spec(name, origin, package)
     }
 
+    /// Bind the live source loader to the code issued for its filename.
+    pub(super) fn source_file_loader(&mut self, name: Id, file: Id) -> Result<Id> {
+        let factory = self.lookup_attr(self.finder_external, "SourceFileLoader")?;
+        let loader = self.call(factory, vec![name, file], vec![])?;
+        self.bind_loader_source(loader, name, file)?;
+        Ok(loader)
+    }
+
     pub(super) fn registered_source_spec(
         &mut self,
         name: Id,
@@ -130,10 +138,7 @@ impl Context {
         let spec_type = self.lookup_attr(bootstrap, "ModuleSpec")?;
         let (origin, loader) = if let Some(file) = origin {
             let file = self.import_path_text(file)?;
-            let factory = self.lookup_attr(external, "SourceFileLoader")?;
-            let loader = self.call(factory, vec![name, file], vec![])?;
-            self.bind_loader_source(loader, name, file)?;
-            (file, loader)
+            (file, self.source_file_loader(name, file)?)
         } else {
             (NONE, NONE)
         };

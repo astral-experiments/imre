@@ -787,6 +787,62 @@ def check_user_site(imre, root, run):
     assert (lazy.returncode, lazy.stdout, lazy.stderr) == (0, b"None None None\nTrue True False\n", b""), lazy
 
 
+def check_startup_main_frame(imre, root, run):
+    hooks = root / "warning-hooks"
+    hooks.mkdir()
+    script = root / "entry.py"
+    # A warning category can hold the actual entry module before site runs.
+    (hooks / "category.py").write_text(
+        "import builtins, sys\n"
+        "class Early(Warning): pass\n"
+        "entry = sys.modules['__main__']\n"
+        "def second(arg): return 91\n"
+        "def render():\n"
+        "    entry.render = second\n"
+        "    return 37\n"
+        "def importing(name, globals, locals, fromlist, level):\n"
+        "    assert globals is entry.__dict__ and locals is globals\n"
+        "    assert name == 'provider' and fromlist == ('render',) and level == 0\n"
+        "    return sys.modules[__name__]\n"
+        "entry.__builtins__ = dict(vars(builtins), __import__=importing)\n"
+    )
+    (hooks / "sitecustomize.py").write_text("import category\n")
+    (hooks / "provider.py").write_text("def render(arg=None): return 3\n")
+    script.write_text('from provider import render\nprint(render())\nprint(render("four"))\n')
+    result = run(
+        imre, "-B", "-W", "ignore::category.Early", script,
+        extra={"PYTHONPATH": str(hooks)}, timeout=300,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"37\n91\n", b""), result
+
+    # The FILE owns its interpreter module even when site exposes a different public mapping.
+    (hooks / "sitecustomize.py").write_text(
+        "import atexit, builtins, sys\n"
+        "entry = sys.modules['__main__']\n"
+        "class Key:\n"
+        "    def __hash__(self): return hash('__builtins__')\n"
+        "    def __eq__(self, name):\n"
+        "        print('lookup', name)\n"
+        "        return name == '__builtins__'\n"
+        "class Loader:\n"
+        "    def __del__(self):\n"
+        "        print('loader', type(entry.__loader__).__name__)\n"
+        "        del entry.__builtins__\n"
+        "        entry.__dict__[Key()] = dict(vars(builtins), print=display)\n"
+        "def display(*args): print('frame', *args)\n"
+        "entry.__loader__ = Loader()\n"
+        "sys.modules = dict(sys.modules, __main__=type(sys)('__main__'))\n"
+        "def after(): print('after', hasattr(entry, '__file__'), hasattr(entry, '__cached__'))\n"
+        "atexit.register(after)\n"
+    )
+    metadata = root / "metadata.py"
+    metadata.write_text("import sys\nprint('body')\n")
+    result = run(imre, "-B", metadata, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, b"loader SourceFileLoader\nlookup __builtins__\nlookup __builtins__\nframe body\nafter False False\n", b"",
+    ), result
+
+
 def check_script_sitecustomize(imre, root, run):
     root = root.resolve()
     app = root / "script-app"
@@ -2271,6 +2327,7 @@ def main():
             check_python_process_identity(imre, root, env)
             check_user_site(imre, root, run)
             check_script_sitecustomize(imre, root, run)
+            check_startup_main_frame(imre, root, run)
             check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
             check_forked_fault_frames(imre, root, run)
