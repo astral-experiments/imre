@@ -52,16 +52,6 @@ impl Storage {
         }
     }
 }
-fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Expr {
-    Expr {
-        ty: value.ty,
-        kind: ExprKind::Scope {
-            body,
-            value: Box::new(value),
-            clear,
-        },
-    }
-}
 fn field(owner: &Expr, at: usize, ty: Type) -> Expr {
     Expr {
         ty,
@@ -298,7 +288,7 @@ impl Checker<'_> {
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
         let payload = s.payload(&local);
-        Ok(scope(
+        Ok(Expr::scope(
             vec![Statement::Assign(slot, receiver)],
             choose(field(&local, s.ready, Type::Bool), payload, value),
             vec![slot],
@@ -329,7 +319,7 @@ impl Checker<'_> {
         } else {
             set
         };
-        Ok(Statement::Expr(scope(
+        Ok(Statement::Expr(Expr::scope(
             vec![Statement::Assign(slot, value), store],
             Expr::none(),
             vec![slot],
@@ -363,10 +353,17 @@ impl Checker<'_> {
     ) -> Result<Statement, String> {
         let slot = self.hidden(value.ty);
         let branch = self.dispatch_record(class, receiver, attr, |me, concrete, view| {
+            if me.has_property(concrete, attr.attr.as_str())
+                || me.shadow(concrete, attr.attr.as_str()).is_none()
+            {
+                let setter = me.classes.setters[concrete].get(attr.attr.as_str());
+                let put = me.direct_setter(concrete, setter, attr, view, me.local(slot))?;
+                return Ok(Expr::scope(vec![put], Expr::none(), Vec::new()));
+            }
             let s = me.writable_shadow(concrete, attr)?;
             let v = me.coerce(me.local(slot), s.ty, attr)?;
             let v = me.coerce(v, s.stored, attr)?;
-            Ok(scope(
+            Ok(Expr::scope(
                 vec![
                     Statement::SetField(view.clone(), s.value, v),
                     Statement::SetField(view, s.ready, Expr::boolean(true)),
@@ -375,7 +372,7 @@ impl Checker<'_> {
                 Vec::new(),
             ))
         })?;
-        Ok(Statement::Expr(scope(
+        Ok(Statement::Expr(Expr::scope(
             vec![Statement::Assign(slot, value)],
             branch,
             vec![slot],
@@ -401,7 +398,7 @@ impl Checker<'_> {
                     )))),
                 },
             };
-            Ok(scope(
+            Ok(Expr::scope(
                 vec![Statement::If(
                     field(&view, s.ready, Type::Bool),
                     vec![

@@ -679,6 +679,17 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    pub(crate) fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Self {
+        Self {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(value),
+                clear,
+            },
+        }
+    }
+
     pub(crate) fn written_range(&self) -> Option<ruff_text_size::TextRange> {
         self.source_position().map(|(range, _, _)| range)
     }

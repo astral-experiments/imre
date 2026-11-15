@@ -31,42 +31,18 @@ impl<'a> Checker<'a> {
         if !self.classes.has_concrete_subclasses(class) {
             return self.direct_setter(class, Some(setter), attr, receiver, value);
         }
-        let (rhs, object) = (self.hidden(value.ty), self.hidden(receiver.ty));
-        let mut branches = None;
-        for layout in self.classes.concrete_layouts(class).into_iter().rev() {
-            let view = Expr {
-                ty: Type::Class(layout),
-                kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(object)]),
-            };
-            let setter = self.classes.setters[layout].get(attr.attr.as_str());
-            let put = self.direct_setter(layout, setter, attr, view, self.local(rhs))?;
-            branches = Some(match branches {
-                None => put,
-                Some(other) => Statement::If(
-                    Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(
-                            Builtin::ExactRecord(layout),
-                            vec![self.local(object)],
-                        ),
-                    },
-                    vec![put],
-                    vec![other],
-                ),
-            });
-        }
-        Ok(Statement::Scope {
-            body: vec![
-                Statement::Assign(rhs, value),
-                Statement::Assign(object, receiver),
-                branches.expect("dispatch has a concrete subclass"),
-            ],
-            clear: vec![rhs, object],
+        self.store_instance_data(class, attr, receiver, value)
+    }
+
+    pub(super) fn has_property(&self, class: usize, name: &str) -> bool {
+        self.classes.methods[class].get(name).is_some_and(|s| {
+            s.method.unwrap().kind(self.classes.declarations)
+                == crate::classes::MethodKind::Property
         })
     }
 
     /// Discard the setter's return value. An override can remove the setter.
-    fn direct_setter(
+    pub(super) fn direct_setter(
         &mut self,
         class: usize,
         setter: Option<&Signature>,
@@ -76,10 +52,7 @@ impl<'a> Checker<'a> {
     ) -> Result<Statement, String> {
         let name = attr.attr.as_str();
         let Some(setter) = setter else {
-            if self.classes.methods[class].get(name).is_some_and(|s| {
-                s.method.unwrap().kind(self.classes.declarations)
-                    == crate::classes::MethodKind::Property
-            }) {
+            if self.has_property(class, name) {
                 let owner = &self.classes.declarations.definitions[class].name;
                 return Ok(Statement::raise(Expr {
                     ty: Type::Exception,

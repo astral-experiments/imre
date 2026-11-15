@@ -38,6 +38,10 @@ class ReadOnly(Setting):
         return self.stored
 
 
+class AlsoReadOnly(ReadOnly):
+    pass
+
+
 def set_via_base(setting: Setting, value: int) -> None:
     setting.level = value
 
@@ -98,3 +102,10 @@ try:
 except AttributeError as error:
     print(str(error))
 print(read_only.level)
+
+try:
+    set_via_base(AlsoReadOnly(1), 5)
+except AttributeError as error:
+    assert "'AlsoReadOnly' object has no setter" in str(error)
+else:
+    raise AssertionError("inherited read-only property accepted a write")
