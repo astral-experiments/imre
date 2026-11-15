@@ -998,6 +998,7 @@ pub(super) fn new_context_with_heap<S: Into<crate::Str>>(
         import_missing: NONE,
         bootstrap_globals: NONE,
         bootstrap_module: NONE,
+        importlib_code: None,
         import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,

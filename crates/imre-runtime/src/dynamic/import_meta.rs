@@ -10,6 +10,13 @@ use super::{
     value::{Code, Error, Id, NONE, Result, Value},
 };
 
+/// Linked entries remain the same when FrozenImporter executes the provider again.
+#[derive(Clone, Copy)]
+pub(super) struct ImportlibCode {
+    pub(super) units: [Code; 2],
+    pub(super) remove_frames: Code,
+}
+
 impl Context {
     /// The bootstrap modules are initialized before user code can replace any import registry.
     pub(super) fn install_import_registry(&mut self) -> Result<()> {
@@ -22,6 +29,20 @@ impl Context {
         let bundled = self.lookup_attr(core, "_BundledImporter")?;
         let path = self.lookup_attr(external, "PathFinder")?;
         let registered_hook = self.lookup_attr(external, "_registered_path_hook")?;
+        let marker = self.lookup_attr(core, "_call_with_frames_removed")?;
+        let marker = self.lookup_attr(marker, "__code__")?;
+        let hook = self.lookup_attr(registered_hook, "__code__")?;
+        let marker = self.code_object(marker);
+        if let (Some(core), Some(external), Some(remove_frames)) = (
+            self.heap.compilation_entry(marker),
+            self.heap.compilation_entry(self.code_object(hook)),
+            marker.native_entry(),
+        ) {
+            self.importlib_code = Some(ImportlibCode {
+                units: [core, external],
+                remove_frames,
+            });
+        }
         let file_hook = self.lookup_attr(external, "_file_path_hook")?;
         let mut hooks = Vec::new();
         if cfg!(unix) {

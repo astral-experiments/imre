@@ -177,8 +177,38 @@ impl Context {
         })
     }
 
+    /// Run the builtin import, including any child import requested by its fromlist.
+    pub(super) fn import_module_level(
+        &mut self,
+        name: &str,
+        key: Id,
+        globals: Option<Id>,
+        fromlist: Option<Id>,
+        level: i32,
+    ) -> Result<Id> {
+        if level != 0 {
+            return self.relative_import(name, globals, fromlist, level);
+        }
+        if name.is_empty() {
+            return Err(Error::new("ValueError", "Empty module name"));
+        }
+        let module = self.import_by_key(name, key)?;
+        if let Some(list) = fromlist
+            && self.truth(list)?
+        {
+            return self.prepare_fromlist(module, list);
+        }
+        match name.split_once('.') {
+            Some((top, _)) => {
+                let head = self.text(top);
+                self.import_by_key(top, head)
+            }
+            None => Ok(module),
+        }
+    }
+
     /// Resolve the package supplied by the caller of a relative builtin import.
-    pub(super) fn relative_import(
+    fn relative_import(
         &mut self,
         name: &str,
         globals: Option<Id>,

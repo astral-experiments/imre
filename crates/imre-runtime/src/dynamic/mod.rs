@@ -278,6 +278,7 @@ pub(crate) struct Context {
     // The running frozen bootstrap keeps its globals even if its registry entry is replaced.
     bootstrap_globals: Id,
     bootstrap_module: Id,
+    importlib_code: Option<import_meta::ImportlibCode>,
     import_registry_installed: bool,
     bootstrap_file_spec: Id,
     // The native path finder stays installed across fresh public bootstrap imports.
@@ -3940,6 +3941,7 @@ impl Context {
         let key = self.text(name);
         let cached = self.registered_module(key)?;
         self.module_from_cache(name, key, cached)
+            .map_err(|error| self.trim_import_traceback(error))
     }
 
     /// The original __import__ waits for a cached module's initialization.
@@ -3958,8 +3960,7 @@ impl Context {
         {
             return Ok(module);
         }
-        self.find_module_from(name, key, NONE, None)
-            .map_err(|error| self.trim_import_traceback(error))?
+        self.find_module_from(name, key, NONE, None)?
             .ok_or_else(|| Self::missing_module(name, key))
     }
 

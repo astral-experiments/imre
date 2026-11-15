@@ -3208,25 +3208,8 @@ pub(super) fn call(
             if level < 0 {
                 return Err(Error::new("ValueError", "level must be >= 0"));
             }
-            if level != 0 {
-                return ctx.relative_import(&name, globals, fromlist, level);
-            }
-            if name.is_empty() {
-                return Err(Error::new("ValueError", "Empty module name"));
-            }
-            let result = ctx.import_by_key(&name, key)?;
-            if let Some(list) = fromlist
-                && ctx.truth(list)?
-            {
-                return ctx.prepare_fromlist(result, list);
-            }
-            match name.split_once('.') {
-                Some((top, _)) => {
-                    let head = ctx.text(top);
-                    ctx.import_by_key(top, head)
-                }
-                None => Ok(result),
-            }
+            ctx.import_module_level(&name, key, globals, fromlist, level)
+                .map_err(|error| ctx.trim_import_traceback(error))
         }
         "complex" => ctx.new_complex(args, kwargs),
         "float" => float::construct(ctx, args, kwargs),
