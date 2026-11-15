@@ -1949,9 +1949,9 @@ impl Checker<'_> {
         // list(parameter). Only move that consumption past literal arguments.
         let materialized = self.immediate_constructor_input(call, class);
         let call = materialized.as_ref().unwrap_or(call);
-        let signature = self.classes.methods[class]["__init__"].clone();
+        let signature = &self.classes.methods[class]["__init__"];
         if let Some(&parent) = self.classes.forwarded_initializers.get(&signature.id)
-            && let Some(error) = self.forwarded_init_error(class, parent, call, &signature)?
+            && let Some(error) = self.forwarded_init_error(class, parent, call, signature)?
         {
             return Ok(error);
         }
@@ -1987,7 +1987,7 @@ impl Checker<'_> {
             }
             args
         } else if self.inference.is_some() {
-            self.bind_source(call, &signature, None, 1, None)?.1
+            self.bind_source(call, signature, None, 1, None)?.1
         } else {
             self.held_arguments(call, &signature.params[1..], None, &mut scope)?
         };
