@@ -2109,7 +2109,7 @@ impl Context {
     pub(super) fn getset_documentation(&mut self, descriptor: Id) -> Result<Id> {
         let doc = match *self.heap.get(descriptor) {
             Value::LayoutDescriptor(owner, field) => {
-                if matches!(self.heap.get(owner), Value::Native(name) if matches!(name.as_str(), "type" | "BaseException"))
+                if matches!(self.heap.get(owner), Value::Native(name) if matches!(name.as_str(), "type" | "BaseException" | "classmethod" | "staticmethod"))
                 {
                     None
                 } else {
@@ -3880,7 +3880,9 @@ impl Context {
                 _ => {}
             },
             Value::ReadOnlyMember(owner, field) => match name {
-                "__doc__" if owner == "typing.TypeVar" => return Ok(NONE),
+                "__doc__" if matches!(owner, "typing.TypeVar" | "classmethod" | "staticmethod") => {
+                    return Ok(NONE);
+                }
                 "__name__" => return Ok(self.text(field)),
                 "__qualname__" => {
                     return Ok(self.text(format!("{}.{field}", owner.rsplit('.').next().unwrap())));
@@ -4516,13 +4518,15 @@ impl Context {
             {
                 return Ok(self.text("(function, /)"));
             }
-            Value::Native(ref class)
-                if matches!(
-                    class.as_str(),
-                    "classmethod" | "staticmethod" | "functools.partial"
-                ) && name == "__get__" =>
-            {
+            Value::Native(ref class) if class == "functools.partial" && name == "__get__" => {
                 return Ok(self.builtin(&format!("{class}.__get__")));
+            }
+            Value::Native(ref class)
+                if matches!(class.as_str(), "classmethod" | "staticmethod")
+                    && name != "__doc__"
+                    && let Some(descriptor) = self.own_class_attr(obj, name) =>
+            {
+                return self.bind_attribute(descriptor, NONE, obj);
             }
             Value::Native(ref class)
                 if matches!(class.as_str(), "property" | "code")
@@ -7298,6 +7302,15 @@ impl Context {
         name: &str,
         receiver: Id,
     ) -> Result<Id> {
+        if matches!(self.heap.get(owner), Value::Native(name) if super::method_decorator::owner(name).is_some())
+        {
+            self.layout_receiver_class(owner, name, receiver)?;
+            let (callable, dictionary) =
+                super::method_decorator::fields(self.heap.get(self.scalar_value(receiver)))
+                    .ok_or_else(|| self.missing_attribute(receiver, name))?;
+            return super::method_decorator::attribute(self, callable, dictionary, name)?
+                .ok_or_else(|| self.missing_attribute(receiver, name));
+        }
         match name {
             "__isabstractmethod__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
@@ -7408,6 +7421,16 @@ impl Context {
         receiver: Id,
         value: Option<Id>,
     ) -> Result<()> {
+        if matches!(self.heap.get(owner), Value::Native(name) if super::method_decorator::owner(name).is_some())
+        {
+            self.layout_receiver_class(owner, name, receiver)?;
+            let wrapper = self.scalar_value(receiver);
+            let (_, dictionary) = super::method_decorator::fields(self.heap.get(wrapper))
+                .ok_or_else(|| self.missing_attribute(receiver, name))?;
+            return super::method_decorator::update_attribute(
+                self, wrapper, dictionary, name, value,
+            );
+        }
         match name {
             "__name__" | "__qualname__" => {
                 self.layout_receiver_class(owner, name, receiver)?;
@@ -8906,8 +8929,9 @@ impl Context {
                 Ok(result)
             }
             Value::Native(ref name)
-                if let Some(owner @ ("function" | "builtin_function_or_method")) =
-                    name.strip_suffix(".__call__") =>
+                if let Some(
+                    owner @ ("function" | "builtin_function_or_method" | "staticmethod"),
+                ) = name.strip_suffix(".__call__") =>
             {
                 let mut arguments = args.into_iter();
                 let function = arguments.next().ok_or_else(|| {
@@ -8944,8 +8968,11 @@ impl Context {
             Value::Native(name) if name == "functools.partial.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "functools.partial", &args, &kwargs)
             }
-            Value::Native(name) if name == "classmethod.__get__" => {
-                wrapper_descriptor::descriptor_get(self, "classmethod", &args, &kwargs)
+            Value::Native(ref name)
+                if let Some(owner @ ("classmethod" | "staticmethod")) =
+                    name.strip_suffix(".__get__") =>
+            {
+                wrapper_descriptor::descriptor_get(self, owner, &args, &kwargs)
             }
             Value::Native(name) if name == "wrapper_descriptor.__get__" => {
                 wrapper_descriptor::descriptor_get(self, "wrapper_descriptor", &args, &kwargs)
@@ -9194,7 +9221,6 @@ impl Context {
                                 | "method"
                                 | "object"
                                 | "property"
-                                | "staticmethod"
                         )
                     ) =>
             {

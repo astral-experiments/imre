@@ -382,6 +382,24 @@ object is passed as the implied first argument.
 Class methods are different than C++ or Java static methods.
 If you want those, see the staticmethod builtin."#
         }
+        "staticmethod" => {
+            r#"Convert a function to be a static method.
+
+A static method does not receive an implicit first argument.
+To declare a static method, use this idiom:
+
+     class C:
+         @staticmethod
+         def f(arg1, arg2, argN):
+             ...
+
+It can be called either on the class (e.g. C.f()) or on an instance
+(e.g. C().f()). Both the class and the instance are ignored, and
+neither is passed implicitly as the first argument to the method.
+
+Static methods in Python are similar to those found in Java or C++.
+For a more advanced concept, see the classmethod builtin."#
+        }
         "frozenset" => r#"Build an immutable unordered collection of unique elements."#,
         "_abc_data" => r#"Internal state held by ABC machinery."#,
         _ => return None,
@@ -2734,21 +2752,6 @@ pub(super) fn call(
                     return Err(ctx.invalid_new_subtype(owner, class));
                 }
                 call(ctx, owner, args, kwargs)
-            }
-            "staticmethod" if method == "__get__" => {
-                positional(name, kwargs)?;
-                arity(name, args, 2, 3)?;
-                if !matches!(ctx.heap.get(args[0]), Value::StaticMethod { .. }) {
-                    return Err(type_error(format!(
-                        "descriptor '__get__' requires a 'staticmethod' object but received a '{}'",
-                        ctx.type_name(args[0])
-                    )));
-                }
-                let owner = args.get(2).copied().unwrap_or(NONE);
-                if args[1] == NONE && owner == NONE {
-                    return Err(type_error("__get__(None, None) is invalid"));
-                }
-                ctx.bind_attribute(args[0], args[1], owner)
             }
             _ => Err(type_error(format!("unknown builtin method {name}"))),
         };

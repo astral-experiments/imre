@@ -3576,6 +3576,8 @@ impl Context {
                 &[]
             }
             _ if builtins::singleton_instance(name).is_some() => &["__new__"],
+            "classmethod" => &["__get__", "__class_getitem__"],
+            "staticmethod" => &["__call__", "__get__", "__class_getitem__"],
             "function" => &["__call__", "__get__"],
             "method" => &["__get__", "__reduce__"],
             "builtin_function_or_method" => &["__call__", "__reduce__"],
@@ -3586,7 +3588,7 @@ impl Context {
             }
             "list" => builtins::LIST_METHODS,
             "method_descriptor" | "wrapper_descriptor" | "classmethod_descriptor" => &["__get__"],
-            "getset_descriptor" => namedtuple::MEMBER_SLOTS,
+            "member_descriptor" | "getset_descriptor" => namedtuple::MEMBER_SLOTS,
             "tuple" => &[
                 "__contains__",
                 "__repr__",
@@ -3678,6 +3680,23 @@ impl Context {
                 } {
                     let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
                     entries.push((self.heap.code_name(field), descriptor));
+                } else if let Some(owner) = method_decorator::owner(name) {
+                    let doc = self
+                        .text(builtins::type_doc(owner).expect("method decorator documentation"));
+                    entries.push((self.heap.code_name("__doc__"), doc));
+                    for field in ["__func__", "__wrapped__"] {
+                        let descriptor = self.readonly_member(owner, field);
+                        entries.push((self.heap.code_name(field), descriptor));
+                    }
+                    for field in [
+                        "__dict__",
+                        "__isabstractmethod__",
+                        "__annotations__",
+                        "__annotate__",
+                    ] {
+                        let descriptor = self.alloc(Value::LayoutDescriptor(value, field));
+                        entries.push((self.heap.code_name(field), descriptor));
+                    }
                 } else if name == "method" {
                     for field in ["__func__", "__self__"] {
                         let descriptor = self.readonly_member("method", field);
