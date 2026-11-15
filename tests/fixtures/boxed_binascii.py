@@ -24,6 +24,16 @@ class DropIndex:
 
 
 def current():
+
+    released = []
+
+    class Packet(bytes):
+        def __release_buffer__(self, view):
+            released.append(view[0])
+
+    assert binascii.b2a_qp(Packet(b"=a")) == b"=3Da"
+    assert released == [ord("=")]
+
     from binascii import a2b_qp
 
     print(a2b_qp("tag_name=5F=FF", header=True))
