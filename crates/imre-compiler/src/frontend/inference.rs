@@ -1823,7 +1823,6 @@ impl Inference {
                 && !skipped
                 && !self.widened.get()
                 && revision == self.revision.get()
-                && !self.unresolved()
             {
                 // Reconsider inferred returns in this graph before placing functions.
                 // Declarations and checked parameters keep their existing contracts.

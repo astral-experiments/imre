@@ -2042,8 +2042,9 @@ print("result", call(b=2, a=1))
         let path = root.path().join("publisher.py");
         let source = format!(
             "def release_count(count: int) -> int:\n    return count * 3 + 1\n\n\
-             {INFERRED_SET_GATHER}\nnames = gather('cab')\n\
-             names.append(release_count(4))\nprint('publish', names)\n"
+             {INFERRED_SET_GATHER}\ndef pick(value): return value\n\
+             names = gather('cab')\nnames.append(release_count(4))\n\
+             print('publish', names, pick('aba'))\n"
         );
         std::fs::write(&path, source).unwrap();
         for module_entry in [None, Some("publisher".into())] {
