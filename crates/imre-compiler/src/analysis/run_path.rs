@@ -231,6 +231,15 @@ impl<'ast> Visitor<'ast> for Calls<'_> {
         self.replaced = false;
         for stmt in body {
             self.visit_stmt(stmt);
+            if matches!(
+                stmt,
+                ast::Stmt::Return(_)
+                    | ast::Stmt::Raise(_)
+                    | ast::Stmt::Break(_)
+                    | ast::Stmt::Continue(_)
+            ) {
+                break;
+            }
         }
         self.replaced = false;
     }

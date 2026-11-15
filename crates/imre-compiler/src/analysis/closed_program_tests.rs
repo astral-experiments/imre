@@ -867,6 +867,34 @@ fn run_path_checks_the_bound_filename_and_linked_body() {
 }
 
 #[test]
+fn run_path_checks_finally_after_a_return() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let source = r#"import runpy, sys
+def answer():
+    try:
+        return 73
+        def dormant(): return runpy.run_path(sys.argv[1])
+    finally:
+        pass
+print(answer())
+"#;
+    fs::write(&entry, source).unwrap();
+    crate::check_file(&entry, None).unwrap();
+
+    fs::write(
+        &entry,
+        source.replace("pass", "runpy.run_path(sys.argv[1])"),
+    )
+    .unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(
+        error.contains("main.py:7:24") && error.contains("open executable filename"),
+        "{error}"
+    );
+}
+
+#[test]
 fn run_path_selected_from_mixed_bindings_requires_a_rewrite() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
