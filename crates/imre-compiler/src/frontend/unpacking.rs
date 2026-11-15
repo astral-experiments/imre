@@ -406,12 +406,13 @@ impl Checker<'_> {
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
         &mut self,
-        assignment: &ast::StmtAssign,
+        targets: &[ast::Expr],
+        rhs: &ast::Expr,
         output: &mut Vec<Statement>,
     ) -> Result<bool, String> {
         // The live namespace owns later lookups. An enclosing call may already
         // have loaded its callable before an argument mutates this attribute.
-        for target in &assignment.targets {
+        for target in targets {
             if self.registered.is_none()
                 && let ast::Expr::Attribute(attribute) = target
                 && matches!(attribute.attr.as_str(), "compile" | "MULTILINE" | "M")
@@ -428,25 +429,22 @@ impl Checker<'_> {
                 return Err(self.scoped_builtin_error("the mutable re module binding", attribute));
             }
         }
-        let fixed_field = match assignment.targets.as_slice() {
+        let fixed_field = match targets {
             [ast::Expr::Attribute(field)] if self.registered.is_none() => Some(field),
             _ => None,
         };
         if let Some(attribute) = fixed_field
             && let Some(field) = self.mime_attribute(attribute)
         {
-            let mut state_assignment = assignment.clone();
-            state_assignment.targets[0] = ast::Expr::Attribute(field);
-            return self.assignment_statement(&state_assignment, output);
+            return self.assignment_statement(&[ast::Expr::Attribute(field)], rhs, output);
         }
         if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "default_factory"
-            && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
-                || self.unshadowed_builtin(&assignment.value, "list"))
+            && (matches!(rhs, ast::Expr::NoneLiteral(_)) || self.unshadowed_builtin(rhs, "list"))
         {
             let receiver = self.expr(&attribute.value)?;
             if self.types.is_default_list_dict(receiver.ty) {
-                let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
+                let enabled = !matches!(rhs, ast::Expr::NoneLiteral(_));
                 output.push(Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
@@ -456,8 +454,7 @@ impl Checker<'_> {
         }
         if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "converter"
-            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
-                self.resolve(&assignment.value)
+            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) = self.resolve(rhs)
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::LogFormatter {
@@ -465,10 +462,10 @@ impl Checker<'_> {
                 return Ok(true);
             }
         }
-        if let [target] = assignment.targets.as_slice() {
+        if let [target] = targets {
             if pattern_elements(target).is_some() {
-                let value = self.unpacking_value(target, &assignment.value)?;
-                bind_assignment(self, &assignment.targets, value, output)?;
+                let value = self.unpacking_value(target, rhs)?;
+                bind_assignment(self, targets, value, output)?;
                 return Ok(true);
             }
             let local = target
@@ -478,11 +475,11 @@ impl Checker<'_> {
                 })
                 .and_then(|name| Some((name.id.as_str(), *self.names.get(name.id.as_str())?)));
             let previous = local.filter(|(_, slot)| self.inferred_containers.contains(slot));
-            let mut context = self.target_expectation(target, Some(&assignment.value));
+            let mut context = self.target_expectation(target, Some(rhs));
             if matches!(context, Some((Type::Callable(_), None)))
                 && let Some((_, slot)) = local
                 && let Some(ValueSource::Function(prior)) = self.assigned.value_source(slot)
-                && let Some(Binding::Definition(owner)) = self.resolve(&assignment.value)
+                && let Some(Binding::Definition(owner)) = self.resolve(rhs)
                 && self
                     .functions
                     .get(&owner)
@@ -497,21 +494,17 @@ impl Checker<'_> {
             let value = if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
-                self.expr_expected_if(
-                    &assignment.value,
-                    self.locals[old],
-                    Self::rebindable_container,
-                )?
+                self.expr_expected_if(rhs, self.locals[old], Self::rebindable_container)?
             } else if let Some((expected, _)) = scalar_item {
                 // Keep the scalar operand. Its RHS can change which container receives the store.
-                self.expr_expected_if(&assignment.value, expected, |_, _| true)?
+                self.expr_expected_if(rhs, expected, |_, _| true)?
             } else if let Some(expected) = context {
-                self.assignment_rhs(target, &assignment.value, expected)?
+                self.assignment_rhs(target, rhs, expected)?
             } else {
-                self.typed_expr(&assignment.value)?
+                self.typed_expr(rhs)?
             };
-            if self.ends_before_assignment(&value, &assignment.targets)? {
-                output.push(self.statement_at(&assignment.value, Statement::Expr(value)));
+            if self.ends_before_assignment(&value, targets)? {
+                output.push(self.statement_at(rhs, Statement::Expr(value)));
                 return Ok(false);
             }
             if let Some((name, old)) = previous
@@ -541,7 +534,7 @@ impl Checker<'_> {
             } else {
                 value
             };
-            let value_site = scalar_item.map(|_| assignment.value.as_ref());
+            let value_site = scalar_item.map(|_| rhs);
             let start = output.len();
             self.store_value(target, value, value_site, Some(output))?;
             if let Some(sites) = &mut self.fixed_sites
@@ -549,34 +542,33 @@ impl Checker<'_> {
                 && let [statement @ Statement::Assign(slot, _)] = &output[start..]
                 && self.names.get(name.id.as_str()) == Some(slot)
             {
-                sites.statement(assignment.value.range(), statement);
+                sites.statement(rhs.range(), statement);
             } else if let Some(sites) = &mut self.fixed_sites
                 && let ast::Expr::Attribute(attribute) = target
                 && let [Statement::SetField(_, field, _)] = &mut output[start..]
             {
-                sites.store_field(attribute, assignment.value.range(), field, None);
+                sites.store_field(attribute, rhs.range(), field, None);
             }
             return Ok(true);
         }
-        let context = assignment.targets.iter().find_map(|target| {
-            self.target_expectation(target, Some(&assignment.value))
+        let context = targets.iter().find_map(|target| {
+            self.target_expectation(target, Some(rhs))
                 .map(|ty| (target, ty))
         });
         let value = if let Some((target, expected)) = context {
-            assignments::unpromoted(self.assignment_rhs(target, &assignment.value, expected)?)
+            assignments::unpromoted(self.assignment_rhs(target, rhs, expected)?)
         } else {
-            let target = assignment
-                .targets
+            let target = targets
                 .iter()
                 .find(|target| pattern_elements(target).is_some())
-                .unwrap_or(&assignment.targets[0]);
-            self.unpacking_value(target, &assignment.value)?
+                .unwrap_or(&targets[0]);
+            self.unpacking_value(target, rhs)?
         };
-        if self.ends_before_assignment(&value, &assignment.targets)? {
-            output.push(self.statement_at(&assignment.value, Statement::Expr(value)));
+        if self.ends_before_assignment(&value, targets)? {
+            output.push(self.statement_at(rhs, Statement::Expr(value)));
             return Ok(false);
         }
-        bind_assignment(self, &assignment.targets, value, output)?;
+        bind_assignment(self, targets, value, output)?;
         Ok(true)
     }
 
