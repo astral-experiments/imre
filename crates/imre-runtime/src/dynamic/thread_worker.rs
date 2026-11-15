@@ -307,8 +307,8 @@ impl Context {
         let Some([thread_class, run, code]) = self.workers.default_run else {
             return Err(unsupported());
         };
-        if *class != thread_class
-            || self.own_class_attr(*class, "run") != Some(run)
+        if !self.direct_subclass(*class, thread_class)
+            || self.class_attr(*class, "run") != Some(run)
             || !matches!(*self.heap.get(run), Value::Function { code: current, .. } if code == current)
         {
             return Err(unsupported());

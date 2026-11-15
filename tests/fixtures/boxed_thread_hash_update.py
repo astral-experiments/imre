@@ -1,12 +1,13 @@
 import hashlib
 import threading
+from multiprocessing.dummy import Process
 
 
-def check(algorithm):
+def check(algorithm, thread_type=threading.Thread):
     chunk = b"abcdefgh" * 4096
     digest = hashlib.new(algorithm)
     before = digest.copy()
-    workers = [threading.Thread(target=digest.update, args=(chunk,)) for _ in range(5)]
+    workers = [thread_type(target=digest.update, args=(chunk,)) for _ in range(5)]
     for worker in workers:
         worker.start()
     for worker in workers:
@@ -19,3 +20,4 @@ def check(algorithm):
 
 check("sha1")
 check("blake2b")
+check("sha256", Process)
