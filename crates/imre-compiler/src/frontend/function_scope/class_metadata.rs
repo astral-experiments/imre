@@ -396,9 +396,7 @@ impl<'a> Visitor<'a> for Uses {
                 self.visit_expr(&n.value);
             }
             ast::Expr::Lambda(f) => {
-                if let Some(params) = &f.parameters {
-                    self.visit_parameters(params);
-                }
+                imre_ast::visit_lambda_defaults(self, f);
                 let mut child = self.child_scope(false);
                 child.visit_expr(&f.body);
                 let mut locals = std::mem::take(&mut child.walrus);

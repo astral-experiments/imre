@@ -712,6 +712,8 @@ fn eager_comprehension_exports_only_guaranteed_assignments() {
     let entry = project.path().join("main.py");
     for (display, bound) in [
         ("[(alias := value) for _ in [1]]", true),
+        ("[(lambda x=(alias := value): x)() for _ in [1]]", true),
+        ("[(lambda x=(alias := value): x)() for _ in []]", false),
         ("[False for _ in [1] if (alias := value) is None]", true),
         ("[(alias := value) for _ in []]", false),
         ("[(alias := value) for _ in [1] if False]", false),
