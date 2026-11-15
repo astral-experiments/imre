@@ -2291,6 +2291,7 @@ pub(super) unsafe extern "C" fn imre_dyn_import_literal(
 ) -> Id {
     // SAFETY: the frame supplies its context and exactly len linked identifier bytes.
     let name = unsafe { imre_boxed_guarded_lit(ctx, 6, spelling, len) };
+    // SAFETY: the literal call has returned and the executing frame owns the live context.
     let ctx = unsafe { &mut *ctx };
     if ctx.heap.execution.pending.is_some() {
         return NONE;

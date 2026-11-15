@@ -310,11 +310,11 @@ impl RegisteredCall {
                 Ok(NONE)
             }
             Self::Restore(wait) => Ok(wait.run()),
-            // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Select(args) => {
+                // SAFETY: the caller owns this context and roots the arguments through the wait.
                 let result = unsafe { stdlib::select::run(context, &args) };
-                // SAFETY: signal callbacks have returned to this execution.
                 result.map_err(|error| {
+                    // SAFETY: the wait and its signal callbacks have returned to the owning frame.
                     stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
                 })
             }

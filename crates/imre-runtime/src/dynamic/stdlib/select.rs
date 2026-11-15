@@ -120,6 +120,7 @@ fn descriptor_sets(
 pub(in crate::dynamic) unsafe fn run(context: *mut Context, args: &[Id]) -> Result<Id> {
     // SAFETY: borrow the active execution only while converting and rooting inputs.
     let mut inputs = [Vec::new(), Vec::new(), Vec::new()];
+    // SAFETY: the caller owns the context. This borrow ends before the readiness wait.
     let (mut sets, timeout) = descriptor_sets(unsafe { &mut *context }, args, &mut inputs)?;
     let any_ready = sets.wait(timeout, || {
         // SAFETY: only the rooted operands and native fd sets survive through signal delivery.
