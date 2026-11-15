@@ -30,7 +30,13 @@ REJECTED = {
     "wrong_dictionary_value": "values: dict[str, str | bytes] = {'bad': 1}\n",
     "union_key": "values: dict[str | bytes, int] = {}\n",
     "union_set_element": "values: set[str | bytes] = set()\n",
-    "unnarrowed_comparison": "def bad(left: str | bytes, right: str | bytes) -> bool:\n    return left == right\n",
+    "comparison_wrong_return": (
+        "def bad(left: str | bytes, right: str | bytes) -> bool:\n"
+        "    if left == right:\n"
+        "        return 'wrong'\n"
+        "    return False\n"
+        "print(bad('a', 'a'))\n"
+    ),
     "alias_field_fact": "class Box:\n    value: str | bytes\n    def __init__(self, value: str | bytes) -> None:\n        self.value = value\ndef bad(box: Box) -> str:\n    if isinstance(box.value, bytes):\n        return box.value.decode()\n    return ''\n",
     "alias_item_fact": "def bad(values: list[str | bytes]) -> str:\n    if isinstance(values[0], bytes):\n        return values[0].decode()\n    return ''\n",
     "walrus_invalidates_fact": "def bad(value: str | bytes) -> str:\n    if isinstance(value, str) and not isinstance((value := b'new'), str):\n        return value + 'bad'\n    return ''\n",
