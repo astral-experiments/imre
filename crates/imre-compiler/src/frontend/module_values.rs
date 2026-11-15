@@ -1145,6 +1145,9 @@ fn collect(
         ExprKind::Builtin(Builtin::GlobalGet(slot), _) => {
             reads.insert(*slot);
         }
+        ExprKind::Builtin(Builtin::ReprWithMethods(methods), _) => {
+            calls.extend(methods.iter().copied())
+        }
         ExprKind::Builtin(Builtin::FormatField(field), _) => {
             calls.extend(field.repr_methods.iter().copied());
         }

@@ -187,8 +187,13 @@ impl Checker<'_> {
         }))
     }
 
-    /// Convert a nullable string to text and evaluate its operand once.
-    pub(super) fn optional_text(&mut self, value: Expr) -> Expr {
+    /// Evaluate a nullable text operand once and use the present class's normal str method.
+    pub(super) fn optional_text(
+        &mut self,
+        value: Expr,
+        at: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let payload = self.types.payload(value.ty).expect("nullable text operand");
         let mut scope = calls::ArgumentScope::default();
         let local = scope.hold(self, value);
         let absent = Expr {
@@ -196,17 +201,22 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
         };
         let present = Expr {
-            ty: Type::Str,
+            ty: payload,
             kind: ExprKind::Unwrap(Box::new(local)),
         };
-        scope.finish(Expr {
+        let present = if matches!(payload, Type::Class(_)) {
+            self.record_text(present, at)?
+        } else {
+            present
+        };
+        Ok(scope.finish(Expr {
             ty: Type::Str,
             kind: ExprKind::Conditional(
                 Box::new(absent),
                 Box::new(unpacking::string("None")),
                 Box::new(present),
             ),
-        })
+        }))
     }
 
     pub(super) fn shlex_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {

@@ -95,7 +95,6 @@ pub(super) fn semantics(
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
                 | (u32::from(metadata.value_struct) << 3)
-                | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4)
                 | (u32::from(scalar_fields) << 6)
                 | (u32::from(repr_takes_self) << 7)
                 | (u32::from(repr.is_some()) << 8)
@@ -109,9 +108,7 @@ pub(super) fn semantics(
                 metadata.fields.get(index).map_or(("", 0), |field| {
                     (
                         field.name.as_str(),
-                        u32::from(field.compare)
-                            | (u32::from(field.repr) << 1)
-                            | (u32::from(field.repr_text) << 2),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
                     )
                 })
             });

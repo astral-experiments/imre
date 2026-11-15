@@ -206,7 +206,7 @@ impl Checker<'_> {
 
     /// The native str service calls repr on members. Each possible override must
     /// have its actual checked body in the concrete record's display descriptor.
-    fn field_repr_methods(&self, root: Type) -> Option<Box<[usize]>> {
+    pub(super) fn field_repr_methods(&self, root: Type) -> Option<Box<[usize]>> {
         let mut pending = vec![root];
         let mut seen = HashSet::new();
         let mut methods = Vec::new();

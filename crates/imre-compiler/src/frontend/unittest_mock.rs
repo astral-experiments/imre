@@ -140,37 +140,15 @@ impl Checker<'_> {
         })
     }
 
-    fn mock_argument(&mut self, node: &ast::Expr, argument: usize) -> Result<Expr, String> {
-        let mut value = self.evaluated_argument(node)?;
-        let kind = match value.ty {
-            Type::Int => "int",
-            Type::Bool => "bool",
-            Type::Str => "str",
-            Type::StrLiteral(_) => {
-                value = literals::view(value, Type::Str);
-                "str"
-            }
-            Type::Bytes => "bytes",
-            Type::None => "None",
-            _ => {
-                return Err(self.object_runtime_export("unittest.mock object arguments", node));
-            }
-        };
-        let constructor = self.classes.methods[argument]["__init__"].id;
-        self.calls.insert(constructor);
-        Ok(Expr {
-            ty: Type::Class(argument),
-            kind: ExprKind::Construct {
-                initializer: constructor,
-                args: ir::CallArgs::positional(vec![
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
-                    },
-                    unpacking::string(kind),
-                ]),
-            },
-        })
+    fn mock_argument(&mut self, node: &ast::Expr) -> Result<Expr, String> {
+        let value = self.evaluated_argument(node)?;
+        if !matches!(
+            value.ty,
+            Type::Int | Type::Bool | Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::None
+        ) {
+            return Err(self.object_runtime_export("unittest.mock object arguments", node));
+        }
+        self.coerce(value, Type::ObjectValue, node)
     }
 
     pub(super) fn mock_arguments(
@@ -189,19 +167,17 @@ impl Checker<'_> {
             target.params[1].ty,
             target.params[2].ty,
         );
-        let Type::Class(argument) = self
-            .types
-            .element(positional)
-            .expect("bundled mock argument list")
-        else {
-            unreachable!()
-        };
         let args = call
             .arguments
             .args
             .iter()
-            .map(|expr| self.mock_argument(expr, argument))
-            .collect::<std::result::Result<_, _>>()?;
+            .map(|expr| self.mock_argument(expr))
+            .collect::<Result<Vec<_>, _>>()?;
+        let tuple = Expr {
+            ty: self.types.tuple(vec![Type::ObjectValue; args.len()]),
+            kind: ExprKind::Tuple(args),
+        };
+        let args = self.coerce(tuple, positional, call)?;
         let kwargs = call
             .arguments
             .keywords
@@ -216,7 +192,7 @@ impl Checker<'_> {
                 })?;
                 Ok((
                     unpacking::string(name.as_str()),
-                    self.mock_argument(&kw.value, argument)?,
+                    self.mock_argument(&kw.value)?,
                 ))
             })
             .collect::<Result<_, String>>()?;
@@ -227,10 +203,7 @@ impl Checker<'_> {
                 function,
                 ir::CallArgs::positional(vec![
                     receiver,
-                    Expr {
-                        ty: positional,
-                        kind: ExprKind::List(args),
-                    },
+                    args,
                     Expr {
                         ty: keywords,
                         kind: ExprKind::dict_pairs(kwargs),

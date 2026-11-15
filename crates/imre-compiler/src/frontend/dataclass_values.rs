@@ -386,10 +386,6 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                     // A UUID's integer determines equality even when its input was a bool.
                     compare: field.compare && (!class.is_uuid(graph) || field.name == "_value"),
                     repr: field.repr,
-                    repr_text: graph.modules[class.definition.module].bundled
-                        && graph.modules[class.definition.module].name == "unittest.mock"
-                        && class.name == "_Call"
-                        && field.name == "_text",
                 })
                 .collect(),
         })

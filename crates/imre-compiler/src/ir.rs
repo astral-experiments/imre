@@ -598,8 +598,6 @@ pub(crate) struct ListBuild {
 
 pub(crate) struct ClassFieldMetadata {
     pub name: String,
-    /// A trusted bundled field containing the complete, unquoted record representation.
-    pub repr_text: bool,
     pub compare: bool,
     pub repr: bool,
 }
@@ -2139,6 +2137,8 @@ pub(crate) enum Builtin {
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
+    /// The rooted repr writer may invoke these checked Python methods.
+    ReprWithMethods(Box<[usize]>),
     /// Base object descriptor on a rooted operand with a statically known builtin class.
     BaseObjectRepr,
     /// object.__repr__ for a rooted source instance, bypassing its __repr__ override.
