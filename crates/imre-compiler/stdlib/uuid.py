@@ -70,7 +70,7 @@ class UUID(_UUIDValue):
 
     @property
     def bytes(self):
-        return self._value.to_bytes(16)
+        return self.int.to_bytes(16)
 
     @property
     def bytes_le(self):
