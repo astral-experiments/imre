@@ -1635,12 +1635,8 @@ pub(in crate::dynamic) fn builtin_slot(
             return integer::truncate_real(ctx, object);
         }
         if method == "__float__" {
-            if let Value::Float(number) = *ctx.heap.get(storage) {
-                return Ok(if storage == object {
-                    object
-                } else {
-                    ctx.alloc(Value::Float(number))
-                });
+            if owner == "float" {
+                return Ok(float::exact_value(ctx, object, storage));
             }
             let number = crate::floats::int_to_float(&ctx.as_int(storage)?)?;
             return Ok(ctx.alloc(Value::Float(number)));
