@@ -1000,7 +1000,7 @@ def main() -> None:
             result = run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             passed += 1
-        for module in ["sys", "typing", "io", "gzip", "zlib", "zipimport"]:
+        for module in ["sys", "io", "gzip", "zlib"]:
             project = temporary / f"shadow-{module}"
             project.mkdir()
             (project / "main.py").write_text(f"import {module}\n")

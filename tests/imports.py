@@ -1640,6 +1640,14 @@ ACCEPTED = {
             "TestCase().assertTrue(True)\n"
         ),
     },
+    "project_typing_module": {
+        "main.py": "import typing\nprint(typing.value())\n",
+        "typing.py": "def value() -> int:\n    return 1\n",
+    },
+    "frozen_zipimport_shadows_project": {
+        "main.py": "import zipimport\nprint('imported')\n",
+        "zipimport.py": "raise RuntimeError('local zipimport executed')\n",
+    },
     "frozen_shadow": {"main.py": "import __hello__\n", "__hello__.py": HELPER},
     "frozen_import_override": {
         "main.py": (
@@ -2306,6 +2314,8 @@ def main() -> None:
 
         build_timeout = 120 if args.lto_linker and not args.sanitize else 60
         for name, files in ACCEPTED.items():
+            if name == "frozen_zipimport_shadows_project" and os.name != "posix":
+                continue
             if name == "boxed_stat_shadow" and sys.platform not in ("linux", "darwin"):
                 continue
             case = temporary / name
