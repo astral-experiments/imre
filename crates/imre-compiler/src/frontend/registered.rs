@@ -4193,6 +4193,7 @@ impl ir::SuspendValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::registered_body_at;
 
     fn prepared_sites<'a>(
         stmts: &'a [ast::Stmt],
@@ -6295,23 +6296,6 @@ publish(5, callback)
         assert!(bump.contains("call i64 @imre_dyn_exact_int_word("));
     }
 
-    fn registered_body_at<'a>(ir: &'a str, filename: &str, line: u32) -> &'a str {
-        let suffix = format!(r#"{filename}\00""#);
-        let file = ir
-            .lines()
-            .find_map(|line| {
-                let (name, value) = line.split_once(" = private unnamed_addr constant ")?;
-                value.ends_with(&suffix).then_some(name)
-            })
-            .unwrap();
-        let statement = format!("ptr {file}, i32 {line}, i64 0)");
-        ir.split("\ndefine internal i64 @code")
-            .skip(1)
-            .filter_map(|code| code.split_once("\n}").map(|(body, _)| body))
-            .find(|body| body.contains(&statement))
-            .unwrap()
-    }
-
     #[test]
     fn retained_list_membership_caller_keeps_its_checked_integer_addition() {
         let dir = tempfile::tempdir().unwrap();
@@ -7977,35 +7961,13 @@ print(choose({left}), choose({right}))
         let compilation =
             crate::compile_file(&path, None, &crate::CompileOptions::default()).unwrap();
         let ir = &compilation.llvm_ir;
-        let filename = ir
-            .lines()
-            .find_map(|line| {
-                let (symbol, data) = line.split_once(" = private unnamed_addr constant ")?;
-                data.ends_with(r#"report.py\00""#).then_some(symbol)
-            })
-            .expect("report.py source filename");
-        let body_at = |line: usize| {
-            let location = format!("ptr {filename}, i32 {line})");
-            let mut matches = ir
-                .split("\ndefine ")
-                .filter_map(|definition| definition.split_once("\n}").map(|(body, _)| body))
-                .filter(|body| {
-                    body.lines().any(|line| {
-                        line.contains("call void @imre_dyn_statement_at(")
-                            && line.ends_with(&location)
-                    })
-                });
-            let body = matches.next().expect("compiled source body");
-            assert!(matches.next().is_none(), "source body emitted twice");
-            body
-        };
-        let report = body_at(2);
+        let report = registered_body_at(ir, "report.py", 2);
         let add = "call i64 @int_add(";
         let callback = "call i64 @imre_dyn_positional_call_at(";
         assert_eq!(report.matches(add).count(), 1);
         assert_eq!(report.matches(callback).count(), 1);
         assert!(report.find(add).unwrap() < report.find(callback).unwrap());
-        let pair = body_at(7);
+        let pair = registered_body_at(ir, "report.py", 7);
         assert!(
             !pair.contains("call i64 @imre_dyn_exact_int_word("),
             "{pair}"

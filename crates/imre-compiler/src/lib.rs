@@ -1426,6 +1426,34 @@ impl DiskSource {
 mod tests {
     use super::{CompileOptions, compile};
 
+    /// Find the single function containing the statement at this filename and source line.
+    pub(super) fn registered_body_at<'a>(ir: &'a str, filename: &str, line: u32) -> &'a str {
+        let suffix = format!(r#"{filename}\00""#);
+        let file = ir
+            .lines()
+            .find_map(|instruction| {
+                let (name, data) = instruction.split_once(" = private unnamed_addr constant ")?;
+                data.ends_with(&suffix).then_some(name)
+            })
+            .expect("source filename in LLVM");
+        let simple = format!("call void @imre_dyn_statement_at(ptr %ctx, ptr {file}, i32 {line})");
+        let with_roots = format!(", ptr {file}, i32 {line}, i64 ");
+        let mut bodies = ir
+            .split("\ndefine ")
+            .skip(1)
+            .filter_map(|definition| definition.split_once("\n}").map(|(body, _)| body))
+            .filter(|body| {
+                body.lines().any(|instruction| {
+                    instruction.contains(&simple)
+                        || (instruction.contains("call void @imre_dyn_statement_with_exception(")
+                            && instruction.contains(&with_roots))
+                })
+            });
+        let body = bodies.next().expect("statement in compiled function");
+        assert!(bodies.next().is_none(), "duplicate statement body");
+        body
+    }
+
     #[test]
     fn preparation_errors_precede_earlier_emission_errors() {
         let mut output = super::ProgramOutput::new(super::CodegenLayout::Split);
@@ -1666,21 +1694,7 @@ print("result", call(b=2, a=1))
                 })
                 .unwrap()
         };
-        let file = constant(r#"paired.py\00""#);
-        let body_at = |line| {
-            let location = format!("ptr {file}, i32 {line}, i64 0)");
-            let mut definitions = ir
-                .split("\ndefine internal i64 @code")
-                .skip(1)
-                .filter_map(|entry| entry.split_once("\n}").map(|(body, _)| body))
-                .filter(|body| body.contains(&location));
-            let definition = definitions
-                .next()
-                .expect("statement in registered function");
-            assert!(definitions.next().is_none(), "duplicate statement body");
-            definition
-        };
-        let reduction = body_at(2);
+        let reduction = registered_body_at(&ir, "paired.py", 2);
         assert_eq!(reduction.matches("call i64 @int_mul(").count(), 1);
         assert!(reduction.contains("call i64 @imre_dyn_exact_int_word("));
         let multiply = constant(r#"c"*\00""#);
@@ -1688,7 +1702,7 @@ print("result", call(b=2, a=1))
             "call i64 @imre_dyn_op_at(ptr %ctx, ptr {multiply},"
         )));
 
-        let publish = body_at(7);
+        let publish = registered_body_at(&ir, "paired.py", 7);
         assert_eq!(publish.matches("call i64 @int_add(").count(), 1);
         assert_eq!(
             publish
