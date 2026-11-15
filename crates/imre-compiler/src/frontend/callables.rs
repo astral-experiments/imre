@@ -943,6 +943,15 @@ impl<'a> Checker<'a> {
                             if !local_callable {
                                 return error;
                             }
+                            // The inferred signature supplies a layout for this copy. Only a
+                            // saved target or a written declaration owns its argument contract.
+                            if saved.is_none()
+                                && declaration.is_none()
+                                && matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
+                                && matches!(checker.value_source(&callable), Some(ValueSource::Function(_)))
+                            {
+                                return checker.scoped_builtin_error("a converted callable argument", site);
+                            }
                             let Some(parameter) = checker
                                 .graph
                                 .session

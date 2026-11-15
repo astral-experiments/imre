@@ -572,6 +572,37 @@ fn a_cold_call_keeps_its_first_party_argument_shape_across_layouts() {
 }
 
 #[test]
+fn a_copied_function_layout_does_not_declare_its_argument() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(
+        project.path().join("provider.py"),
+        "def take(n: int) -> int: return n\n",
+    )
+    .unwrap();
+    let scores = project.path().join("scores.py");
+    let source = "import provider\ndef app() -> int:\n    method = provider.take\n    if False:\n        return method('x')\n    return 42\n";
+    for neighbor in ["", "def unused(): return locals()\n"] {
+        fs::write(
+            &entry,
+            format!("import scores\n{neighbor}print(set([1,2]))\nprint(scores.app())\n"),
+        )
+        .unwrap();
+        fs::write(&scores, source).unwrap();
+        crate::check_file(&entry, None).unwrap();
+
+        fs::write(&scores, source.replace("return 42", "return 'wrong'")).unwrap();
+        let error = crate::check_file(&entry, None).unwrap_err();
+        assert!(
+            error.contains("scores.py:6:12")
+                && (error.contains("expected int, got str")
+                    || error.contains("invalid-return-type")),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn a_dormant_module_call_keeps_its_required_imported_argument() {
     let project = tempdir().unwrap();
     let entry = project.path().join("main.py");
