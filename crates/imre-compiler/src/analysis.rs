@@ -2207,11 +2207,14 @@ impl Session {
             index.symbol_resolves_to_global_scope(symbol, scope)
                 || index.scope(scope).kind() == ScopeKind::Class
                     && table.symbol(symbol).is_local()
-                    && index.try_expression_use_id(root.into()).is_some_and(|use_id| {
-                        index.use_def_map(scope).bindings_at_use(use_id).any(|binding| {
-                            binding.binding.definition().is_none()
+                    && index
+                        .try_expression_use_id(root.into())
+                        .is_some_and(|use_id| {
+                            index
+                                .use_def_map(scope)
+                                .bindings_at_use(use_id)
+                                .any(|binding| binding.binding.definition().is_none())
                         })
-                    })
         };
         index
             .scope_ids()

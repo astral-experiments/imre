@@ -5711,10 +5711,11 @@ impl<'a> Loader<'a> {
                 .or_insert(Binding::RuntimeClass);
         }
         self.modules[id].value_structs =
-            self.session.classes_with_module_decorator(id, &parsed, |target| {
-                resolve_binding(&self.modules, id, target)
-                    == Some(Binding::Intrinsic(Intrinsic::Struct))
-            });
+            self.session
+                .classes_with_module_decorator(id, &parsed, |target| {
+                    resolve_binding(&self.modules, id, target)
+                        == Some(Binding::Intrinsic(Intrinsic::Struct))
+                });
         if !field_separators.is_empty() {
             let module = &mut self.modules[id];
             let mut source = module.source.clone();

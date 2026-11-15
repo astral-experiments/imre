@@ -632,7 +632,10 @@ fn object_fallback(
                 matches!(
                     kind,
                     LoweringKind::ReturnType | LoweringKind::DeclaredArgument
-                ) || g.modules.iter().any(|module| !module.value_structs.is_empty())
+                ) || g
+                    .modules
+                    .iter()
+                    .any(|module| !module.value_structs.is_empty())
             }))
     {
         return fallback(checked_graph);
