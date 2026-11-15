@@ -8837,7 +8837,13 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_stderr_line", &[&args[0].value]);
                 none()
             }
-            Builtin::Print if args.len() > 1 || matches!(args[0].value.ty, Type::Union(_)) => {
+            Builtin::Print
+                if args.len() > 1
+                    || matches!(
+                        args[0].value.ty.word_kind(),
+                        WordKind::Object | WordKind::Union
+                    ) =>
+            {
                 let kinds = self.byte_array(
                     args.iter()
                         .map(|arg| {

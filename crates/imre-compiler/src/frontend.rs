@@ -15473,27 +15473,6 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::Print, vec![text]),
             });
         }
-        if name == "print"
-            && args.len() == 1
-            && matches!(
-                args[0].ty,
-                Type::Exception
-                    | Type::NamedException(_)
-                    | Type::ImportException
-                    | Type::TimeoutExpired
-            )
-        {
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(
-                    Builtin::Print,
-                    vec![Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(Builtin::ExceptionMessage, args),
-                    }],
-                ),
-            });
-        }
         if cfg!(unix)
             && let [value] = args.as_slice()
             && matches!(value.ty, Type::Popen(..) | Type::ActivePopen)
@@ -15841,6 +15820,14 @@ impl<'a> Checker<'a> {
                             )
                         };
                         scalar(arg.ty)
+                            || matches!(
+                                arg.ty,
+                                Type::Exception
+                                    | Type::NamedException(_)
+                                    | Type::ImportException
+                                    | Type::TimeoutExpired
+                            )
+                            || self.types.payload(arg.ty) == Some(Type::Exception)
                             || (args.len() > 1 && self.types.element(arg.ty).is_some_and(scalar))
                             || self
                                 .types
@@ -15848,6 +15835,18 @@ impl<'a> Checker<'a> {
                                 .is_some_and(|members| members.into_iter().all(scalar))
                     }) =>
             {
+                // The writer takes concrete byte-sized kinds. Box a nullable word without
+                // formatting it, so later arguments run before the writer calls __str__.
+                args = args
+                    .into_iter()
+                    .map(|value| {
+                        if matches!(value.ty, Type::Optional(_)) {
+                            self.coerce(value, Type::ObjectValue, call)
+                        } else {
+                            Ok(value)
+                        }
+                    })
+                    .collect::<Result<_, _>>()?;
                 (Builtin::Print, Type::None)
             }
             "complex"
