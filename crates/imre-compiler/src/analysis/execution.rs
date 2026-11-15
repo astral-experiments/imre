@@ -53,9 +53,11 @@ impl ExecutionIntrinsic {
     }
 
     fn from_type<'db>(model: &SemanticModel<'db>, ty: Type<'db>) -> Option<Self> {
-        [Self::Exec, Self::Eval]
-            .into_iter()
-            .find(|intrinsic| is_stdlib_function_type(model, ty, "builtins", intrinsic.name()))
+        super::select_stdlib_function(model, ty, "builtins", |name| {
+            [Self::Exec, Self::Eval]
+                .into_iter()
+                .find(|kind| kind.name() == name)
+        })
     }
 
     pub(super) fn possible(model: &SemanticModel<'_>, expression: &Expr) -> Option<Self> {
@@ -753,6 +755,12 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
     }
 
     fn visit_expr(&mut self, expression: &'a Expr) {
+        self.visit_operand(expression, true);
+    }
+}
+
+impl<'a> Escape<'a, '_> {
+    fn visit_operand(&mut self, expression: &'a Expr, check_escape: bool) {
         if self.first.is_some() {
             return;
         }
@@ -775,7 +783,8 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
                 walk_expr(self, &attribute.value);
                 return;
             }
-            if let Some(intrinsic) = ExecutionIntrinsic::possible(self.model, expression)
+            if check_escape
+                && let Some(intrinsic) = ExecutionIntrinsic::possible(self.model, expression)
                 && self.reachable(expression.range())
             {
                 self.first = Some(self.required(
@@ -822,7 +831,8 @@ impl<'a> Visitor<'a> for Escape<'a, '_> {
             // through ordinary argument and namespace dispatch.
             walk_expr(self, &call.func);
         } else {
-            self.visit_expr(&call.func);
+            // The target was just checked. Visit its reads and children in the live scope.
+            self.visit_operand(&call.func, false);
         }
         for argument in call.arguments.iter_source_order() {
             let operand = argument.value();
