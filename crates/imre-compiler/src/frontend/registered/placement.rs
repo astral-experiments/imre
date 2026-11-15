@@ -43,6 +43,32 @@ mod tests {
     }
 
     #[test]
+    fn recovered_function_keeps_its_checked_module_caller() {
+        let text = include_str!("../../../../../tests/fixtures/callables/map_escaping.py");
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+
+        let (_, initializers) = graph.take_registered_functions();
+        let caller = &initializers[&graph.entry];
+        assert!(matches!(
+            caller.function.body.as_slice(),
+            [Statement::Expr(Expr {
+                kind: ExprKind::Call(..),
+                ..
+            })]
+        ));
+        let site = *caller.fixed_sites.last().unwrap();
+        assert_eq!(&text[site], "run()");
+        assert!(matches!(
+            caller.fixed_attribute(site),
+            Some(FixedAttribute::Call(Some(_), _))
+        ));
+    }
+
+    #[test]
     fn module_prefix_keeps_the_checked_tails_named_operands() {
         let text = "def width(text: str) -> int: return len(text)\nsaved = 'é'\nprint(len(saved), width('name'))\n";
         let project = tempfile::tempdir().unwrap();

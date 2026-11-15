@@ -1713,7 +1713,8 @@ fn lower_graph(
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = &completed_calls;
-        let mut fixed_entry = (!needs_registered_entry && unavailable.is_none()).then(|| {
+        checker.placement_only = needs_registered_entry || unavailable.is_some();
+        let mut fixed_entry =
             if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
                 // The Python frame must read its live module name. Keep a tail that
                 // binds locals with the checker that owns their layout and contracts.
@@ -1733,11 +1734,10 @@ fn lower_graph(
                     checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
                 }
                 // Leave room for the declarations and their Python statement checkpoints.
-                Vec::with_capacity(tail.len() + 2 * prefix.len())
+                Some(Vec::with_capacity(tail.len() + 2 * prefix.len()))
             } else {
-                Vec::new()
-            }
-        });
+                (!checker.placement_only).then(Vec::new)
+            };
         let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
         let result = checker.finish_region(result);
         if checked_region(result, graph, module_id, &mut unavailable, |failure| {
@@ -1771,17 +1771,23 @@ fn lower_graph(
             None
         }
     };
-    if let Some(reason) = unavailable.or_else(|| {
+    let reason = unavailable.or_else(|| {
         globals
             .missing_bindings
             .borrow_mut()
             .pop_first()
             .map(|(_, reason)| reason)
-    }) {
-        place_completed(&mut completed, &owners);
-        return Err(reason);
-    }
-    if needs_registered_entry {
+    });
+    if reason.is_some() || needs_registered_entry {
+        if let (Some(source), Some(entry)) = (entry_source, entry)
+            && let Ok(frame) = source.place(entry)
+        {
+            graph.register_initializer(graph.entry, frame);
+        }
+        if let Some(reason) = reason {
+            place_completed(&mut completed, &owners);
+            return Err(reason);
+        }
         return Ok(Some(crate::CheckedProgram::Registered(None)));
     }
     if let Some(error) = graph.deferred_object_error.take() {
