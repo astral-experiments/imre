@@ -885,7 +885,8 @@ impl<'a> Checker<'a> {
             if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
         let declaration = local
             .and_then(|slot| self.declared_slots.get(slot))
-            .copied();
+            .copied()
+            .or_else(|| self.value_declaration(&callable));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
         let cold_frame = registered_site.is_none() && matches!(returns, Type::Coroutine(_));
         // Resolve the loaded callable before an argument can replace its slot.
@@ -1206,6 +1207,30 @@ mod tests {
 
         std::fs::write(&main, format!("{declarations}    return take(1)\n")).unwrap();
         crate::check_file(&main, None).unwrap();
+    }
+
+    #[test]
+    fn a_copied_callable_keeps_its_declared_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("aliases.py");
+        let source = concat!(
+            "from collections.abc import Callable\n",
+            "def apply(cb: Callable[[int], int]) -> int:\n",
+            "    method = cb\n",
+            "    if False:\n",
+            "        return method('x')\n",
+            "    return 42\n",
+            "def expose(): return locals()\n",
+            "print(set([1, 2]))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("aliases.py:5:23: Imre: expected int, got str"),
+            "{error}"
+        );
+        std::fs::write(&file, source.replace("'x'", "7")).unwrap();
+        crate::check_file(&file, None).unwrap();
     }
 
     #[test]
