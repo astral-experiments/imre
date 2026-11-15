@@ -158,7 +158,16 @@ class TCPServer:
         self._shutdown_requested = False
         self._server_stopped = False
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        _activate(self, bind_and_activate)
+        if self.address_family != socket.AF_INET or self.socket_type != socket.SOCK_STREAM:
+            self.server_close()
+            raise NotImplementedError("TCPServer requires AF_INET and SOCK_STREAM")
+        if bind_and_activate:
+            try:
+                self.server_bind()
+                self.server_activate()
+            except:
+                self.server_close()
+                raise
 
     def server_bind(self) -> None:
         if self.allow_reuse_port:
@@ -269,16 +278,3 @@ class TCPServer:
                 raise
         else:
             self.shutdown_request(request)
-
-
-def _activate(server: TCPServer, bind_and_activate: bool) -> None:
-    if server.address_family != socket.AF_INET or server.socket_type != socket.SOCK_STREAM:
-        server.server_close()
-        raise NotImplementedError("TCPServer requires AF_INET and SOCK_STREAM")
-    if bind_and_activate:
-        try:
-            server.server_bind()
-            server.server_activate()
-        except:
-            server.server_close()
-            raise

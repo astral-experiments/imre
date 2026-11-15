@@ -3,6 +3,8 @@ class Parent:
 
     def __init__(self, value: int = 17) -> None:
         self.value = value
+        if value == 42:
+            print(self.value)
 
 
 class Child(Parent):
