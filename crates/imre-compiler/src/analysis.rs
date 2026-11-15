@@ -1838,13 +1838,7 @@ impl Session {
     }
 
     fn write_file(&mut self, path: &str, source: &str) -> Result<File, String> {
-        self.db
-            .system
-            .fs()
-            .write_file_all(path, source)
-            .map_err(|error| error.to_string())?;
-        // Earlier package resolution may have cached a directory before this child existed.
-        File::sync_path(&mut self.db, path.as_ref());
+        self.seed_parser_input(Path::new(path), source)?;
         system_path_to_file(&self.db, path).map_err(|error| error.to_string())
     }
 
