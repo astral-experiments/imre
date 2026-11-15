@@ -257,7 +257,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
         )
         .unwrap();
         handle.join(Some(Duration::ZERO)).unwrap();
-        assert!(handle.alive());
+        assert!(handle.alive(&mut ctx).unwrap());
         assert!(ctx.heap.workers.entries[0].handle.awaiting_exit());
         assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 1);
         assert_eq!(ident, handle.ident());
@@ -272,7 +272,7 @@ fn native_start_and_join_publish_the_worker_lifetime() {
     });
     handle.join(None).unwrap();
     handle.join(None).unwrap();
-    assert!(!handle.alive());
+    assert!(!handle.alive(&mut ctx).unwrap());
     assert!(!ctx.heap.workers.entries[0].handle.awaiting_exit());
     assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
@@ -484,7 +484,7 @@ fn failed_startup_release_skips_the_blocking_acquire() {
     assert_eq!(error.kind, "RuntimeError");
     assert_eq!(error.message, "RuntimeError: release unlocked lock");
     handle.join(Some(Duration::from_secs(2))).unwrap();
-    assert!(handle.is_done());
+    assert!(handle.is_done(&mut ctx).unwrap());
     assert!(!body.locked());
     assert_eq!(ctx.interpreter.worker_count.load(Ordering::Acquire), 0);
 }
@@ -526,7 +526,7 @@ fn bound_hash_worker_owns_expanded_input_while_running() {
     ctx.collect_unreachable();
     assert!(matches!(ctx.heap.get(weak_owner), Value::Weak(wr) if wr.target == Some(owner)));
     assert!(matches!(ctx.heap.get(input), Value::Bytes(data) if data == b"abc"));
-    assert!(handle.alive());
+    assert!(handle.alive(&mut ctx).unwrap());
     assert_ne!(ident, thread_ident());
     assert!(ctx.check_thread_reporter_mutable().is_ok());
 
@@ -585,7 +585,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
         )
         .unwrap();
         joined.join(Some(Duration::from_secs(5))).unwrap();
-        assert!(!joined.alive());
+        assert!(!joined.alive(&mut ctx).unwrap());
         ctx.reap_thread_operands();
         assert!(!ctx.heap.workers.roots().any(|&id| id == owner));
         ctx.heap.release_temporaries_since(mark);
@@ -612,6 +612,7 @@ fn joined_and_detached_operands_are_released_at_their_own_checkpoints() {
 
 #[test]
 fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
+    let mut ctx = context();
     let timeout = Duration::from_secs(5);
     // Bound every wait so an incorrect join cannot strand the test process.
     struct ExitGate {
@@ -653,12 +654,12 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
         .unwrap();
 
     handle.join(Some(Duration::ZERO)).unwrap();
-    assert!(handle.alive());
+    assert!(handle.alive(&mut ctx).unwrap());
     end_body.send(()).unwrap();
     at_exit.recv_timeout(timeout).unwrap();
     thread::scope(|scope| {
         let observer = Arc::clone(&handle);
-        scope.spawn(move || assert!(!observer.alive()));
+        scope.spawn(move || assert!(!observer.alive(&mut context()).unwrap()));
         let deadline = std::time::Instant::now() + timeout;
         while handle.native.try_lock().is_ok() {
             assert!(std::time::Instant::now() < deadline);
@@ -676,6 +677,119 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
         assert_eq!(error.message, "worker failure");
     });
     handle.join(None).unwrap();
+}
+
+#[test]
+fn registered_observers_park_through_native_tls_teardown() {
+    use std::sync::atomic::AtomicUsize;
+
+    struct ExitGate {
+        handle: Arc<Handle>,
+        parked: Arc<AtomicUsize>,
+        entered: Option<mpsc::SyncSender<()>>,
+        observed: mpsc::Sender<usize>,
+    }
+    impl Drop for ExitGate {
+        fn drop(&mut self) {
+            if let Some(entered) = &self.entered {
+                let _ = entered.send(());
+            }
+            // The body has signaled exit. Sample the owning heap only once the caller
+            // claims the native join that cannot finish until this destructor returns.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while self.handle.native.try_lock().is_ok() {
+                if std::time::Instant::now() >= deadline {
+                    return;
+                }
+                thread::yield_now();
+            }
+            let _ = self.observed.send(self.parked.load(Ordering::Acquire));
+        }
+    }
+    thread_local! {
+        static GATE: std::cell::OnceCell<ExitGate> = const { std::cell::OnceCell::new() };
+    }
+
+    let mut ctx = context();
+    let parked = Arc::<AtomicUsize>::default();
+    ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+    let timeout = Duration::from_secs(5);
+    let mut depths = Vec::new();
+    for name in ["join", "is_done", "_imre_thread.alive", "_thread._shutdown"] {
+        let shutdown = name == "_thread._shutdown";
+        let handle = Arc::<Handle>::default();
+        let receiver = ctx.alloc(Value::ThreadHandle(Arc::clone(&handle)));
+        let (callable, args, expected) = match name {
+            "join" => (
+                ctx.lookup_attr(receiver, name).unwrap(),
+                vec![ctx.int(0)],
+                NONE,
+            ),
+            "is_done" => (
+                ctx.lookup_attr(receiver, name).unwrap(),
+                vec![],
+                boolean(true),
+            ),
+            "_imre_thread.alive" => (ctx.builtin(name), vec![receiver], boolean(false)),
+            _ => {
+                let object = ctx.builtin("object");
+                let owner = ctx.instance(object, None);
+                ctx.heap.workers.entries.push(Entry {
+                    thread: Some(RegisteredThread {
+                        owner,
+                        daemon: false,
+                    }),
+                    handle: Arc::clone(&handle),
+                    operands: vec![],
+                });
+                (ctx.builtin(name), vec![], NONE)
+            }
+        };
+        let (entered, at_exit) = mpsc::sync_channel(0);
+        let (observed, observation) = mpsc::channel();
+        let gate = ExitGate {
+            handle: Arc::clone(&handle),
+            parked: Arc::clone(&parked),
+            entered: (!shutdown).then_some(entered),
+            observed,
+        };
+        handle
+            .spawn(move |_| {
+                gate.handle.ident.set(Some(thread_ident())).unwrap();
+                // Shutdown selects live workers. Exit only after this caller parks to wait.
+                if shutdown {
+                    let deadline = std::time::Instant::now() + timeout;
+                    while gate.parked.load(Ordering::Acquire) == 0 {
+                        if std::time::Instant::now() >= deadline {
+                            return Err("shutdown did not park".into());
+                        }
+                        thread::yield_now();
+                    }
+                }
+                GATE.with(|cell| assert!(cell.set(gate).is_ok()));
+                Ok(())
+            })
+            .unwrap();
+        if !shutdown {
+            at_exit.recv_timeout(timeout).unwrap();
+        }
+        assert_eq!(
+            ctx.call(callable, args, vec![]).unwrap(),
+            expected,
+            "{name}"
+        );
+        assert_eq!(parked.load(Ordering::Acquire), 0, "{name} returned parked");
+        depths.push(
+            observation
+                .try_recv()
+                .expect("observer returned before native TLS teardown"),
+        );
+    }
+    assert_eq!(
+        depths,
+        [1, 1, 1, 1],
+        "join(0), is_done(), is_alive(), _shutdown()"
+    );
 }
 
 #[test]
@@ -706,7 +820,7 @@ fn shutdown_joins_non_daemon_workers_and_leaves_daemon_workers_running() {
         .unwrap();
         drop(ctx);
         assert!(normal.native.lock().unwrap().thread.is_none());
-        assert!(daemon.alive());
+        assert!(daemon.awaiting_exit());
         normal.join(None).unwrap();
     });
     daemon.join(None).unwrap();
@@ -719,7 +833,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
     let owner = ctx.instance(object, None);
     let handle = Arc::<Handle>::default();
     assert_eq!(handle.ident(), 0);
-    assert!(!handle.is_done());
+    assert!(!handle.is_done(&mut ctx).unwrap());
     assert!(handle.set_done().is_err());
     let active = while_lock_held(|gate| {
         let (ident, _) = launch(
@@ -739,7 +853,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
         let receiver = ctx.alloc(Value::ThreadHandle(handle.clone()));
         let join = ctx.lookup_attr(receiver, "join").unwrap();
         assert_eq!(ctx.call(join, vec![], vec![]).unwrap(), NONE);
-        assert!(handle.is_done());
+        assert!(handle.is_done(&mut ctx).unwrap());
         assert!(handle.awaiting_exit());
         ctx.reap_thread_operands();
         assert_eq!(ctx.heap.workers.entries.len(), 1);
@@ -754,6 +868,7 @@ fn detached_handle_keeps_the_non_daemon_worker_registered_until_exit() {
 
 #[test]
 fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
+    let mut ctx = context();
     let handle = Arc::<Handle>::default();
     handle.spawn(|_| Ok(())).unwrap();
     assert!(handle.wait(Some(Duration::from_secs(5)), State::join_pending));
@@ -761,6 +876,6 @@ fn set_done_after_body_exit_releases_the_unclaimed_native_handle() {
     assert!(handle.native.lock().unwrap().thread.is_some());
     handle.set_done().unwrap();
     assert!(handle.native.lock().unwrap().thread.is_none());
-    assert!(handle.is_done());
+    assert!(handle.is_done(&mut ctx).unwrap());
     handle.join(None).unwrap();
 }
