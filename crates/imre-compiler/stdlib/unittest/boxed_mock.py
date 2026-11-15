@@ -774,9 +774,8 @@ class CallableMixin:
         return self._mock_call(*args, **kwargs)
 
     def _increment_mock_call(self, /, *args, **kwargs):
+        _store_call(self, args, kwargs)
         node = self._node
-        node.called = True
-        node._store_call(_new_call(args, kwargs))
         self.mock_calls.append(_Call(("", args, kwargs)))
 
         current = node

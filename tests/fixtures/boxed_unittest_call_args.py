@@ -71,3 +71,20 @@ assert m.call_count == 2
 m.assert_any_call("later")
 m.call_args_list.append((("manual",), {"flag": 1}))
 m.assert_any_call("manual", flag=1)
+
+
+class RejectRecord(Mock):
+    @Mock.call_args.setter
+    def call_args(self, value):
+        assert self.called and self.call_count == 0
+        raise ValueError("record rejected")
+
+
+reject = RejectRecord()
+try:
+    reject(1)
+except ValueError as error:
+    assert str(error) == "record rejected"
+else:
+    raise AssertionError("call_args setter was skipped")
+assert reject.call_args is None and reject.call_args_list == [] and reject.mock_calls == []

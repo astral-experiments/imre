@@ -127,11 +127,6 @@ class _Node:
         self._history = []
         self._ancestors = []
 
-    def _store_call(self, received: _Call) -> None:
-        self.call_args = received
-        self.call_args_list.append(received)
-        self.call_count = len(self.call_args_list)
-
     def _reset_state(self, reset_return: bool, reset_effect: bool) -> None:
         self.called = False
         self.call_count = 0
@@ -155,6 +150,15 @@ class _Node:
             if node._result != -1:
                 # A retained return value resets its calls, but keeps its configuration.
                 pending.append((nodes[node._result], False, False))
+
+
+def _store_call(mock: Mock, args: tuple[object, ...], kwargs: dict[str, object]) -> _Call:
+    mock.called = True
+    received = _new_call(args, kwargs)
+    mock.call_args = received
+    mock.call_args_list.append(received)
+    mock.call_count = len(mock.call_args_list)
+    return received
 
 
 def _check_child_name(name: str) -> None:
@@ -211,9 +215,7 @@ class Mock:
         return self._at(self._return_index())
 
     def _record(self, args: tuple[object, ...], kwargs: dict[str, object]) -> Mock:
-        received = _new_call(args, kwargs)
-        self._node.called = True
-        self._node._store_call(received)
+        received = _store_call(self, args, kwargs)
         self._node._history.append(("call", received))
         for ancestor in self._node._ancestors:
             ancestor.calls.append((ancestor.prefix, received))
