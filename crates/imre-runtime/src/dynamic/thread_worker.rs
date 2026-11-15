@@ -738,17 +738,17 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                 // Preparation and cancellation both belong to this pthread.
                 let _publication =
                     crate::fault_handler::FramePublication::enter(&request.interpreter.finalizing);
-                return match callback.into_call(
-                    Arc::clone(&request.interpreter),
-                    request.fault_workers.expect("Python worker"),
-                ) {
-                    Ok(invoke) if enter(None) => invoke(detached_label),
-                    Ok(_) => Ok(()),
-                    Err(error) => {
+                return callback
+                    .run(
+                        Arc::clone(&request.interpreter),
+                        request.fault_workers.as_ref().expect("Python worker"),
+                        || enter(None),
+                        detached_label,
+                    )
+                    .unwrap_or_else(|error| {
                         let _ = ready.send(Err(error.to_string()));
                         Ok(())
-                    }
-                };
+                    });
             }
             Operation::Acquire {
                 wait,

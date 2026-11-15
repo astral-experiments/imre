@@ -341,6 +341,129 @@ fn worker_waits_for_the_creator_to_publish_its_receiver() {
     ctx.heap.leave(NONE, false);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn python_worker_owns_its_bound_frame_before_publication() {
+    use crate::dynamic::value::Body;
+    use crate::objects::logging::HandlerLock;
+    use std::io::{self, Seek};
+    use std::os::fd::AsRawFd;
+
+    fn traceback() -> String {
+        let mut file = std::fs::File::from(
+            rustix::fs::memfd_create(c"worker-frames", rustix::fs::MemfdFlags::CLOEXEC).unwrap(),
+        );
+        crate::fault_handler::dump_traceback(file.as_raw_fd(), true);
+        file.rewind().unwrap();
+        io::read_to_string(file).unwrap()
+    }
+
+    unsafe extern "C" fn entry(raw: *mut Context, scope: Id) -> Id {
+        // SAFETY: the registered frame owns this context on the worker.
+        let ctx = unsafe { &mut *raw };
+        ctx.collect_unreachable();
+        let result = (|| {
+            let receiver = ctx.lookup(scope, "self")?;
+            let alias = ctx.lookup(scope, "alias")?;
+            if receiver != alias {
+                return Err(Error::new("AssertionError", "lost bound receiver identity"));
+            }
+            let Value::HandlerLock(lock) = ctx.heap.get(receiver) else {
+                return Err(Error::new("AssertionError", "lost bound lock"));
+            };
+            if !lock.acquire(false, None).map_err(Error::from)? {
+                return Err(Error::new("ValueError", "worker lock is held"));
+            }
+            Ok(receiver)
+        })();
+        result.unwrap_or_else(|error| {
+            ctx.heap.execution.pending = Some(error);
+            NONE
+        })
+    }
+
+    let mut ctx = context();
+    let interpreter = Arc::clone(&ctx.interpreter);
+    let _publication = crate::fault_handler::FramePublication::enter(&interpreter.finalizing);
+    let scope = ctx.scope("worker_test", None);
+    let name = ctx.text("target");
+    let signature = ctx.text(r#"{"positional":["self"],"kwonly":["alias"],"scope_complete":true,"thread_lock_only":true}"#);
+    let file = ctx.text("worker_test.py");
+    let code = ctx.prelinked_code(
+        Body::Native(entry, NONE),
+        scope,
+        name,
+        signature,
+        (name, NONE),
+        (file, 7),
+    );
+    let defaults = ctx.dict(Vec::new());
+    let function = ctx
+        .define_function(code, scope, name, defaults, name, NONE, NONE, false)
+        .unwrap();
+    let object = ctx.builtin("object");
+    let owner = ctx.instance(object, None);
+    let args = ctx.alloc(Value::Tuple(Vec::new()));
+    let keyword = ctx.text("alias");
+    for (cancel, held) in [(true, false), (false, false), (false, true)] {
+        let lock = Arc::<HandlerLock>::default();
+        if held {
+            assert!(matches!(lock.acquire(false, None), Ok(true)));
+        }
+        let receiver = ctx.alloc(Value::HandlerLock(Arc::clone(&lock)));
+        let method = ctx.bind_python_method(function, receiver);
+        let kwargs = ctx.dict(vec![(keyword, receiver)]);
+        let (operation, roots) = worker_target(&ctx, method, args, kwargs).unwrap();
+        assert!(matches!(operation, Operation::Python(_)));
+        let handle = Arc::<Handle>::default();
+        let request = Start::new(&ctx, operation, registered(&handle, false, owner), roots);
+        let (ready, registration) = super::launch(request).unwrap();
+        ctx.workers.entries.push(registration);
+        let started = ready.wait().unwrap();
+        let ident = started.ident;
+        let creator_lock = held.then(|| (thread_ident(), 1));
+        assert_ne!(ident, thread_ident());
+        assert_eq!(handle.ident(), 0);
+        assert_eq!(lock.state(), creator_lock);
+        let trace = traceback();
+        let header = format!("Thread 0x{ident:0width$x}", width = 2 * size_of::<usize>());
+        let frame = r#"  File "worker_test.py", line 7 in target"#;
+        assert!(
+            trace
+                .split("\n\n")
+                .any(|stack| stack.starts_with(&header) && stack.lines().any(|line| line == frame)),
+            "{trace}"
+        );
+        if cancel {
+            drop(started);
+        } else {
+            // SAFETY: the creator owns the registration and this context.
+            unsafe { started.publish(&raw mut ctx) }.unwrap();
+        }
+        assert!(handle.wait(Some(Duration::from_secs(5)), State::worker_pending));
+        let result = handle.join(Some(Duration::ZERO));
+        if held {
+            let error = result.unwrap_err();
+            assert_eq!(error.kind, "SystemError");
+            assert!(error.message.contains("ValueError: worker lock is held"));
+        } else {
+            result.unwrap();
+        }
+        assert_eq!(
+            lock.state(),
+            if cancel || held {
+                creator_lock
+            } else {
+                Some((ident, 1))
+            }
+        );
+        assert!(!traceback().contains(frame));
+        assert_eq!(Arc::strong_count(&lock), 2); // The creator's wrapper and test observer.
+        ctx.reap_thread_operands();
+        assert!(ctx.workers.entries.is_empty());
+    }
+}
+
 #[test]
 fn failed_startup_release_skips_the_blocking_acquire() {
     let mut ctx = context();

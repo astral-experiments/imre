@@ -8,7 +8,7 @@ use super::*;
 /// Written operands still need Python argument binding. Selected slots are in formal order.
 pub(super) enum FunctionArguments<'a> {
     Written(Cow<'a, [Id]>, Vec<(String, Id)>, Option<Id>),
-    Bound(Vec<Id>),
+    Bound(Vec<thread_callback::Argument>),
 }
 
 const KEY_WRAPPER: &str = "functools.KeyWrapper";
@@ -9746,8 +9746,9 @@ impl Context {
             }
             FunctionArguments::Bound(slots) => {
                 debug_assert_eq!(slots.len(), sig.positional.len() + sig.keyword_only.len());
-                for (name, value) in sig.positional.iter().chain(&sig.keyword_only).zip(slots) {
-                    self.bind_argument(local, name, value)?;
+                for (slot, argument) in slots.into_iter().enumerate() {
+                    let value = argument.realize(self, local, &shape);
+                    self.bind_argument(local, shape.parameter(slot), value)?;
                 }
                 smallvec::SmallVec::new()
             }
