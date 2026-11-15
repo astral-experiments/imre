@@ -1,6 +1,7 @@
 //! Concrete eager consumers share ordinary iteration and own all private roots.
 
 use super::*;
+use expansions::ExpansionSource;
 
 impl Checker<'_> {
     pub(super) fn list_call(
@@ -82,39 +83,38 @@ impl Checker<'_> {
         {
             return Ok(filtered);
         }
-        let (input, convert) = self.consumer_input(source, element)?;
+        let (input, mapped) = self.consumer_source(source, element)?;
         match input {
-            Iteration::Container {
+            ExpansionSource::Value(iterable)
+            | ExpansionSource::Iteration(Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } if !convert
-                && self.types.element(iterable.ty) == Some(Type::Str)
-                && element.is_none_or(|ty| ty == Type::Str) =>
+            }) if match mapped {
+                Some(_) => iterable.ty == Type::Str && element.is_none_or(|ty| ty == Type::Int),
+                None => {
+                    self.types.element(iterable.ty) == Some(Type::Str)
+                        && element.is_none_or(|ty| ty == Type::Str)
+                }
+            } =>
             {
-                Ok(Expr {
-                    ty: iterable.ty,
-                    kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable]),
-                })
-            }
-            Iteration::Container {
-                iterable,
-                items: false,
-                start: None,
-            } if convert
-                && iterable.ty == Type::Str
-                && element.is_none_or(|ty| ty == Type::Int) =>
-            {
-                // Exhaust the checked immutable text in order, including its first conversion error.
-                Ok(Expr {
-                    ty: Type::ListInt,
-                    kind: ExprKind::Builtin(
+                let (ty, operation) = if mapped.is_some() {
+                    (
+                        Type::ListInt,
                         Builtin::StringIntList(self.call_origin(call)),
-                        vec![iterable],
-                    ),
+                    )
+                } else {
+                    (iterable.ty, Builtin::StringListCopy)
+                };
+                Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(operation, vec![iterable]),
                 })
             }
-            input => self.collect_list(input, convert, element, call),
+            input => {
+                let input = input.into_iteration(self, mapped.unwrap_or(source))?;
+                self.collect_list(input, mapped.is_some(), element, call)
+            }
         }
     }
 
@@ -486,10 +486,33 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
+        let (input, mapped) = self.consumer_source(expression, element)?;
+        Ok((
+            input.into_iteration(self, mapped.unwrap_or(expression))?,
+            mapped.is_some(),
+        ))
+    }
+
+    fn consumer_source<'e>(
+        &mut self,
+        expression: &'e ast::Expr,
+        element: Option<Type>,
+    ) -> Result<(ExpansionSource, Option<&'e ast::Expr>), String> {
         if let ast::Expr::Call(call) = expression
-            && let Some((converter, source)) =
-                self.map_converter_input(call, |name| name == "int" && self.fixed_map(call))
+            && let Some(mapped) = self.bound_map(call)
         {
+            let (callee, converter, source) = match mapped {
+                pipelines::CallbackPipeline::MapBuiltin {
+                    callee,
+                    converter,
+                    source,
+                } if converter.id == "int" => (callee, converter, source),
+                mapped => {
+                    let input = self.callback_input(call, element, mapped)?;
+                    self.hint_empty_iteration(&input, element);
+                    return Ok((ExpansionSource::Iteration(Iteration::Prepared(input)), None));
+                }
+            };
             if !call.arguments.keywords.is_empty() {
                 return Err(error(
                     self.source,
@@ -502,41 +525,33 @@ impl Checker<'_> {
             if self.class.is_none() || self.settled_attributes.is_none() {
                 self.fixed_sites = None;
             }
-            let input = self.expansion_input(source, None)?;
+            let mut input = self.expansion_source(source, None)?;
             if self.fixed_sites.is_none()
                 && self.inference.is_none()
                 && self.registered.is_none()
                 && let Some(sites) = self.settled_attributes.as_deref_mut()
-                && let Iteration::Container {
-                    iterable: value,
-                    items: false,
-                    start: None,
-                } = &input
-                && let ExprKind::Local(slot) = value.kind
+                && let ExpansionSource::Value(value) = &mut input
                 && let Some(parameter) = source.as_name_expr()
-                && let Some(name) = call.func.as_name_expr()
                 && let std::collections::hash_map::Entry::Vacant(site) = sites.entry(call.range())
+                && let Some(checked) =
+                    registered::values::CheckedCall::with_parameter(parameter, value, |value| {
+                        let converter = registered::values::located(
+                            converter.range(),
+                            converter.start(),
+                            registered::values::name_binding(converter.id.clone()),
+                        );
+                        registered::values::name_call(
+                            call,
+                            callee.id.as_str(),
+                            vec![converter, value],
+                        )
+                    })
             {
-                let converter = registered::values::located(
-                    converter.range(),
-                    converter.start(),
-                    registered::values::name_binding(converter.id.clone()),
-                );
-                let value = registered::values::CheckedCall {
-                    parameter: parameter.id.clone(),
-                    slot,
-                    ty: value.ty,
-                    call: registered::values::name_call(
-                        call,
-                        name.id.as_str(),
-                        vec![converter, Expr::local(slot, value.ty)],
-                    ),
-                };
-                site.insert(FixedAttribute::CallValue(Box::new(value)));
+                site.insert(FixedAttribute::CallValue(Box::new(checked)));
             }
-            return Ok((input, true));
+            return Ok((input, Some(source)));
         }
-        Ok((self.expansion_input(expression, element)?, false))
+        Ok((self.expansion_source(expression, element)?, None))
     }
 
     pub(super) fn consumer_value(

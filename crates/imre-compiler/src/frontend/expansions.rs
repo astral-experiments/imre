@@ -2,13 +2,13 @@
 
 use super::*;
 
-enum ExpansionSource {
+pub(super) enum ExpansionSource {
     Value(Expr),
     Iteration(Iteration),
 }
 
 impl ExpansionSource {
-    fn into_iteration(
+    pub(super) fn into_iteration(
         self,
         checker: &mut Checker<'_>,
         source: &ast::Expr,
@@ -806,7 +806,7 @@ impl Checker<'_> {
             .into_iteration(self, expression)
     }
 
-    fn expansion_source(
+    pub(super) fn expansion_source(
         &mut self,
         expression: &ast::Expr,
         element: Option<Type>,
