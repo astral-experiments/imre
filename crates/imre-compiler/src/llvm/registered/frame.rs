@@ -510,13 +510,15 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         retiring
     }
 
-    /// Retain the exception and exit callable while unwinding abandoned evaluation
-    /// operands, then the private values of the lexical scopes being left.
-    pub(super) fn take_context_error(&mut self, label: &str, callable: &str) -> String {
+    /// Retain the exception and any exit callable while unwinding the failed expression.
+    pub(super) fn take_handler_error(&mut self, label: &str, exit: Option<&str>) -> String {
         let slots = self.start_label(label);
         let retiring = self.take_unwind_slots(slots);
         let exception = self.op("take_error", &[]);
-        let (_, retained) = self.live_handles(&[&exception, callable]);
+        let (_, retained) = match exit {
+            Some(exit) => self.live_handles(&[&exception, exit]),
+            None => self.live_handles(&[&exception]),
+        };
         let (ptr, count) = self.write_handles_at(retained, &retiring);
         self.line(&format!(
             "call void @imre_dyn_unwind_frame(ptr %ctx, ptr {ptr}, i64 {count}, i64 {retained})"
