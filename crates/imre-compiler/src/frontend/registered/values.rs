@@ -144,16 +144,9 @@ impl<'a> RegisteredSource<'a> {
                 let selection = field.map_or_else(|| callable_target(call), method_target);
                 Ok(Some(selection.prepare(call, target, child)?))
             }
-            ast::Expr::Attribute(field) => Ok(receiver(&field.value, true, None)?.map(|value| {
-                let op = match placed {
-                    Some(FixedAttribute::Operation { operation, position })
-                        if position == field.attr.start() && matches!(&*operation,
-                            Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, .. }
-                            if name == field.attr.as_str()) => *operation,
-                    _ => super::attribute_opcode(ir::AttributeAction::Load, field),
-                };
-                super::operation(op, Type::PythonObject, vec![value])
-            })),
+            ast::Expr::Attribute(field) => {
+                Ok(receiver(&field.value, true, None)?.map(|value| loaded_attribute(field, value)))
+            }
             _ => Ok(None),
         }
     }

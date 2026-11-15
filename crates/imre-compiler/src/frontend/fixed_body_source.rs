@@ -85,10 +85,7 @@ pub(crate) enum FixedAttribute {
     CallValue(Box<registered::values::CheckedCall>),
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
-    Operation {
-        operation: Box<Builtin>,
-        position: TextSize,
-    },
+    Load(ast::Identifier),
     /// The fixed builtin already carries its method receiver. A standalone callee is saved here.
     Call(Option<Box<Expr>>, Box<ir::RegisteredCall>),
 }
@@ -445,16 +442,8 @@ impl SourceSites {
             && !ruff_python_stdlib::identifiers::is_mangled_private(field.attr.as_str())
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
-            self.attributes.insert(
-                site.range,
-                FixedAttribute::Operation {
-                    operation: Box::new(registered::attribute_opcode(
-                        ir::AttributeAction::Load,
-                        field,
-                    )),
-                    position: field.attr.start(),
-                },
-            );
+            self.attributes
+                .insert(site.range, FixedAttribute::Load(field.attr.clone()));
             self.commit(site, node);
         }
     }
@@ -928,17 +917,12 @@ mod tests {
                 assert_eq!(&text[key.target], "self.other");
                 continue;
             }
-            let FixedAttribute::Operation {
-                operation,
-                position,
-            } = field
-            else {
+            let FixedAttribute::Load(name) = field else {
                 panic!("expected attribute load")
             };
-            assert!(
-                matches!(&**operation, Builtin::RegisteredAttribute { action: ir::AttributeAction::Load, name, range: target } if name == "text" && target == range)
-            );
-            assert_eq!(&text[TextRange::new(*position, range.end())], "text");
+            assert_eq!(name.as_str(), "text");
+            assert_eq!(&text[name.range()], "text");
+            assert_eq!(name.end(), range.end());
             assert!(text[*range].starts_with("self."));
         }
         let class = |name| {
