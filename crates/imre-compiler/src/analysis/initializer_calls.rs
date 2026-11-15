@@ -146,24 +146,34 @@ struct InitializerStatement<'a, 'db> {
 }
 
 impl Session {
-    /// A sole return of this function's parameter cannot produce a Python call result.
-    pub(crate) fn returns_bound_parameter(
+    /// Check whether every possible result already has a fixed source operand.
+    pub(crate) fn returns_fixed_operand(
         &self,
         module: usize,
         function: &StmtFunctionDef,
+        fixed_call: impl Fn(TextRange) -> bool,
     ) -> bool {
-        function.body.len() == 1
-            && passive_function_return(function, |value| {
-                let file = self.files[module];
-                let parameter = self.parameter_read(file, &self.parsed(file), value)?;
-                function
-                    .parameters
-                    .range()
-                    .contains_range(parameter)
-                    .then_some(())
-            })
-            .flatten()
-            .is_some()
+        let Some(value) = function
+            .body
+            .last()
+            .and_then(Stmt::as_return_stmt)
+            .and_then(|ret| ret.value.as_deref())
+        else {
+            return false;
+        };
+        if fixed_call(value.range()) {
+            return super::explicit_returns(function).into_iter().all(|ret| {
+                ret.value.as_deref().is_some_and(|operand| {
+                    operand.range() == value.range() || fixed_call(operand.range())
+                })
+            });
+        }
+        if function.body.len() != 1 || !passive_declaration(function) {
+            return false;
+        }
+        let file = self.files[module];
+        self.parameter_read(file, &self.parsed(file), value)
+            .is_some_and(|parameter| function.parameters.range().contains_range(parameter))
     }
 
     /// Find the guarded statement and the start of its proven normal path.
