@@ -167,28 +167,34 @@ mod tests {
             let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
             graph.registered_startup = named;
             let program = crate::checked_lower(&mut graph).unwrap();
-            let admitted = graph.registered_functions();
-            let was_admitted = admitted
-                .get(&graph.entry)
-                .is_some_and(|functions| functions.contains_key(&start));
-            drop(admitted);
             let (functions, _) = graph.take_registered_functions();
-            let body = &functions[&graph.entry][&start];
-            assert_eq!(was_admitted, named);
+            let frame = functions
+                .get(&graph.entry)
+                .and_then(|bodies| bodies.get(&start));
             if named {
                 assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+                let body = &frame.expect("expected the checked Python frame").function;
+                assert_eq!(body.returns, Type::PythonObject);
+                let Some(Statement::Return(value)) = body.body.last() else {
+                    panic!("expected the live return");
+                };
+                let call = value.without_location().python_call().unwrap();
+                assert_eq!(&text[call.range], "parser.parse_args()");
             } else {
                 let crate::CheckedProgram::Native(fixed) = program else {
                     panic!("expected a fixed namespace result");
                 };
-                assert!(matches!(fixed.ir.0.functions[0].returns, Type::Class(_)));
+                assert!(frame.is_none());
+                let function = &fixed.ir.0.functions[0];
+                let [Statement::Return(value)] = function.body.as_slice() else {
+                    panic!("expected the fixed parser return");
+                };
+                assert!(matches!(
+                    &value.without_location().kind,
+                    ExprKind::Builtin(Builtin::ParseArgs { namespace, process_argv: true, .. }, _)
+                        if function.returns == Type::Class(*namespace) && value.ty == function.returns
+                ));
             }
-            let Some(Statement::Return(value)) = body.function.body.last() else {
-                panic!("expected the live return");
-            };
-            let call = value.without_location().python_call().unwrap();
-            assert_eq!(&text[call.range], "parser.parse_args()");
-            assert_eq!(body.function.returns, Type::PythonObject);
         }
     }
 
