@@ -1310,6 +1310,24 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                     );
                     return;
                 }
+                (
+                    Statement::AugmentField(
+                        receiver,
+                        ir::StoreField::Written(field, name),
+                        op,
+                        rhs,
+                    ),
+                    Some(site),
+                ) => {
+                    frame.statement_site(site, None);
+                    frame.mutate_attribute(
+                        ir::AttributeAction::InPlace(op.protocol()),
+                        name,
+                        field.target,
+                        [receiver, rhs].into_iter(),
+                    );
+                    return;
+                }
                 (_, Some(range)) => frame.statement_site(range, None),
                 (_, None) => {}
             }
@@ -1403,11 +1421,11 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             Statement::AugmentField(receiver, field, op, rhs) => {
                 let code = self.fixed();
                 let receiver = code.operand(receiver);
-                let old = code.field_update_operand(&receiver.value, *field, rhs);
+                let old = code.field_update_operand(&receiver.value, field.slot(), rhs);
                 let right = code.operand(rhs);
                 let value = code.binary(*op, &old.value, &right.value);
                 code.forget(&value);
-                code.replace_field(&receiver.value, *field, &value);
+                code.replace_field(&receiver.value, field.slot(), &value);
                 code.release_operand(&right);
                 code.release_operand(&old);
                 code.release_operand(&receiver);

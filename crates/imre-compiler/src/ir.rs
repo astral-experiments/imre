@@ -3817,7 +3817,7 @@ pub(crate) enum Statement {
     SetItem(ItemOrder, Expr, Expr, Expr),
     AugmentItem(Expr, Expr, ItemUpdate, Expr),
     SetField(Expr, StoreField, Expr),
-    AugmentField(Expr, usize, Binary, Expr),
+    AugmentField(Expr, StoreField, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
     /// The evaluated subject survives failed guards, with captures bound before the guard.

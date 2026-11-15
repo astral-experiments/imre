@@ -86,6 +86,7 @@ pub(crate) fn frame_inputs(
                 return match stmt {
                     Statement::Assign(slot, _) => uses_slot(slot, false),
                     Statement::SetField(_, ir::StoreField::Written(_, _), _)
+                    | Statement::AugmentField(_, ir::StoreField::Written(_, _), _, _)
                         if source.is_some() =>
                     {
                         uses_python_protocol = true;

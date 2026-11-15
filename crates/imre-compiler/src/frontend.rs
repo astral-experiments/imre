@@ -7304,6 +7304,10 @@ impl<'a> Checker<'a> {
                     } else {
                         value
                     };
+                    let mut field = ir::StoreField::Native(field);
+                    if let Some(sites) = &mut self.fixed_sites {
+                        sites.store_field(target, target.value.range(), &mut field, Some(op));
+                    }
                     Some(Statement::AugmentField(receiver, field, op, value))
                 } else if let ast::Expr::Name(name) = &*assign.target {
                     let left = self.expr(&assign.target)?;
