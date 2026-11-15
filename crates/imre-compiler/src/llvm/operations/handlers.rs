@@ -175,19 +175,16 @@ impl CheckedBody<'_, '_, '_, '_> {
     /// Enter the handler's binding, emit its checked suite, then unwind a normal
     /// exit through the same lexical cleanup as an explicit loop transfer.
     fn caught_arm(&mut self, handler: &ExceptHandler, caught: &Caught, done: &str, depth: usize) {
-        let binding = match caught {
-            Caught::Native(exception) => {
-                self.fixed().catch_exception(handler.name, exception);
-                None
-            }
+        match caught {
+            Caught::Native(exception) => self.fixed().catch_exception(handler.name, exception),
             Caught::Registered(exception) => self.python().enter_handler_arm(handler, exception),
-        };
+        }
         self.emit_block(&handler.body);
         if !self.body().terminated {
             self.jump_from_regions(done.to_owned(), depth);
         }
         match &mut self.0 {
-            Entry::Registered(frame) => frame.leave_handler_arm(binding.as_deref()),
+            Entry::Registered(frame) => frame.leave_handler_arm(),
             Entry::Native(code) => {
                 code.cleanups.pop();
             }
