@@ -212,6 +212,11 @@ impl Int {
         self.as_small().or_else(|| self.big().to_i64())
     }
 
+    /// Convert a SystemExit integer code to the native process status.
+    fn exit_status(&self) -> i32 {
+        self.to_i64().unwrap_or(-1) as i32
+    }
+
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         if let (Some(x), Some(y)) = (self.as_small(), other.as_small()) {
             x.cmp(&y)

@@ -1545,8 +1545,8 @@ pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     if code == NONE {
         return 0;
     }
-    if let Ok(integer) = ctx.as_int(code) {
-        return integer.to_i64().unwrap_or(-1) as i32;
+    if let Ok(integer) = ctx.borrow_int(code) {
+        return integer.exit_status();
     }
     ctx.heap.keep(code);
     if let Some(file) = ctx
