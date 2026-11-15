@@ -100,14 +100,14 @@ pub(super) fn units<'a>(
             let zip = archive_members.get(path);
             let physical = physical_files.get(path).filter(|_| !builtin);
             let types = layouts.iter_mut().find_map(|facts| facts.take(unit));
+            let bundled = path.starts_with(bundled_root);
             let origin = registrations
-                .provider_origin(unit, path.starts_with(bundled_root))
+                .provider_origin(unit, bundled)
                 .unwrap_or_else(|| {
                     ModuleOrigin::Program(module_id.and_then(|id| registrations.functions.get(&id)))
                 });
             // Only the selected bundled initializer can own its documented inputs.
-            let bundled_prompts = path
-                .starts_with(bundled_root)
+            let bundled_prompts = bundled
                 .then(|| registrations.bundled_doctest_prompts.get(name))
                 .flatten();
             let standalone = bundled_prompts.is_none()
@@ -115,8 +115,8 @@ pub(super) fn units<'a>(
                 && matches!(origin, ModuleOrigin::Bundled(_))
                 && physical.is_none()
                 && zip.is_none()
-                && discovered.is_none()
-                && checked.is_none_or(|unit| unit.source.is_none() && unit.run_path.is_none())
+                // A checked parser for this SDK source also serves the standalone initializer.
+                && checked.is_none_or(|unit| unit.run_path.is_none())
                 && literals.is_none()
                 && types.is_none();
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {
@@ -175,13 +175,15 @@ pub(super) fn units<'a>(
                 let normalized = normalized.filter(|root| match root {
                     super::LoweredRoot::Unchanged(_) => standalone || owned_parser,
                     // Indexed parses of one physical Python input share source-order node IDs.
-                    super::LoweredRoot::Complete(..) => syntax.as_deref().is_some_and(|original| {
-                        types.zip(indexed.as_ref()).is_none_or(|(types, indexed)| {
-                            std::ptr::eq(&**indexed, original)
-                                || indexed_input
-                                    .is_some_and(|input| input == types.indexed_input(indexed))
+                    super::LoweredRoot::Complete(..) => {
+                        syntax.as_deref().map_or(standalone, |original| {
+                            types.zip(indexed.as_ref()).is_none_or(|(types, indexed)| {
+                                std::ptr::eq(&**indexed, original)
+                                    || indexed_input
+                                        .is_some_and(|input| input == types.indexed_input(indexed))
+                            })
                         })
-                    }),
+                    }
                 });
                 let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
                     Some(parsed) => ParsedModule { text, parsed },
@@ -213,7 +215,11 @@ pub(super) fn units<'a>(
                     (types, checked_source, initializer),
                 )?;
                 body.prompts = bundled_prompts
-                    .or_else(|| checked_source.map(|source| &source.doctest_prompts))
+                    .or_else(|| {
+                        checked_source
+                            .filter(|_| !bundled)
+                            .map(|source| &source.doctest_prompts)
+                    })
                     .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
                     .map_or(&[], Vec::as_slice);
                 Ok(Initializer::Checked(Box::new(body)))

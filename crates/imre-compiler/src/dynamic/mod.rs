@@ -748,15 +748,18 @@ fn scan_imports(
         getter,
         file_alternative.map(|(path, _)| path),
     )?;
-    // A parser can supply its original statements only if discovery left their names intact.
     let scanned = (original
-        && (shipped || parsed.is_some())
-        && imports.invalid_executable.is_none()
-        && !imports.private_names.rewritten)
-        .then(|| ScannedModule {
-            parsed,
-            lowered: LoweredRoot::Unchanged(std::mem::take(&mut imports.private_names)),
-        });
+        && (shipped || parsed.is_some() && !imports.private_names.rewritten)
+        && imports.invalid_executable.is_none())
+    .then(|| {
+        let names = std::mem::take(&mut imports.private_names);
+        let lowered = if names.rewritten {
+            LoweredRoot::Complete(body, names)
+        } else {
+            LoweredRoot::Unchanged(names)
+        };
+        ScannedModule { parsed, lowered }
+    });
     Ok((imports, scanned))
 }
 
@@ -1843,13 +1846,22 @@ pub(crate) fn compile(
                         && let Some(id) = graph.bundled_module(&prefix)
                     {
                         let module = &graph.modules[id];
-                        if module.original_source() == source {
+                        let original = module.original_source();
+                        if original == source {
                             checked = Some(id);
                             if module.path.strip_prefix(&graph.session.root)
                                 == Ok(Path::new(filename))
-                                && CheckedFile::select(graph, id).is_some()
+                                && let Some(file) = CheckedFile::select(graph, id)
                             {
                                 parser = Some(&*module.parsed);
+                                // Emission uses the SDK member's original source offsets.
+                                if std::ptr::eq(original, module.source.as_str()) {
+                                    registrations
+                                        .checked_units
+                                        .entry(sources.len())
+                                        .or_default()
+                                        .source = Some(file);
+                                }
                             }
                             if graph.registered_functions().contains_key(&id) {
                                 let unit = registrations
@@ -3219,10 +3231,10 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
 }
 
 #[test]
-fn shipped_private_parameter_requires_fresh_lowering() {
+fn shipped_discovery_retains_the_rewritten_suite() {
     for (source, reusable) in [
         ("class C:\n    def f(self, arg): pass\n", true),
-        ("class C:\n    def f(self, __arg): pass\n", false),
+        ("class C:\n    def f(self, __arg): pass\n", true),
         ("class C:\r\n    pass\r\n", false),
     ] {
         let text = crate::normalize_source(source, SourceKind::File).unwrap();
@@ -3231,6 +3243,19 @@ fn shipped_private_parameter_requires_fresh_lowering() {
             let (_, scanned) =
                 scan_imports(source, SourceKind::File, existing, None, None, true).unwrap();
             assert_eq!(scanned.is_some(), reusable);
+            if source.contains("__arg") {
+                let LoweredRoot::Complete(body, names) = scanned.unwrap().lowered else {
+                    panic!("a changed parameter requires the lowered suite");
+                };
+                assert!(names.rewritten);
+                let ast::Stmt::ClassDef(class) = &body[0] else {
+                    panic!()
+                };
+                let ast::Stmt::FunctionDef(method) = &class.body[0] else {
+                    panic!()
+                };
+                assert_eq!(method.parameters.args[1].parameter.name.as_str(), "_C__arg");
+            }
         }
     }
 }
