@@ -6,6 +6,30 @@ mod tests {
     use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
+    fn method_recovery_uses_the_operands_from_its_completed_fixed_check() {
+        let text = concat!(
+            "class Row:\n",
+            "    def values(self, data: list[int]) -> list[int]: return data\n",
+            "    def count(self, data: list[int]) -> int:\n",
+            "        values = self.values(data)\n",
+            "        if values:\n",
+            "            return len({value for value in values})\n",
+            "        return 0\n",
+            "print(Row().count([1, 1, 2]))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        graph.registered_startup = true;
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        let start = TextSize::try_from(text.find("def count").unwrap()).unwrap();
+        assert!(graph.registered_functions()[&graph.entry].contains_key(&start));
+        assert_eq!(lowered.iter().filter(|name| *name == "count").count(), 2);
+    }
+
+    #[test]
     fn class_method_keeps_its_checked_return_after_the_factory_needs_a_python_frame() {
         let text = concat!(
             include_str!("../../../../../tests/fixtures/callables/escaping_bound_method.py"),
