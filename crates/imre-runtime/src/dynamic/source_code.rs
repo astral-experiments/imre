@@ -771,10 +771,6 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         module: bool,
     ) -> Result<()> {
         use ast::visitor::Visitor;
-        enum Child<'a> {
-            Expression(&'a ast::Expr),
-            Lowered(Box<Program>),
-        }
         let mut children = HashMap::new();
         children
             .try_reserve(functions.len())
@@ -790,50 +786,59 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                     if let Some(plan) = OperandPlan::for_function(&lambda.body, false) {
                         let mut child = Program::new("<lambda>", has_named_bindings);
                         child.record_operand(*lambda.body.clone(), &plan)?;
-                        Child::Lowered(Box::new(child))
+                        Some(Box::new(child))
                     } else {
-                        Child::Expression(&lambda.body)
+                        None
                     }
                 }
                 ast::Expr::Generator(genexpr) => {
-                    let mut child = Program::new("<genexpr>", has_named_bindings);
-                    if has_named_bindings {
-                        let mut bindings = NamedBindings::default();
-                        bindings.visit_expr(expr);
-                        for (name, offset, _) in bindings.targets {
-                            let kind = if module
-                                || matches!(
-                                    self.directives.get(&name),
-                                    Some((ScopeDirective::Global, _))
-                                ) {
-                                ScopeDirective::Global
-                            } else {
-                                ScopeDirective::Nonlocal
-                            };
-                            child
-                                .directives
-                                .insert(name, (kind, TextRange::empty(offset)));
-                        }
+                    let plan = Plan::generator(genexpr);
+                    if plan.body_suspends() {
+                        let mut child = Program::new("<genexpr>", has_named_bindings);
+                        child.is_async = true;
+                        child.lower_comprehension_body(&plan)?;
+                        Some(Box::new(child))
+                    } else {
+                        plan.try_target_names().map_err(invalid_target)?;
+                        None
                     }
-                    child.lower_genexpr(genexpr)?;
-                    Child::Lowered(Box::new(child))
                 }
                 _ => unreachable!("anonymous function expression"),
             };
-            children.insert(expr.range(), child);
+            children.insert(expr.range(), (expr, child));
         }
-        for child in children.into_values() {
-            let roots = match child {
-                Child::Expression(body) => {
-                    let directives = HashMap::new();
-                    let mut strings =
-                        CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
-                    strings.visit_expr(body);
-                    strings.finish_nested_scope(has_named_bindings)?
+        for (expr, child) in children.into_values() {
+            let mut directives = HashMap::new();
+            if has_named_bindings && matches!(expr, ast::Expr::Generator(_)) {
+                let mut bindings = NamedBindings::default();
+                bindings.visit_expr(expr);
+                for (name, offset, _) in bindings.targets {
+                    let kind = if module
+                        || matches!(
+                            self.directives.get(&name),
+                            Some((ScopeDirective::Global, _))
+                        ) {
+                        ScopeDirective::Global
+                    } else {
+                        ScopeDirective::Nonlocal
+                    };
+                    directives.insert(name, (kind, TextRange::empty(offset)));
                 }
-                Child::Lowered(mut program) => {
-                    program.prepare_strings(self.heap, self.shared, self.spellings)?
+            }
+            let roots = if let Some(mut child) = child {
+                child.directives = directives;
+                child.prepare_strings(self.heap, self.shared, self.spellings)?
+            } else {
+                let mut strings =
+                    CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
+                match expr {
+                    ast::Expr::Lambda(lambda) => strings.visit_expr(&lambda.body),
+                    ast::Expr::Generator(generator) => {
+                        Plan::generator(generator).visit_body(|operand| strings.visit_expr(operand))
+                    }
+                    _ => unreachable!("anonymous function expression"),
                 }
+                strings.finish_nested_scope(has_named_bindings)?
             };
             if roots != NONE {
                 self.keep(roots)?;

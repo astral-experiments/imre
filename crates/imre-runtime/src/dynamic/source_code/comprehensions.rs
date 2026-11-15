@@ -5,14 +5,6 @@ use imre_ast::comprehension::BodyOperand;
 use super::*;
 
 impl Program {
-    /// Describe the implicit generator function with its outer iterator parameter.
-    pub(super) fn lower_genexpr(&mut self, genexpr: &ast::ExprGenerator) -> Result<()> {
-        let plan = Plan::generator(genexpr);
-        self.is_async = plan.body_suspends();
-        self.lower_comprehension_body(&plan)?;
-        Ok(())
-    }
-
     /// Visit the outer iterable before entering the implicit comprehension scope.
     pub(super) fn lower_eager_comprehension(&mut self, comp: &Plan<'_>) -> Result<()> {
         comp.try_target_names().map_err(invalid_target)?;
@@ -21,7 +13,7 @@ impl Program {
         Ok(())
     }
 
-    fn lower_comprehension_body(&mut self, comp: &Plan<'_>) -> Result<()> {
+    pub(super) fn lower_comprehension_body(&mut self, comp: &Plan<'_>) -> Result<()> {
         for operand in comp.body_operands() {
             match operand {
                 BodyOperand::Value(expr) => {
