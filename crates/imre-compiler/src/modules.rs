@@ -6817,7 +6817,6 @@ impl<'a> Loader<'a> {
                 "unittest/__init__.py",
                 include_str!("../stdlib/unittest/__init__.py"),
             )),
-            "http.client" => Some(("http/client.py", include_str!("../stdlib/http/client.py"))),
             _ => {
                 path_first = name == "ssl" && self.allow_imports;
                 registered_namespace = source_exports || matches!(name, "bisect" | "email" | "ssl");
