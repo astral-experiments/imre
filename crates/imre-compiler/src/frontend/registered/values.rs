@@ -517,6 +517,9 @@ impl ir::RegisteredCallTarget {
         target: Expr,
         child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Expr, E> {
+        if matches!(self, Self::Method { .. }) {
+            return Ok(bound_call(call, self, target, call_arguments(call, child)?));
+        }
         let (layout, arguments) = prepared_arguments(call, child)?;
         let (site, target) = self.bind(call, target, Some(layout));
         Ok(invoke_value(site, target, arguments))
