@@ -1231,6 +1231,21 @@ fn checked_lower_with(
         }
         return Ok(CheckedProgram::Runtime(reason));
     }
+    let lowered = match lowered {
+        Err(report) if let LoweringKind::GuardedSignature(owner) = report.kind => {
+            use ruff_text_size::Ranged;
+            let operand = graph.modules[owner.module].parsed.suite()[owner.statement].range();
+            let session = retry_checks.as_mut().unwrap_or(&mut graph.session);
+            let session = session.closed_program_session(
+                cache.as_deref_mut().map(|compiler| &mut compiler.cache),
+                &graph.inputs,
+            )?;
+            Err(session
+                .guarded_signature_error(owner.module, operand)
+                .map_or(report, Into::into))
+        }
+        result => result,
+    };
     if cache.is_none()
         && !retry_with_cached_hints
         && let Err(reason) = lowered

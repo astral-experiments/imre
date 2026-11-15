@@ -944,7 +944,17 @@ fn lower_graph(
                         Ok(signature) => signature,
                         Err(_) if layout_error.is_some() => continue,
                         Err(error) => {
-                            return Err(format!("{}:{error}", module.path.display()).into());
+                            let error =
+                                Diagnostic::from(format!("{}:{error}", module.path.display()));
+                            return Err(
+                                if !module.type_guards.iter().any(|&stmt| {
+                                    stmt < statement_id && module.parsed.suite()[stmt].is_if_stmt()
+                                }) {
+                                    error
+                                } else {
+                                    error.classified(Kind::GuardedSignature(owner))
+                                },
+                            );
                         }
                     };
                     // Rewriting a top-level function takes ownership of its declaration.
