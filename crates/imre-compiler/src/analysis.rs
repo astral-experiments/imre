@@ -729,6 +729,21 @@ fn deferred_global(
 }
 
 impl Session {
+    /// A parser option can use the module's binding when its own source scope leaves the name free.
+    pub(crate) fn reads_module_binding(&self, module: usize, expression: &Expr) -> bool {
+        let Some(name) = expression.as_name_expr() else {
+            return false;
+        };
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        index
+            .try_expression_scope_id(expression)
+            .and_then(|scope| index.place_table(scope).symbol_by_name(name.id.as_str()))
+            .is_some_and(|symbol| {
+                !symbol.is_bound() && !symbol.is_declared() && !symbol.is_nonlocal()
+            })
+    }
+
     /// The class namespace supplies a name before Python falls back to its module.
     pub(crate) fn reads_outer_name(&self, module: usize, expression: &Expr) -> bool {
         let file = self.db.program_file(self.files[module]);

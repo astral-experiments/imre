@@ -229,13 +229,13 @@ impl<'a> Flags<'a> {
 /// A class constant must resolve to the builtin in the builder's lexical scope.
 fn builtin_constant<'a>(
     value: &'a ast::Expr,
-    module: &SourceModule,
-    locals: &HashSet<String>,
+    graph: &SourceGraph,
+    module: ModuleId,
 ) -> Option<&'a str> {
     let name = value.as_name_expr()?.id.as_str();
     (annotations::is_builtin_type(name)
-        && !module.bindings.contains_key(name)
-        && !locals.contains(name))
+        && !graph.modules[module].bindings.contains_key(name)
+        && graph.session.reads_module_binding(module, value))
     .then_some(name)
 }
 
@@ -246,7 +246,6 @@ fn option(
     types: &Types,
     classes: &Classes,
     flags: &Flags,
-    locals: &HashSet<String>,
 ) -> Result<(OptionField, Option<Registration>), String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
@@ -364,8 +363,7 @@ fn option(
         };
         required = value.value;
     }
-    let is_intrinsic =
-        |expr, intrinsic| registration::is_intrinsic(expr, intrinsic, graph, id, locals);
+    let is_intrinsic = |expr, intrinsic| registration::is_intrinsic(expr, intrinsic, graph, id);
     let action = match kw.get("action").copied() {
         None => "store",
         Some(expr) if is_intrinsic(expr, Intrinsic::BooleanOptionalAction) => "boolean_optional",
@@ -451,9 +449,7 @@ fn option(
                     None | Some(ast::Expr::NoneLiteral(_)) => None,
                     Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
                     Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
-                    Some(v) if builtin_constant(v, module, locals).is_some() => {
-                        Some(Type::BuiltinClass)
-                    }
+                    Some(v) if builtin_constant(v, graph, id).is_some() => Some(Type::BuiltinClass),
                     Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
                     Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
                     _ => return Err(invalid()),
@@ -494,7 +490,7 @@ fn option(
         None if action == "store_true" => Some("True"),
         None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, graph, id),
         Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
             Some(if value.value { "True" } else { "False" })
         }
@@ -586,7 +582,7 @@ fn option(
         None if action == "store_true" => Some("False"),
         None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, graph, id),
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
                 || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
@@ -1135,13 +1131,6 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder.to_owned());
-                    let mut locals = crate::narrowing::assigned_names(&function.body);
-                    locals.extend(
-                        function
-                            .parameters
-                            .iter_non_variadic_params()
-                            .map(|p| p.name().to_string()),
-                    );
                     let mut registration_errors = HashMap::new();
                     let mut registrations = HashMap::new();
                     let mut read_options =
@@ -1157,7 +1146,6 @@ impl Parsers {
                                     owner,
                                     graph,
                                     module_id,
-                                    &locals,
                                     flags.prefixes,
                                 )
                             };
@@ -1231,7 +1219,7 @@ impl Parsers {
                                     continue;
                                 }
                                 let (mut field, registration) =
-                                    option(add, graph, module_id, types, classes, flags, &locals)?;
+                                    option(add, graph, module_id, types, classes, flags)?;
                                 if let Some(registration) = registration {
                                     registrations.insert(add.range(), registration);
                                 }
