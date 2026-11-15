@@ -330,8 +330,18 @@ def main():
             )
             if check.returncode == 0:
                 raise AssertionError(statement)
-        # A field unique to one child is accessible only after dispatch.
         source = Path(directory) / "unchecked_command.py"
+        supplied = (FIXTURES / "supplied_namespace.py").read_text()
+        for missing in ("Other.count", "Target.unknown"):
+            source.write_text("class Other: pass\n" + supplied.replace("Target.count, extras", f"{missing}, extras"))
+            checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+            if checked.returncode == 0 or b"unknown class member" not in checked.stderr:
+                raise AssertionError((missing, checked.stderr))
+        source.write_text(supplied.replace("    print(result is Target,", "    broken: int = Target.label\n    print(result is Target,"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"expected int, got str" not in checked.stderr:
+            raise AssertionError(checked.stderr)
+        # A field unique to one child is accessible only after dispatch.
         commands = (FIXTURES / "commands.py").read_text()
         for wrong in ["print(args.text)", "print(args.first)"]:
             source.write_text(commands.replace("    print(args.label)", "    " + wrong))

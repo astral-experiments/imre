@@ -1662,14 +1662,16 @@ impl Checker<'_> {
             .arguments
             .find_argument_value("namespace", 1)
             .is_some_and(|value| !value.is_none_literal_expr());
+        let mut supplied_class = None;
         let mut bound = self.arguments_with(call, &params, None, |checker, slot, arg| {
             if supplied {
                 if slot == 1
                     && let Some(name) = arg.as_name_expr()
                     && !checker.names.contains_key(name.id.as_str())
-                    && checker.class_reference(arg).is_some()
+                    && let Some(class) = checker.class_reference(arg)
                 {
                     // Actions can write to the class itself. Read that binding in its Python frame.
+                    supplied_class = Some(class);
                     return Ok(registered::values::name_binding(name.id.clone()));
                 }
                 return checker.expr(arg);
@@ -1700,15 +1702,20 @@ impl Checker<'_> {
                 .expect("collected parser name");
             let receiver = registered::values::name_binding(builder.id.clone());
             bound.values.truncate(call.arguments.len());
-            return self
-                .registered_method_call_with_values(
-                    call,
-                    attribute,
-                    receiver,
-                    Type::PythonObject,
-                    Some(bound.values),
-                )
-                .map(Some);
+            let value = self.registered_method_call_with_values(
+                call,
+                attribute,
+                receiver,
+                Type::PythonObject,
+                Some(bound.values),
+            )?;
+            if let Some(class) = supplied_class {
+                let layouts = std::iter::once(&parser.class).chain(&parser.children);
+                self.module_namespace
+                    .supplied_classes
+                    .extend(layouts.map(|&layout| (class, layout)));
+            }
+            return Ok(Some(value));
         }
         let argv = bound.values.swap_remove(bound.order[0]);
         let process_argv = argv.ty == Type::None;

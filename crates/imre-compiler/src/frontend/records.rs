@@ -1273,17 +1273,26 @@ impl Checker<'_> {
                 "special methods cannot be used as function values",
             ));
         }
-        let signature = self.classes.methods[class]
-            .get(attribute.attr.as_str())
-            .ok_or_else(|| {
-                self.missing_class_member(
-                    class,
-                    attribute.attr.as_str(),
+        let name = attribute.attr.as_str();
+        let Some(signature) = self.classes.methods[class].get(name).cloned() else {
+            if receiver.is_none()
+                && let Some(binding) = attribute.value.as_name_expr()
+                && self.has_static_namespace_root(&attribute.value)
+                && self
+                    .module_namespace
+                    .supplied_classes
+                    .iter()
+                    .any(|&(owner, layout)| {
+                        owner == class && self.declared_field(layout, name).is_some()
+                    })
+            {
+                return Ok(registered::values::loaded_attribute(
                     attribute,
-                    "unknown class member",
-                )
-            })?
-            .clone();
+                    registered::values::located_name(binding),
+                ));
+            }
+            return Err(self.missing_class_member(class, name, attribute, "unknown class member"));
+        };
         match signature.method.unwrap().kind(self.classes.declarations) {
             MethodKind::Property => {
                 let receiver = receiver.ok_or_else(|| {
