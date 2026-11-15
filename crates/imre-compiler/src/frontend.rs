@@ -6629,7 +6629,7 @@ impl<'a> Checker<'a> {
                 // A loop joins its own exits. A later statement can inspect an if for narrowing.
                 let scratch = match statement {
                     ast::Stmt::For(_) => false,
-                    ast::Stmt::If(_) => statements
+                    ast::Stmt::If(_) | ast::Stmt::Assert(_) => statements
                         .get(index + 1)
                         .is_some_and(|next| next.is_return_stmt() || length_guard.is_some()),
                     _ => true,
@@ -6943,6 +6943,42 @@ impl<'a> Checker<'a> {
                         "attribute target requires a Python object",
                     ));
                 }
+            }
+            return Ok(true);
+        }
+        if let ast::Stmt::Assert(assertion) = statement {
+            if self.graph.python_optimization() > 0 {
+                assertion_syntax::validate(self.source, assertion)?;
+                return Ok(true);
+            }
+            let test = self.condition(&assertion.test)?;
+            let message = if let Some(message) = assertion.msg.as_deref() {
+                let successful = self.local_state();
+                let value = if self.registered.is_some() {
+                    self.expr(message)?
+                } else {
+                    self.expr_expected(message, Type::Str)?
+                };
+                self.restore_state(successful);
+                Some(value)
+            } else {
+                None
+            };
+            self.apply_facts(&assertion.test, true);
+            if checking {
+                return Ok(true);
+            }
+            if self.registered.is_some() {
+                body.extend(registered::assertion_statements(assertion, test, message));
+            } else {
+                let failure = Statement::raise(Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: 9,
+                        message: message.map(Box::new),
+                    },
+                });
+                body.push(Statement::If(test, Vec::new(), vec![failure]));
             }
             return Ok(true);
         }
@@ -7429,39 +7465,6 @@ impl<'a> Checker<'a> {
                 let statement =
                     (!self.discarded_function_body()).then(|| Statement::While(test, body, orelse));
                 return Ok((statement.into_iter().collect(), falls));
-            }
-            ast::Stmt::Assert(assertion) if self.graph.python_optimization() > 0 => {
-                assertion_syntax::validate(self.source, assertion)?;
-                None
-            }
-            ast::Stmt::Assert(assert) => {
-                let test = self.condition(&assert.test)?;
-                let successful = self.local_state();
-                let result = if self.registered.is_some() {
-                    let message = assert
-                        .msg
-                        .as_deref()
-                        .map(|message| self.expr(message))
-                        .transpose()?;
-                    Vec::from(registered::assertion_statements(assert, test, message))
-                } else {
-                    let message = assert
-                        .msg
-                        .as_deref()
-                        .map(|message| self.expr_expected(message, Type::Str).map(Box::new))
-                        .transpose()?;
-                    vec![Statement::If(
-                        test,
-                        Vec::new(),
-                        vec![Statement::raise(Expr {
-                            ty: Type::Exception,
-                            kind: ExprKind::Exception { kind: 9, message },
-                        })],
-                    )]
-                };
-                self.restore_state(successful);
-                self.apply_facts(&assert.test, true);
-                return Ok((result, true));
             }
             ast::Stmt::With(with_) if !with_.is_async => {
                 if self.registered.is_some() {
