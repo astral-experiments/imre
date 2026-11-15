@@ -955,7 +955,7 @@ impl Initialization {
                 // cannot read definitions that are still being initialized.
                 if checker.module != checker.graph.entry
                     && !module.bindings.contains_key("__name__")
-                    && inactive_main_guard(statement)
+                    && main_guard(statement)
                 {
                     checker.class_reads.get_mut().clear();
                     body.truncate(start);
@@ -1117,7 +1117,8 @@ impl ModuleValues {
     }
 }
 
-fn inactive_main_guard(stmt: &ast::Stmt) -> bool {
+/// A direct comparison of the module name with the main namespace.
+pub(super) fn main_guard(stmt: &ast::Stmt) -> bool {
     let ast::Stmt::If(branch) = stmt else {
         return false;
     };
