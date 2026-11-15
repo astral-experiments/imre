@@ -3317,6 +3317,11 @@ pub(super) fn call(
             Ok(ctx.alloc(Value::Cell(args.first().copied())))
         }
         "function" => ctx.construct_function(args, kwargs),
+        "AttributeError" => {
+            let mut error = ctx.exception(name, args);
+            exceptions::initialize_attribute(&mut error, kwargs)?;
+            Ok(ctx.alloc(Value::Raised(error)))
+        }
         "ImportError" | "ModuleNotFoundError" => {
             let mut error = ctx.exception(name, args);
             exceptions::initialize_import(&mut error, args, kwargs)?;

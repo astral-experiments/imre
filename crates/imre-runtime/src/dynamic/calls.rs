@@ -938,7 +938,12 @@ impl Context {
                 }
             }
         }
-        Err(self.missing_attribute(obj, &text))
+        let failure = self.missing_attribute(obj, &text);
+        if matches!(op, ObjectAttribute::Get) {
+            self.attribute_error_context(failure, obj, name, original)
+        } else {
+            Err(failure)
+        }
     }
 
     /// Assign or delete a local naming attribute without changing the generic alias's origin.
@@ -1707,7 +1712,7 @@ impl Context {
         name: &str,
     ) -> Result<Id> {
         let member = self.instance_class_member(class, name);
-        self.resolved_instance_attribute(object, class, field, name, member)
+        self.resolved_instance_attribute(object, class, field, name, member, None)
     }
 
     fn resolved_instance_attribute(
@@ -1717,6 +1722,7 @@ impl Context {
         field: Option<Id>,
         name: &str,
         member: Option<Id>,
+        original: Option<Id>,
     ) -> Result<Id> {
         if member.is_none()
             && matches!(name, "fget" | "fset" | "fdel" | "__name__")
@@ -1754,7 +1760,7 @@ impl Context {
             }
             (None, None) => self.builtin_attribute(
                 object,
-                AttributeName::Text(name),
+                AttributeName::from_lookup(name, original),
                 AttributeLookup::Value,
                 None,
             ),
@@ -2593,6 +2599,40 @@ impl Context {
         Error::new("AttributeError", message)
     }
 
+    /// Preserve the original lookup operands without replacing a descriptor's own error fields.
+    fn attribute_error_context(
+        &mut self,
+        error: Error,
+        obj: Id,
+        key: AttributeName<'_>,
+        original: Option<Id>,
+    ) -> Result<Id> {
+        if !self.is_attribute_error(&error)
+            || error
+                .trace
+                .as_ref()
+                .is_some_and(|trace| trace.attribute_fields.iter().any(Option::is_some))
+        {
+            return Err(error);
+        }
+        let name = self.attribute_lookup_key(key, original);
+        if error.class().is_none() {
+            let mut error = error;
+            error.tracing().attribute_fields = [Some(name), Some(obj)];
+            return Err(error);
+        }
+        let mark = self.heap.temporary_mark();
+        let exception = self.raised_instance(error);
+        self.heap.keep(exception);
+        self.heap.keep(name);
+        self.heap.keep(obj);
+        let result = self
+            .set_attr(exception, "name", name)
+            .and_then(|_| self.set_attr(exception, "obj", obj))
+            .and_then(|_| Err(self.error_from_instance(exception)));
+        self.release_with_result(mark, result)
+    }
+
     /// Match an attribute lookup failure using the ordinary exception hierarchy.
     pub(super) fn is_attribute_error(&self, error: &Error) -> bool {
         self.is_builtin_error(error, "AttributeError")
@@ -2737,11 +2777,16 @@ impl Context {
         original: Option<Id>,
     ) -> Result<Id> {
         let callable = self.bind_attribute(hook, obj, class)?;
-        let key = original.unwrap_or_else(|| match attr {
+        let key = self.attribute_lookup_key(attr, original);
+        self.call(callable, vec![key], Vec::new())
+    }
+
+    /// Use the same Python name object for a lookup hook and its exception.
+    fn attribute_lookup_key(&mut self, attr: AttributeName<'_>, original: Option<Id>) -> Id {
+        original.unwrap_or_else(|| match attr {
             AttributeName::Linked(name) => self.heap.code_name(name),
             _ => attr.key(self),
-        });
-        self.call(callable, vec![key], Vec::new())
+        })
     }
 
     /// Read an optional attribute, preserving exceptions raised by user lookup hooks.
@@ -2854,6 +2899,21 @@ impl Context {
 
     /// Preserve a linked operand for user hooks while an exact static name takes the text path.
     pub(super) fn lookup_attribute_operand(
+        &mut self,
+        obj: Id,
+        attr: AttributeName<'_>,
+        report_missing: bool,
+        original: Option<Id>,
+    ) -> Result<Id> {
+        let result = self.lookup_attribute_inner(obj, attr, report_missing, original);
+        if report_missing {
+            result.or_else(|error| self.attribute_error_context(error, obj, attr, original))
+        } else {
+            result
+        }
+    }
+
+    fn lookup_attribute_inner(
         &mut self,
         obj: Id,
         attr: AttributeName<'_>,
@@ -3465,7 +3525,14 @@ impl Context {
             {
                 return self.bind_instance_member(member, obj, class, &mut lookup);
             }
-            return self.resolved_instance_attribute(obj, class, field, name, member);
+            return self.resolved_instance_attribute(
+                obj,
+                class,
+                field,
+                name,
+                member,
+                attr.original(),
+            );
         }
         if let Value::Raised(error) = self.heap.get(obj) {
             let dictionary = error.trace.as_ref().and_then(|trace| trace.dictionary);
@@ -3476,7 +3543,14 @@ impl Context {
                 } else {
                     self.dictionary_field(dictionary, name)?
                 };
-                return self.resolved_instance_attribute(obj, class, field, name, Some(member));
+                return self.resolved_instance_attribute(
+                    obj,
+                    class,
+                    field,
+                    name,
+                    Some(member),
+                    attr.original(),
+                );
             }
         }
         if matches!(name, "__new__" | "__init__" | "with_traceback")
@@ -6334,7 +6408,8 @@ impl Context {
                 }
             }
         }
-        Err(self.missing_attribute(obj, name))
+        let error = self.missing_attribute(obj, name);
+        self.attribute_error_context(error, obj, attr, attr.original())
     }
 
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
