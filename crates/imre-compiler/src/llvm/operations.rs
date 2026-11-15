@@ -1247,6 +1247,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         usage: ValueUse,
     ) -> CheckedValue {
         match op {
+            Builtin::LiteralStringView if matches!(self.0, Entry::Registered(_)) => {
+                self.operand_for(&args[0], usage)
+            }
             Builtin::RegisteredAttribute {
                 action: ir::AttributeAction::Load,
                 name,

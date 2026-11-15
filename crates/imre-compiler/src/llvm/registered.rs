@@ -55,10 +55,14 @@ pub(crate) fn frame_inputs(
     let scalar_parameter = |value: &Expr| {
         has_scalar
             && value.ty != Type::PythonObject
-            && matches!(value.kind, ExprKind::Local(slot)
-                if checked.function.params.contains(&slot) && checked.function.locals[slot].builtin_scalar_name().is_some())
+            && value.viewed_local().is_some_and(|slot| {
+                checked.function.params.contains(&slot)
+                    && checked.function.locals[slot]
+                        .builtin_scalar_name()
+                        .is_some()
+            })
     };
-    let protocol_parameter = |value: &Expr| usize::from(scalar_parameter(value.without_location()));
+    let protocol_parameter = |value: &Expr| usize::from(scalar_parameter(value));
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
     let mut sites = Vec::new();
@@ -361,7 +365,10 @@ pub(crate) fn frame_inputs(
                 args.len() == 1
             }
             ExprKind::Builtin(Builtin::RegisteredDiscard, _) => true,
-            ExprKind::Builtin(Builtin::RegisteredLocation(..), operands) => operands.len() == 1,
+            ExprKind::Builtin(
+                Builtin::RegisteredLocation(..) | Builtin::LiteralStringView,
+                operands,
+            ) => operands.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredAttribute { action, .. }, operands) => {
                 use ir::AttributeAction;
                 uses_python_protocol |= *action != AttributeAction::Load;

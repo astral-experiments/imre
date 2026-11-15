@@ -6470,9 +6470,10 @@ print(choose({left}), choose({right}))
             let start = TextSize::try_from(source.find("def choose").unwrap()).unwrap();
             let graph = checked_named_source(&source);
             let functions = graph.registered_functions();
-            let body = &functions[&graph.entry][&start].function.body;
+            let frame = &functions[&graph.entry][&start];
+            crate::verify::registered(frame.region()).unwrap();
             let mut comparisons = Vec::new();
-            ir::walk_expressions(body, &mut |expr| {
+            ir::walk_expressions(&frame.function.body, &mut |expr| {
                 if let ExprKind::Compare(values, _) = &expr.kind {
                     comparisons.push((values[0].ty, values[1].ty, expr.ty));
                 }
