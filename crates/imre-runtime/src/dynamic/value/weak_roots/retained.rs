@@ -107,15 +107,17 @@ impl Heap {
     ) -> bool {
         let mut cache = std::mem::take(&mut self.retained_paths);
         cache.anchors.clear();
-        for id in roots
-            .chain(self.execution.roots())
+        let anchored = roots
+            .chain(self.execution_roots())
             .filter(|&id| !self.slot_shapes[id as usize].is_scalar_leaf())
-        {
-            if cache.anchors.try_reserve(1).is_err() {
-                self.retained_paths = cache;
-                return false;
-            }
-            cache.anchors.push(id);
+            .try_for_each(|id| {
+                cache.anchors.try_reserve(1)?;
+                cache.anchors.push(id);
+                Ok::<_, std::collections::TryReserveError>(())
+            });
+        if anchored.is_err() {
+            self.retained_paths = cache;
+            return false;
         }
         let mut kept = cache.keeps(self, operand_release);
         if !kept && cache.paths.search_due() && cache.learn(self).is_some() {

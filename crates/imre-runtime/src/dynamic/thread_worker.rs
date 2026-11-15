@@ -304,7 +304,7 @@ impl Context {
         else {
             return Err(unsupported());
         };
-        let Some([thread_class, run, code]) = self.workers.default_run else {
+        let Some([thread_class, run, code]) = self.heap.workers.default_run else {
             return Err(unsupported());
         };
         if !self.direct_subclass(*class, thread_class)
@@ -371,16 +371,16 @@ impl Context {
         if let Some(callable) = self.own_class_attr(class, "run")
             && let Value::Function { code, scope, .. } = *self.heap.get(callable)
         {
-            self.workers.default_run = Some([class, callable, code]);
-            self.workers.main = Some((thread_ident(), main));
-            self.workers.reporting = Some((scope, self.scope_name(scope, "excepthook")));
+            self.heap.workers.default_run = Some([class, callable, code]);
+            self.heap.workers.main = Some((thread_ident(), main));
+            self.heap.workers.reporting = Some((scope, self.scope_name(scope, "excepthook")));
         }
     }
 
     /// A surviving main thread keeps its pthread identity, but receives a new Linux TID.
     #[cfg(target_os = "linux")]
     pub(super) fn refresh_main_thread_after_fork(&mut self) {
-        if let Some((_, main)) = self.workers.main {
+        if let Some((_, main)) = self.heap.workers.main {
             let tid = self.int(crate::objects::locks::native_thread_id() as i64);
             if let Err(error) = self.set_attr(main, "_native_id", tid) {
                 super::unraisable::report(
@@ -395,20 +395,19 @@ impl Context {
     }
 
     pub(super) fn reap_thread_operands(&mut self) {
-        self.workers
-            .reap_where(&mut self.heap, |entry| entry.thread.is_some());
+        self.heap.reap_workers(|entry| entry.thread.is_some());
     }
 }
 
 impl RegisteredThread {
     /// Complete default Thread.run cleanup on the creator heap before releasing its bound operands.
-    fn clear_target(&self, heap: &mut Heap) -> bool {
-        let Value::Instance { namespace, .. } = *heap.get(self.owner) else {
+    fn clear_target(owner: Id, heap: &mut Heap) -> bool {
+        let Value::Instance { namespace, .. } = *heap.get(owner) else {
             unreachable!("a registered Thread owns its original instance")
         };
         let dictionary = namespace.and_then(|dict| heap.dict_storage(dict));
         for name in ["_target", "_args", "_kwargs"] {
-            heap.remove_instance_field(self.owner, name);
+            heap.remove_instance_field(owner, name);
             if let Some(dict) = dictionary
                 && let Some(position) = heap.dict_entries(dict).and_then(|items| {
                     items.iter().position(
@@ -439,34 +438,41 @@ impl Entry {
     }
 }
 
+impl Heap {
+    /// Release completed registrations in startup order. Keep every other record visible to GC.
+    fn reap_workers(&mut self, include: impl Fn(&Entry) -> bool) {
+        let mut kept = 0;
+        for index in 0..self.workers.entries.len() {
+            let entry = &self.workers.entries[index];
+            if include(entry) && !entry.handle.awaiting_exit() {
+                let owner = entry.thread.as_ref().map(|thread| thread.owner);
+                // A failed field removal leaves the registration intact for the next checkpoint.
+                if entry.handle.ident() == 0
+                    || owner.is_none_or(|owner| RegisteredThread::clear_target(owner, self))
+                {
+                    let operands = std::mem::take(&mut self.workers.entries[index].operands);
+                    for root in owner.into_iter().chain(operands) {
+                        self.weak_edge_removed(root);
+                    }
+                    continue;
+                }
+            }
+            self.workers.entries.swap(kept, index);
+            kept += 1;
+        }
+        self.workers.entries.truncate(kept);
+    }
+
+    pub(super) fn reap_finished_workers(&mut self) {
+        self.reap_workers(|_| true);
+    }
+}
+
 impl Registry {
     fn reserve_entry(&mut self) -> Result<()> {
         self.entries
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))
-    }
-
-    fn reap_where(&mut self, heap: &mut Heap, include: impl Fn(&Entry) -> bool) {
-        self.entries.retain(|entry| {
-            if !include(entry) || entry.handle.awaiting_exit() {
-                return true;
-            }
-            // Cancellation skips Thread.run cleanup and releases the same registered roots.
-            if let Some(thread) = &entry.thread
-                && entry.handle.ident() != 0
-                && !thread.clear_target(heap)
-            {
-                return true;
-            }
-            for &root in entry.roots() {
-                heap.weak_edge_removed(root);
-            }
-            false
-        });
-    }
-
-    pub(super) fn reap_finished(&mut self, heap: &mut Heap) {
-        self.reap_where(heap, |_| true);
     }
 
     /// Reaping an entry can release creator-heap roots independently of the current operands.
@@ -555,7 +561,7 @@ enum Registration {
 pub(super) fn prepare_shutdown(ctx: &mut Context) -> Result<super::calls::RegisteredCall> {
     // An exception in the Python handler can deliberately prevent a non-daemon join.
     // Do not repeat that join in Drop or include workers started later by ordinary atexit.
-    ctx.workers.joined_at_shutdown = true;
+    ctx.heap.workers.joined_at_shutdown = true;
     let key = ctx.text("threading");
     let Some(module) = ctx.initialized_registry_entry(key)? else {
         return Ok(super::calls::RegisteredCall::Returned(NONE));
@@ -575,6 +581,7 @@ pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
         // SAFETY: only this thread accesses its registry. Clone the handle so the
         // borrow ends here, before a signal handler can change the registry.
         let handle = unsafe { &*context }
+            .heap
             .workers
             .shutdown_handles()
             .find(|handle| handle.awaiting_exit())
@@ -604,6 +611,7 @@ pub(super) unsafe fn shutdown_workers(context: *mut Context) -> Result<Id> {
     // SAFETY: the registered caller is back in its context. Snapshot the native
     // handles so the registry borrow ends before the first join.
     let handles: Vec<_> = unsafe { &*context }
+        .heap
         .workers
         .shutdown_handles()
         .cloned()
@@ -797,9 +805,8 @@ pub(super) fn prepare_detached(
     function: Id,
     operands: Vec<Id>,
 ) -> Result<Start> {
-    ctx.workers
-        .reap_where(&mut ctx.heap, |entry| entry.thread.is_none());
-    ctx.workers.reserve_entry()?;
+    ctx.heap.reap_workers(|entry| entry.thread.is_none());
+    ctx.heap.workers.reserve_entry()?;
     let label = ctx.repr(function);
     Ok(Start::new(
         ctx,
@@ -893,7 +900,7 @@ impl Start {
             Ok((ready, entry)) => {
                 // SAFETY: spawn runs no Python on the creator. Register the selected roots in
                 // the reserved slot before a callback, wait or collection can run here.
-                unsafe { &mut *context }.workers.entries.push(entry);
+                unsafe { &mut *context }.heap.workers.entries.push(entry);
                 ready
             }
             Err(error) => {
@@ -990,6 +997,7 @@ pub(super) fn prepare_start(
         return Err(Error::new("TypeError", "expected a boolean daemon flag"));
     };
     if ctx
+        .heap
         .workers
         .reporting
         .is_some_and(|(scope, original)| ctx.scope_name(scope, "excepthook") != original)
@@ -999,7 +1007,7 @@ pub(super) fn prepare_start(
             "custom threading.excepthook requires the parent Python heap",
         ));
     }
-    ctx.workers.reserve_entry()?;
+    ctx.heap.workers.reserve_entry()?;
     let thread = RegisteredThread { daemon, owner };
     Ok(Start::new(
         ctx,
@@ -1052,10 +1060,11 @@ pub(super) fn call(
         }
         ("current", &[main]) => {
             let ident = thread_ident();
-            if ctx.workers.main == Some((ident, main)) {
+            if ctx.heap.workers.main == Some((ident, main)) {
                 return Ok(main);
             }
-            ctx.workers
+            ctx.heap
+                .workers
                 .live_threads()
                 .find_map(|(id, owner)| (id == ident).then_some(owner))
                 .ok_or_else(|| {
@@ -1066,7 +1075,12 @@ pub(super) fn call(
                 })
         }
         ("threads", []) => {
-            let owners = ctx.workers.live_threads().map(|(_, owner)| owner).collect();
+            let owners = ctx
+                .heap
+                .workers
+                .live_threads()
+                .map(|(_, owner)| owner)
+                .collect();
             Ok(ctx.alloc(Value::List(owners)))
         }
         _ => Err(Error::new(

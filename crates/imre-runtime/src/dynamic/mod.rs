@@ -329,7 +329,6 @@ pub(crate) struct Context {
     // Active calls to an overridable socket.send from sendfile. Receivers stay rooted by the call.
     sendfile_writes: Vec<(Id, crate::objects::socket::SendfileIdentity, Id)>,
     threads: lowlevel_threads::Workers,
-    workers: thread_worker::Registry,
     heap: Heap,
     // Startup finishes applying environment overrides before any context can read this config.
     config: Arc<serde_json::Value>,

@@ -963,7 +963,6 @@ fn context_with_heap<S: Into<crate::Str>>(
         },
         config: Arc::clone(&interpreter.config),
         interpreter,
-        workers: Default::default(),
         sendfile_writes: Vec::new(),
         argv: NONE,
         startup_path0: None,
@@ -3706,7 +3705,7 @@ impl Context {
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
-        self.workers.reap_finished(&mut self.heap);
+        self.heap.reap_finished_workers();
         (
             &mut self.heap,
             self.classes
@@ -3728,7 +3727,6 @@ impl Context {
                 .chain(self.fork_hooks.iter().flatten())
                 .chain(&self.exit_callbacks)
                 .copied()
-                .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.fault_file)
                 .chain(self.fault_user_files.values().copied())
