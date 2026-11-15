@@ -1142,12 +1142,15 @@ impl<'p> RegisteredFrame<'_, 'p> {
                     if name == "*" {
                         self.op("import_star", &[&self.scope.clone(), &module]);
                     } else {
-                        let value = self.op("from", &[&module, &member]);
-                        if let Some(binding) = binding {
-                            self.bind(binding, &value);
-                        } else {
-                            self.op("assign", &[&self.scope.clone(), &member, &value]);
-                        }
+                        let binding = binding.as_deref().unwrap_or(name);
+                        self.output.intern_identifier(binding);
+                        let data = self.output.data(binding.as_bytes());
+                        self.take_matching_check();
+                        self.line(&format!(
+                            "call void @imre_dyn_bind_from(ptr %ctx, i64 {}, i64 {module}, i64 {member}, ptr {data}, i64 {})",
+                            self.scope, binding.len()
+                        ));
+                        self.check_error();
                     }
                 }
             }

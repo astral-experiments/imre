@@ -842,6 +842,47 @@ def check_startup_main_frame(imre, root, run):
         0, b"loader SourceFileLoader\nlookup __builtins__\nlookup __builtins__\nframe body\nafter False False\n", b"",
     ), result
 
+    # A successful from-import store survives failure on the next member of the same object.
+    (hooks / "sitecustomize.py").write_text(
+        "import builtins, gc, weakref\n"
+        "events = []\n"
+        "refs = []\n"
+        "class Member:\n"
+        "    def __del__(self): events.append('released')\n"
+        "class Returned:\n"
+        "    def __getattr__(self, name):\n"
+        "        events.append(name)\n"
+        "        if name == 'kept': return object()\n"
+        "        if name == 'first':\n"
+        "            member = Member()\n"
+        "            refs.append(weakref.ref(member))\n"
+        "            return member\n"
+        "        gc.collect()\n"
+        "        events.append(refs[0]() is None)\n"
+        "        raise LookupError(name)\n"
+        "class Locals(dict):\n"
+        "    def __setitem__(self, key, value):\n"
+        "        gc.collect()\n"
+        "        events.append(key)\n"
+        "        super().__setitem__(key, None if key == 'chosen' else value)\n"
+        "def importing(*args):\n"
+        "    events.append('import')\n"
+        "    return Returned()\n"
+        "namespace = Locals()\n"
+        "try:\n"
+        "    exec('from provider import kept as saved, first as chosen, second, third', "
+        "{'__builtins__': dict(vars(builtins), __import__=importing)}, namespace)\n"
+        "except LookupError as error:\n"
+        "    print(events, str(error), list(namespace), type(namespace['saved']).__name__, namespace['chosen'])\n"
+    )
+    result = run(imre, "-B", metadata, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        b"['import', 'kept', 'saved', 'first', 'chosen', 'released', 'second', True] "
+        b"second ['saved', 'chosen'] object None\nbody\n",
+        b"",
+    ), result
+
 
 def check_script_sitecustomize(imre, root, run):
     root = root.resolve()

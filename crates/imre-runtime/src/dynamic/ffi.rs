@@ -2277,6 +2277,41 @@ pub(super) unsafe extern "C" fn imre_dyn_clear_handler_target(
     }
 }
 
+/// Bind a member of the returned import object in the importing frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bind_from(
+    ctx: *mut Context,
+    scope: Id,
+    module: Id,
+    member: Id,
+    binding: *const u8,
+    len: usize,
+) {
+    // SAFETY: the checked frame owns the context and the linked UTF-8 binding.
+    let (ctx, binding) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(binding, len)),
+        )
+    };
+    if ctx.heap.execution.pending.is_some() {
+        return;
+    }
+    let mark = ctx.heap.temporary_mark();
+    let result = ctx.import_from(module, member).and_then(|value| {
+        // A class namespace or a colliding globals key can run Python during the store.
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(value);
+        let binding = ctx.heap.code_name(binding);
+        ctx.op("assign", scope, binding, value)
+    });
+    if let Err(error) = result {
+        finish(ctx, Err(error));
+    }
+    // A mapping can discard its value. Release it before the next member lookup.
+    ctx.unwind_operands(mark);
+}
+
 /// Execute an import statement through the importing frame's builtins.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_import_literal(
