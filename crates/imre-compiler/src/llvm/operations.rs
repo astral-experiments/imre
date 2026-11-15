@@ -968,7 +968,9 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             };
             return frame.at_expression(range, position, |frame| {
                 if let Some(attr @ FixedAttribute::Call(target, site)) = attribute {
-                    let (callee, args) = attr.call_operands(expr).expect("placed call operands");
+                    let (callee, args) = attr
+                        .call_operands(range, frame.operand_range(expr), expr)
+                        .expect("placed call operands");
                     let load = if target.is_some() {
                         CheckedFrame::source_callee
                     } else {

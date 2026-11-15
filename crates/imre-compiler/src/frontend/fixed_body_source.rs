@@ -28,9 +28,7 @@ impl FixedBodySource {
             if let ir::Node::Statement(Statement::If(test, ..)) = node {
                 condition = Some(test);
             }
-            if parent.is_some_and(|expr| expr.coroutine_arguments().is_some())
-                || !node.has_fixed_site()
-            {
+            if !node.has_fixed_site_in(parent) {
                 return true;
             }
             let Some((range, Some(expected))) = sites.next() else {
@@ -57,7 +55,12 @@ impl FixedBodySource {
                     return false;
                 }
                 python_arguments = true;
-            } else if !expected.matches_in(&node, condition) {
+            } else if !expected.matches_in(&node, condition, |expr| {
+                let attr = self.attributes.get(&range)?;
+                let next = sites.as_slice().first().map(|site| site.0);
+                let (_, args) = attr.call_operands(range, next, expr)?;
+                Some(FixedNode::indexed(&expr.kind, args.len(), expr.ty))
+            }) {
                 return false;
             }
             fixed_sites.push(range);
@@ -68,6 +71,7 @@ impl FixedBodySource {
         }
         drop(sites);
         let mut frame = RegisteredFunction {
+            placed_from: 0,
             fixed_sites: fixed_sites.into_boxed_slice(),
             inputs: match self.method {
                 Some(method) => FrameInputs::Protocol {
@@ -107,12 +111,29 @@ pub(crate) enum FixedAttribute {
 
 impl FixedAttribute {
     /// Borrow the written target and arguments from the checked operation in evaluation order.
-    pub(crate) fn call_operands<'a>(&'a self, expr: &'a Expr) -> Option<(&'a Expr, &'a [Expr])> {
-        let Self::Call(target, _) = self else {
+    pub(crate) fn call_operands<'a>(
+        &'a self,
+        range: TextRange,
+        next: Option<TextRange>,
+        expr: &'a Expr,
+    ) -> Option<(&'a Expr, &'a [Expr])> {
+        let Self::Call(target, call) = self else {
             return None;
         };
-        if let (None, ExprKind::Invoke { callable, args }) = (target, &expr.kind) {
-            return Some((callable, &args.values));
+        if matches!(expr.kind, ExprKind::Invoke { .. }) {
+            let callee = next?;
+            if target.is_some()
+                || call.range != range
+                || callee.is_empty()
+                || !call.contains_target(Some(callee))
+                || !matches!(call.target, ir::RegisteredCallTarget::Callable { suspended_name, .. }
+                    if suspended_name.is_none_or(|name| name == callee))
+                || !matches!(call.arguments, ir::RegisteredArguments::Positional)
+                || call.partition_field.is_some()
+            {
+                return None;
+            }
+            return expr.fixed_positional_invoke_operands();
         }
         match target.as_deref() {
             Some(target) => Some((
@@ -165,21 +186,21 @@ impl FixedNode {
     }
 
     fn positional_invoke(expr: &Expr) -> Option<Self> {
-        let ExprKind::Invoke { callable, args } = &expr.kind else {
-            return None;
-        };
-        (matches!(callable.ty, Type::Callable(_))
-            && args.site.python().is_none()
-            && args.order.iter().copied().eq(0..args.values.len()))
-        .then(|| Self::indexed(&expr.kind, args.values.len(), expr.ty))
+        let (_, args) = expr.fixed_positional_invoke_operands()?;
+        Some(Self::indexed(&expr.kind, args.len(), expr.ty))
     }
 
     /// Compare owned payloads against the final instruction without copying them.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
-        self.matches_in(node, None)
+        self.matches_in(node, None, Self::positional_invoke)
     }
 
-    fn matches_in(&self, node: &ir::Node<'_>, condition: Option<&Expr>) -> bool {
+    fn matches_in(
+        &self,
+        node: &ir::Node<'_>,
+        condition: Option<&Expr>,
+        positional: impl FnOnce(&Expr) -> Option<Self>,
+    ) -> bool {
         if let ir::Node::Expression(expr) = node {
             match &expr.kind {
                 ExprKind::Str(value) => {
@@ -200,7 +221,7 @@ impl FixedNode {
                     return if let Self::Invocation(call, ty) = self {
                         *ty == expr.ty && expr.python_call() == Some(call.as_ref())
                     } else {
-                        Self::positional_invoke(expr).as_ref() == Some(self)
+                        positional(expr).as_ref() == Some(self)
                     };
                 }
                 _ => {}

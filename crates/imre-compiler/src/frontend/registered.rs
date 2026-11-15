@@ -52,8 +52,8 @@ pub(crate) struct RegisteredOperand {
 }
 
 #[derive(Clone, Copy)]
-enum RegionRoot<'a> {
-    Suite(&'a [Statement]),
+enum RegionRoot<'a, Suite = &'a [Statement]> {
+    Suite(Suite),
     Operand(&'a Expr),
 }
 
@@ -65,35 +65,44 @@ pub(crate) struct RegisteredRegion<'a> {
     pub(crate) params: &'a [usize],
     pub(crate) local_names: &'a HashMap<usize, LocalBinding>,
     pub(crate) frame_slots: &'a FrameSlots,
-    root: RegionRoot<'a>,
+    root: RegionRoot<'a, &'a RegisteredFunction>,
 }
 
 impl<'a> RegisteredRegion<'a> {
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
+    pub(crate) fn is_registered_invoke(self, sites: &[TextRange], value: &Expr) -> bool {
+        if let (RegionRoot::Suite(frame), [range, tail @ ..]) = (self.root, sites)
+            && let Some(attr @ FixedAttribute::Call(..)) = frame.fixed_attribute(*range)
+        {
+            return attr
+                .call_operands(*range, tail.first().copied(), value)
+                .is_some();
+        }
+        value.is_registered_invoke()
+    }
+
+    #[cfg(test)]
     pub(crate) fn walk(self, visit: &mut impl FnMut(ir::Node<'a>, Option<&'a Expr>)) {
         match self.root {
-            RegionRoot::Suite(body) => ir::walk_nodes(body, visit),
+            RegionRoot::Suite(frame) => ir::walk_nodes(&frame.function.body, visit),
             RegionRoot::Operand(value) => ir::walk_operand_nodes(value, visit),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn private_slots(self) -> Vec<usize> {
-        self.frame_layout(|_| true).unwrap().slots().to_vec()
+        self.frame_layout(|_, _, _| true).unwrap().slots().to_vec()
     }
 
-    /// Collect private names and cursor kinds as the caller visits the scoped operations.
+    /// Collect private slots while visiting each node. Positioned nodes receive the remaining
+    /// physical sites, starting with their own and then their first positioned operand.
     pub(crate) fn frame_layout(
         self,
-        mut supported: impl FnMut(ir::Node<'a>) -> bool,
+        mut supported: impl FnMut(ir::Node<'a>, Option<&'a Expr>, &[TextRange]) -> bool,
     ) -> Option<FrameSlots> {
         let mut slots = std::collections::BTreeSet::new();
         let mut cursors = HashMap::new();
-        let mut visit = |node: ir::Node<'a>, parent: Option<&'a Expr>| {
-            // The Python call consumes the fields of the native argument record directly.
-            if parent.is_some_and(|expr| expr.coroutine_arguments().is_some()) {
-                return true;
-            }
+        let mut visit = |node, parent, positions| {
             match &node {
                 ir::Node::Statement(Statement::Scope { clear, .. })
                 | ir::Node::Expression(Expr {
@@ -112,11 +121,25 @@ impl<'a> RegisteredRegion<'a> {
                 }
                 _ => {}
             }
-            supported(node)
+            supported(node, parent, positions)
         };
+        let mut unplaced = |node, parent| visit(node, parent, &[]);
         let complete = match self.root {
-            RegionRoot::Suite(body) => ir::all_nodes(body, &mut visit),
-            RegionRoot::Operand(value) => ir::all_operand_nodes(value, None, &mut visit),
+            RegionRoot::Operand(value) => ir::all_operand_nodes(value, None, &mut unplaced),
+            RegionRoot::Suite(frame) => {
+                // Explicit declaration bindings precede the placed suffix and own no fixed sites.
+                let (prefix, tail) = frame.function.body.split_at_checked(frame.placed_from)?;
+                let mut sites = frame.fixed_sites.iter();
+                ir::all_nodes(prefix, &mut unplaced)
+                    && ir::all_nodes(tail, &mut |node, parent| {
+                        if frame.fixed_sites.is_empty() || !node.has_fixed_site_in(parent) {
+                            return visit(node, parent, &[]);
+                        }
+                        let current = sites.as_slice();
+                        sites.next().is_some() && visit(node, parent, current)
+                    })
+                    && sites.len() == 0
+            }
         };
         if !complete {
             return None;
@@ -287,6 +310,8 @@ impl FrameSlots {
 }
 
 pub(crate) struct RegisteredFunction {
+    /// Initial statements with explicit Python locations before the fixed sites begin.
+    pub(crate) placed_from: usize,
     pub(crate) inputs: FrameInputs,
     pub(crate) frame_slots: FrameSlots,
     /// Physical positions for the unchanged fixed operations, in checked node order.
@@ -314,6 +339,7 @@ impl RegisteredFunction {
         let mut checked = Self {
             inputs: FrameInputs::default(),
             frame_slots: FrameSlots::default(),
+            placed_from: 0,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function,
@@ -366,6 +392,7 @@ impl RegisteredFunction {
         Self {
             inputs: FrameInputs::default(),
             frame_slots: FrameSlots::default(),
+            placed_from: 0,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {
@@ -390,7 +417,7 @@ impl RegisteredFunction {
             params: &self.function.params,
             local_names: &self.local_names,
             frame_slots: &self.frame_slots,
-            root: RegionRoot::Suite(&self.function.body),
+            root: RegionRoot::Suite(self),
         }
     }
 }
@@ -1801,8 +1828,6 @@ impl NamedBody<'_> {
 }
 
 pub(crate) struct RegisteredSuite {
-    /// Initial statements with explicit Python locations before a placed body.
-    pub(crate) placed_from: usize,
     pub(crate) refusal: Option<PreparedRefusal>,
     falls_through: bool,
     pub(crate) checked: RegisteredFunction,
@@ -1831,7 +1856,6 @@ impl RegisteredSuite {
 
     fn new(checked: RegisteredFunction, operands: Vec<PhysicalOperand>) -> Self {
         Self {
-            placed_from: 0,
             checked,
             operands,
             suites: Vec::new(),
@@ -2510,7 +2534,6 @@ impl<'a> SuitePreparation<'a> {
             finalbody,
         );
         RegisteredSuite {
-            placed_from: 0,
             checked: scope.finish(statements),
             operands,
             suites,
@@ -2937,7 +2960,7 @@ impl<'a> SuitePreparation<'a> {
             body.check_from = body.falls_through.then_some(body.statements.len());
         }
         body.check_run(self);
-        let (placed_from, checked) = if let Some(mut entry) = placed {
+        let checked = if let Some(mut entry) = placed {
             // Bind the saved targets where these declarations installed their names.
             // The written global lookup stays live when this scope has no local binding.
             for attribute in entry
@@ -2962,14 +2985,14 @@ impl<'a> SuitePreparation<'a> {
             let placed_from = body.statements.len() - tail_len;
             scope.namespaces.extend(entry.local_names);
             let mut checked = scope.finish(body.statements);
+            checked.placed_from = placed_from;
             checked.fixed_sites = entry.fixed_sites;
             checked.fixed_attributes = entry.fixed_attributes;
-            (placed_from, checked)
+            checked
         } else {
-            (0, scope.finish(body.statements))
+            scope.finish(body.statements)
         };
         RegisteredSuite {
-            placed_from,
             checked,
             operands,
             suites,
@@ -3627,6 +3650,7 @@ impl RegisteredBindings {
         RegisteredFunction {
             inputs: FrameInputs::default(),
             frame_slots: self.slots,
+            placed_from: 0,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function: ir::Function {

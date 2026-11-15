@@ -77,13 +77,12 @@ pub(crate) fn frame_inputs(
         true
     };
     // Scope declarations can follow uses in the walk. Check their complete set afterward.
-    let mut positions = checked.fixed_sites.iter();
-    let private = checked.region().frame_layout(|node| {
-        let source = if !checked.fixed_sites.is_empty() && node.has_fixed_site() {
-            positions.next().copied()
-        } else {
-            None
-        };
+    let private = checked.region().frame_layout(|node, parent, positions| {
+        // The Python call reads the fields directly, without emitting the coroutine tuple.
+        if parent.is_some_and(|value| value.coroutine_arguments().is_some()) {
+            return true;
+        }
+        let source = positions.first().copied();
         let attribute = source.and_then(|range| checked.fixed_attribute(range));
         let expr = match node {
             ir::Node::Statement(stmt) => {
@@ -195,8 +194,10 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let Some(attribute @ crate::frontend::FixedAttribute::Call(target, _)) = attribute
-            && let Some((receiver, args)) = attribute.call_operands(expr)
+        if let Some((range, attribute @ crate::frontend::FixedAttribute::Call(target, _))) =
+            source.zip(attribute)
+            && let Some((receiver, args)) =
+                attribute.call_operands(range, positions.get(1).copied(), expr)
         {
             uses_python_protocol = true;
             protocol_reads += args.iter().map(&protocol_parameter).sum::<usize>();
@@ -603,7 +604,8 @@ impl<'f, 'a, 'p> Frame<'f, 'a, 'p> {
 impl<'f> Frame<'f, '_, '_> {
     /// Emit the source-bound prefix before starting the checked tail's position cursor.
     pub(super) fn explicit_prefix<'s>(&mut self, body: &'s [Statement]) -> &'s [Statement] {
-        let (prefix, placed) = body.split_at(self.suite.map_or(0, |suite| suite.placed_from));
+        let (prefix, placed) =
+            body.split_at(self.suite.map_or(0, |suite| suite.checked.placed_from));
         if !prefix.is_empty() {
             let mut frame = self.reborrow();
             frame.fixed_sites = None;

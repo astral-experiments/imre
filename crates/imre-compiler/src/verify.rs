@@ -70,61 +70,55 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
 /// checked native scalar or a Python handle as a display operand. They have no native
 /// container layout table. Validate this handoff before the emitter indexes its operands.
 pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
-    let private = frame.frame_layout(|_| true).unwrap();
-    let local = |slot: usize| {
-        require(
-            slot < frame.locals.len()
-                && (frame.local_names.contains_key(&slot) || private.index(&slot).is_some()),
-            "invalid registered frame slot or missing Python name",
-        )
+    use std::collections::BTreeMap;
+
+    const LOCAL: &str = "invalid registered frame slot or missing Python name";
+    const ENTERED: &str = "context binding needs a private entered-value slot";
+    const PULL: &str = "registered pull needs distinct private cursor, item and readiness slots";
+    let mut required = BTreeMap::new();
+    let local = |slot: usize, required: &mut BTreeMap<_, _>| {
+        if !frame.local_names.contains_key(&slot) {
+            required.entry(slot).or_insert(LOCAL);
+        }
+        require(slot < frame.locals.len(), LOCAL)
     };
-    for &slot in frame.params {
-        local(slot)?;
-    }
-    for &slot in frame.local_names.keys() {
-        local(slot)?;
+    for &slot in frame.params.iter().chain(frame.local_names.keys()) {
+        local(slot, &mut required)?;
     }
     let mut result = Ok(());
-    frame.walk(&mut |node, parent| {
-        if result.is_err() {
-            return;
-        }
+    let layout = frame.frame_layout(|node, parent, positions| {
         result = match node {
-            ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot),
+            ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot, &mut required),
             ir::Node::Statement(Statement::With {
                 binding: Some(binding),
                 ..
-            }) => require(
-                frame.locals.get(binding.entered) == Some(&Type::PythonObject)
-                    && private.index(&binding.entered).is_some(),
-                "context binding needs a private entered-value slot",
-            ),
+            }) => {
+                required.entry(binding.entered).or_insert(ENTERED);
+                require(frame.locals.get(binding.entered) == Some(&Type::PythonObject), ENTERED)
+            }
             ir::Node::Statement(Statement::IterNext {
                 kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
                 iterator,
                 key,
                 ready,
                 value,
-            }) => require(
-                (matches!(kind, ir::IterNextKind::Pair(_)) == value.is_some()) && value.is_none_or(|slot| {
-                    slot != *iterator
-                        && slot != *key
-                        && slot != *ready
-                        && private.index(&slot).is_some()
-                        && frame.locals.get(slot) == Some(&Type::PythonObject)
-                }) && iterator != key
-                    && key != ready
-                    && iterator != ready
-                    && [iterator, key, ready]
-                        .iter()
-                        .all(|slot| private.index(slot).is_some())
-                    && frame.locals.get(*iterator) == Some(&Type::PythonObject)
-                    && frame.locals.get(*key) == Some(&Type::PythonObject)
-                    && frame.locals.get(*ready) == Some(&Type::Bool),
-                "registered pull needs distinct private cursor, item and readiness slots",
-            ),
+            }) => {
+                for slot in [Some(*iterator), Some(*key), Some(*ready), *value].into_iter().flatten() {
+                    required.entry(slot).or_insert(PULL);
+                }
+                require(
+                    (matches!(kind, ir::IterNextKind::Pair(_)) == value.is_some()) && value.is_none_or(|slot| {
+                        slot != *iterator && slot != *key && slot != *ready
+                            && frame.locals.get(slot) == Some(&Type::PythonObject)
+                    }) && iterator != key && key != ready && iterator != ready
+                        && frame.locals.get(*iterator) == Some(&Type::PythonObject)
+                        && frame.locals.get(*key) == Some(&Type::PythonObject)
+                        && frame.locals.get(*ready) == Some(&Type::Bool),
+                    PULL,
+                )
+            }
             ir::Node::Expression(value) => match &value.kind {
-                ExprKind::Local(slot) => local(*slot),
+                ExprKind::Local(slot) => local(*slot, &mut required),
                 ExprKind::List(_) => require(
                     matches!(value.ty, Type::PythonObject | Type::ListInt | Type::List(_)),
                     "invalid checked list type",
@@ -149,7 +143,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                     },
                     "inconsistent checked set element type",
                 ),
-                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot).and_then(|()| {
+                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot, &mut required).and_then(|()| {
                     require(
                         args.len() == 1,
                         "registered namespace write needs one operand",
@@ -160,7 +154,7 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                     "registered assertion failure takes at most one message",
                 ),
                 ExprKind::Invoke { .. } => require(
-                    value.is_registered_invoke(),
+                    frame.is_registered_invoke(positions, value),
                     "registered invocation needs a Python callable, call position and matching argument layout",
                 ),
                 ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
@@ -194,13 +188,18 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
             },
             _ => Ok(()),
         };
+        result.is_ok()
     });
     result?;
-    // Replacing an operation can leave an allocated local unused.
+    let layout = layout.ok_or("registered fixed sites disagree with the physical body")?;
+    // Declarations may follow reads. Unused allocated slots can survive an IR replacement.
+    for (slot, error) in required {
+        require(layout.index(&slot).is_some(), error)?;
+    }
     require(
-        private.slots().iter().all(|slot| {
+        layout.slots().iter().all(|slot| {
             frame.frame_slots.index(slot).is_some()
-                && frame.frame_slots.cursor(slot) == private.cursor(slot)
+                && frame.frame_slots.cursor(slot) == layout.cursor(slot)
         }),
         "registered frame storage disagrees with its scoped operations",
     )
@@ -896,6 +895,22 @@ mod tests {
                 frontend::RegisteredFunction::from_suite(body, scope, source, &operations, true)
                     .unwrap();
             registered(frame.region()).unwrap();
+            let slot = frame.function.locals.len();
+            frame.function.locals.push(Type::PythonObject);
+            frame
+                .function
+                .body
+                .push(Statement::Expr(Expr::local(slot, Type::PythonObject)));
+            frame.function.body.push(Statement::Scope {
+                body: Vec::new(),
+                clear: vec![slot],
+            });
+            frame.frame_slots = frame.region().frame_layout(|_, _, _| true).unwrap();
+            registered(frame.region()).unwrap();
+            frame.function.body.pop(); // A read still requires a declaration for its allocated slot.
+            assert!(registered(frame.region()).is_err());
+            frame.function.body.pop();
+            registered(frame.region()).unwrap();
             frame.local_names.clear();
             assert!(
                 registered(frame.region())
@@ -910,6 +925,7 @@ mod tests {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: Default::default(),
             frame_slots: Default::default(),
+            placed_from: 0,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function: empty().entry,
@@ -940,6 +956,7 @@ mod tests {
         let mut frame = crate::frontend::RegisteredFunction {
             inputs: Default::default(),
             frame_slots: Default::default(),
+            placed_from: 0,
             fixed_sites: Box::default(),
             fixed_attributes: None,
             function: empty().entry,
