@@ -7766,11 +7766,7 @@ pub(crate) fn value_target(statement: &ast::Stmt) -> Option<&ast::Expr> {
 }
 
 fn module_value(statement: &ast::Stmt) -> Option<&ast::Expr> {
-    match statement {
-        ast::Stmt::Assign(assignment) => Some(&assignment.value),
-        ast::Stmt::AnnAssign(assignment) => assignment.value.as_deref(),
-        _ => None,
-    }
+    imre_ast::assignment_parts(statement).map(|(_, value)| value)
 }
 
 /// A runtime binding introduced directly in a module-level conditional branch.

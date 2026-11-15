@@ -386,10 +386,14 @@ pub(crate) fn direct_base_init(
         .parameters
         .iter()
         .any(|p| p.name() == root.id.as_str())
-        && !ast::helpers::any_over_body(
-            &initializer.body,
-            |expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load),
-        )
+        && !initializer.body.iter().any(|stmt| {
+            let rebinds = |expr: &ast::Expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load);
+            if let Some((targets, rhs)) = initializer_assignment(initializer, stmt) {
+                targets.iter().chain([rhs]).any(|expr| ast::helpers::any_over_expr(expr, rebinds))
+            } else {
+                ast::helpers::any_over_body(std::slice::from_ref(stmt), rebinds)
+            }
+        })
 }
 
 /// Infer scalar field storage without changing how the constructor evaluates its value.
@@ -429,7 +433,7 @@ fn scalar_field_annotation(
 pub(super) fn annotated_fields(
     graph: &SourceGraph,
     module: usize,
-    init: &mut ast::StmtFunctionDef,
+    init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
 ) {
     let Some(receiver) = init.parameters.iter_non_variadic_params().next() else {
@@ -441,22 +445,16 @@ pub(super) fn annotated_fields(
         .map(|p| (p.name().as_str(), p.annotation()))
         .collect::<HashMap<_, _>>();
     let locals = crate::narrowing::assigned_names(&init.body);
-    for statement in &mut init.body {
-        let (target, value, annotation) = match &*statement {
-            ast::Stmt::AnnAssign(a)
-                if let (ast::Expr::Attribute(target), Some(value)) = (&*a.target, &a.value) =>
-            {
-                (target, &**value, Some(&*a.annotation))
-            }
-            ast::Stmt::Assign(a) if let [ast::Expr::Attribute(target)] = a.targets.as_slice() => {
-                (target, &*a.value, None)
-            }
-            _ => continue,
-        };
-        if !matches!(&*target.value, ast::Expr::Name(n) if n.id.as_str() == receiver.name().as_str())
-        {
+    for statement in &init.body {
+        let Some(([target], value)) = imre_ast::assignment_parts(statement) else {
             continue;
-        }
+        };
+        let Some(name) = receiver_field(target, receiver.name().as_str()) else {
+            continue;
+        };
+        let annotation = statement
+            .as_ann_assign_stmt()
+            .map(|a| a.annotation.as_ref());
         let proxy_arg = if let ast::Expr::Call(call) = value
             && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::WeakProxy))
         {
@@ -470,7 +468,7 @@ pub(super) fn annotated_fields(
         } else {
             None
         };
-        if let Some(field) = fields.iter_mut().find(|f| f.name == target.attr.as_str()) {
+        if let Some(field) = fields.iter_mut().find(|f| f.name == name) {
             field.weak_proxy |= proxy_arg.is_some();
         } else if let Some(annotation) = annotation.or_else(|| {
             let name = proxy_arg?.as_name_expr()?.id.as_str();
@@ -478,23 +476,13 @@ pub(super) fn annotated_fields(
         }) {
             fields.push(Field {
                 module,
-                name: target.attr.to_string(),
+                name: name.to_owned(),
                 annotation: annotation.clone(),
                 weak_proxy: proxy_arg.is_some(),
                 default: None,
                 kw_only: false,
                 repr: true,
                 compare: true,
-            });
-        }
-        if let ast::Stmt::AnnAssign(assign) = statement
-            && let Some(value) = &assign.value
-        {
-            *statement = ast::Stmt::Assign(ast::StmtAssign {
-                node_index: ast::AtomicNodeIndex::NONE,
-                range: assign.range,
-                targets: vec![(*assign.target).clone()],
-                value: value.clone(),
             });
         }
     }

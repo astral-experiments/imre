@@ -107,6 +107,18 @@ pub fn check_single_input(
     Ok(())
 }
 
+/// The written targets and right-hand side of an assignment that stores a value.
+pub fn assignment_parts(statement: &ast::Stmt) -> Option<(&[ast::Expr], &ast::Expr)> {
+    match statement {
+        ast::Stmt::Assign(assign) => Some((&assign.targets, &assign.value)),
+        ast::Stmt::AnnAssign(assign) => Some((
+            std::slice::from_ref(assign.target.as_ref()),
+            assign.value.as_deref()?,
+        )),
+        _ => None,
+    }
+}
+
 /// A valueless parenthesized name in an annotation neither binds nor reads the name.
 pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
     assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()

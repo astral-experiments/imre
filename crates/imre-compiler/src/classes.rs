@@ -1420,17 +1420,10 @@ fn collect_class<'syntax>(
         }
     }
     let mut open_parameter_field = false;
-    if !is_enum
-        && dataclass.is_none()
-        && let Some(init) = initializer
-    {
+    let constructor_fields = !is_enum && dataclass.is_none();
+    if constructor_fields && let Some(init) = initializer {
         let infer = fields.len() == inherited_fields.len();
-        inheritance::annotated_fields(
-            graph,
-            definition.module,
-            methods[init].function.make_mut(),
-            &mut fields,
-        );
+        inheritance::annotated_fields(graph, definition.module, &methods[init], &mut fields);
         if infer {
             init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
             open_parameter_field =
@@ -1590,6 +1583,7 @@ fn collect_class<'syntax>(
             module,
             &methods[initializer],
             InitializerFields {
+                constructor_fields,
                 declared: &fields,
                 bindings: &static_bindings,
                 inherited: if generated_initializer {
@@ -1798,7 +1792,25 @@ pub(crate) fn method_kind(
     ))
 }
 
+pub(crate) fn receiver_field<'a>(expr: &'a ast::Expr, receiver: &str) -> Option<&'a str> {
+    let attr = expr.as_attribute_expr()?;
+    (attr.value.as_name_expr()?.id == receiver).then(|| attr.attr.as_str())
+}
+
+/// An annotated store contributes to the fixed constructor only for a direct receiver field.
+pub(crate) fn initializer_assignment<'s>(
+    initializer: &ast::StmtFunctionDef,
+    statement: &'s ast::Stmt,
+) -> Option<(&'s [ast::Expr], &'s ast::Expr)> {
+    if let ast::Stmt::AnnAssign(assignment) = statement {
+        let receiver = initializer.parameters.iter_non_variadic_params().next()?;
+        receiver_field(&assignment.target, receiver.name().as_str())?;
+    }
+    imre_ast::assignment_parts(statement)
+}
+
 struct InitializerFields<'a> {
+    constructor_fields: bool,
     declared: &'a [Field],
     exposes_self: bool,
     inherited: &'a [Field],
@@ -1817,6 +1829,7 @@ fn check_initializer(
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<bool, String> {
     let InitializerFields {
+        constructor_fields,
         declared: fields,
         exposes_self: base_exposes_self,
         inherited,
@@ -1916,8 +1929,12 @@ fn check_initializer(
             );
             continue;
         }
-        let assignment = match statement {
-            ast::Stmt::Assign(assignment) => assignment,
+        let (written_targets, value) = match statement {
+            _ if (constructor_fields || statement.is_assign_stmt())
+                && let Some(parts) = initializer_assignment(initializer, statement) =>
+            {
+                parts
+            }
             ast::Stmt::Expr(value)
                 if value.value.is_string_literal_expr()
                     || value.value.is_ellipsis_literal_expr() =>
@@ -1987,9 +2004,9 @@ fn check_initializer(
             }
         };
         let mut self_use = SelfUse(receiver, None, &initialized);
-        self_use.visit_expr(&assignment.value);
+        self_use.visit_expr(value);
         if let Some(expression) = self_use.1 {
-            if let Some(name) = init_hooks::receiver_call(&assignment.value, receiver, true)
+            if let Some(name) = init_hooks::receiver_call(value, receiver, true)
                 && matches!(lookup(name), Some(Ok(writes)) if writes.is_empty())
             {
                 hooks.entry(name.to_owned()).or_default();
@@ -2001,7 +2018,7 @@ fn check_initializer(
             }
         }
         let mut targets = Vec::new();
-        for target in &assignment.targets {
+        for target in written_targets {
             initializer_targets(target, &mut targets);
         }
         for target in targets {

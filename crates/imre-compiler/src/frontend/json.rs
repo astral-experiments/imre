@@ -803,14 +803,16 @@ pub(super) fn schemas(
         let mut values = HashMap::new();
         for statement in &initializer.body {
             match statement {
-                ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => {
-                    let ast::Expr::Attribute(target) = &assignment.targets[0] else {
+                _ if let Some(([target], value)) =
+                    crate::classes::initializer_assignment(initializer, statement) =>
+                {
+                    let ast::Expr::Attribute(target) = target else {
                         return Err(module.error(
                             statement,
                             "JSON constructors require individual self.field assignments",
                         ));
                     };
-                    values.insert(target.attr.as_str(), &*assignment.value);
+                    values.insert(target.attr.as_str(), value);
                 }
                 ast::Stmt::Pass(_) => {}
                 ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}

@@ -120,14 +120,10 @@ pub(super) trait StatementLowering {
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, Self::Error> {
         let (statement, continues) = match stmt {
-            ast::Stmt::Assign(assign) => {
-                return self.assignment(&assign.targets, &assign.value, body);
-            }
-            ast::Stmt::AnnAssign(assign)
-                if !assign.target.is_name_expr()
-                    && let Some(rhs) = assign.value.as_deref() =>
+            _ if !matches!(stmt, ast::Stmt::AnnAssign(a) if a.target.is_name_expr())
+                && let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) =>
             {
-                return self.assignment(std::slice::from_ref(assign.target.as_ref()), rhs, body);
+                return self.assignment(targets, rhs, body);
             }
             ast::Stmt::If(branch) => return self.branch(branch, body),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),

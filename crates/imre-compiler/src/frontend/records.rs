@@ -2270,10 +2270,12 @@ impl Checker<'_> {
         let class = &self.classes.declarations.definitions[class];
         let index = class.initializer?;
         let init = &class.methods[index];
-        let ast::Stmt::Assign(assign) = init.body.iter().find(|stmt| !matches!(stmt, ast::Stmt::Expr(e) if matches!(&*e.value, ast::Expr::StringLiteral(_))))? else { return None };
-        let ast::Expr::Call(list) = &*assign.value else {
-            return None;
-        };
+        let first = init
+            .body
+            .iter()
+            .find(|stmt| !matches!(stmt, ast::Stmt::Expr(e) if e.value.is_string_literal_expr()))?;
+        let (_, value) = crate::classes::initializer_assignment(init, first)?;
+        let list = value.as_call_expr()?;
         if !matches!(&*list.func, ast::Expr::Name(n) if n.id == "list")
             || !list.arguments.keywords.is_empty()
         {
