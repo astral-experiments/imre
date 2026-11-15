@@ -1498,30 +1498,39 @@ impl Inference {
                     }
                 }
             }
-            let mut checker = Checker::new(
-                graph,
-                graph.entry,
-                signatures,
-                classes,
-                types,
-                &helpers,
-                &globals,
-            );
-            checker.inference = Some(self);
-            checker.module_scope = true;
-            checker.nonreturning_functions = &completed_calls;
-            let result = checker.lower_block(entry_statements, None);
-            let entry_callable = match checker.finish_region(result) {
-                Err(Failure::PendingSignature {
-                    signature,
-                    missing_callable_parameters: true,
-                    ..
-                }) => Some(signature),
-                Err(diagnostic) => {
-                    errors.push((graph.entry, None, diagnostic));
-                    None
+            // A changed round with only resolved return slots has no input or layout
+            // left to learn from the entry. Its ordinary check can own these operations.
+            let entry_callable = if first_open_return == Some(self.len())
+                && self.revision.get() != before
+                && !self.widened.get()
+            {
+                None
+            } else {
+                let mut checker = Checker::new(
+                    graph,
+                    graph.entry,
+                    signatures,
+                    classes,
+                    types,
+                    &helpers,
+                    &globals,
+                );
+                checker.inference = Some(self);
+                checker.module_scope = true;
+                checker.nonreturning_functions = &completed_calls;
+                let result = checker.lower_block(entry_statements, None);
+                match checker.finish_region(result) {
+                    Err(Failure::PendingSignature {
+                        signature,
+                        missing_callable_parameters: true,
+                        ..
+                    }) => Some(signature),
+                    Err(diagnostic) => {
+                        errors.push((graph.entry, None, diagnostic));
+                        None
+                    }
+                    Ok(_) => None,
                 }
-                Ok(_) => None,
             };
             self.apply_document_fields(classes);
             if self.revision.get() == before {
