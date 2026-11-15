@@ -1262,7 +1262,13 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
                 action: ir::AttributeAction::Load,
                 name,
                 range,
-            } => self.load_attribute(args, name, *range, usage),
+                ..
+            } => self
+                .python()
+                .at_expression(*range, name.range.start(), |frame| {
+                    CheckedBody::registered(frame.reborrow())
+                        .load_attribute(args, name, *range, usage)
+                }),
             Builtin::ListGet(_)
             | Builtin::TupleGet
             | Builtin::TupleIndex

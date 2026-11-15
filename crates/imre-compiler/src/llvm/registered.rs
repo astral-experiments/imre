@@ -1236,6 +1236,7 @@ impl<'f> Frame<'f, '_, '_> {
                     action,
                     name,
                     range,
+                    ..
                 },
                 _,
             ) => self.mutate_attribute(*action, name, *range, operands.iter()),

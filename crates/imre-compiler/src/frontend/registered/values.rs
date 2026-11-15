@@ -379,12 +379,11 @@ pub(in crate::frontend) fn method_receiver(
 }
 
 pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver: Expr) -> Expr {
-    let value = super::operation(
+    super::operation(
         super::attribute_opcode(ir::AttributeAction::Load, field),
         Type::PythonObject,
         vec![receiver],
-    );
-    located(field.range(), field.attr.start(), value)
+    )
 }
 
 pub(in crate::frontend) fn subscript(

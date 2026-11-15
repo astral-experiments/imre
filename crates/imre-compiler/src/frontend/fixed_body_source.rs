@@ -146,7 +146,14 @@ pub(super) enum FixedNode {
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
     Invocation(Box<ir::RegisteredCall>, Type),
     Located(TextRange, TextSize, Option<Type>, Type),
-    Name(ruff_python_ast::name::Name, Option<TextRange>, Type),
+    Name(ruff_python_ast::name::Name, Type),
+    Attribute(
+        ruff_python_ast::name::Name,
+        TextRange,
+        TextSize,
+        Option<Type>,
+        Type,
+    ),
     Integer(i64),
     Scalar(ir::Constant),
     String(Box<str>),
@@ -268,16 +275,19 @@ impl FixedNode {
                 ExprKind::Builtin(Builtin::RegisteredName(ref name), ref operands)
                     if operands.is_empty() =>
                 {
-                    Self::Name(name.clone(), None, expr.ty)
+                    Self::Name(name.clone(), expr.ty)
                 }
                 ExprKind::Builtin(
                     Builtin::RegisteredAttribute {
                         action: ir::AttributeAction::Load,
                         ref name,
                         range,
+                        hint,
                     },
                     ref operands,
-                ) if operands.len() == 1 => Self::Name(name.id.clone(), Some(range), expr.ty),
+                ) if operands.len() == 1 => {
+                    Self::Attribute(name.id.clone(), range, name.start(), hint, expr.ty)
+                }
                 ExprKind::Invoke { .. } => {
                     Self::Invocation(Box::new(expr.python_call()?.clone()), expr.ty)
                 }
