@@ -199,6 +199,30 @@ mod tests {
     }
 
     #[test]
+    fn an_annotated_mapping_keeps_its_checked_python_return() {
+        let source = concat!(
+            "import json\n",
+            "def mapping(text: str) -> dict[str, int]:\n",
+            "    value = json.loads(text)\n",
+            "    assert isinstance(value, dict)\n",
+            "    return value\n",
+            "print(mapping('{}'))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let (functions, _) = graph.take_registered_functions();
+        let start = TextSize::try_from(source.find("def mapping").unwrap()).unwrap();
+        let frame = &functions[&graph.entry][&start];
+        let Some(Statement::Return(value)) = frame.function.body.last() else {
+            panic!("expected the checked return");
+        };
+        assert_eq!(value.ty, Type::PythonObject);
+    }
+
+    #[test]
     fn a_python_return_preserves_the_checked_scalar_and_its_live_caller() {
         let text = concat!(
             "import argparse\n",
