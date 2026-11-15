@@ -107,6 +107,7 @@ pub(crate) struct Classes<'syntax> {
     pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
     pub(crate) registered_classes: HashSet<DefinitionId>,
+    pub(crate) scoped_bases: HashMap<DefinitionId, (&'syntax ast::Expr, &'static str)>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
@@ -283,6 +284,7 @@ impl<'syntax> Classes<'syntax> {
         let mut resolved = exceptions::collect(graph)?;
         let mut registered_classes = std::mem::take(&mut resolved.registered);
         let mut source_nodes = Vec::new();
+        let mut scoped_bases = HashMap::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
             for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
@@ -321,6 +323,9 @@ impl<'syntax> Classes<'syntax> {
                             return Err(module
                                 .diagnostic(base, &format!("{name} requires object lowering"))
                                 .classified(Kind::ScopedClassLayout));
+                        }
+                        if module.is_program_source() {
+                            scoped_bases.insert(definition, (base, name));
                         }
                         registered_classes.insert(definition);
                     }
@@ -391,6 +396,7 @@ impl<'syntax> Classes<'syntax> {
             exceptions: resolved.ids,
             registered_classes,
             exception_declarations: resolved.named,
+            scoped_bases,
         })
     }
 }
