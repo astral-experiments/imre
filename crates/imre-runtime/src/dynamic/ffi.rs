@@ -2344,8 +2344,13 @@ pub(super) unsafe extern "C" fn imre_boxed_named_op(
     len: usize,
     value: Id,
 ) -> Id {
-    // SAFETY: the emitter supplies a live context and a terminated opcode.
-    if unsafe { !imre_dyn_failed(ctx) && libc::strcmp(op, c"setattr".as_ptr()) == 0 } {
+    // A checked operand can have failed before the emitter reaches the name.
+    // SAFETY: the executing frame supplies its live context.
+    if unsafe { imre_dyn_failed(ctx) } {
+        return NONE;
+    }
+    // SAFETY: the emitter supplies a terminated opcode.
+    if unsafe { libc::strcmp(op, c"setattr".as_ptr()) == 0 } {
         // The existing setter can consume this spelling without boxing the name.
         // SAFETY: the generated name has exactly len bytes for the lifetime of this call.
         let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
@@ -2361,26 +2366,6 @@ pub(super) unsafe extern "C" fn imre_boxed_named_op(
             0
         } else {
             imre_dyn_op_at(ctx, op, receiver, key, value, std::ptr::null())
-        }
-    }
-}
-
-/// Preserve a pending exception before loading the operation's linked name.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_boxed_guarded_named_op(
-    ctx: *mut Context,
-    op: *const c_char,
-    receiver: Id,
-    name: *const u8,
-    len: usize,
-    value: Id,
-) -> Id {
-    // SAFETY: the guarded entry borrows the same inputs as imre_boxed_named_op.
-    unsafe {
-        if imre_dyn_failed(ctx) {
-            0
-        } else {
-            imre_boxed_named_op(ctx, op, receiver, name, len, value)
         }
     }
 }
