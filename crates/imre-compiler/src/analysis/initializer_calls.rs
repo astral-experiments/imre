@@ -627,6 +627,24 @@ impl Session {
                     &[scope][..],
                 );
                 let error = super::file_errors(&self.db, checked).first()?;
+                // A call in the callee can exit before its checked return is evaluated.
+                if let Some(Stmt::Expr(first)) = after_docstring(&function.body).first()
+                    && error
+                        .range
+                        .is_some_and(|range| first.end() <= range.start())
+                    && let Some(call) = first.value.as_call_expr()
+                    && imre_ast::evaluated_arguments(&call.arguments)
+                        .all(|arg| !arg.is_variadic() && arg.value().is_literal_expr())
+                    && let Some(name) = call.func.as_name_expr()
+                    && self.function_reads_global(owner_module, function, &name.id)
+                    && site.progress.get(&owner_module) == Some(&None)
+                    && let Some(target) =
+                        self.initialized_member(owner_module, name.id.as_str(), None)
+                    && let DefinitionKind::Function(target) = target.kind(&self.db)
+                    && self.nonreturning_function(owner_module, target.node(&owner_ast))
+                {
+                    return None;
+                }
                 return Some(Err(
                     Diagnostic::plain(error.rendered.clone()).classified(Kind::RegisteredExecution)
                 ));
