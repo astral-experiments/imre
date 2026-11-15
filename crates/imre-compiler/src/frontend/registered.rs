@@ -528,6 +528,14 @@ pub(super) fn lower_definition(
         })
 }
 
+/// Which checker owns the function's result contract.
+pub(super) enum ReturnCheck<'a> {
+    Declared,
+    Infer,
+    /// A Python statement can finish the frame while the fixed checker validates its cases.
+    AfterFixed(&'a mut Option<CheckedPlacement>),
+}
+
 /// Keep the Python entry's physical operations and return their existing facts to the graph.
 pub(super) fn place_checked_definition(
     original: &Checker<'_>,
@@ -535,6 +543,7 @@ pub(super) fn place_checked_definition(
     signature: &Signature,
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
+    result: ReturnCheck<'_>,
 ) -> Result<Option<LoweredBody>, String> {
     Ok(prepare_checked_definition(
         original,
@@ -542,7 +551,7 @@ pub(super) fn place_checked_definition(
         signature,
         inference,
         callable_inputs,
-        false,
+        result,
     )?
     .map(|(mut body, placement)| {
         let frame = &placement.frame.function;
@@ -602,7 +611,7 @@ pub(super) fn prepare_checked_definition(
     signature: &Signature,
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
-    infer_result: bool,
+    result: ReturnCheck<'_>,
 ) -> Result<Option<(LoweredBody, CheckedPlacement)>, String> {
     let graph = original.graph;
     let module = original.module;
@@ -625,10 +634,11 @@ pub(super) fn prepare_checked_definition(
         &values,
     );
     checker.nonreturning_functions = original.nonreturning_functions;
-    if infer_result {
+    if matches!(result, ReturnCheck::Infer) {
         checker.python_result_tail = definition.body.last().map(Ranged::start);
     }
     checker.checked_call_contracts = true;
+    checker.fixed_checks_tail = matches!(result, ReturnCheck::AfterFixed(_));
     checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;
     if deferred.is_some() {
@@ -661,15 +671,20 @@ pub(super) fn prepare_checked_definition(
     {
         return Ok(None);
     }
-    Ok(Some((
-        body,
-        CheckedPlacement {
-            module,
-            range: definition.range(),
-            frame,
-            check_source: deferred.is_some(),
-        },
-    )))
+    let erased = frame.function.returns == Type::PythonObject
+        && signature.returns != Type::PythonObject
+        && definition.returns.is_some();
+    let placement = CheckedPlacement {
+        module,
+        range: definition.range(),
+        frame,
+        check_source: deferred.is_some(),
+    };
+    if erased && let ReturnCheck::AfterFixed(after_fixed) = result {
+        *after_fixed = Some(placement);
+        return Ok(None);
+    }
+    Ok(Some((body, placement)))
 }
 
 /// The selected Python return has no later checked statements that depend on

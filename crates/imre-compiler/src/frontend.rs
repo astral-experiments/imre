@@ -1658,6 +1658,7 @@ fn lower_graph(
                 signature,
                 inference,
                 callable_inputs.as_mut(),
+                registered::ReturnCheck::Declared,
             )
             .ok()
             .flatten()
@@ -1727,7 +1728,12 @@ fn lower_graph(
                     let mut checker = checker_for(*module_id);
                     checker.nonreturning_functions = &completed_calls;
                     if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
-                        &checker, definition, signature, inference, None, false,
+                        &checker,
+                        definition,
+                        signature,
+                        inference,
+                        None,
+                        registered::ReturnCheck::Declared,
                     ) && placement.retain_for_launch(
                         graph,
                         &inference.source_checks,
@@ -1762,7 +1768,7 @@ fn lower_graph(
                                     signature,
                                     inference,
                                     Some(inputs),
-                                    false,
+                                    registered::ReturnCheck::Declared,
                                 )
                             {
                                 frame.retain_for_launch(
@@ -2503,6 +2509,7 @@ fn lower_function(
     }
     let statements = checker.function_statements(definition);
     let mut cannot_return = false;
+    let mut after_fixed = None;
     let (mut body, falls_through) = if module.archive.is_some() {
         let args = params.iter().map(|&slot| checker.local(slot)).collect();
         let kind = |ty| match ty {
@@ -2582,6 +2589,7 @@ fn lower_function(
                         signature,
                         inference,
                         inputs.as_deref_mut(),
+                        registered::ReturnCheck::AfterFixed(&mut after_fixed),
                     )
                     .ok()
                     .flatten();
@@ -2663,6 +2671,11 @@ fn lower_function(
             });
         }
     };
+    if failure.is_none()
+        && let (Some(frame), Some(inference)) = (after_fixed, placement)
+    {
+        frame.retain_for_launch(checker.graph, &inference.source_checks, true);
+    }
     let mut source = None;
     if let Some(names) = registered_locals {
         names.extend(checker.namespace_bindings.drain());
@@ -3957,6 +3970,8 @@ struct Checker<'a> {
     python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
+    /// An enclosing fixed checker will validate the final source statement before using this frame.
+    fixed_checks_tail: bool,
     /// A result trial can finish its last statement even when the native result
     /// still needs inference. An earlier refusal must stop before checking siblings.
     python_result_tail: Option<TextSize>,
@@ -4104,6 +4119,7 @@ impl<'a> Checker<'a> {
             placement_only: false,
             python_method_frame: false,
             checked_call_contracts: false,
+            fixed_checks_tail: false,
             python_result_tail: None,
             settled_attributes: None,
             nonreturning_functions: &classes.nonreturning_functions,
@@ -7056,11 +7072,13 @@ impl<'a> Checker<'a> {
             };
             if !supported {
                 if let Some(function) = tail
-                    && self.returns == Type::PythonObject
+                    && (self.returns == Type::PythonObject
+                        || self.fixed_checks_tail && self.return_declaration.is_some())
                     && let Some(body) = output.as_deref_mut()
                     && let Some(falls) =
                         registered::finish_source_statement(self, function, statement, body)
                 {
+                    self.returns = Type::PythonObject;
                     self.frame_arguments = FrameArguments::Python;
                     return Ok(falls);
                 }
