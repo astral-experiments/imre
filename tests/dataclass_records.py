@@ -114,7 +114,7 @@ Option().updated(unknown=True)
         + "    @double.setter\n    def double(self, value: int) -> None:\n        self.value = value // 2\n",
     "property_wrong_return": WRONG_PROPERTY_RETURN,
     "property_wrong_return_read": WRONG_PROPERTY_RETURN + "print(Item(3).double)\n",
-    "classmethod_recursion": METHOD.replace("return cls(value)", "return cls.make(value)"),
+    "classmethod_wrong_return": METHOD.replace("return cls(value)", 'return "wrong"'),
     "classmethod_missing_receiver": METHOD.replace("def make(cls, value: int)", "def make(value: int)"),
     "classmethod_wrong_receiver": METHOD.replace("def make(cls,", "def make(self,").replace("return cls(value)", "return Item(value)"),
     "classmethod_receiver_rebind": METHOD.replace("return cls(value)", "cls = Item\n        return cls(value)"),
@@ -153,6 +153,10 @@ ERRORS = {
         + "def argument() -> int:\n    print(\"must not evaluate argument\")\n    return 1\n"
         + "print(receiver().make(argument()))\n",
         "ValueError",
+    ),
+    "classmethod_recursion_called": (
+        METHOD.replace("return cls(value)", "return cls.make(value)") + "Item.make(3)\n",
+        "RecursionError",
     ),
     "constructor_argument_failure": (
         IMPORT + "@dataclass\nclass Item:\n    name: str\n    value: int\n"
@@ -211,10 +215,13 @@ display((8, 1, 2), stats)
     (fixtures / "upstream_teststats.py").write_bytes(b"import dataclasses\n\n" + original + driver.encode())
 
 
-def check_property_return(name: str, stderr: str) -> None:
+def check_return_diagnostic(name: str, stderr: str) -> None:
     if name in {"property_wrong_return", "property_wrong_return_read"}:
         assert "main.py:7:16" in stderr, (name, stderr)
         assert "expected int, got str" in stderr or "invalid-return-type" in stderr, (name, stderr)
+    elif name == "classmethod_wrong_return":
+        first_line = stderr.partition("\n")[0]
+        assert "main.py:7:16: Imre: expected main.Item, got str" in first_line, (name, stderr)
 
 
 def run_suite(fixtures: Path) -> None:
@@ -223,7 +230,7 @@ def run_suite(fixtures: Path) -> None:
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors=ERRORS,
-        check_rejection=check_property_return,
+        check_rejection=check_return_diagnostic,
         label="dataclass and descriptor",
         description=__doc__,
         thinlto_build_timeout=120,
