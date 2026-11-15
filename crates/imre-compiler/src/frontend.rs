@@ -9896,7 +9896,13 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        if binding == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+        // A module exported by a source module is read from the owner's live namespace.
+        let module_member = self.graph.modules[self.module].is_program_source()
+            && matches!(
+                (base_binding, binding),
+                (Some(Binding::Module(_)), Some(Binding::IntrinsicModule(_)))
+            );
+        if (module_member || binding == Some(Binding::Intrinsic(Intrinsic::DefaultDict)))
             && self.has_static_namespace_root(expression)
         {
             let source = self
@@ -9930,13 +9936,21 @@ impl<'a> Checker<'a> {
         }
         if binding == Some(Binding::ConditionalValue) {
             let operation = "a value selected by a module guard";
-            if expression.as_name_expr().is_some_and(|name| {
-                self.graph.modules[self.module]
+            let module = &self.graph.modules[self.module];
+            if let Some(name) = expression.as_name_expr()
+                && module
                     .optional_imports
                     .values()
                     .flatten()
                     .any(|alias| alias == name.id.as_str())
-            }) {
+            {
+                if module.is_program_source() && self.has_static_namespace_root(expression) {
+                    // The try binds the alias on either arm. Read it after intervening imports.
+                    self.require_registered_representation(|| {
+                        self.scoped_builtin_error(operation, name)
+                    })?;
+                    return Ok(registered::values::located_name(name));
+                }
                 return Err(self.object_export_error(operation, expression));
             }
             return Err(self.object_runtime_export(operation, expression));
