@@ -930,6 +930,20 @@ impl Session {
             })
     }
 
+    /// Whether the indexed module scope binds a name at or after this statement.
+    pub(crate) fn binds_module_name_from(&self, module: usize, start: TextSize) -> bool {
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let parsed = self.parsed(file);
+        index
+            .use_def_map(FileScopeId::global())
+            .definitions_with_usage()
+            .any(|(_, definition, _)| {
+                definition.place(&self.db).as_symbol().is_some()
+                    && definition.focus_range(&self.db, &parsed).start() >= start
+            })
+    }
+
     /// A module operand follows the statement's normal continuation if they have
     /// the same use-def condition. Calls before the statement may themselves raise.
     pub(crate) fn unconditional_module_operand(

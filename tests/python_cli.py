@@ -43,6 +43,20 @@ def check_reassigned_callable_operand(imre, root, run):
 
 def check_registered_entry_operand(imre, root, run):
     entry = root / "checked_operand.py"
+    guard = (
+        "def checked(x: int) -> None: print(x)\n"
+        'if __name__ == "__main__":\n'
+        "    x: list[int] = [3]; "
+    )
+    entry.write_text(guard + "x.append(True); print(x)")
+    result = run(imre, "-m", entry.stem)
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:3:34: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(guard + 'globals()["x"] = ["changed"]; x.append(True); print(x)')
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"['changed', True]\n", b""), result
+
     functions = (
         "def publish(a: int, b: int, send):\n    send(a + b)\n"
         "def report(value):\n    print(value)\n"

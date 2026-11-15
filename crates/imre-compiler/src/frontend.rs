@@ -1694,6 +1694,7 @@ fn lower_graph(
     }
     let mut startup = Vec::new();
     let mut entry_source = None;
+    let mut python_entry = false;
     let entry = {
         let module_id = graph.entry;
         let mut checker = checker_for(module_id);
@@ -1701,7 +1702,23 @@ fn lower_graph(
         checker.nonreturning_functions = &completed_calls;
         let mut fixed_entry = (!needs_registered_entry && unavailable.is_none()).then(|| {
             if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
-                checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
+                // The Python frame must read its live module name. Keep a tail that
+                // binds locals with the checker that owns their layout and contracts.
+                if named
+                    && let Some(guard) = tail.first()
+                    && module_values::main_guard(guard)
+                    && !graph
+                        .session
+                        .binds_module_name_from(module_id, guard.start())
+                {
+                    checker.registered = Some(graph.modules[module_id].registered_values());
+                    checker.registered_local_start = Some(0);
+                    checker.checked_call_contracts = true;
+                    checker.frame_arguments = FrameArguments::Python;
+                    python_entry = true;
+                } else {
+                    checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
+                }
                 // Leave room for the declarations and their Python statement checkpoints.
                 Vec::with_capacity(tail.len() + 2 * prefix.len())
             } else {
@@ -2002,7 +2019,12 @@ fn lower_graph(
                 graph.register_initializer(order.module, frame);
             }
         }
-        if let Some(frame) = entry_source.and_then(|source| source.place(entry).ok()) {
+        let frame = if python_entry && entry.locals.is_empty() {
+            RegisteredFunction::from_checked_body(entry, HashMap::new(), FrameArguments::Python)
+        } else {
+            entry_source.and_then(|source| source.place(entry).ok())
+        };
+        if let Some(frame) = frame {
             graph.register_initializer(graph.entry, frame);
         }
         register(completed, &owners);
