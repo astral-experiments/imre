@@ -48,7 +48,6 @@ REJECTED = {
     "rebind_builtin": 'def f() -> None:\n    len = 1\nf()\n',
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
     "unknown_module": 'import missing_imre_test_module\nprint(1)\n',
-    "recursive": 'def f(x: int) -> int:\n    return f(x)\nf(1)\n',
     "undefined_global": 'def f() -> int:\n    return x\nf()\n',
     "missing_return": 'def f(x: bool) -> int:\n    if x:\n        return 1\nf(False)\n',
     "inplace_list_repeat": 'def f() -> None:\n    x = [1]\n    x *= 2\nf()\n',
@@ -84,8 +83,9 @@ SOURCE_BOUNDARIES = {
     "literal_indentation_data": 'x = """a\n\tb\n\fc"""\nprint(x == "a\\n\\tb\\n\\fc")\n',
 }
 
-# Fixed subscripts and integer conversion carry the failing source range.
+# Compare every frame when the compiled operation retains its source location.
 TRACEBACK_ERRORS = {
+    "recursive": ('def f(x: int) -> int:\n    return f(x)\nf(1)\n', "RecursionError"),
     "bounds": ("x = [1]\nprint(x[1])\n", "IndexError"),
     "negative_bounds": ("x = [1]\nprint(x[-2])\n", "IndexError"),
     "empty_negative_bounds": ("x: list[int] = []\nprint(x[-1])\n", "IndexError"),
