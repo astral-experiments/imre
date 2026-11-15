@@ -150,9 +150,17 @@ impl Restore {
         })
     }
 
-    pub(super) fn run(self) -> Id {
-        self.lock.acquire_restore(self.depth, self.owner);
-        NONE
+    /// # Safety
+    /// The caller exclusively owns its active execution through this native wait.
+    pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        // SAFETY: conversion completed before parking. The closure owns only the
+        // selected native lock and the saved integers.
+        unsafe {
+            super::value::ParkedExecution::wait(context, move || {
+                self.lock.acquire_restore(self.depth, self.owner);
+            })?;
+        }
+        Ok(NONE)
     }
 }
 
@@ -173,7 +181,9 @@ pub(super) fn method(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     if name == "_acquire_restore" {
-        return Ok(Restore::prepare(ctx, args, kwargs)?.run());
+        let restore = Restore::prepare(ctx, args, kwargs)?;
+        // SAFETY: conversion returned to this frame and holds no heap borrow.
+        return unsafe { restore.run(ctx) };
     }
     if matches!(name, "acquire" | "__enter__") {
         let wait = prepare_acquire(ctx, name, args, kwargs)?;

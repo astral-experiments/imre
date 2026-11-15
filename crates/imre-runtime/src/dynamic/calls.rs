@@ -329,7 +329,8 @@ impl RegisteredCall {
                 lock.release()?;
                 Ok(NONE)
             }
-            Self::Restore(wait) => Ok(wait.run()),
+            // SAFETY: the native restore owns its lock. The caller owns the active execution.
+            Self::Restore(wait) => unsafe { wait.run(context) },
             Self::Select(args) => {
                 // SAFETY: the caller owns this context and roots the arguments through the wait.
                 let result = unsafe { stdlib::select::run(context, &args) };

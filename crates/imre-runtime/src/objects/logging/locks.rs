@@ -121,6 +121,11 @@ impl HandlerLock {
         self.state.lock().unwrap().owner
     }
 
+    #[cfg(test)]
+    pub(crate) fn has_parked_waiter(&self) -> bool {
+        self.state.lock().unwrap().parked
+    }
+
     /// Fully release a recursively acquired lock for a condition wait.
     pub(crate) fn release_save(&self) -> Result<(usize, usize)> {
         let mut state = self.state.lock().unwrap();
@@ -378,7 +383,7 @@ mod tests {
             let peer = Arc::clone(&lock);
             let waiter = scope.spawn(move || peer.acquire(true, Some(Duration::from_secs(1))).ok());
             let started = std::time::Instant::now();
-            while !lock.state.lock().unwrap().parked {
+            while !lock.has_parked_waiter() {
                 assert!(started.elapsed() < Duration::from_secs(5));
                 thread::yield_now();
             }

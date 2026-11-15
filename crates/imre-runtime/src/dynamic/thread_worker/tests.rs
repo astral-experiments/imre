@@ -680,6 +680,47 @@ fn zero_timeout_applies_to_worker_exit_and_all_observers_share_native_join() {
 }
 
 #[test]
+fn contended_condition_restore_parks_its_caller_and_recovers_recursion() {
+    use crate::objects::logging::HandlerLock;
+    use std::sync::atomic::AtomicUsize;
+
+    let mut ctx = context();
+    let parked = Arc::<AtomicUsize>::default();
+    ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+    let lock = Arc::<HandlerLock>::default();
+    let receiver = ctx.alloc(Value::HandlerLock(Arc::clone(&lock)));
+    let restore = ctx.lookup_attr(receiver, "_acquire_restore").unwrap();
+    let save = ctx.lookup_attr(receiver, "_release_save").unwrap();
+    assert_eq!(lock.acquire(true, None).ok(), Some(true));
+    assert_eq!(lock.acquire(true, None).ok(), Some(true));
+    let state = ctx.call(save, vec![], vec![]).unwrap();
+    let owner = thread_ident();
+    let timeout = Duration::from_secs(3);
+    let observed = thread::scope(|scope| {
+        let (ready, acquired) = mpsc::sync_channel(0);
+        let lock = Arc::clone(&lock);
+        let parked = Arc::clone(&parked);
+        let peer = scope.spawn(move || {
+            assert_eq!(lock.acquire(true, Some(timeout)).ok(), Some(true));
+            ready.send(()).unwrap();
+            let deadline = std::time::Instant::now() + timeout;
+            while !lock.has_parked_waiter() && std::time::Instant::now() < deadline {
+                thread::yield_now();
+            }
+            let observation = (lock.has_parked_waiter(), parked.load(Ordering::Acquire));
+            assert!(lock.release().is_ok());
+            observation
+        });
+        acquired.recv_timeout(timeout).unwrap();
+        assert_eq!(ctx.call(restore, vec![state], vec![]).unwrap(), NONE);
+        peer.join().unwrap()
+    });
+    assert_eq!(observed, (true, 1));
+    assert_eq!(parked.load(Ordering::Acquire), 0);
+    assert_eq!(lock.state(), Some((owner, 2)));
+}
+
+#[test]
 fn registered_observers_park_through_native_tls_teardown() {
     use std::sync::atomic::AtomicUsize;
 
