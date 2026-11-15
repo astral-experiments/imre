@@ -340,7 +340,8 @@ impl Context {
 
     /// A new module member follows all named slots in the effective storage base.
     pub(super) fn module_slot_start(&mut self, class: Id) -> Result<usize> {
-        let (mut base, _) = self.module_slot_layout(class)?;
+        let bases = self.class_bases_tuple(class).expect("prepared module class");
+        let mut base = self.member_layout_base(&bases)?;
         let mut count = 0;
         while matches!(self.heap.get(base), Value::Class { .. }) {
             let (parent, slots) = self.module_slot_layout(base)?;
