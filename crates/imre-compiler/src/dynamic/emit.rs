@@ -468,6 +468,10 @@ impl<'a> PreparedBody<'a> {
         };
         let syntax = parsed.syntax();
         let tokens = parsed.tokens();
+        let registered_values = checked_source
+            .filter(|source| std::ptr::eq(source.parsed.syntax(), syntax))
+            .and_then(|source| source.cached_registered_values());
+        let mut bindings = BTreeSet::new();
         let (replacements, has_templates) = module_source::validate(
             &path,
             source,
@@ -479,15 +483,13 @@ impl<'a> PreparedBody<'a> {
             },
             keep_docstrings
                 && !(interactive && syntax.body.first().is_some_and(ast::Stmt::is_expr_stmt)),
+            registered_values.is_none().then_some(&mut bindings),
         )?;
         let docs = if keep_docstrings && name == "collections" && bundled {
             crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
         } else {
             None
         };
-        let registered_values = checked_source
-            .filter(|source| std::ptr::eq(source.parsed.syntax(), syntax))
-            .and_then(|source| source.cached_registered_values());
         let template_fields = if has_templates {
             imre_ast::strings::template_fields(source, tokens, syntax)
         } else {
@@ -519,10 +521,9 @@ impl<'a> PreparedBody<'a> {
                 .map_or_else(|| stmt.start(), Ranged::start)
             })
             .unwrap_or_default();
-        let method_imports = registered_values.map_or_else(
-            || Cow::Owned(imre_ast::module_imports(&syntax.body)),
-            |values| Cow::Borrowed(&values.method_imports),
-        );
+        let method_imports = registered_values.map_or(Cow::Owned(bindings), |values| {
+            Cow::Borrowed(&values.method_imports)
+        });
         let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
         let (body, private_names) = match normalized {
             Some(super::LoweredRoot::Complete(body, names)) => (Cow::Owned(body), names),

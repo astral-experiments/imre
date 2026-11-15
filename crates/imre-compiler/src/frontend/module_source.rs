@@ -1,6 +1,6 @@
 //! Parsed physical module text and the source checks used before preparing registered code.
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
 use ruff_python_ast as ast;
@@ -135,14 +135,17 @@ fn validate_syntax(
     source: &str,
     parsed: &Parsed<ast::ModModule>,
     checked: Option<&Parsed<ast::ModModule>>,
+    bindings: Option<&mut BTreeSet<String>>,
 ) -> Result<(), String> {
     if let Some((range, reason)) = imre_ast::comprehension::dict_unpacking_error(parsed) {
         let error = super::diagnostic_message(source, &range, &format!("SyntaxError: {reason}"));
         return Err(format!("{}:{error}", path.display()));
     }
     if checked.is_none_or(|previous| !std::ptr::eq(previous, parsed)) {
-        crate::analysis::check_scope_syntax(source, parsed.syntax())
+        crate::analysis::check_scope_syntax(source, parsed.syntax(), bindings)
             .map_err(|error| format!("{}:{error}", path.display()))?;
+    } else if let Some(bindings) = bindings {
+        *bindings = imre_ast::module_imports(&parsed.syntax().body);
     }
     if let Some(keyword) = imre_ast::repeated_keyword(parsed.syntax().into()) {
         let name = keyword.arg.as_ref().expect("repeated named argument");
@@ -160,7 +163,7 @@ pub(crate) fn validate_file(
     parsed: &Parsed<ast::ModModule>,
     keep_docstrings: bool,
 ) -> Result<(), String> {
-    validate_syntax(path, source, parsed, None)?;
+    validate_syntax(path, source, parsed, None, None)?;
     super::validate_docstring_literals(source, parsed, keep_docstrings, None)
         .map_err(|error| format!("{}:{error}", path.display()))
 }
@@ -175,9 +178,10 @@ pub(crate) fn validate<'a>(
     checked: Option<&'a crate::modules::SourceModule>,
     checked_literal: Option<&Parsed<ast::ModModule>>,
     keep_docstrings: bool,
+    bindings: Option<&mut BTreeSet<String>>,
 ) -> Result<(Cow<'a, LiteralReplacements>, bool), String> {
     let checked_scope = checked_literal.or_else(|| checked.map(|module| &*module.parsed));
-    validate_syntax(path, source, parsed, checked_scope)?;
+    validate_syntax(path, source, parsed, checked_scope, bindings)?;
     let (replacements, has_templates) = if let Some(module) = checked
         && let Some(values) = module.cached_registered_values()
     {
@@ -238,6 +242,7 @@ mod tests {
                 checked,
                 None,
                 keep,
+                None,
             )
         };
         let (independent, has_templates) = validate(None, false).unwrap();
@@ -263,6 +268,7 @@ mod tests {
             Some(module),
             None,
             false,
+            None,
         )
         .unwrap();
         assert!(matches!(borrowed, (Cow::Borrowed(borrowed), true) if std::ptr::eq(borrowed, map)));
@@ -281,6 +287,7 @@ mod tests {
             None,
             Some(&checked.parsed),
             false,
+            None,
         )
         .unwrap_err();
         assert_eq!(

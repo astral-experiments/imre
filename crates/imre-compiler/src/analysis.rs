@@ -1624,7 +1624,8 @@ impl Session {
         if let Some(error) = parsed.errors().first() {
             return Err(format!("{path}: {error}"));
         }
-        check_scope_syntax(source, parsed.syntax()).map_err(|error| format!("{path}:{error}"))?;
+        check_scope_syntax(source, parsed.syntax(), None)
+            .map_err(|error| format!("{path}:{error}"))?;
         check_handler_count(parsed.tokens()).map_err(|error| format!("{path}: {error}"))?;
         // Source files additionally restrict form feeds in suite and replacement-field indentation.
         if kind != crate::SourceKind::Command {
@@ -5210,8 +5211,9 @@ impl<'a> Visitor<'a> for LoopTransfers {
 pub(crate) fn check_scope_syntax(
     source: &str,
     module: &ruff_python_ast::ModModule,
+    bindings: Option<&mut std::collections::BTreeSet<String>>,
 ) -> Result<(), String> {
-    if let Some(range) = imre_ast::misplaced_star_import(&module.body) {
+    if let Some(range) = imre_ast::check_import_scopes(&module.body, bindings) {
         return Err(crate::frontend::diagnostic_message(
             source,
             &range,
