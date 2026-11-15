@@ -76,17 +76,11 @@ impl NamedFunction<'_> {
         def: &ast::StmtFunctionDef,
         names: &imre_ast::Names,
         child: ClosureNames,
-        may_capture_class: bool,
+        captures_class: bool,
         suspension_flags: u32,
         annotation_reads: Option<Box<super::ParameterReads>>,
     ) -> (Self, ClosureNames) {
         let parameters = Some(def.parameters.as_ref());
-        let captures_class = may_capture_class
-            && imre_ast::class_cell::function_needed(
-                &def.body,
-                parameters,
-                child.string_annotations,
-            );
         let (metadata, mut child) =
             CallableMetadata::new(parameters, child, suspension_flags, |_| captures_class);
         let header = Self {

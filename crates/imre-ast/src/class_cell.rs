@@ -1,7 +1,10 @@
 //! Identify the implicit cells needed before a class body executes.
+use std::collections::HashSet;
+
 use crate::comprehension::{Output, Plan};
 use ast::visitor::{self, Visitor};
 use ruff_python_ast as ast;
+use ruff_text_size::{Ranged, TextSize};
 
 const CLASS: u8 = 1;
 const DICT: u8 = 2;
@@ -45,7 +48,17 @@ pub struct ClassCells {
 
 impl ClassCells {
     pub fn of(body: &[ast::Stmt], string_annotations: bool) -> Self {
+        Self::with_method_cells(body, string_annotations, None)
+    }
+
+    /// Collect methods that close over the class while resolving the class's own cells.
+    pub fn with_method_cells(
+        body: &[ast::Stmt],
+        string_annotations: bool,
+        methods: Option<&mut HashSet<TextSize>>,
+    ) -> Self {
         let mut scope = Scope {
+            methods,
             class: true,
             string_annotations,
             ..Scope::default()
@@ -83,7 +96,10 @@ pub fn function_needed(
     scope.free() & CLASS != 0
 }
 
-fn function_scope(parameters: Option<&ast::Parameters>, string_annotations: bool) -> Scope {
+fn function_scope(
+    parameters: Option<&ast::Parameters>,
+    string_annotations: bool,
+) -> Scope<'static> {
     Scope {
         string_annotations,
         shadows: parameters.map_or(0, |params| {
@@ -94,7 +110,8 @@ fn function_scope(parameters: Option<&ast::Parameters>, string_annotations: bool
 }
 
 #[derive(Default)]
-struct Scope {
+struct Scope<'s> {
+    methods: Option<&'s mut HashSet<TextSize>>,
     class: bool,
     string_annotations: bool,
     shadows: u8,
@@ -106,7 +123,7 @@ struct Scope {
     annotation: u8,
 }
 
-impl Scope {
+impl Scope<'_> {
     fn child(&self) -> Self {
         Self {
             string_annotations: self.string_annotations,
@@ -143,7 +160,7 @@ impl Scope {
         }
     }
 }
-impl<'a> Visitor<'a> for Scope {
+impl<'a> Visitor<'a> for Scope<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
         if self.class {
             // Even an unannotated method gets an annotation scope in Python 3.14.
@@ -166,6 +183,12 @@ impl<'a> Visitor<'a> for Scope {
                 let mut method = self.child();
                 method.shadows = cells(f.parameters.iter().map(|arg| arg.name().as_str()));
                 method.visit_body(&f.body);
+                let free = method.free();
+                if free & CLASS != 0
+                    && let Some(methods) = &mut self.methods
+                {
+                    methods.insert(f.start());
+                }
                 for default in f
                     .parameters
                     .iter_non_variadic_params()
@@ -181,7 +204,7 @@ impl<'a> Visitor<'a> for Scope {
                 if let Some(result) = &f.returns {
                     parent.visit_annotation(result);
                 }
-                parent.nested |= method.free();
+                parent.nested |= free;
                 if let Some(generic) = generic {
                     self.add_annotation(generic);
                 }

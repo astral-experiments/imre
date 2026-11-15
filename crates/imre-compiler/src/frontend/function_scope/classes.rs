@@ -1,5 +1,5 @@
 //! Class namespaces hide their own bindings from direct reads, while methods capture outer cells.
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextSize};
@@ -50,6 +50,7 @@ impl ClassScope {
         class: &ast::StmtClassDef,
         names: &imre_ast::Names,
         enclosing_class: Option<ruff_text_size::TextSize>,
+        method_cells: &mut HashSet<TextSize>,
     ) -> Self {
         let body = &class.body;
         let string_annotations = names.string_annotations;
@@ -68,7 +69,11 @@ impl ClassScope {
                 },
                 captures_class: false,
             },
-            cells: imre_ast::class_cell::ClassCells::of(body, string_annotations),
+            cells: imre_ast::class_cell::ClassCells::with_method_cells(
+                body,
+                string_annotations,
+                Some(method_cells),
+            ),
             annotation_reads: BTreeSet::new(),
             static_attributes: BTreeSet::new(),
         }
