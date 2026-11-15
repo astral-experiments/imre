@@ -905,11 +905,8 @@ fn registered_observers_park_through_native_tls_teardown() {
             "{name} joined the native thread during preparation"
         );
         // SAFETY: preparation has returned and the observing caller is still active.
-        assert_eq!(
-            unsafe { call.run(&raw mut ctx) }.unwrap(),
-            expected,
-            "{name}"
-        );
+        let observed = unsafe { call.run(&raw mut ctx) }.unwrap();
+        assert_eq!(observed, expected, "{name}");
         assert_eq!(parked.load(Ordering::Acquire), 0, "{name} returned parked");
         depths.push(
             observation
