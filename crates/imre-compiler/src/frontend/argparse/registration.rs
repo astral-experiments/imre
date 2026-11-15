@@ -9,15 +9,13 @@ pub(super) fn is_intrinsic(
     intrinsic: Intrinsic,
     graph: &SourceGraph,
     id: ModuleId,
-    locals: &HashSet<String>,
 ) -> bool {
     let mut root = expr;
     while let ast::Expr::Attribute(attr) = root {
         root = &attr.value;
     }
-    root.as_name_expr()
-        .is_some_and(|name| !locals.contains(name.id.as_str()))
-        && graph.resolve(id, expr) == Some(Binding::Intrinsic(intrinsic))
+    graph.resolve(id, expr) == Some(Binding::Intrinsic(intrinsic))
+        && graph.session.reads_module_binding(id, root)
 }
 
 /// CPython formats the choices to validate an action's metavar during add_argument.
@@ -93,7 +91,6 @@ struct Calls<'a> {
     receiver: &'a str,
     graph: &'a SourceGraph,
     module: ModuleId,
-    locals: &'a HashSet<String>,
     prefixes: &'a str,
     failures: HashMap<TextSize, Expr>,
 }
@@ -113,8 +110,7 @@ impl Calls<'_> {
                         | ast::Expr::StringLiteral(_)
                         | ast::Expr::NumberLiteral(_)
                 )
-                && builtin_constant(&kw.value, &self.graph.modules[self.module], self.locals)
-                    .is_none()
+                && builtin_constant(&kw.value, self.graph, self.module).is_none()
             {
                 // A dynamic destination can fail lookup before the action constructor runs.
                 return None;
@@ -126,7 +122,6 @@ impl Calls<'_> {
             Intrinsic::BooleanOptionalAction,
             self.graph,
             self.module,
-            self.locals,
         );
         let class = if boolean {
             "BooleanOptionalAction"
@@ -246,14 +241,12 @@ pub(super) fn failures(
     receiver: &str,
     graph: &SourceGraph,
     module: ModuleId,
-    locals: &HashSet<String>,
     prefixes: &str,
 ) -> HashMap<TextSize, Expr> {
     let mut calls = Calls {
         receiver,
         graph,
         module,
-        locals,
         prefixes,
         failures: HashMap::new(),
     };
