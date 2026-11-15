@@ -79,7 +79,7 @@ fn bound_release_signals_the_selected_native_waiter() {
     assert!(gate.acquire(false, None));
     let waiter = ctx.alloc(Value::PrimitiveLock(Arc::clone(&gate)));
     let release = ctx.lookup_attr(waiter, "release").unwrap();
-    let call = ctx.prepare_call(release, vec![], vec![]).unwrap();
+    let call = ctx.prepare_call(release, vec![].into(), vec![]).unwrap();
     let crate::dynamic::calls::RegisteredCall::Release(selected) = call else {
         panic!("bound lock release was not prepared");
     };
@@ -152,12 +152,12 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
                 ctx.prepare_call_in_scope(
                     scope,
                     operator,
-                    vec![wrapper],
+                    vec![wrapper].into(),
                     vec![("alias".into(), value)],
                 )
                 .unwrap()
             } else {
-                ctx.prepare_call(target, vec![value], vec![("alias".into(), value)])
+                ctx.prepare_call(target, vec![value].into(), vec![("alias".into(), value)])
                     .unwrap()
             };
             let crate::dynamic::calls::RegisteredCall::Native(frame) = call else {

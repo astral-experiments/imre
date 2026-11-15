@@ -6,8 +6,8 @@ use super::wrapper_descriptor::BuiltinDescriptor;
 use super::*;
 
 /// Written operands still need Python argument binding. Selected slots are in formal order.
-pub(super) enum FunctionArguments {
-    Written(Vec<Id>, Vec<(String, Id)>, Option<Id>),
+pub(super) enum FunctionArguments<'a> {
+    Written(Cow<'a, [Id]>, Vec<(String, Id)>, Option<Id>),
     Bound(Vec<Id>),
 }
 
@@ -8397,7 +8397,7 @@ impl Context {
     pub(super) fn prepare_call(
         &mut self,
         mut callable: Id,
-        mut args: Vec<Id>,
+        mut args: Cow<'_, [Id]>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<RegisteredCall> {
         loop {
@@ -8413,7 +8413,7 @@ impl Context {
                     receiver,
                     ..
                 } => {
-                    args = method_arguments(receiver, args)?;
+                    args = method_arguments(receiver, owned_ids(args)?)?.into();
                     callable = target;
                 }
                 Value::StaticMethod {
@@ -8475,7 +8475,7 @@ impl Context {
                 _ => break,
             }
         }
-        self.call_other(callable, args, kwargs)
+        self.call_other(callable, owned_ids(args)?, kwargs)
             .map(RegisteredCall::Returned)
     }
 
@@ -8507,12 +8507,12 @@ impl Context {
                 self.validate_keyword_keys(mapping)?;
                 return self.prepare_function_call(
                     callable,
-                    FunctionArguments::Written(args, Vec::new(), Some(mapping)),
+                    FunctionArguments::Written(args.into(), Vec::new(), Some(mapping)),
                 );
             }
         }
         let kwargs = self.keyword_args(mapping)?;
-        self.prepare_call_in_scope(scope, callable, args, kwargs)
+        self.prepare_call_in_scope(scope, callable, args.into(), kwargs)
     }
 
     fn validate_keyword_keys(&self, mapping: Id) -> Result<()> {
@@ -8534,7 +8534,7 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        let call = self.prepare_call(callable, args, kwargs)?;
+        let call = self.prepare_call(callable, args.into(), kwargs)?;
         // SAFETY: the call was prepared in this context for synchronous execution.
         unsafe { call.run(self) }
     }
@@ -9431,7 +9431,7 @@ impl Context {
     pub(super) fn prepare_function_call(
         &mut self,
         callable: Id,
-        arguments: FunctionArguments,
+        arguments: FunctionArguments<'_>,
     ) -> Result<RegisteredCall> {
         let Value::Function {
             ref fields,
@@ -9501,12 +9501,12 @@ impl Context {
                 let binding = shape.bind(&name, args.len(), keys, num_defaults, |n| {
                     self.dict_named_item(kwdefaults, n).is_some()
                 })?;
-                for (n, &v) in pos.iter().zip(&args) {
+                for (n, &v) in pos.iter().zip(args.iter()) {
                     self.bind_argument(local, n, v)?;
                 }
                 if let Some(n) = sig.varargs.as_deref() {
                     let extra = if pos.is_empty() {
-                        args
+                        owned_ids(args)?
                     } else {
                         copy_ids(args.get(pos.len()..).unwrap_or_default())?
                     };

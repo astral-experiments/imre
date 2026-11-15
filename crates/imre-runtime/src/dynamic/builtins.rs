@@ -1493,7 +1493,7 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        let call = self.prepare_call_in_scope(scope, callable, args, kwargs)?;
+        let call = self.prepare_call_in_scope(scope, callable, args.into(), kwargs)?;
         // SAFETY: this synchronous caller owns the context that prepared the call.
         unsafe { call.run(self) }
     }
@@ -1503,14 +1503,14 @@ impl Context {
         &mut self,
         scope: Id,
         callable: Id,
-        args: Vec<Id>,
+        args: std::borrow::Cow<'_, [Id]>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<super::calls::RegisteredCall> {
         if let Value::Native(name) = self.heap.get(callable) {
             let result = match name.as_str() {
                 "operator.call" => {
-                    let (target, args) = self.operator_call_target(args)?;
-                    return self.prepare_call_in_scope(scope, target, args, kwargs);
+                    let (target, args) = self.operator_call_target(super::owned_ids(args)?)?;
+                    return self.prepare_call_in_scope(scope, target, args.into(), kwargs);
                 }
                 "len" => call(self, "len", &args, &kwargs),
                 "eval" => return self.prepare_eval_exec(scope, "eval", &args, &kwargs),
