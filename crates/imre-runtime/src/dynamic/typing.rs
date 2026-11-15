@@ -2956,22 +2956,22 @@ impl Context {
                 if self.instance_of(value, class) {
                     return Ok(true);
                 }
-                // Fixed native values cannot override their reported class.
-                let Some(actual) = self.heap.get(value).instance_class() else {
-                    return Ok(false);
-                };
-                if !self.is_type_object(class) {
-                    return Ok(false);
-                }
-                match self.lookup_attr(value, "__class__") {
-                    Ok(reported) => Ok(reported != actual
-                        && self.is_type_object(reported)
-                        && self.direct_subclass(reported, class)),
-                    Err(error) if self.is_attribute_error(&error) => Ok(false),
-                    Err(error) => Err(error),
-                }
+                Ok(self.is_type_object(class)
+                    && self
+                        .reported_instance_class(value)?
+                        .is_some_and(|reported| self.direct_subclass(reported, class)))
             }
         }
+    }
+
+    /// Only Python instances can override the class reported to isinstance.
+    pub(super) fn reported_instance_class(&mut self, value: Id) -> Result<Option<Id>> {
+        let Some(actual) = self.heap.get(value).instance_class() else {
+            return Ok(None);
+        };
+        Ok(self
+            .optional_attr(value, "__class__")?
+            .filter(|&reported| reported != actual && self.is_type_object(reported)))
     }
 
     /// ABCMeta checks the instance's reported class first, then its actual type if different.

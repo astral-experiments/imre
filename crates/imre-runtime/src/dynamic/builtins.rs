@@ -1733,15 +1733,33 @@ pub(super) fn compile(
     } else {
         ctx.inherited_compile_flags()
     };
+    let mode = match ctx.str_value(args[2])? {
+        "exec" => "exec",
+        "single" => "single",
+        "eval" => "eval",
+        "func_type" => {
+            return Err(Error::new(
+                "ValueError",
+                "compile() mode 'func_type' requires flag PyCF_ONLY_AST",
+            ));
+        }
+        _ => {
+            return Err(Error::new(
+                "ValueError",
+                "compile() mode must be 'exec', 'eval' or 'single'",
+            ));
+        }
+    };
+    ctx.check_compile_ast(args[0], mode)?;
     // Ordinary native compilation implements Python optimization level zero. The
     // loader already owns the code registered for this executable's startup options.
     if (loader || ctx.config["optimize"].as_i64().unwrap_or(0) == 0)
-        && ctx.str_value(args[2])? == "exec"
+        && mode == "exec"
         && let Some(code) = ctx.file_code_from_bytes(filename, args[0], inherited, loader)?
     {
         return Ok(code);
     }
-    ctx.compile_source_with_flags(args[0], filename, args[2], inherited)
+    ctx.compile_source_with_flags(args[0], filename, mode, inherited)
 }
 
 pub(super) fn call(
