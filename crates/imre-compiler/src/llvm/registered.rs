@@ -154,9 +154,13 @@ pub(crate) fn frame_inputs(
                         uses_python_protocol = true;
                         true
                     }
-                    Statement::SetItem(_, receiver, _, _)
-                    | Statement::AugmentItem(receiver, _, ir::ItemUpdate::Protocol(_), _) => {
-                        uses_python_protocol |= receiver.ty == Type::PythonObject;
+                    Statement::SetItem(_, receiver, key, value)
+                    | Statement::AugmentItem(receiver, key, ir::ItemUpdate::Protocol(_), value) => {
+                        if receiver.ty == Type::PythonObject {
+                            // Both Python item writers consume the original key and value handles.
+                            uses_python_protocol = true;
+                            protocol_reads += protocol_parameter(key) + protocol_parameter(value);
+                        }
                         matches!(receiver.ty, Type::Dict(_) | Type::PythonObject)
                     }
                     Statement::Clear(slot) => uses_slot(slot, true),
