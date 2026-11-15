@@ -672,6 +672,18 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// Store an already checked fixed value with its concrete word kind and owner.
+    pub(crate) fn into_object_value(self) -> Self {
+        if self.ty == Type::ObjectValue {
+            self
+        } else {
+            Self {
+                ty: Type::ObjectValue,
+                kind: ExprKind::Builtin(Builtin::BoxValue, vec![self]),
+            }
+        }
+    }
+
     pub(crate) fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Self {
         Self {
             ty: value.ty,
@@ -2186,7 +2198,6 @@ pub(crate) enum Builtin {
         reversed: bool,
     },
     MappingObjectGet,
-    ExceptionTupleView,
     ExceptionKeywordSuggestion,
     BindSourceKeywords,
     /// A new nominal record whose arguments initialize its complete checked layout.
