@@ -282,7 +282,7 @@ pub(super) enum RegisteredCall {
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
     Select(Vec<Id>),
-    Accept(crate::ObjectOwner),
+    Accept(Id),
     Recv(stdlib::socket::Recv),
 }
 
