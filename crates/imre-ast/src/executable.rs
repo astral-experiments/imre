@@ -347,19 +347,38 @@ impl BindingErrors {
             source,
             in_function: false,
             group: None,
+            past_future_prefix: false,
+            misplaced_future: None,
         };
-        check.visit_body(body);
+        // Future imports are allowed in the module prefix following its optional docstring.
+        for stmt in ast::helpers::body_without_leading_docstring(body) {
+            check.past_future_prefix =
+                check.past_future_prefix || crate::future_statement(stmt).is_none();
+            check.visit_stmt(stmt);
+        }
+        if let Some(range) = check.misplaced_future {
+            // The symbol table visits imported aliases before checking future placement.
+            let future = match crate::misplaced_star_import(body) {
+                Some(star) if star.start() < range.end() => {
+                    (star, "import * only allowed at module level")
+                }
+                _ => (
+                    range,
+                    "from __future__ imports must occur at the beginning of the file",
+                ),
+            };
+            check.errors.symbol = Some(future)
+                .into_iter()
+                .chain(check.errors.symbol)
+                .min_by_key(|(span, _)| span.start());
+        }
         check.errors
     }
 
-    /// Future directives and reserved bindings are diagnosed during symbol-table construction.
-    pub fn first_symbol(
-        &self,
-        future: Option<(TextRange, &'static str)>,
-    ) -> Option<(TextRange, &'static str)> {
-        future
+    /// Reserved stores and symbol-table errors are compared in source order.
+    pub fn first_symbol(&self) -> Option<(TextRange, &'static str)> {
+        self.symbol
             .into_iter()
-            .chain(self.symbol)
             .chain(self.target)
             .min_by_key(|(range, _)| range.start())
     }
@@ -370,6 +389,8 @@ struct Check<'s> {
     source: &'s str,
     in_function: bool,
     group: Option<GroupHandler>,
+    past_future_prefix: bool,
+    misplaced_future: Option<TextRange>,
 }
 
 impl Check<'_> {
@@ -417,6 +438,9 @@ impl Check<'_> {
 
 impl<'a> Visitor<'a> for Check<'_> {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if self.past_future_prefix && crate::future_statement(stmt).is_some() {
+            self.misplaced_future.get_or_insert(stmt.range());
+        }
         match stmt {
             ast::Stmt::Assert(assertion) if self.errors.target.is_none() => {
                 self.errors.target = assertion_binding_error(assertion);

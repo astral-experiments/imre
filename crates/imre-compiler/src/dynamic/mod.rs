@@ -118,11 +118,9 @@ impl ModuleSyntaxError {
     /// Binding and future errors have a shared precedence for files and literal modules.
     pub(crate) fn in_body(source: &str, body: &[ast::Stmt]) -> Option<Self> {
         let bindings = imre_ast::executable::BindingErrors::check(body, source);
-        let future = imre_ast::future_import_error(body);
-        let validate_at_origin =
-            future.is_none() && bindings.symbol.is_none() && bindings.pattern.is_none();
+        let validate_at_origin = bindings.symbol.is_none() && bindings.pattern.is_none();
         let mut error = bindings
-            .first_symbol(future)
+            .first_symbol()
             .map(|(range, reason)| Self::new(source, range, reason.to_owned(), false))
             .or_else(|| {
                 let issue = bindings.handler?;

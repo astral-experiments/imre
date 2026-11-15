@@ -2533,10 +2533,6 @@ impl Context {
             imre_ast::check_single_input(&module.body, parsed.tokens())
                 .map_err(|message| Error::new("SyntaxError", message))?;
         }
-        let future_error = match parsed.syntax() {
-            ast::Mod::Module(module) => imre_ast::future_import_error(&module.body),
-            _ => None,
-        };
         let spellings = string_replacements(source, parsed.tokens());
         let has_named_bindings = source.contains(":=");
         let scope_error =
@@ -2577,7 +2573,7 @@ impl Context {
             }
             _ => Default::default(),
         };
-        let symbol_error = bindings.first_symbol(future_error);
+        let symbol_error = bindings.first_symbol();
         let mut code = Program::new("<module>", has_named_bindings);
         code.deferred_pattern = bindings
             .pattern
