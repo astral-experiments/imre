@@ -5776,6 +5776,7 @@ impl Context {
                 if matches!(name, "__base__" | "__bases__" | "__mro__")
                     && (builtins::CORE_RUNTIME_TYPES.contains(&class.as_str())
                         || class == defaultdict::CLASS
+                        || stdlib::datetime::members(class).is_some()
                         || builtins::is_exported_type(class)) =>
             {
                 if name == "__base__" {
