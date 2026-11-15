@@ -2,16 +2,6 @@
 
 use super::*;
 
-fn self_field<'a>(expr: &'a ast::Expr, this: &str) -> Option<&'a str> {
-    if let ast::Expr::Attribute(field) = expr
-        && matches!(&*field.value, ast::Expr::Name(n) if n.id.as_str() == this)
-    {
-        Some(field.attr.as_str())
-    } else {
-        None
-    }
-}
-
 impl Checker<'_> {
     /// A Python constructor can accept a literal mapping when its first and
     /// only post-init action wraps that field in a generated, side-effect-free
@@ -53,7 +43,7 @@ impl Checker<'_> {
         let [value, class_spec] = test.arguments.args.as_ref() else {
             return None;
         };
-        let field = self_field(value, this)?;
+        let field = crate::classes::receiver_field(value, this)?;
         if !builtin(&test.func, "isinstance")
             || !test.arguments.keywords.is_empty()
             || !builtin(class_spec, "dict")
@@ -92,7 +82,7 @@ impl Checker<'_> {
         let [kw] = wrap.arguments.keywords.as_ref() else {
             return None;
         };
-        if kw.arg.is_none() || self_field(&kw.value, this) != Some(field) {
+        if kw.arg.is_none() || crate::classes::receiver_field(&kw.value, this) != Some(field) {
             return None;
         }
         let Binding::Definition(target) = self.graph.resolve(module, &wrap.func)? else {

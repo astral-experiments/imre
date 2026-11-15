@@ -2,11 +2,6 @@
 
 use super::*;
 
-fn self_attribute<'a>(expr: &'a ast::Expr, receiver: &str) -> Option<&'a str> {
-    let attr = expr.as_attribute_expr()?;
-    (attr.value.as_name_expr()?.id == receiver).then(|| attr.attr.as_str())
-}
-
 fn called_attribute(expr: &ast::Expr) -> Option<&ast::ExprAttribute> {
     let call = expr.as_call_expr()?;
     call.arguments.is_empty().then_some(())?;
@@ -20,7 +15,7 @@ fn copied_factory<'a>(expr: &'a ast::Expr, receiver: &str) -> Option<&'a str> {
     }
     let call = copy.value.as_call_expr()?;
     call.arguments.is_empty().then_some(())?;
-    self_attribute(&call.func, receiver)
+    receiver_field(&call.func, receiver)
 }
 
 fn literal_type(expr: &ast::Expr) -> Option<String> {
@@ -101,13 +96,13 @@ pub(super) fn infer(
     let mut mappings: HashMap<&str, String> = HashMap::new();
     let mut locals = HashMap::new();
     for stmt in &initializer.body {
-        let ast::Stmt::Assign(assign) = stmt else {
+        let Some((written_targets, rhs)) = initializer_assignment(initializer, stmt) else {
             locals.clear();
             continue;
         };
         // Do not reuse a pair's types if either local has been rebound.
         let mut targets = Vec::new();
-        for t in &assign.targets {
+        for t in written_targets {
             initializer_targets(t, &mut targets);
         }
         for t in targets {
@@ -115,33 +110,37 @@ pub(super) fn infer(
                 locals.remove(n.id.as_str());
             }
         }
-        if ast::helpers::any_over_body(std::slice::from_ref(stmt), ast::Expr::is_named_expr) {
+        if written_targets
+            .iter()
+            .chain([rhs])
+            .any(|expr| ast::helpers::any_over_expr(expr, ast::Expr::is_named_expr))
+        {
             locals.clear();
             continue;
         }
-        let [target] = assign.targets.as_slice() else {
+        let [target] = written_targets else {
             continue;
         };
         if let Some(pair) = target.as_tuple_expr()
             && let [key, value] = pair.elts.as_slice()
             && let (Some(key), Some(value)) = (key.as_name_expr(), value.as_name_expr())
             && key.id != value.id
-            && let Some(pop) = called_attribute(&assign.value)
+            && let Some(pop) = called_attribute(rhs)
             && pop.attr.as_str() == "popitem"
-            && let Some(source) = self_attribute(&pop.value, receiver)
+            && let Some(source) = receiver_field(&pop.value, receiver)
             && let Some(element) = mappings.get(source)
         {
             locals.insert(key.id.as_str(), "str".to_owned());
             locals.insert(value.id.as_str(), element.clone());
             continue;
         }
-        let Some(name) = self_attribute(target, receiver) else {
+        let Some(name) = receiver_field(target, receiver) else {
             continue;
         };
         if fields.iter().any(|f| f.name == name) {
             continue;
         }
-        let factory = copied_factory(&assign.value, receiver)
+        let factory = copied_factory(rhs, receiver)
             .and_then(|factory| methods.iter().position(|m| m.name.as_str() == factory));
         let element = if let Some(index) = factory {
             let method = &methods[index];
@@ -149,7 +148,7 @@ pub(super) fn infer(
                 continue;
             }
             literal_mapping(method)
-        } else if let Some(dict) = assign.value.as_dict_expr()
+        } else if let Some(dict) = rhs.as_dict_expr()
             && dict.items.iter().all(|entry| {
                 entry.key.as_ref().is_some_and(ast::Expr::is_name_expr)
                     && entry.value.is_name_expr()

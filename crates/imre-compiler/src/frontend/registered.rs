@@ -2835,17 +2835,7 @@ impl<'a> SuitePreparation<'a> {
                 body.mixed(self, statement, self.operand_refusals(&operands[start..]));
                 continue;
             }
-            let assignment = match stmt {
-                ast::Stmt::Assign(assign) => {
-                    Some((assign.targets.as_slice(), assign.value.as_ref()))
-                }
-                ast::Stmt::AnnAssign(ann) => ann
-                    .value
-                    .as_deref()
-                    .map(|value| (std::slice::from_ref(ann.target.as_ref()), value)),
-                _ => None,
-            };
-            if let Some((targets, rhs)) = assignment {
+            if let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) {
                 let input = scope.hidden(Type::PythonObject);
                 let value = unpacking::take_pattern_temporary(
                     Expr::local(input, Type::PythonObject),
