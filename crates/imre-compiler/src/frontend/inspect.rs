@@ -11,10 +11,6 @@ pub(super) fn marks_function(
         == Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark: true })))
 }
 
-pub(super) fn is_sentinel(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> bool {
-    graph.resolve(module, value) == Some(Binding::Intrinsic(Intrinsic::InspectSentinel))
-}
-
 pub(super) fn sentinel() -> Expr {
     Expr {
         ty: Type::PlainObject,

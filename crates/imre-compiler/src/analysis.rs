@@ -2357,6 +2357,29 @@ impl Session {
         shipped_exports::binding_at_use(&self.db, file, expression)
     }
 
+    /// The read must reach one assignment in this method's defining class.
+    pub(crate) fn class_assignment_value<'a>(
+        &self,
+        class: crate::modules::DefinitionId,
+        expression: &Expr,
+        parsed: &'a ParsedModuleRef,
+    ) -> Option<&'a Expr> {
+        expression.as_name_expr()?;
+        let def = self.reaching_binding(class.module, expression)?;
+        let owner = def.scope(&self.db).node(&self.db).as_class()?.node(parsed);
+        if !std::ptr::eq(
+            owner,
+            parsed.suite().get(class.statement)?.as_class_def_stmt()?,
+        ) {
+            return None;
+        }
+        let ty_python_core::definition::DefinitionKind::Assignment(assign) = def.kind(&self.db)
+        else {
+            return None;
+        };
+        assign.unpack().is_none().then(|| assign.value(parsed))
+    }
+
     /// Fold a local import only while that statement is the sole binding reaching this read.
     pub(crate) fn has_import_binding(
         &self,
