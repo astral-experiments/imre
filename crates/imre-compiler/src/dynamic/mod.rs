@@ -21,6 +21,7 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
+use crate::frontend::function_scope::{TypeParameterScope, type_parameter_scope};
 use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind};
 
@@ -504,8 +505,8 @@ impl<'a> Visitor<'a> for Imports {
             }
             Stmt::FunctionDef(function)
                 if self.private_names.string_annotations
-                    && function_type_params(function, true, true, Some(&self.private_names))
-                        .is_some() =>
+                    && type_parameter_scope(function, true, true, Some(&self.private_names))
+                        == Some(TypeParameterScope::Function) =>
             {
                 self.runtime_imports = true;
             }
@@ -658,24 +659,6 @@ impl<'a> Visitor<'a> for Imports {
         }
         visitor::walk_expr(self, e);
     }
-}
-
-/// Keep eligibility for object lowering independent of what an already-boxed body can emit.
-pub(crate) fn function_type_params<'a>(
-    function: &'a ast::StmtFunctionDef,
-    string_annotations: bool,
-    nested: bool,
-    private_names: Option<&imre_ast::Names>,
-) -> Option<&'a ast::TypeParams> {
-    if nested && !string_annotations {
-        return None;
-    }
-    crate::frontend::function_scope::boxed_function_type_params(
-        function,
-        string_annotations,
-        nested,
-        private_names,
-    )
 }
 
 enum ImportSource<'s, 'p> {
@@ -1113,7 +1096,7 @@ pub(crate) fn compile(
             && !imports.runtime_imports
         {
             imports.runtime_imports = body.iter().any(|stmt| {
-                matches!(stmt, Stmt::FunctionDef(function) if function_type_params(function, imports.private_names.string_annotations, false, Some(&imports.private_names)).is_some())
+                matches!(stmt, Stmt::FunctionDef(function) if type_parameter_scope(function, imports.private_names.string_annotations, false, Some(&imports.private_names)) == Some(TypeParameterScope::Function))
             });
         }
         if let Some((graph, file)) = file_entry.zip(entry_file)

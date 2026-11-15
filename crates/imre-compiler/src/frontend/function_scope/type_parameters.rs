@@ -110,19 +110,6 @@ pub(crate) enum TypeParameterScope {
     MethodClosure,
 }
 
-/// A synchronous boxed function with one body scope can capture its unbounded type parameters.
-pub(crate) fn boxed_function_type_params<'a>(
-    function: &'a ast::StmtFunctionDef,
-    string_annotations: bool,
-    nested: bool,
-    private_names: Option<&imre_ast::Names>,
-) -> Option<&'a ast::TypeParams> {
-    function.type_params.as_deref().filter(|_| {
-        type_parameter_scope(function, string_annotations, nested, private_names)
-            == Some(TypeParameterScope::Function)
-    })
-}
-
 /// Parameters whose names and kinds can be installed by the registered function frame.
 pub(crate) fn function_parameter_header<'a>(
     function: &'a ast::StmtFunctionDef,
