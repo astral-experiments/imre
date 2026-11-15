@@ -1527,7 +1527,7 @@ impl Inference {
                                 FixedAttribute::Operation { operation, .. } => matches!(**operation, Builtin::RegisteredAttribute { .. }),
                                 FixedAttribute::Call(Some(target), _) => matches!(&target.without_location().kind,
                                     ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty()),
-                                FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
+                                FixedAttribute::CallValue(_) | FixedAttribute::Call(None, _) | FixedAttribute::ModuleName(_) => false,
                             })
                         })
                     {

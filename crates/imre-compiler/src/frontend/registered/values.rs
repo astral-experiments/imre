@@ -561,6 +561,39 @@ fn invoke_value(site: Box<ir::RegisteredCall>, target: Box<Expr>, arguments: Vec
     }
 }
 
+/// A written Python call whose original checked parameter remains available to either layout.
+#[derive(Clone)]
+pub(crate) struct CheckedCall {
+    pub(in crate::frontend) parameter: ast::name::Name,
+    pub(in crate::frontend) slot: usize,
+    pub(in crate::frontend) ty: Type,
+    pub(in crate::frontend) call: Expr,
+}
+
+impl CheckedCall {
+    /// Preserve the ordinary call after its supplied operands have been checked in written order.
+    pub(in crate::frontend) fn method(
+        call: &ast::ExprCall,
+        receiver: &mut Expr,
+        written: Vec<Expr>,
+    ) -> Option<Self> {
+        let field = call.func.as_attribute_expr()?;
+        let name = field.value.as_name_expr()?;
+        let ExprKind::Local(slot) = receiver.kind else {
+            return None;
+        };
+        let ty = receiver.ty;
+        let original = std::mem::replace(receiver, Expr::local(slot, ty));
+        let receiver = located(name.range(), name.start(), original);
+        Some(Self {
+            parameter: name.id.clone(),
+            slot,
+            ty,
+            call: bound_call(call, method_target(field), receiver, written),
+        })
+    }
+}
+
 impl Checker<'_> {
     pub(in crate::frontend) fn located_callback(
         &self,
@@ -1608,39 +1641,52 @@ impl Checker<'_> {
         let operands = graph.session.operand_types(owner);
         let is_bound_method = |callee: &ast::Expr| operands.is_bound_method(callee);
         let class = self.class;
-        let mut live_receiver = false;
-        if let Some(sites) = &mut self.settled_attributes
-            && let Some(call) = node.as_call_expr()
-            && self.namespace.is_none()
-            && let Some(name) = call
-                .func
-                .as_name_expr()
-                .or_else(|| call.func.as_attribute_expr()?.value.as_name_expr())
-            && !self.names.contains_key(name.id.as_str())
-            && let Some(FixedAttribute::Call(Some(target), mut site)) = sites.remove(&call.range())
-            && site.target == callable_target(call)
-            && operands.is_original_operand(&call.func)
-        {
-            // Forwarding can preserve the imported target and replace its arguments.
-            let (layout, args) = prepared_arguments(call, |arg| self.expr(arg))?;
-            site.arguments = layout;
-            return Ok(Some(
-                source.located_operation(node, invoke_value(site, target, args)),
-            ));
-        }
-        // Rewritten syntax can share a physical range with another name.
+        // Rewritten syntax can share a physical range with another source operation.
         let placed = self.settled_attributes.as_deref_mut().and_then(|sites| {
-            let range = node.range();
-            if node.is_attribute_expr()
-                || node.is_call_expr()
-                    && matches!(sites.get(&range), Some(FixedAttribute::Call(None, _)))
-                    && operands.is_original_operand(node)
-            {
-                sites.remove(&range)
-            } else {
-                None
+            if node.is_attribute_expr() {
+                return sites.remove(&node.range());
             }
+            let call = node.as_call_expr()?;
+            let std::collections::hash_map::Entry::Occupied(site) = sites.entry(call.range()) else {
+                return None;
+            };
+            match site.get() {
+                FixedAttribute::CallValue(saved)
+                    if self.namespace.is_none()
+                        && first_local.is_some_and(|first| saved.slot < first)
+                        && self.names.get(saved.parameter.as_str()) == Some(&saved.slot)
+                        && self.locals[saved.slot] == saved.ty
+                        && source.direct_method(call).is_some() == saved.call.python_call().is_some_and(|call| matches!(call.target, ir::RegisteredCallTarget::Method { .. }))
+                        && operands.is_original_operand(node) => {}
+                _ if self.namespace.is_none()
+                    && call.func.as_name_expr().or_else(|| call.func.as_attribute_expr()?.value.as_name_expr())
+                        .is_some_and(|name| !self.names.contains_key(name.id.as_str())) =>
+                {
+                    let attr = site.remove();
+                    return matches!(&attr, FixedAttribute::Call(Some(_), saved)
+                        if saved.target == callable_target(call) && operands.is_original_operand(&call.func))
+                        .then_some(attr);
+                }
+                FixedAttribute::Call(None, _) if operands.is_original_operand(node) => {}
+                _ => return None,
+            }
+            Some(site.remove())
         });
+        let placed = match (node.as_call_expr(), placed) {
+            (Some(_), Some(FixedAttribute::CallValue(saved))) => {
+                return Ok(Some(source.located_operation(node, saved.call)));
+            }
+            (Some(call), Some(FixedAttribute::Call(Some(target), mut site))) => {
+                // Forwarding can preserve the imported target and replace its arguments.
+                let (layout, args) = prepared_arguments(call, |arg| self.expr(arg))?;
+                site.arguments = layout;
+                return Ok(Some(
+                    source.located_operation(node, invoke_value(site, target, args)),
+                ));
+            }
+            (_, attribute) => attribute,
+        };
+        let mut live_receiver = false;
         let Some(mut value) = operation(
             node,
             source,

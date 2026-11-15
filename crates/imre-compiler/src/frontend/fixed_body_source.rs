@@ -69,6 +69,7 @@ impl FixedBodySource {
 
 #[derive(Clone)]
 pub(crate) enum FixedAttribute {
+    CallValue(Box<registered::values::CheckedCall>),
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
     Operation {
@@ -282,6 +283,36 @@ impl SourceSites {
             self.sites.resize_with(site.index + 1, Default::default);
         }
         self.sites[site.index] = (site.range, Some(node));
+    }
+
+    pub(super) fn inside_site(&self, range: TextRange) -> bool {
+        self.current
+            .is_some_and(|site| site.range != range && site.range.contains_range(range))
+    }
+
+    /// Take a literal from the expression just checked, before the fixed call adds its defaults.
+    pub(super) fn written_literal(&self, source: &ast::Expr, fixed: &mut Expr) -> Option<Expr> {
+        let (range, Some(key)) = self.sites.last()? else {
+            return None;
+        };
+        if source.range() != *range || !source.is_literal_expr() {
+            return None;
+        }
+        let scalar = match &mut fixed.kind {
+            ExprKind::Present(inner) => inner.as_mut(),
+            _ => fixed,
+        };
+        let ty = scalar.kind.scalar_literal_type()?;
+        if !key.matches(&ir::Node::Expression(scalar)) {
+            return None;
+        }
+        let mut original = std::mem::replace(scalar, scalar.clone());
+        original.ty = ty;
+        Some(registered::values::located(
+            *range,
+            source.start(),
+            original,
+        ))
     }
 
     fn site_at(&self, range: TextRange) -> Option<PendingSite> {

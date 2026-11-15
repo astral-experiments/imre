@@ -487,7 +487,7 @@ impl Checker<'_> {
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
         if let ast::Expr::Call(call) = expression
-            && let Some((_, source)) =
+            && let Some((converter, source)) =
                 self.map_converter_input(call, |name| name == "int" && self.fixed_map(call))
         {
             if !call.arguments.keywords.is_empty() {
@@ -502,7 +502,39 @@ impl Checker<'_> {
             if self.class.is_none() || self.settled_attributes.is_none() {
                 self.fixed_sites = None;
             }
-            return Ok((self.expansion_input(source, None)?, true));
+            let input = self.expansion_input(source, None)?;
+            if self.fixed_sites.is_none()
+                && self.inference.is_none()
+                && self.registered.is_none()
+                && let Some(sites) = self.settled_attributes.as_deref_mut()
+                && let Iteration::Container {
+                    iterable: value,
+                    items: false,
+                    start: None,
+                } = &input
+                && let ExprKind::Local(slot) = value.kind
+                && let Some(parameter) = source.as_name_expr()
+                && let Some(name) = call.func.as_name_expr()
+                && let std::collections::hash_map::Entry::Vacant(site) = sites.entry(call.range())
+            {
+                let converter = registered::values::located(
+                    converter.range(),
+                    converter.start(),
+                    registered::values::name_binding(converter.id.clone()),
+                );
+                let value = registered::values::CheckedCall {
+                    parameter: parameter.id.clone(),
+                    slot,
+                    ty: value.ty,
+                    call: registered::values::name_call(
+                        call,
+                        name.id.as_str(),
+                        vec![converter, Expr::local(slot, value.ty)],
+                    ),
+                };
+                site.insert(FixedAttribute::CallValue(Box::new(value)));
+            }
+            return Ok((input, true));
         }
         Ok((self.expansion_input(expression, element)?, false))
     }

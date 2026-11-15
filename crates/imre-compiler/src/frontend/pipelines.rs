@@ -791,12 +791,13 @@ impl Checker<'_> {
         &self,
         call: &'e ast::ExprCall,
         accepts: impl FnOnce(&str) -> bool,
-    ) -> Option<(&'e str, &'e ast::Expr)> {
+    ) -> Option<(&'e ast::ExprName, &'e ast::Expr)> {
         let [converter @ ast::Expr::Name(name), source] = call.arguments.args.as_ref() else {
             return None;
         };
-        let name = name.id.as_str();
-        (accepts(name) && self.unshadowed_builtin(converter, name)).then_some((name, source))
+        let spelling = name.id.as_str();
+        (accepts(spelling) && self.unshadowed_builtin(converter, spelling))
+            .then_some((name, source))
     }
 
     /// Recognizes only sealed constructor syntax at a direct consumer boundary.
@@ -938,6 +939,7 @@ impl Checker<'_> {
                         self.callback_input(call, element, false)?,
                     )));
                 };
+                let name = name.id.as_str();
                 self.reject_builtin_keywords(call)?;
                 let source = self.expansion_input(source, None)?;
                 let mut input = self.prepare_iteration(source, call, false)?;
