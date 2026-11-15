@@ -6985,11 +6985,13 @@ impl<'a> Checker<'a> {
                                 | ast::Expr::List(_)]
                         )
                 }
-                ast::Stmt::AugAssign(assign) => assign
-                    .target
-                    .as_name_expr()
-                    .and_then(|name| self.registered_in_place_local(name.id.as_str()))
-                    .is_some(),
+                ast::Stmt::AugAssign(assign) => match &*assign.target {
+                    ast::Expr::Attribute(_) => true,
+                    ast::Expr::Name(name) => {
+                        self.registered_in_place_local(name.id.as_str()).is_some()
+                    }
+                    _ => false,
+                },
                 ast::Stmt::Assert(_) | ast::Stmt::FunctionDef(_) => {
                     self.registered_local_start.is_some()
                 }
@@ -7378,8 +7380,19 @@ impl<'a> Checker<'a> {
                         ir::ItemUpdate::Fixed(op),
                         value,
                     ))
-                } else if let ast::Expr::Attribute(target) = &*assign.target {
+                } else if let Some(effect) = registered::attribute_write(statement) {
+                    let target = effect.field;
                     let receiver = Self::weak_target(self.expr(&target.value)?);
+                    if self.registered.is_some() {
+                        if self.types.payload(receiver.ty).unwrap_or(receiver.ty)
+                            == Type::PythonObject
+                        {
+                            let rhs = self.expr(&assign.value)?;
+                            let update = effect.statement(vec![receiver, rhs]);
+                            return Ok((vec![update], true));
+                        }
+                        self.require_registered_operation(statement)?;
+                    }
                     if let Some(property @ (class, _)) = self.writable_property(receiver.ty, target)
                     {
                         let slot = self.hidden(receiver.ty);
