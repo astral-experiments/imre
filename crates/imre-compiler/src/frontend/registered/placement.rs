@@ -210,7 +210,10 @@ mod tests {
             SuitePreparation::new(&operations, module.registered_values().context(text), true);
         let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
         assert_eq!(suite.checked.function.body.as_ptr(), original);
-        assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+        assert_eq!(
+            suite.checked.placed_from + 1,
+            suite.checked.function.body.len()
+        );
     }
 
     #[test]
@@ -266,7 +269,10 @@ mod tests {
             SuitePreparation::new(&operations, module.registered_values().context(text), true);
         let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
         assert_eq!(suite.checked.function.body.as_ptr(), original);
-        assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+        assert_eq!(
+            suite.checked.placed_from + 1,
+            suite.checked.function.body.len()
+        );
         let site = suite.checked.fixed_sites[2];
         assert_eq!(&text[site], "ｒｅｎｄｅｒ(17, input())");
         let Some(FixedAttribute::Call(Some(target), _)) = suite.checked.fixed_attribute(site)
@@ -319,7 +325,7 @@ mod tests {
         assert_eq!(suite.checked.function.body.as_ptr(), original);
         let mut calls = Vec::new();
         ir::walk_nodes(
-            &suite.checked.function.body[suite.placed_from..],
+            &suite.checked.function.body[suite.checked.placed_from..],
             &mut |node, _| {
                 if let ir::Node::Expression(Expr {
                     kind: ExprKind::Invoke { args, .. },
@@ -382,7 +388,7 @@ mod tests {
         let suite = prepare.module(&module.parsed.syntax().body, Some((module, entry)));
         assert_eq!(suite.checked.function.body.as_ptr(), original);
         assert_eq!(suite.checked.local_names[&saved].name, "saved");
-        assert!(suite.placed_from > 0);
+        assert!(suite.checked.placed_from > 0);
     }
 
     #[test]
@@ -412,7 +418,10 @@ mod tests {
                 SuitePreparation::new(&operations, module.registered_values().context(text), true);
             let suite = prepare.module(&module.parsed.syntax().body, Some((module, body)));
             assert_eq!(suite.checked.function.body.as_ptr(), original);
-            assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
+            assert_eq!(
+                suite.checked.placed_from + 1,
+                suite.checked.function.body.len()
+            );
             assert!(!std::mem::replace(&mut seen, true));
         }
         assert!(seen);
@@ -911,7 +920,7 @@ mod tests {
         assert_eq!(module, owner);
         assert_eq!(&source[operand], "input()");
         let binding = body.fixed_attribute(operand).unwrap();
-        let (read, []) = binding.call_operands(inner).unwrap() else {
+        let (read, []) = binding.call_operands(operand, None, inner).unwrap() else {
             panic!("expected input without arguments");
         };
         assert!(matches!(binding, FixedAttribute::Call(_, call) if call.range == operand));
@@ -937,6 +946,105 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn placed_positional_invoke_uses_its_own_call_and_operands() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/callables/escaping_rebound_method.py");
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let module = &graph.modules[graph.entry];
+        let (_, mut initializers) = graph.take_registered_functions();
+        let mut entry = initializers.remove(&graph.entry).unwrap();
+        let [.., range, callee_range] = *entry.fixed_sites else {
+            panic!("expected the invocation and its physical callee");
+        };
+        assert_eq!(
+            (&module.source[range], &module.source[callee_range]),
+            ("outer()()", "outer()")
+        );
+        let mut placed = None;
+        ir::walk_nodes(&entry.function.body, &mut |node, _| {
+            if let ir::Node::Expression(value) = node
+                && matches!(value.kind, ExprKind::Invoke { .. })
+            {
+                assert!(placed.replace(value.clone()).is_none());
+            }
+        });
+        let value = placed.unwrap();
+        let attr = entry.fixed_attribute(range).unwrap();
+        let (callee, []) = attr
+            .call_operands(range, Some(callee_range), &value)
+            .unwrap()
+        else {
+            panic!("the live bound method supplies its default");
+        };
+        assert!(matches!(callee.ty, Type::Callable(_)));
+        assert!(matches!(callee.kind, ExprKind::Call(_, _)));
+        let mut misplaced = value.clone();
+        let ExprKind::Invoke { args, .. } = &mut misplaced.kind else {
+            unreachable!()
+        };
+        args.order.push(0);
+        assert!(
+            attr.call_operands(range, Some(callee_range), &misplaced)
+                .is_none()
+        );
+        crate::verify::registered(entry.region()).unwrap();
+
+        let Some(FixedAttribute::Call(Some(active_callee), _)) =
+            entry.fixed_attribute(callee_range)
+        else {
+            panic!("expected the written callee of outer()");
+        };
+        let active_callee = active_callee.clone();
+        let rejects_invoke = |entry: &RegisteredFunction| {
+            let error = crate::verify::registered(entry.region()).unwrap_err();
+            assert!(
+                error.contains("registered invocation needs a Python callable"),
+                "{error}"
+            );
+        };
+        let original = entry
+            .fixed_attributes
+            .as_mut()
+            .unwrap()
+            .remove(&range)
+            .unwrap();
+        rejects_invoke(&entry);
+        let FixedAttribute::Call(None, owned) = &original else {
+            panic!("expected outer()()");
+        };
+        for (written, end, replacement) in [
+            (range, callee_range.end(), Some(active_callee)),
+            (callee_range, callee_range.end(), None),
+            (range, callee_range.start() + TextSize::of("outer"), None),
+        ] {
+            let mut call = owned.clone();
+            let ir::RegisteredCallTarget::Callable { end: saved, .. } = &mut call.target else {
+                panic!("expected a positional callable");
+            };
+            *saved = end;
+            call.range = written;
+            entry
+                .fixed_attributes
+                .as_mut()
+                .unwrap()
+                .insert(range, FixedAttribute::Call(replacement, call));
+            rejects_invoke(&entry);
+        }
+        entry
+            .fixed_attributes
+            .as_mut()
+            .unwrap()
+            .insert(range, original);
+        crate::verify::registered(entry.region()).unwrap();
+
+        // The identical instruction in the unplaced prefix has no call descriptor.
+        entry.function.body.insert(0, Statement::Expr(value));
+        entry.placed_from += 1;
+        rejects_invoke(&entry);
     }
 
     #[test]

@@ -829,6 +829,17 @@ impl Expr {
         }
     }
 
+    /// The fixed positional binder already holds the callable and the written operands in order.
+    pub(crate) fn fixed_positional_invoke_operands(&self) -> Option<(&Expr, &[Expr])> {
+        let ExprKind::Invoke { callable, args } = &self.kind else {
+            return None;
+        };
+        (matches!(callable.ty, Type::Callable(_))
+            && args.site.python().is_none()
+            && args.order.iter().copied().eq(0..args.values.len()))
+        .then_some((callable, &args.values))
+    }
+
     pub(crate) fn is_registered_invoke(&self) -> bool {
         let ExprKind::Invoke { callable, args } = &self.kind else {
             return false;
@@ -837,24 +848,23 @@ impl Expr {
             return false;
         };
         let call = &site.call;
-        let end = call.target.end();
-        if let RegisteredCallTarget::Method {
+        let written = if let RegisteredCallTarget::Method {
             attribute,
             name_start,
             ..
         } = &call.target
         {
-            if !call.range.contains_range(*attribute) || !attribute.contains(*name_start) {
+            if !attribute.contains(*name_start) {
                 return false;
             }
+            Some(*attribute)
         } else {
             let name = call.target.suspended_name();
-            if !callable.registered_invoke_target(name)
-                || name.is_some_and(|name| !call.range.contains_range(name) || name.end() != end)
-            {
+            if !callable.registered_invoke_target(name) {
                 return false;
             }
-        }
+            name
+        };
         let valid_layout = match &call.arguments {
             RegisteredArguments::Positional => true,
             RegisteredArguments::Keywords { positional, names } => {
@@ -873,8 +883,7 @@ impl Expr {
         });
         valid_layout
             && valid_projection
-            && call.range.start() < end
-            && end < call.range.end()
+            && call.contains_target(written)
             && site
                 .scope
                 .as_ref()
@@ -1762,6 +1771,14 @@ impl RegisteredCall {
             partition_field: None,
             position: None,
         })
+    }
+
+    /// The written target, when available, ends at the descriptor's interior call position.
+    pub(crate) fn contains_target(&self, written: Option<ruff_text_size::TextRange>) -> bool {
+        let end = self.target.end();
+        self.range.start() < end
+            && end < self.range.end()
+            && written.is_none_or(|range| self.range.start() <= range.start() && range.end() == end)
     }
 
     /// Python locates a method lookup at the attribute name in the written call.
@@ -4162,6 +4179,11 @@ pub(crate) enum Node<'a> {
 }
 
 impl Node<'_> {
+    /// The coroutine writer consumes the tuple's fields without emitting the tuple itself.
+    pub(crate) fn has_fixed_site_in(&self, parent: Option<&Expr>) -> bool {
+        self.has_fixed_site() && !parent.is_some_and(|expr| expr.coroutine_arguments().is_some())
+    }
+
     /// A Python handle already represents both a present value and None. A native
     /// optional tag around the written operand has no source position of its own.
     pub(crate) fn has_fixed_site(&self) -> bool {
