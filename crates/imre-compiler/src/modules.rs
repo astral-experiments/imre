@@ -504,7 +504,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
                 "../../../benchmarks/cpython_stdlib/full/http/upstream/Lib/http/cookiejar.py"
             ),
         )),
-        "http.server" => bundled_source!("http/server.py"),
+        "http.server" => bundled_source!("http/server.py", from "http"),
         "locale" => bundled_source!("locale.py"),
         "_imre_gettext_locale" => bundled_source!("_imre_gettext_locale.py"),
         // CPython 3.14.5 Lib/colorsys.py. See licenses/CPython.txt.
