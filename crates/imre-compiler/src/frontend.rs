@@ -1608,7 +1608,7 @@ fn lower_graph(
                     let mut checker = checker_for(*module_id);
                     checker.nonreturning_functions = &completed_calls;
                     if let Ok(Some((_, placement))) = registered::prepare_checked_definition(
-                        &checker, definition, signature, inference, None,
+                        &checker, definition, signature, inference, None, false,
                     ) {
                         placement.retain_for_launch(graph, &inference.source_checks);
                     }
@@ -2423,6 +2423,15 @@ fn lower_function(
                 .into());
             }
         }
+    }
+    if checker.infer_python_call_result && falls_through {
+        return Err(checker
+            .classified_error(
+                Kind::ScopedObject,
+                definition,
+                "the function can fall through without a call result",
+            )
+            .into());
     }
     if classes.generators.contains(&signature.id) {
         body = checker.generator_body(body);
@@ -3687,6 +3696,8 @@ struct Checker<'a> {
     placement_only: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
+    /// Keep a Python result only when the returned operation already produces that representation.
+    infer_python_call_result: bool,
     /// Resolved operations from a fixed source that the live frame can still use.
     settled_attributes: Option<&'a mut HashMap<TextRange, FixedAttribute>>,
     nonreturning_functions: &'a HashSet<usize>,
@@ -3824,6 +3835,7 @@ impl<'a> Checker<'a> {
             fixed_sites: None,
             placement_only: false,
             checked_call_contracts: false,
+            infer_python_call_result: false,
             settled_attributes: None,
             nonreturning_functions: &classes.nonreturning_functions,
             registered: None,
@@ -5441,6 +5453,17 @@ impl<'a> Checker<'a> {
     }
 
     fn value_source(&self, value: &Expr) -> Option<ValueSource> {
+        let value = if self.infer_python_call_result {
+            let operand = value.without_location();
+            if let Some(call) = operand.python_call()
+                && !self.classes.parsers.has_fixed_call(self.module, call.range)
+            {
+                return Some(ValueSource::PythonCall);
+            }
+            operand
+        } else {
+            value
+        };
         match &value.kind {
             ExprKind::Local(slot) => self.assigned.value_source(*slot),
             ExprKind::Builtin(Builtin::StaticFunction(id), _) => Some(ValueSource::Function(*id)),
@@ -5473,7 +5496,8 @@ impl<'a> Checker<'a> {
     fn value_declaration(&self, value: &Expr) -> Option<TypeDeclaration> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration) => Some(declaration),
-            ValueSource::LiteralStrings(_)
+            ValueSource::PythonCall
+            | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
             | ValueSource::Function(_)
             | ValueSource::ReboundMethod => None,
@@ -9867,8 +9891,7 @@ impl<'a> Checker<'a> {
                             self.scoped_builtin_error("the builtin module as a value", expression)
                         );
                     }
-                    if self.inference.is_some()
-                        && self.graph.modules[self.module].is_program_source()
+                    if self.graph.modules[self.module].is_program_source()
                         && matches!(binding, Some(Binding::IntrinsicModule(_)))
                     {
                         self.require_registered_operation(expression)?;

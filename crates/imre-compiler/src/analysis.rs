@@ -2309,26 +2309,6 @@ impl Session {
         shipped_exports::binding_at_use(&self.db, file, expression)
     }
 
-    /// Inspect a returned method call and the unique assignment that supplies its receiver.
-    pub(crate) fn assigned_method(
-        &self,
-        module: usize,
-        operand: &Expr,
-        inspect: impl FnOnce(&ruff_python_ast::ExprCall, &ruff_python_ast::ExprAttribute, &Expr) -> bool,
-    ) -> bool {
-        let file = self.files[module];
-        let parsed = self.parsed(file);
-        let assigned =
-            |value| execution::assigned_value(&self.db, file, &parsed, value, Expr::is_name_expr);
-        let Some(call) = assigned(operand).and_then(Expr::as_call_expr) else {
-            return false;
-        };
-        let Some(method) = call.func.as_attribute_expr() else {
-            return false;
-        };
-        assigned(&method.value).is_some_and(|receiver| inspect(call, method, receiver))
-    }
-
     /// Fold a local import only while that statement is the sole binding reaching this read.
     pub(crate) fn has_import_binding(
         &self,

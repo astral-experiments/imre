@@ -993,35 +993,8 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
 }
 
 impl Parsers {
-    /// A parser call outside the native schema returns its ordinary Python object.
-    pub(super) fn returns_python_namespace(
-        &self,
-        graph: &SourceGraph,
-        module: ModuleId,
-        function: &ast::StmtFunctionDef,
-    ) -> bool {
-        let Some(ast::Stmt::Return(ret)) = function.body.last() else {
-            return false;
-        };
-        let Some(value) = ret.value.as_deref() else {
-            return false;
-        };
-        graph
-            .session
-            .assigned_method(module, value, |call, method, receiver| {
-                method.attr.as_str() == "parse_args"
-                    && !self.calls.contains_key(&(module, call.range()))
-                    && receiver.as_call_expr().is_some_and(|constructor| {
-                        let name = constructor
-                            .func
-                            .as_attribute_expr()
-                            .map_or(&*constructor.func, |attr| &*attr.value);
-                        graph.session.reads_module_binding(module, name)
-                            && graph.resolve(module, &constructor.func)
-                                == Some(Binding::Intrinsic(Intrinsic::ARGUMENT_PARSER))
-                    })
-            })
-            && crate::analysis::explicit_returns(function).len() == 1
+    pub(super) fn has_fixed_call(&self, module: ModuleId, range: TextRange) -> bool {
+        self.calls.contains_key(&(module, range))
     }
 
     pub(super) fn namespace(&self, class: usize) -> bool {
