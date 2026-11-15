@@ -5,30 +5,41 @@ pub(super) fn unsigned_scalar(
     expression: &ast::Expr,
     source: &str,
 ) -> Result<Option<Expr>, String> {
-    let (ty, kind) = match expression {
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Int(value),
-            ..
-        }) => (Type::Int, ExprKind::Int(value.to_string())),
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Float(value),
-            ..
-        }) => (Type::Float, ExprKind::Float(*value)),
-        ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
-        ast::Expr::StringLiteral(value) => {
-            check_string(value, source)?;
-            (Type::Str, ExprKind::Str(value.value.to_string()))
-        }
-        ast::Expr::BytesLiteral(value) => {
-            (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
-        }
-        ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-        _ => return Ok(None),
+    let Some(literal) = expression.as_literal_expr() else {
+        return Ok(None);
     };
-    Ok(Some(Expr { ty, kind }))
+    if let ast::LiteralExpressionRef::StringLiteral(string) = literal {
+        check_string(string, source)?;
+    }
+    let kind = scalar(literal, None);
+    Ok(kind.scalar_literal_type().map(|ty| Expr { ty, kind }))
 }
 
-pub(super) fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
+pub(super) fn scalar(
+    literal: ast::LiteralExpressionRef<'_>,
+    registered: Option<RegisteredSource<'_>>,
+) -> ExprKind {
+    use ast::LiteralExpressionRef as Literal;
+    match literal {
+        Literal::NumberLiteral(number) => number_literal(&number.value, false),
+        Literal::BooleanLiteral(value) => ExprKind::Bool(value.value),
+        Literal::StringLiteral(value) => {
+            if let Some(source) = registered
+                && !source.replacements.is_empty()
+            {
+                return source
+                    .string(value.value.iter().map(FStringLiteral::Adjacent))
+                    .kind;
+            }
+            ExprKind::Str(value.value.iter().map(|part| part.as_str()).collect())
+        }
+        Literal::BytesLiteral(value) => ExprKind::Bytes(value.value.bytes().collect()),
+        Literal::NoneLiteral(_) => ExprKind::None,
+        Literal::EllipsisLiteral(_) => ExprKind::Builtin(Builtin::RegisteredEllipsis, vec![]),
+    }
+}
+
+fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
     match number {
         ast::Number::Int(n) => {
             let mut text = n.to_string();
