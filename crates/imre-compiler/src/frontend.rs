@@ -773,8 +773,11 @@ fn checked_region<T>(
 }
 
 pub(crate) fn fixed_frame_entry(function: &ast::StmtFunctionDef) -> bool {
-    !function.is_async
-        && function.decorator_list.is_empty()
+    !function.is_async && fixed_frame_header(function)
+}
+
+fn fixed_frame_header(function: &ast::StmtFunctionDef) -> bool {
+    function.decorator_list.is_empty()
         && function.type_params.is_none()
         && function.parameters.vararg.is_none()
         && function.parameters.kwarg.is_none()
@@ -1518,8 +1521,12 @@ fn lower_graph(
         let provider_frame = !needs_registered_entry
             && source_function
             && matches!(source, Cow::Borrowed(_))
-            && fixed_frame_entry(definition)
-            && fixed_frame_provider(graph, callable_definitions[signature.id], definition);
+            && fixed_frame_header(definition)
+            && fixed_frame_provider(graph, callable_definitions[signature.id], definition)
+            && (!definition.is_async
+                || graph
+                    .session
+                    .returns_fixed_operand(*module_id, definition, |_| false));
         let collect_sites = prepare_sites || provider_frame;
         let prepared = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
             use std::collections::hash_map::Entry;
