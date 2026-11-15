@@ -10491,8 +10491,8 @@ impl Context {
         body_scope.closure.nonlocals = bindings.scope_nonlocals.try_into()?;
         body_scope.enum_namespace = enum_namespace;
         body_scope.class_cell = Some(cell);
+        body_scope.globals = bindings.class_globals;
         if let Some((_, mapping)) = prepared {
-            body_scope.globals = bindings.class_globals;
             body_scope.namespace = Some(mapping);
             body_scope
                 .class_namespace

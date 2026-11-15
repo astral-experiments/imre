@@ -1037,7 +1037,6 @@ impl SourceMap<'_> {
                     frame.bind("__doc__", &value);
                 }
                 function.declared_globals = &class.bindings.globals;
-                frame.declare_globals(function.declared_globals);
                 RegisteredBody::Suite(&prepared.body).emit(&mut function);
                 self.finish_class_annotations(
                     &mut function.frame,
