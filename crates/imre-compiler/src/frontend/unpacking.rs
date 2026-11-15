@@ -552,9 +552,9 @@ impl Checker<'_> {
                 sites.statement(assignment.value.range(), statement);
             } else if let Some(sites) = &mut self.fixed_sites
                 && let ast::Expr::Attribute(attribute) = target
-                && let [statement @ Statement::SetField(..)] = &output[start..]
+                && let [Statement::SetField(_, field, _)] = &mut output[start..]
             {
-                sites.store_field(attribute, assignment.value.range(), statement);
+                sites.store_field(attribute, assignment.value.range(), field);
             }
             return Ok(true);
         }
@@ -1053,7 +1053,7 @@ impl Checker<'_> {
                         error
                     }
                 })?;
-                Statement::SetField(receiver, field, value)
+                Statement::set_field(receiver, field, value)
             } else {
                 return Err(error(self.source, target, "unsupported assignment target"));
             }

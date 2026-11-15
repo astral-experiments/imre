@@ -1035,8 +1035,8 @@ impl<'s> Checker<'s> {
                                 ),
                             },
                         ),
-                        Statement::SetField(self.local(value), 0, self.local(counter)),
-                        Statement::SetField(self.local(value), 1, self.local(input.value)),
+                        Statement::set_field(self.local(value), 0, self.local(counter)),
+                        Statement::set_field(self.local(value), 1, self.local(input.value)),
                     ]
                 } else {
                     vec![Statement::Assign(
@@ -2343,7 +2343,7 @@ impl<'s> Checker<'s> {
                 success.insert(0, Statement::Clear(inputs[index].value));
                 success.insert(
                     0,
-                    Statement::SetField(self.local(value), index, self.local(inputs[index].value)),
+                    Statement::set_field(self.local(value), index, self.local(inputs[index].value)),
                 );
             }
             step.push(Statement::If(

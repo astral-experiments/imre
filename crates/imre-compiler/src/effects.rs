@@ -492,7 +492,7 @@ def integers(values: list[int]) -> int:
                     0,
                     vec![call(1, Vec::new())],
                 ))]),
-                function(vec![Statement::SetField(
+                function(vec![Statement::set_field(
                     Expr::integer(1),
                     0,
                     call(1, Vec::new()),

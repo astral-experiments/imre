@@ -46,13 +46,13 @@ pub(super) fn constructors(module: &Module) -> Vec<Option<Constructor>> {
                     return None;
                 };
                 if !is_local(base, receiver)
-                    || value.ty != *fields.get(*field)?
+                    || value.ty != *fields.get(field.slot())?
                     || !seen.insert(slot)
                 {
                     return None;
                 }
                 let position = params.iter().position(|param| *param == slot)?;
-                if layout[*field].replace(position).is_some() {
+                if layout[field.slot()].replace(position).is_some() {
                     return None;
                 }
             }

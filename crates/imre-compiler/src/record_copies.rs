@@ -74,17 +74,18 @@ fn copy(function: &Function, module: &Module) -> Option<Overrides> {
         let Statement::SetField(base, field, parameter) = statement else {
             return None;
         };
-        if slot(base) != Some(init.params[0]) || *field != fields.len() {
+        let field = field.slot();
+        if slot(base) != Some(init.params[0]) || field != fields.len() {
             return None;
         }
         let param = slot(parameter)?;
         let pos = init.params[1..].iter().position(|p| *p == param)?;
         let arg = &args.values[args.order[pos]];
-        if arg.ty != module.class_fields[class][*field] {
+        if arg.ty != module.class_fields[class][field] {
             return None;
         }
         fields.push(match &arg.kind {
-            ExprKind::Field(source, i) if slot(source) == Some(root) && i == field => None,
+            ExprKind::Field(source, i) if slot(source) == Some(root) && *i == field => None,
             _ if constant(arg) => Some(arg.clone()),
             ExprKind::Local(id) => Some(updates.iter().rev().find_map(|stmt| match stmt {
                 Statement::Assign(s, value) if s == id => Some(value.clone()),

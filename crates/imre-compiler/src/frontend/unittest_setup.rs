@@ -398,8 +398,8 @@ impl Checker<'_> {
             body: vec![
                 Statement::Assign(rhs, value),
                 Statement::Assign(object, receiver),
-                Statement::SetField(self.local(object), field.value, self.local(rhs)),
-                Statement::SetField(self.local(object), field.ready, Expr::boolean(true)),
+                Statement::set_field(self.local(object), field.value, self.local(rhs)),
+                Statement::set_field(self.local(object), field.ready, Expr::boolean(true)),
             ],
             clear: vec![rhs, object],
         })

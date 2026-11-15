@@ -3775,6 +3775,28 @@ pub(crate) struct RaisedException {
     pub(crate) origin: Option<Box<FixedOrigin>>,
 }
 
+/// One field projection in a single checked source body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FieldUse {
+    pub slot: usize,
+    pub target: ruff_text_size::TextRange,
+}
+
+#[derive(Clone)]
+pub(crate) enum StoreField {
+    Native(usize),
+    Written(FieldUse, ruff_python_ast::Identifier),
+}
+
+impl StoreField {
+    pub(crate) fn slot(&self) -> usize {
+        match self {
+            Self::Native(slot) => *slot,
+            Self::Written(field, _) => field.slot,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
     /// An original statement checkpoint and its optional call without a separate highlight.
@@ -3791,7 +3813,7 @@ pub(crate) enum Statement {
     },
     SetItem(ItemOrder, Expr, Expr, Expr),
     AugmentItem(Expr, Expr, ItemUpdate, Expr),
-    SetField(Expr, usize, Expr),
+    SetField(Expr, StoreField, Expr),
     AugmentField(Expr, usize, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
@@ -3982,6 +4004,10 @@ macro_rules! statement_children {
 }
 
 impl Statement {
+    pub(crate) fn set_field(receiver: Expr, slot: usize, value: Expr) -> Self {
+        Self::SetField(receiver, StoreField::Native(slot), value)
+    }
+
     /// Returns the arms taken when the tested local is true and false, respectively.
     pub(crate) fn branches_for_flag(&self, flag: usize) -> Option<(&[Self], &[Self])> {
         let Self::If(test, yes, no) = self else {

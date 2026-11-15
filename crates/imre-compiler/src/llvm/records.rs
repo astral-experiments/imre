@@ -31,7 +31,7 @@ pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> O
         let Statement::SetField(object, index, value) = statement else {
             return None;
         };
-        if *index != field
+        if index.slot() != field
             || value.ty != *ty
             || args.values[field].ty != *ty
             || !matches!(object.kind, ExprKind::Local(slot) if slot == *receiver)

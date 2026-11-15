@@ -85,13 +85,8 @@ pub(crate) fn frame_inputs(
             ir::Node::Statement(stmt) => {
                 return match stmt {
                     Statement::Assign(slot, _) => uses_slot(slot, false),
-                    Statement::SetField(..)
-                        if matches!(attribute,
-                            Some(crate::frontend::FixedAttribute::Operation { operation, .. })
-                                if matches!(&**operation, Builtin::RegisteredAttribute {
-                                    action: ir::AttributeAction::Store, ..
-                                })
-                        ) =>
+                    Statement::SetField(_, ir::StoreField::Written(_, _), _)
+                        if source.is_some() =>
                     {
                         uses_python_protocol = true;
                         stmt.operands(|input| protocol_reads += protocol_parameter(input));
@@ -1222,7 +1217,14 @@ impl<'f> Frame<'f, '_, '_> {
 
     pub(super) fn builtin(&mut self, op: &Builtin, operands: &[Expr]) -> CheckedValue {
         let handle = match (op, operands) {
-            (Builtin::RegisteredAttribute { .. }, _) => self.mutate_attribute(op, operands.iter()),
+            (
+                Builtin::RegisteredAttribute {
+                    action,
+                    name,
+                    range,
+                },
+                _,
+            ) => self.mutate_attribute(*action, name, *range, operands.iter()),
             (Builtin::RegisteredInput(index), []) => self.registered_input(*index),
             (op, args) if let Some(iteration) = op.iteration_operands(args) => {
                 use ir::IterationOperands::*;
