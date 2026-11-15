@@ -1658,13 +1658,12 @@ impl Checker<'_> {
         }
         let graph = self.graph;
         let owner = self.module;
-        let mut frame_identity = false;
         if let ast::Expr::Compare(cmp) = node {
             let frame_op = self
                 .registered_local_start
                 .and(cmp.as_single())
                 .map(|(_, op, _)| *op);
-            frame_identity = matches!(frame_op, Some(ast::CmpOp::Is | ast::CmpOp::IsNot));
+            let frame_identity = matches!(frame_op, Some(ast::CmpOp::Is | ast::CmpOp::IsNot));
             let opaque = |operand: &ast::Expr| {
                 let receiver = match operand {
                     ast::Expr::Call(call) => match call.func.as_ref() {
@@ -1803,14 +1802,6 @@ impl Checker<'_> {
         else {
             return Ok(None);
         };
-        if frame_identity
-            && let ExprKind::Compare(values, _) = &value.kind
-            && !values
-                .iter()
-                .any(|operand| operand.ty == Type::PythonObject)
-        {
-            return Ok(None);
-        }
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
