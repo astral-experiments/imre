@@ -1,7 +1,7 @@
 //! Link checked module registrations to their native initializers.
 
 use super::body::{begin_main, end_main};
-use super::registered::{ABI, Output};
+use super::registered::{ABI, Output, suspension};
 use crate::ir::{ModuleLoader, PhysicalModuleKind};
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -16,6 +16,7 @@ pub(crate) struct ModuleLauncher {
     pub(crate) output: Output,
     main: String,
     declarations: HashSet<String>,
+    suspending_provider: bool,
 }
 
 impl ModuleLauncher {
@@ -36,6 +37,7 @@ impl ModuleLauncher {
             output,
             main,
             declarations: HashSet::new(),
+            suspending_provider: false,
         }
     }
 
@@ -51,7 +53,8 @@ impl ModuleLauncher {
         }
     }
 
-    pub(crate) fn external(&mut self, symbol: &str) -> String {
+    pub(crate) fn external(&mut self, symbol: &str, suspends: bool) -> String {
+        self.suspending_provider |= suspends;
         if self.declarations.insert(symbol.to_owned()) {
             writeln!(self.output.functions, "declare i64 @{symbol}(ptr, i64)").unwrap();
         }
@@ -116,6 +119,9 @@ impl ModuleLauncher {
     }
 
     pub(crate) fn finish(mut self) -> String {
+        if self.suspending_provider || self.output.declarations.declared_suspension {
+            self.output.functions.push_str(suspension::DRIVE);
+        }
         self.output.integer_prelude();
         end_main(&mut self.main, "@imre_dyn_finish(ptr %ctx)");
         module_parts(&self.output.constants, &self.output.functions, &self.main).concat()
@@ -129,6 +135,7 @@ fn module_parts<'a>(constants: &'a str, functions: &'a str, entry: &'a str) -> [
 
 /// An initializer whose content determines its link name before its alias is written.
 pub(crate) struct ProviderBody {
+    pub(crate) suspends: bool,
     constants: String,
     functions: String,
     entry: String,
@@ -136,8 +143,15 @@ pub(crate) struct ProviderBody {
 
 impl ProviderBody {
     pub(crate) fn new(mut output: Output, entry: String) -> Self {
+        let suspends = output.declarations.declared_suspension;
+        if suspends {
+            output
+                .functions
+                .push_str("declare hidden void @imre_boxed_drive(ptr, i1 zeroext)\n");
+        }
         output.integer_prelude();
         Self {
+            suspends,
             constants: output.constants,
             functions: output.functions,
             entry,

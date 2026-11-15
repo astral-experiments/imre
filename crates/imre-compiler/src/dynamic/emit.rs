@@ -155,6 +155,8 @@ impl crate::ProgramOutput {
                 let mut whole_entry = None;
                 let mut external = None;
                 let mut archived = matches!(initializer, Initializer::Archived(_));
+                // A sealed initializer can refer to the launcher without emitting its body here.
+                let mut suspends = archived;
                 if let Initializer::Checked(initializer) = initializer
                     && initializer.has_body_statements
                     && (check_archive || separate)
@@ -170,6 +172,7 @@ impl crate::ProgramOutput {
                         None
                     };
                     let (symbol, body) = initializer.provider_body(target)?;
+                    suspends = body.suspends;
                     archived = check_archive && providers.contains(&symbol);
                     if !archived && separate && !root.declares(&symbol) {
                         if whole.is_none() && whole_requested {
@@ -192,7 +195,7 @@ impl crate::ProgramOutput {
                         let module = launcher.module_operands(name, path);
                         let code = match (symbol, initializer) {
                             (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
-                                launcher.external(symbol)
+                                launcher.external(symbol, suspends)
                             }
                             (None, Initializer::Checked(body)) => {
                                 body.emit(&mut launcher.output, unit, &module.file)?
