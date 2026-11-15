@@ -838,7 +838,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                     }
                     _ => unreachable!("anonymous function expression"),
                 }
-                strings.finish_nested_scope(has_named_bindings)?
+                strings.finish_scope(has_named_bindings, false)?
             };
             if roots != NONE {
                 self.keep(roots)?;
@@ -847,9 +847,9 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         Ok(())
     }
 
-    fn finish_nested_scope(mut self, has_named_bindings: bool) -> Result<Id> {
+    fn finish_scope(mut self, has_named_bindings: bool, module: bool) -> Result<Id> {
         let children = self.scan()?;
-        self.prepare_children(children, has_named_bindings, false)?;
+        self.prepare_children(children, has_named_bindings, module)?;
         Ok(self.finish())
     }
 
@@ -1080,16 +1080,6 @@ impl Program {
         shared: &mut SharedConstants,
         spellings: &StringReplacements,
     ) -> Result<Id> {
-        self.prepare_scope_strings(heap, shared, spellings, None)
-    }
-
-    fn prepare_scope_strings<'a>(
-        &'a mut self,
-        heap: &mut value::Heap,
-        shared: &mut SharedConstants,
-        spellings: &StringReplacements,
-        expression_body: Option<&'a ast::Expr>,
-    ) -> Result<Id> {
         use ast::visitor::Visitor;
         let stringized = self.string_annotations();
         let mut strings = CompiledStrings::new(heap, shared, spellings, &self.directives);
@@ -1162,7 +1152,7 @@ impl Program {
                         if let Some(args) = arguments {
                             header.visit_arguments(args);
                         }
-                        roots = header.finish_nested_scope(self.has_named_bindings)?;
+                        roots = header.finish_scope(self.has_named_bindings, false)?;
                     }
                     if roots != NONE {
                         strings.keep(roots)?;
@@ -1182,9 +1172,6 @@ impl Program {
                     }
                 }
             }
-        }
-        if let Some(body) = expression_body {
-            strings.visit_expr(body);
         }
         let mut functions = strings.scan()?;
         functions.extend(prepared_generators);
@@ -2605,15 +2592,19 @@ impl Context {
         let mut flags = inherited;
         code.strip_docstrings = self.config["optimize"].as_i64().unwrap_or(0) >= 2;
         code.interactive = interactive;
-        let expression_body = match parsed.into_syntax() {
+        let mut shared = SharedConstants::default();
+        let constants = match parsed.into_syntax() {
             ast::Mod::Expression(expression) => {
+                use ast::visitor::Visitor;
                 if code.has_named_bindings {
-                    use ast::visitor::Visitor;
                     let mut named = NamedBindings::default();
                     named.visit_expr(&expression.body);
                     named.declare(Some(&mut code))?;
                 }
-                Some(expression.body)
+                let mut strings =
+                    CompiledStrings::new(&mut self.heap, &mut shared, &spellings, &code.directives);
+                strings.visit_expr(&expression.body);
+                strings.finish_scope(code.has_named_bindings, true)?
             }
             ast::Mod::Module(module) => {
                 let mut body = module.body;
@@ -2649,15 +2640,9 @@ impl Context {
                     }
                     return Err(error);
                 }
-                None
+                code.prepare_strings(&mut self.heap, &mut shared, &spellings)?
             }
         };
-        let constants = code.prepare_scope_strings(
-            &mut self.heap,
-            &mut SharedConstants::default(),
-            &spellings,
-            expression_body.as_deref(),
-        )?;
         if let Some(issue) = pending_syntax(self, &code)? {
             return Err(issue);
         }

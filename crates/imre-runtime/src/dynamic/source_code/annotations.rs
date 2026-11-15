@@ -185,7 +185,7 @@ impl<'a> CompiledStrings<'a, '_> {
         for (name, expr) in entries {
             strings.annotation(name, expr, stringized)?;
         }
-        let roots = strings.finish_nested_scope(has_named_bindings)?;
+        let roots = strings.finish_scope(has_named_bindings, false)?;
         if roots != NONE {
             self.keep(roots)?;
         }
