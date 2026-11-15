@@ -447,15 +447,7 @@ impl Context {
         // CPython clears hash and equality exceptions from type lookup. Instance dictionary
         // operations hash the key independently and propagate their own failures.
         let hash = self.dictionary_hash(key).ok()?;
-        let mut bases = Vec::new();
-        self.find_in_mro(class, |base| {
-            bases.push(base);
-            None::<()>
-        });
-        let object = self.builtin("object");
-        if !bases.contains(&object) {
-            bases.push(object);
-        }
+        let bases = self.base_lineage(class, true);
         for &base in &bases {
             self.heap.keep(base);
         }
@@ -3347,19 +3339,8 @@ impl Context {
             return self.bind_attribute(member, obj, meta);
         }
         if let Some((class, receiver)) = reader {
-            let member = if attr.nonexact_key(self).is_some() {
-                self.class_attr_with_name(class, attr)
-            } else {
-                let object = self.builtin("object");
-                self.base_lineage(class, true).into_iter().find_map(|base| {
-                    if base == object {
-                        self.raw_object_member(name)
-                    } else {
-                        self.own_class_attr(base, name)
-                    }
-                })
-            };
-            if let Some(member) = member {
+            let key = attr.key(self);
+            if let Some((_, _, member)) = self.class_dictionary_member(class, key) {
                 return self.bind_attribute(member, receiver, class);
             }
             if let Some((meta, member)) = metaclass_member {

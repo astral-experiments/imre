@@ -60,4 +60,12 @@ def current():
     assert Number(8) >> Swapped(2) == 0
     assert events == ["forward", "forward"]
     assert int.__rshift__(Number(8), True) == 4
+    class FormatKey(str):
+        def __hash__(self):
+            return hash("__format__")
+
+        def __eq__(self, other):
+            return other == "__format__"
+
+    assert getattr(bool, FormatKey("__getattribute__")) is int.__dict__["__format__"]
     return True
