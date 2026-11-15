@@ -40,13 +40,13 @@ pub(super) struct PreparedUnit<'a> {
     pub(super) initializer: Result<Initializer<'a>, &'a ModuleSyntaxError>,
 }
 
-/// Check a self-contained initializer without retaining its prepared body.
-pub(super) fn check_shipped(
-    name: &str,
-    path: &Path,
-    input: super::emit::ParsedInput<'_, '_>,
+/// Prepare an SDK initializer that needs no application-owned inputs.
+pub(super) fn shipped_body<'a>(
+    name: &'a str,
+    path: &'a Path,
+    input: super::emit::ParsedInput<'a, '_>,
     python_optimization: i32,
-) -> Result<(), String> {
+) -> Result<PreparedBody<'a>, String> {
     PreparedBody::from_parsed(
         name,
         path,
@@ -56,7 +56,6 @@ pub(super) fn check_shipped(
         Default::default(),
         Default::default(),
     )
-    .map(drop)
 }
 
 /// Lower each source on demand for checking or native emission.
@@ -183,10 +182,8 @@ pub(super) fn units<'a>(
                         })
                     })
                 });
-                let module = match indexed.as_deref().map(Cow::Borrowed).or(syntax) {
-                    Some(parsed) => ParsedModule { text, parsed },
-                    None => ParsedModule::parse(path, text)?,
-                };
+                let parser = indexed.as_deref().map(Cow::Borrowed).or(syntax);
+                let module = ParsedModule::with_parser(path, text, parser)?;
                 let checked_source = file.map(|file| file.module(registrations.modules));
                 let initializer = module_id.zip(checked_source).and_then(|(id, source)| {
                     let winner = match entry {

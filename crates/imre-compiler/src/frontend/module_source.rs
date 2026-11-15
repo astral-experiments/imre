@@ -65,7 +65,19 @@ impl CheckedFile {
     }
 }
 
-impl<'a> ParsedModule<'a, '_> {
+impl<'a, 'p> ParsedModule<'a, 'p> {
+    /// Use the parser selected for these executable bytes, or parse them in place.
+    pub(crate) fn with_parser(
+        path: &Path,
+        text: Cow<'a, str>,
+        parsed: Option<Cow<'p, Parsed<ast::ModModule>>>,
+    ) -> Result<Self, String> {
+        match parsed {
+            Some(parsed) => Ok(Self { text, parsed }),
+            None => Self::parse(path, text),
+        }
+    }
+
     pub(crate) fn parse(path: &Path, text: Cow<'a, str>) -> Result<Self, String> {
         let parsed = imre_ast::indentation::prepare(&text)
             .parse_module()
