@@ -6444,9 +6444,15 @@ publish(5, callback)
 
     #[test]
     fn named_function_compares_the_original_checked_scalar_argument() {
-        for (annotation, left, right, expected) in [
-            ("int", "0", "2", Type::Int),
-            ("Literal['diff', 'github']", "'diff'", "'github'", Type::Str),
+        for (annotation, left, right, operand, result) in [
+            ("int", "0", "2", Type::Int, Type::Bool),
+            (
+                "Literal['diff', 'github']",
+                "'diff'",
+                "'github'",
+                Type::Str,
+                Type::PythonObject,
+            ),
         ] {
             let source = format!(
                 "from typing import Literal
@@ -6468,7 +6474,7 @@ print(choose({left}), choose({right}))
                     comparisons.push((values[0].ty, values[1].ty, expr.ty));
                 }
             });
-            assert_eq!(comparisons, [(expected, expected, Type::PythonObject)]);
+            assert_eq!(comparisons, [(operand, operand, result)]);
         }
     }
 
