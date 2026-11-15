@@ -734,11 +734,7 @@ fn scan_imports(
         && imports.invalid_executable.is_none())
     .then(|| {
         let names = std::mem::take(&mut imports.private_names);
-        let lowered = if names.rewritten {
-            LoweredRoot::Complete(body.into_owned(), names)
-        } else {
-            LoweredRoot::Unchanged(names)
-        };
+        let lowered = LoweredRoot::from_body(body, names);
         ScannedModule { parsed, lowered }
     });
     Ok((imports, scanned))
@@ -748,6 +744,16 @@ pub(super) enum LoweredRoot {
     Complete(ast::Suite, imre_ast::Names),
     /// The registered parser input already has the names found at discovery.
     Unchanged(imre_ast::Names),
+}
+
+impl LoweredRoot {
+    fn from_body(body: Cow<'_, ast::Suite>, names: imre_ast::Names) -> Self {
+        if names.rewritten {
+            Self::Complete(body.into_owned(), names)
+        } else {
+            Self::Unchanged(names)
+        }
+    }
 }
 
 enum ScannedParser {
@@ -764,17 +770,12 @@ pub(super) struct ScannedModule {
 
 impl ScannedModule {
     fn from_input((module, lowered): emit::ParsedInput<'_, '_>) -> Option<Self> {
-        // An unchanged suite can use its selected parser at preparation.
-        let lowered = match lowered? {
-            LoweredRoot::Complete(_, names) if !names.rewritten => LoweredRoot::Unchanged(names),
-            root => root,
-        };
         Some(Self {
             parsed: match module.parsed {
                 Cow::Owned(parser) => Some(ScannedParser::Owned(parser)),
                 Cow::Borrowed(_) => None,
             },
-            lowered,
+            lowered: lowered?,
         })
     }
 }
@@ -803,10 +804,7 @@ fn retained_imports<'a, 'p>(
     let mut imports = imports_from_body(&module.text, &mut body, getter, None, checked)?;
     let lowered = imports.invalid_executable.is_none().then(|| {
         let names = std::mem::take(&mut imports.private_names);
-        match body {
-            Cow::Borrowed(_) => LoweredRoot::Unchanged(names),
-            Cow::Owned(body) => LoweredRoot::Complete(body, names),
-        }
+        LoweredRoot::from_body(body, names)
     });
     Ok((imports, Some((module, lowered))))
 }
@@ -834,6 +832,10 @@ fn imports_from_body(
     let error = ModuleSyntaxError::in_body(normalized, body);
     let module_flags = imre_ast::future_flags(body);
     let string_annotations = module_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
+    let original = match body {
+        Cow::Borrowed(suite) if getter.is_none() => Some(*suite),
+        _ => None,
+    };
     let names = if checked.is_some_and(|types| !types.has_name_scopes()) {
         let mut names = imre_ast::Names::default();
         names.string_annotations = string_annotations;
@@ -841,6 +843,11 @@ fn imports_from_body(
     } else {
         imre_ast::lower_in(body.to_mut(), "", string_annotations)
     };
+    if !names.rewritten
+        && let Some(original) = original
+    {
+        *body = Cow::Borrowed(original);
+    }
     // An optional file must pass the emitter's name checks before registration.
     if let Some(path) = file_alternative {
         module_source::validate_names(path, normalized, body, &names)?;
@@ -1085,9 +1092,13 @@ pub(crate) fn compile(
         file_entry.and_then(|graph| CheckedFile::entry(graph, entry_identity.unwrap_or(path)));
     let checked_entry = matches!(operation, Some(ObjectOperation::CheckedEntry));
     let mut scanned_modules = HashMap::new();
-    let mut entry_imports = |text: &str, body: ast::Suite| -> Result<Imports, String> {
-        let mut body = Cow::Owned(body);
-        let mut imports = imports_from_body(text, &mut body, None, None, None)?;
+    let entry_types = file_entry
+        .zip(entry_file)
+        .map(|(graph, _)| graph.session.operand_types(graph.entry));
+    let mut entry_imports = |text: &str,
+                             mut body: Cow<'_, ast::Suite>|
+     -> Result<Imports, String> {
+        let mut imports = imports_from_body(text, &mut body, None, None, entry_types)?;
         // Generic functions can admit an unresolved entry. A runtime-class import
         // also needs the entry's own request when checking its first-party callers.
         if module_entry.is_none()
@@ -1114,8 +1125,8 @@ pub(crate) fn compile(
                 0,
                 ScannedModule {
                     parsed,
-                    lowered: LoweredRoot::Complete(
-                        body.into_owned(),
+                    lowered: LoweredRoot::from_body(
+                        body,
                         std::mem::take(&mut imports.private_names),
                     ),
                 },
@@ -1126,22 +1137,16 @@ pub(crate) fn compile(
     let mut file_source = None;
     let mut first = if let Some(file) = entry_file {
         let module = file.parsed(modules);
-        entry_imports(
-            &module.text,
-            module_source::into_body(module.parsed).into_owned(),
-        )?
+        entry_imports(&module.text, module_source::into_body(module.parsed))?
     } else {
         let module = match read_import_source(&src, kind, |_| None) {
             Ok(ImportSource::Module(module)) => module,
             _ => return Ok(None),
         };
         if in_memory {
-            entry_imports(
-                &module.text,
-                module_source::into_body(module.parsed).into_owned(),
-            )?
+            entry_imports(&module.text, module_source::into_body(module.parsed))?
         } else {
-            let imports = entry_imports(&module.text, module.parsed.syntax().body.clone())?;
+            let imports = entry_imports(&module.text, Cow::Borrowed(&module.parsed.syntax().body))?;
             file_source = Some(module);
             imports
         }
@@ -3195,11 +3200,9 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     .unwrap();
     assert!(imports.names.is_empty());
     assert_eq!(getter.names, [(0, "fractions".to_owned())]);
-    let (_, lower) = module.unwrap();
-    let Some(LoweredRoot::Complete(body, _)) = lower else {
-        panic!("expected checked syntax");
-    };
-    let [Stmt::FunctionDef(function)] = body.as_slice() else {
+    let (module, lower) = module.unwrap();
+    assert!(matches!(lower, Some(LoweredRoot::Unchanged(_))));
+    let [Stmt::FunctionDef(function)] = module.parsed.syntax().body.as_slice() else {
         panic!("expected the module's lazy getter");
     };
     let [Stmt::Import(_), Stmt::Return(ret)] = function.body.as_slice() else {
