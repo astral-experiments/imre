@@ -187,11 +187,11 @@ fn captured_publish_emits_its_registered_callback_and_error_return() {
     );
     let checkpoints: Vec<_> = body
         .lines()
-        .filter(|line| line.contains("call void @imre_dyn_statement_with_exception("))
+        .filter(|line| line.contains("call void @imre_dyn_statement_at("))
         .collect();
     assert_eq!(checkpoints.len(), 2);
-    assert!(checkpoints[0].contains("i32 2, i64 0)"));
-    assert!(checkpoints[1].contains("i32 3, i64 0)"));
+    assert!(checkpoints[0].ends_with("i32 2)"));
+    assert!(checkpoints[1].ends_with("i32 3)"));
     let pos = output.positions[&[3, 3, 4, 15]];
     assert!(body.contains(&format!(
         "call void @imre_dyn_call_position(ptr %ctx, ptr @pos{pos})"

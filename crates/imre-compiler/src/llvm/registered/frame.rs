@@ -912,10 +912,17 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let (ptr, count) = self.live_handles(trailing);
         let line = self.positions.line(range.start());
         self.position = SourcePosition::statement(line);
-        self.line(&format!(
-            "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {}, i32 {line}, i64 {})",
-            self.positions.file, self.caught.last().map_or("0", String::as_str)
-        ));
+        let file = self.positions.file;
+        if count == 0 && self.caught.is_empty() {
+            self.line(&format!(
+                "call void @imre_dyn_statement_at(ptr %ctx, ptr {file}, i32 {line})"
+            ));
+        } else {
+            let caught = self.caught.last().map_or("0", String::as_str);
+            self.line(&format!(
+                "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {file}, i32 {line}, i64 {caught})"
+            ));
+        }
         self.check_error();
     }
 

@@ -3625,6 +3625,17 @@ pub(super) unsafe extern "C" fn namedtuple_constructor(raw: *mut Context, scope:
     finish(ctx, result)
 }
 
+/// Enter a statement with no live operand handles or saved handler exception.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_statement_at(
+    ctx: *mut Context,
+    file: *const c_char,
+    line: u32,
+) {
+    // SAFETY: the entered frame and its linked filename have the ordinary checkpoint lifetime.
+    unsafe { imre_dyn_statement_with_exception(ctx, std::ptr::null(), 0, file, line, NONE) };
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     ctx: *mut Context,
