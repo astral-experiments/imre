@@ -47,6 +47,11 @@ def current():
     for wrapper in (raw, staticmethod(raw.__func__)):
         kind = type(wrapper)
         namespace = type_dict(kind)
+        assert list(namespace)[-7:] == [
+            "__func__", "__wrapped__", "__isabstractmethod__", "__dict__",
+            "__annotations__", "__annotate__", "__doc__",
+        ]
+        assert set(dir(kind)) == set(dir(object)) | set(namespace)
         member = namespace["__dict__"]
         assert namespace is not type_dict(kind) and member is vars(kind)["__dict__"]
         assert member.__objclass__ is kind and member.__get__(wrapper) is vars(wrapper)
