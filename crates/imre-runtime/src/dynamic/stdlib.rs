@@ -892,7 +892,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
             | "get_reparse_deferral"
             | "set_reparse_deferral",
         )
-        | ("_imre_metadata", "filenames" | "dedent" | "zip_names" | "zip_open" | "zip_read")
+        | ("_imre_metadata", "filenames" | "zip_names" | "zip_open" | "zip_read")
         | (
             "_imre_posixpath",
             "extension_start" | "string_args" | "normalized_parts" | "relative_parts"
