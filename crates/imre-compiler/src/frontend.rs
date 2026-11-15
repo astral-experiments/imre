@@ -4405,15 +4405,13 @@ impl<'a> Checker<'a> {
                 "operand needs a runtime type check",
             ))
         } else {
-            Err(self.classified_error(
-                Kind::ExactType,
+            Err(Diagnostic::exact_type(
+                self.source,
                 node,
-                &format!(
-                    "expected {}, got {}; annotations are enforced contracts",
-                    self.type_name(expected),
-                    self.type_name(actual)
-                ),
-            ))
+                self.type_name(expected),
+                self.type_name(actual),
+            )
+            .into())
         }
     }
 

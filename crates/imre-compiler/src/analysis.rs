@@ -3327,7 +3327,7 @@ impl Session {
                     && let Some(expected) = param.inferred_type(&owner_model)
                     && let Some(actual) = value.inferred_type(&model)
                     && let Some(error) =
-                        Self::scalar_contract_error(&model, expected, value, actual)
+                        Self::scalar_contract_error(&model, expected, value, actual, || false)
                 {
                     errors.push(error.with_path(path).to_string());
                 }
@@ -4117,11 +4117,13 @@ fn dormant_returns(
                 Some(value) => value.inferred_type(&model)?,
                 None => ty_python_semantic::types::Type::none(db, &model.program_environment()),
             };
-            Session::scalar_contract_error(&model, expected?, &operand, actual).map(|error| {
-                error
-                    .with_path(Path::new(file.path(db).as_str()))
-                    .to_string()
-            })
+            Session::scalar_contract_error(&model, expected?, &operand, actual, || false).map(
+                |error| {
+                    error
+                        .with_path(Path::new(file.path(db).as_str()))
+                        .to_string()
+                },
+            )
         })
     })
 }

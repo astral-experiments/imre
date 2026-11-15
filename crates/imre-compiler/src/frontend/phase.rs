@@ -88,6 +88,22 @@ pub(crate) enum Failure<M = String> {
     },
 }
 
+impl Diagnostic {
+    pub(crate) fn exact_type(
+        source: &str,
+        operand: &impl Ranged,
+        expected: impl fmt::Display,
+        actual: impl fmt::Display,
+    ) -> Self {
+        Self::at(
+            source,
+            operand,
+            format!("expected {expected}, got {actual}; annotations are enforced contracts"),
+        )
+        .classified(Kind::ExactType)
+    }
+}
+
 impl<M> Diagnostic<M> {
     pub(crate) fn plain(message: M) -> Self {
         Self {
