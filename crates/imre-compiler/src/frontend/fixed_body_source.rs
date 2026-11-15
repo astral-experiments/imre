@@ -5,7 +5,7 @@ use super::*;
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
     pub(crate) method: Option<crate::classes::MethodSource>,
-    arguments: FrameArguments,
+    pub(super) arguments: FrameArguments,
     pub(crate) attributes: HashMap<TextRange, FixedAttribute>,
     sites: Vec<(TextRange, Option<FixedNode>)>,
     pub(crate) local_names: HashMap<usize, registered::LocalBinding>,
@@ -54,11 +54,6 @@ impl FixedBodySource {
         };
         if matches!(frame.inputs, FrameInputs::Checked { .. })
             && self.arguments == FrameArguments::Python
-            && frame
-                .function
-                .params
-                .iter()
-                .any(|&slot| frame.function.locals[slot].builtin_scalar_name().is_some())
             && !frame.bind_python_arguments()
         {
             return Err(frame

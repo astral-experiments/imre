@@ -136,7 +136,9 @@ mod tests {
             "    return value * 3 + 2\n",
             "def through(value: int) -> int:\n",
             "    return adjusted(value)\n",
-            "exec('print(through(7), parse([]))')\n",
+            "def add(left: float, right: float) -> float:\n",
+            "    return left + right\n",
+            "exec('print(through(7), add(1.5, 2.0), parse([]))')\n",
         );
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
@@ -144,13 +146,14 @@ mod tests {
         let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
         crate::checked_lower(&mut graph).unwrap();
         let functions = graph.registered_functions();
-        for (declaration, returned) in [
-            ("def adjusted", "return value * 3 + 2"),
-            ("def through", "return adjusted(value)"),
+        for (declaration, returned, result) in [
+            ("def adjusted", "return value * 3 + 2", Type::Int),
+            ("def through", "return adjusted(value)", Type::Int),
+            ("def add", "return left + right", Type::Float),
         ] {
             let start = TextSize::try_from(text.find(declaration).unwrap()).unwrap();
             let body = &functions[&graph.entry][&start];
-            assert_eq!(body.function.returns, Type::Int);
+            assert_eq!(body.function.returns, result);
             assert!(matches!(
                 body.function.body.as_slice(),
                 [Statement::Return(_)]
