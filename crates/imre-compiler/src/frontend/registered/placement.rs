@@ -7,22 +7,33 @@ mod tests {
 
     #[test]
     fn a_direct_local_function_preserves_its_callers_checked_return() {
-        let source = concat!(
-            "def report(value: int) -> str:\n",
-            "    def clean(x: int) -> str:\n",
-            "        return str(x)\n",
-            "    return clean(value)\n",
-            "print(report(40))\n",
-        );
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.py");
-        std::fs::write(&path, source).unwrap();
-        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
-        graph.registered_startup = true;
-        crate::checked_lower(&mut graph).unwrap();
-        let functions = graph.registered_functions();
-        let report = &functions[&graph.entry][&TextSize::default()];
-        assert_eq!(report.function.returns, Type::Str);
+        for source in [
+            concat!(
+                "def report(value: int) -> str:\n",
+                "    def clean(x: int) -> str:\n",
+                "        return str(x)\n",
+                "    return clean(value)\n",
+                "print(report(40))\n",
+            ),
+            concat!(
+                "def format_table(values: list[int]) -> str:\n",
+                "    def show(count: int, *, bracket: bool = True) -> str:\n",
+                "        return '[' + str(count) + ']' if bracket else str(count)\n",
+                "    values.sort(key=lambda v: -v, reverse=False)\n",
+                "    return show(len(values)) + ' ' + str(values)\n",
+                "print(format_table([3, 1, 2]))\n",
+            ),
+        ] {
+            std::fs::write(&path, source).unwrap();
+            let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+            graph.registered_startup = true;
+            crate::checked_lower(&mut graph).unwrap();
+            let functions = graph.registered_functions();
+            let caller = &functions[&graph.entry][&TextSize::default()];
+            assert_eq!(caller.function.returns, Type::Str, "{source}");
+        }
     }
 
     #[test]

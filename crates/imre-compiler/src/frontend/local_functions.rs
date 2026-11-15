@@ -552,8 +552,8 @@ impl Checker<'_> {
             ));
         }
         let binding = self.local_functions.get_mut(name).unwrap();
-        // A Python frame builds its own local callable. Moving the caller may
-        // discard the checked helper only when no value or default was bound here.
+        // The Python frame creates the callable and evaluates its defaults.
+        // A direct helper with only constant defaults has no binding effects to carry.
         binding.direct_only = !site.value_read
             && object.is_none()
             && function.captures.is_empty()
@@ -563,7 +563,7 @@ impl Checker<'_> {
                 .signature
                 .params
                 .iter()
-                .all(|param| param.default.is_none());
+                .all(|param| param.default.as_ref().is_none_or(ir::Constant::is_constant));
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
         Ok(object.map(|(slot, value)| Statement::Assign(slot, value)))
