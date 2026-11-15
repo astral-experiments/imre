@@ -1298,7 +1298,7 @@ fn lower_graph(
     let recover_completed = std::cell::Cell::new(named);
     let defer_capture = !named && !needs_registered_entry && cache.is_none();
     let capture_on_object = |failure: &Failure| {
-        if failure.is_object() || needs_registered_entry {
+        if !needs_registered_entry && failure.is_object() {
             if defer_capture {
                 // A settled body needs no further contract check. Keep its existing
                 // recovery path while the remaining procedures finish validation.
@@ -1351,7 +1351,7 @@ fn lower_graph(
             capture_on_object,
         )
         .inspect_err(|_| {
-            if defer_capture && recover_completed.get() {
+            if needs_registered_entry || defer_capture && recover_completed.get() {
                 capture();
             }
         })?;
@@ -1359,8 +1359,19 @@ fn lower_graph(
     // After an initializer requests recovery, a checked procedure can supply both
     // its source contracts and its Python frame, just as it does on a named entry.
     let place_procedures = recover_completed.get();
-    if needs_registered_entry {
-        capture();
+    // The ordinary checker supplies the unfinished physical definitions below.
+    // Capture the other definitions from inference's settled results now.
+    let place_live = |slot: usize| {
+        let (module, _, signature) = &definitions[slot];
+        needs_registered_entry
+            && signature.physical_frame
+            && signature.method.is_none()
+            && !checked_bodies.contains(&slot)
+            && graph.modules[*module].is_program_source()
+            && !graph.modules[*module].bundled
+    };
+    if needs_registered_entry && let Some(prepared) = pending_capture.borrow_mut().as_mut() {
+        capture_slots(prepared, &mut slots().filter(|&slot| !place_live(slot)));
     }
     if let Some(cache) = cache.as_deref_mut() {
         cache.validate_abi(&definitions, &globals);
@@ -1471,31 +1482,22 @@ fn lower_graph(
         // This graph will emit registered frames. Inference already checked this exact
         // definition with the settled signature; recovery owns its executable checked body.
         if (needs_registered_entry || unavailable.is_some())
+            && body_checks.is_some_and(|ids| ids.contains(&signature.id))
             && graph
                 .registered_functions()
                 .get(module_id)
-                .and_then(|bodies| bodies.get(&definition.start()))
-                .is_some_and(|frame| {
-                    body_checks.is_some_and(|ids| ids.contains(&signature.id))
-                        || needs_registered_entry
-                            && !frame.fixed_sites.is_empty()
-                            && frame.function.returns == signature.returns
-                            && frame
-                                .function
-                                .params
-                                .iter()
-                                .map(|&slot| frame.function.locals[slot])
-                                .eq(signature.params.iter().map(|parameter| parameter.ty))
-                })
+                .is_some_and(|bodies| bodies.contains_key(&definition.start()))
         {
             continue;
         }
         // A bound wrapper with an unknown owner may need the method's Python
         // frame. Keep the operand sites until its specialized layout is known.
         let python_method = graph.registered_startup || has_wrapper_link;
-        let prepare_sites = !needs_registered_entry
-            && (signature.method.is_none() || python_method)
-            && signature.physical_frame;
+        let live = place_live(signature.id);
+        let prepare_sites = live
+            || !needs_registered_entry
+                && (signature.method.is_none() || python_method)
+                && signature.physical_frame;
         let inferred = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
             if prepare_sites && prepared.get(&signature.id)?.is_ok() {
                 prepared.remove(&signature.id)?.ok()
@@ -1511,7 +1513,7 @@ fn lower_graph(
             && matches!(source, Cow::Borrowed(_))
             && fixed_frame_entry(definition);
         checker.fixed_sites = ((prepare_sites || provider_frame) && inferred.is_none())
-            .then(|| fixed_body_source::SourceSites::new(python_method));
+            .then(|| fixed_body_source::SourceSites::new(python_method || live));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
         checker.python_method_frame =
             checker.placement_only && signature.method.is_some() && signature.physical_frame;
@@ -1680,6 +1682,16 @@ fn lower_graph(
         }
         let Some((body, sums)) = placed else { continue };
         has_wrapper_link |= body.wrapper_link;
+        if live {
+            let mut body = body;
+            if let Some(source) = &mut body.source
+                && let Some(prepared) = pending_capture.borrow_mut().as_mut()
+            {
+                source.arguments = FrameArguments::Python;
+                prepared.insert(signature.id, Ok((body, sums)));
+            }
+            continue;
+        }
         if needs_registered_entry || (unavailable.is_some() && body.source.is_none()) {
             // After a fixed layout fails, only bodies with a source frame can be placed.
             // Later definitions still receive the checked transfer and wrapper facts above.
@@ -1736,6 +1748,9 @@ fn lower_graph(
         call_graph.push(calls);
         class_reads.push(reads);
         recursion_errors.push(recursion_error);
+    }
+    if needs_registered_entry {
+        capture();
     }
     let mut reports = body_reports.into_iter();
     if let Some(primary) = reports.next() {
