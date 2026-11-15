@@ -998,7 +998,7 @@ pub(super) fn call(
         "newlines" => return Ok(w.input.borrow().newlines(ctx)),
         "close" => {
             let closed = ctx.lookup_attr(buffer, "closed")?;
-            if ctx.truth(closed)? || w.buffer.get().is_none() {
+            if ctx.truth(closed)? || Wrapper::current(ctx, receiver)?.buffer.get().is_none() {
                 return Ok(NONE);
             }
             if let Value::Instance {
