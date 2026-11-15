@@ -882,6 +882,7 @@ impl Checker<'_> {
         // Native bound adapters take their context first. The source arguments
         // keep their evaluation order at direct calls to the same lifted body.
         let bound_capture = materialize
+            && !self.graph.registered_startup
             && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled
             && !signature.asynchronous
             && matches!(captures.as_slice(), [slot] if stable_callbacks.contains(slot));
