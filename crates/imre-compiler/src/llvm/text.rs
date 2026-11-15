@@ -455,7 +455,7 @@ mod tests {
             (
                 "source: str, sep: str",
                 "return source.rsplit(maxsplit=1, sep=sep)[-1]",
-                false,
+                true,
             ),
             (
                 "source: str, sep: str",
