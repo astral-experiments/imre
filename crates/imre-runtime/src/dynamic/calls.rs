@@ -6339,11 +6339,14 @@ impl Context {
 
     /// A missing T_OBJECT member reads as None, even after repeated deletions.
     fn update_key_wrapper_field(&mut self, obj: Id, name: &str, value: Option<Id>) -> Result<bool> {
-        let Value::KeyWrapper { object, .. } = self.heap.get_mut(obj) else {
+        let Value::KeyWrapper { .. } = self.heap.get(obj) else {
             return Ok(false);
         };
         match name {
             "obj" => {
+                let Value::KeyWrapper { object, .. } = self.heap.get_mut(obj) else {
+                    unreachable!()
+                };
                 if let Some(old) = std::mem::replace(object, value) {
                     self.heap.weak_edge_removed(old);
                 }
