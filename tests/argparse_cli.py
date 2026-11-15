@@ -13,7 +13,9 @@ CASES = {
     "evaluated_default": [[], ["--repository", "explicit"], ["--repository="], ["--repository"]],
     "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
                             ["nested-group"], ["nested-child"], ["nested-child-group"],
-                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"]],
+                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"],
+                            ["repeated_flag"], ["invalid_arity"], ["zero_arity"],
+                            ["mixed_positionals"], ["metavar_arity"], ["bad_template"]],
     "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
                         ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
     "boolean_options": [
@@ -182,19 +184,13 @@ CASES = {
                   ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
 REJECTED = {
-    "repeated_flag": 'parser.add_argument("-v", "--verbose")\n    parser.add_argument("-v")',
-    "invalid_arity": 'parser.add_argument("input", nargs="bad")',
-    "zero_arity": 'parser.add_argument("input", nargs=0)',
-    "mixed_positionals": 'parser.add_argument("input", "--other")',
     "computed_default_bad_converter": 'parser.add_argument("--key", default="name".upper())\n    parser.add_argument("--number", type=complex)',
     "foreign_converter": 'parser.add_argument("--number", type=complex)',
     "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
-    "metavar_arity": 'parser.add_argument("--key", nargs="?", metavar=("A", "B"))',
     "metavar_element": 'parser.add_argument("--key", nargs="*", metavar=("A", 2))',
     "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
     "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
     "escaped_builder": "copy = parser",
-    "bad_template": 'parser.add_argument("--key", help="%(value)s")',
 }
 
 
