@@ -3744,6 +3744,8 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// After a layout refusal the outer fixed body can only be used with its source sites.
     placement_only: bool,
+    /// This body is checked solely for an already selected registered method.
+    python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
     /// Keep a Python result only when the returned operation already produces that representation.
@@ -3886,6 +3888,7 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             placement_only: false,
+            python_method_frame: false,
             checked_call_contracts: false,
             infer_python_call_result: false,
             settled_attributes: None,

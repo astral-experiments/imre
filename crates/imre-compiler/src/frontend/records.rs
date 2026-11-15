@@ -1595,11 +1595,17 @@ impl Checker<'_> {
             _ => (None, receiver),
         };
         let skip = usize::from(receiver.is_some());
-        let value = self.source_call(call, &signature, receiver, skip)?;
+        let mut value = self.source_call(call, &signature, receiver, skip)?;
+        let written = 1 + call.arguments.len();
         if kind == MethodKind::Instance
             && skip == 1
             && let Some(sites) = &mut self.fixed_sites
-            && if call.arguments.keywords.is_empty() {
+            && if call.arguments.keywords.is_empty()
+                && (!self.python_method_frame
+                    || value
+                        .named_call_arguments()
+                        .is_some_and(|args| args.len() == written))
+            {
                 registered::values::fixed_positional_arguments(call)
             } else {
                 self.placement_only
@@ -1610,7 +1616,27 @@ impl Checker<'_> {
                         .is_some()
             }
         {
-            sites.method(call, attribute, &value);
+            if self.python_method_frame
+                && let ExprKind::Call(_, args) = &mut value.kind
+                && !args.exhaustive_enum_match
+                && args.values.len() >= written
+            {
+                // Fixed binding appends defaults after the receiver and written values.
+                // The live method binds its own defaults after evaluating those operands.
+                let mut values = std::mem::take(&mut args.values);
+                values.truncate(written);
+                let receiver = values.remove(0);
+                value.kind = registered::values::bound_call(
+                    call,
+                    registered::values::method_target(attribute),
+                    receiver,
+                    values,
+                )
+                .kind;
+                sites.checked_expression(call.range(), &value);
+            } else {
+                sites.method(call, attribute, &value);
+            }
         }
         Ok(self.evaluated_receiver(discarded, value))
     }
