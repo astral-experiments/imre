@@ -4852,7 +4852,10 @@ impl Context {
             Value::Calendar { ref value, .. } => {
                 let kind = value.class();
                 let class = self.exact_type(obj)?;
-                if let Some(member) = self.class_attr(class, name) {
+                if let Some(member) = self
+                    .class_attr(class, name)
+                    .or_else(|| self.inherited_object_initializer(class, name))
+                {
                     return self.bind_attribute(member, obj, class);
                 }
                 return Err(Error::new(
@@ -6226,8 +6229,7 @@ impl Context {
             if class == obj && self.builtins.get("type") == Some(&class) {
                 return Ok(self.builtin("type.__init__"));
             }
-            if self.inherits_native_object_init(class) {
-                let init = self.builtin("object.__init__");
+            if let Some(init) = self.inherited_object_initializer(class, name) {
                 return self.bind_attribute(init, receiver, class);
             }
         }
@@ -8038,6 +8040,11 @@ impl Context {
         ))
     }
 
+    fn inherited_object_initializer(&mut self, class: Id, name: &str) -> Option<Id> {
+        (name == "__init__" && self.inherits_native_object_init(class))
+            .then(|| self.builtin("object.__init__"))
+    }
+
     /// An intrinsic allocator consumes the constructor arguments only when the MRO
     /// leaves initialization to object. Some native descriptors are exposed lazily.
     pub(super) fn inherits_native_object_init(&self, class: Id) -> bool {
@@ -8047,7 +8054,11 @@ impl Context {
         let Value::Native(owner) = self.heap.get(layout) else {
             return false;
         };
-        if self.builtins.get("object") == Some(&layout) || !builtins::owns_native_new(owner) {
+        let owns_new = builtins::owns_native_new(owner)
+            || self.own_class_attr(layout, "__new__").is_some_and(|slot| {
+                matches!(self.heap.get(slot), Value::Native(name) if name.strip_suffix(".__new__") == Some(owner.as_str()))
+            });
+        if self.builtins.get("object") == Some(&layout) || !owns_new {
             return false;
         }
         match self.class_attr(class, "__init__") {

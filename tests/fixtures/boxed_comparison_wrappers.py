@@ -1,4 +1,5 @@
 import types
+from datetime import date
 
 
 def current():
@@ -34,8 +35,12 @@ def current():
     assert marked.co_freevars == names == ("obj",)
     assert marked.co_freevars is not names
 
+    class Day(date):
+        pass
+
+    day = Day(2024, 2, 29)
     method = Owner().method
-    for value in (method.__func__.__code__, method.__func__, method, 42, "abc"):
+    for value in (method.__func__.__code__, method.__func__, method, 42, "abc", date(2024, 2, 29), day):
         assert type(value).__init__ is object.__init__
         assert type(value).__init__(value) is None
         bound = value.__init__
@@ -43,6 +48,7 @@ def current():
         assert bound.__self__ is value
         assert bound() is None
         assert bound(1, flag=True) is None
+    assert (day.year, day.month, day.day) == (2024, 2, 29)
     method.__func__.__init__ = None
     assert method.__init__.__self__ is method
     del method.__func__.__init__
