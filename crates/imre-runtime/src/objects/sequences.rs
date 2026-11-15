@@ -96,22 +96,8 @@ impl SliceIndices {
     /// Normalizes already decoded bounds against the current sequence length.
     fn from_bounds(length: usize, start: Option<isize>, stop: Option<isize>, step: isize) -> Self {
         let reverse = step < 0;
-        let length = length as isize;
-        let (lower, upper) = if reverse {
-            (-1, length - 1)
-        } else {
-            (0, length)
-        };
-        let normalize = |value: isize| {
-            let value = if value < 0 { value + length } else { value };
-            value.clamp(lower, upper)
-        };
-        let start = start
-            .map(normalize)
-            .unwrap_or(if reverse { upper } else { lower });
-        let stop = stop
-            .map(normalize)
-            .unwrap_or(if reverse { lower } else { upper });
+        let [start, stop, _] =
+            crate::dynamic::normalize_slice_bounds([start, stop, Some(step)], length as isize);
         let distance = if reverse { start - stop } else { stop - start };
         let stride = step.unsigned_abs();
         let remaining = if distance > 0 {
