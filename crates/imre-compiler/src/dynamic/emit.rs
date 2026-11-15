@@ -171,7 +171,7 @@ impl crate::ProgramOutput {
                     } else {
                         None
                     };
-                    let (symbol, body) = initializer.provider_body(target)?;
+                    let (symbol, body) = initializer.provider_body(name, target)?;
                     suspends = body.suspends;
                     archived = check_archive && providers.contains(&symbol);
                     if !archived && separate && !root.declares(&symbol) {
@@ -198,7 +198,7 @@ impl crate::ProgramOutput {
                                 launcher.external(symbol, suspends)
                             }
                             (None, Initializer::Checked(body)) => {
-                                body.emit(&mut launcher.output, unit, &module.file)?
+                                body.emit_module(name, &mut launcher.output, unit, &module.file)?
                             }
                         };
                         (module, code)
@@ -488,11 +488,7 @@ impl<'a> PreparedBody<'a> {
                 && !(interactive && syntax.body.first().is_some_and(ast::Stmt::is_expr_stmt)),
             registered_values.is_none().then_some(&mut bindings),
         )?;
-        let docs = if keep_docstrings && name == "collections" && bundled {
-            crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections)
-        } else {
-            None
-        };
+        let docs = Self::sealed_docs(name, bundled && keep_docstrings);
         let template_fields = if has_templates {
             imre_ast::strings::template_fields(source, tokens, syntax)
         } else {
@@ -750,11 +746,35 @@ impl<'a> PreparedBody<'a> {
         &self.initializer
     }
 
+    fn sealed_docs(name: &str, enabled: bool) -> Option<crate::modules::doctest::SealedDocs> {
+        (enabled && name == "collections")
+            .then(|| crate::modules::doctest::sealed(crate::modules::IntrinsicModule::Collections))
+            .flatten()
+    }
+
+    pub(super) fn shares_standalone_source(&self, name: &str, source: &str) -> bool {
+        let origin = ModuleOrigin::Bundled(None);
+        self.source.text == source
+            && origin.python_annotations(name) == origin.python_annotations(self.name)
+            && Self::sealed_docs(name, self.source.python_optimization < 2).map(|docs| docs.module)
+                == self.source.docs.as_ref().map(|docs| docs.module)
+    }
+
     fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
+        self.emit_module(self.name, output, unit, file)
+    }
+
+    fn emit_module(
+        &self,
+        name: &str,
+        output: &mut Output,
+        unit: usize,
+        file: &str,
+    ) -> Result<String, String> {
         #[cfg(test)]
         crate::single_emission_tests::record_llvm_start(Some(&self.source.path));
         // Frozen code exposes its origin independently of the module's registered source path.
-        let code_file = match (self.source.bundled, self.name) {
+        let code_file = match (self.source.bundled, name) {
             (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
             (true, "_frozen_importlib_external") => {
                 output.data(b"<frozen importlib._bootstrap_external>")
@@ -773,7 +793,7 @@ impl<'a> PreparedBody<'a> {
         let code = location.code(
             output,
             QualnameScope::MODULE,
-            Body::Module(self),
+            Body::Module(self, name),
             false,
             None,
         );
@@ -785,7 +805,7 @@ impl<'a> PreparedBody<'a> {
 
     #[cfg(test)]
     pub(super) fn standalone(&self) -> Result<(String, String), String> {
-        let (symbol, body) = self.provider_body(None)?;
+        let (symbol, body) = self.provider_body(self.name, None)?;
         let ir = body.llvm_ir(&symbol, "");
         Ok((symbol, ir))
     }
@@ -793,6 +813,7 @@ impl<'a> PreparedBody<'a> {
     /// Hash the emitted module before deciding whether its native object is already available.
     pub(super) fn provider_body(
         &self,
+        name: &str,
         mut placement: Option<(&mut Output, usize, &mut String)>,
     ) -> Result<(String, ProviderBody), String> {
         let mut output = Output {
@@ -804,7 +825,7 @@ impl<'a> PreparedBody<'a> {
         }
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
-        let mut entry = self.emit(&mut output, 0, &file)?;
+        let mut entry = self.emit_module(name, &mut output, 0, &file)?;
         if let Some((target, _, whole_entry)) = placement {
             *whole_entry = Output::whole_operand(&mut entry);
             output.finish_placement(target);
@@ -813,7 +834,7 @@ impl<'a> PreparedBody<'a> {
         let mut hash = blake3::Hasher::new();
         for field in [
             std::env::consts::ARCH.as_bytes(),
-            self.name.as_bytes(),
+            name.as_bytes(),
             filename,
             self.source.text.as_bytes(),
         ] {
@@ -833,7 +854,7 @@ impl<'a> PreparedBody<'a> {
 }
 
 enum Body<'a> {
-    Module(&'a PreparedBody<'a>),
+    Module(&'a PreparedBody<'a>, &'a str),
     Namespace(&'a crate::frontend::function_scope::classes::ClassScope),
     CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
     Registered(&'a Callable<'a>),
@@ -989,7 +1010,7 @@ impl SourceMap<'_> {
         let empty = BTreeSet::new();
         let mut function = self.function(output, suspension, &empty, &prefix, in_function);
         match body {
-            Body::Module(module) => {
+            Body::Module(module, name) => {
                 let frame = &mut function.frame;
                 if let Some(annotations) = &self.module_annotations {
                     self.define_module_annotations(frame, annotations);
@@ -1000,7 +1021,7 @@ impl SourceMap<'_> {
                     module.docstring.as_deref(),
                 );
                 if !module.prompts.is_empty() {
-                    let name = frame.code_name(module.name);
+                    let name = frame.code_name(name);
                     frame.op("bind_doctest_module", &[&frame.scope.clone(), &name]);
                 }
                 function.declared_globals = &self.scopes.module_globals;

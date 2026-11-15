@@ -1,7 +1,8 @@
 //! Prepare the registered source units selected by import resolution.
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use super::ModuleSyntaxError;
 use super::emit::{ModuleOrigin, PhysicalFile, PreparedBody, RegisteredBodies};
@@ -28,7 +29,7 @@ pub(super) struct SourceInputs<'a> {
 }
 
 pub(super) enum Initializer<'a> {
-    Checked(Box<PreparedBody<'a>>),
+    Checked(Rc<PreparedBody<'a>>),
     Archived(&'a str),
 }
 
@@ -85,6 +86,16 @@ pub(super) fn units<'a>(
         .iter()
         .map(|module| (module, false))
         .chain(builtins.iter().map(|module| (module, true)));
+    // Only retain preparation for a physical SDK path selected under multiple names.
+    let mut aliases: HashMap<_, Option<Rc<PreparedBody<'_>>>> = {
+        let mut seen = HashSet::new();
+        modules
+            .clone()
+            .filter_map(|((_, path, _), _)| {
+                (path.starts_with(bundled_root) && !seen.insert(path)).then_some((path, None))
+            })
+            .collect()
+    };
     modules
         .enumerate()
         .map(move |(unit, (original, builtin))| {
@@ -119,6 +130,10 @@ pub(super) fn units<'a>(
                 && checked.is_none_or(|unit| unit.run_path.is_none())
                 && literals.is_none()
                 && types.is_none();
+            let alias =
+                (standalone && checked.is_none() && matches!(origin, ModuleOrigin::Bundled(None)))
+                    .then(|| aliases.get_mut(path))
+                    .flatten();
             let shipped = shipped_checks.remove(&unit).filter(|_| standalone);
             let initializer = if !builtin && let Some(error) = module_errors.get(path) {
                 Err(error.as_ref())
@@ -126,6 +141,10 @@ pub(super) fn units<'a>(
                 return check.map(|()| None);
             } else if let Some(Shipped::Archived(symbol)) = shipped {
                 Ok(Initializer::Archived(symbol))
+            } else if let Some(body) = alias.as_deref().and_then(Option::as_ref)
+                && body.shares_standalone_source(name, source)
+            {
+                Ok(Initializer::Checked(Rc::clone(body)))
             } else {
                 // Preserve the loader's digest while compiling its normalized source.
                 let (text, syntax) = if let Some(entry) = discovered {
@@ -217,7 +236,11 @@ pub(super) fn units<'a>(
                     })
                     .or_else(|| module_id.map(|id| &registrations.modules[id].doctest_prompts))
                     .map_or(&[], Vec::as_slice);
-                Ok(Initializer::Checked(Box::new(body)))
+                let body = Rc::new(body);
+                if let Some(alias) = alias {
+                    *alias = Some(Rc::clone(&body));
+                }
+                Ok(Initializer::Checked(body))
             };
             // Release each checker database after its last selected first-party file.
             layouts.retain(|facts| !facts.is_empty());
@@ -235,4 +258,57 @@ pub(super) fn units<'a>(
             }))
         })
         .filter_map(Result::transpose)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shared_sdk_source_keeps_both_registrations() {
+        let root = Path::new("<imre stdlib>");
+        let path = root.join("importlib/_bootstrap_external.py");
+        let source = "def _path_stat(path):\n    return _os.stat(path)\n";
+        let modules = [
+            ("__main__".into(), "app.py".into(), "".into()),
+            (
+                "importlib._bootstrap_external".into(),
+                path.clone(),
+                source.into(),
+            ),
+            (
+                "_frozen_importlib_external".into(),
+                path.clone(),
+                source.into(),
+            ),
+            ("other".into(), path, "def changed(): return 42".into()),
+        ];
+        let errors = HashMap::new();
+        let registered = RegisteredBodies::default();
+        let bodies = units(
+            (&modules, &[]),
+            SourceInputs::default(),
+            0,
+            root,
+            &errors,
+            &registered,
+            vec![],
+        )
+        .skip(1)
+        .map(|unit| match unit.unwrap().initializer {
+            Ok(Initializer::Checked(body)) => body,
+            _ => panic!("expected the checked source"),
+        })
+        .collect::<Vec<_>>();
+        assert!(Rc::ptr_eq(&bodies[0], &bodies[1]));
+        assert!(!Rc::ptr_eq(&bodies[1], &bodies[2]));
+        for (body, (name, _, _)) in bodies.iter().zip(&modules[1..3]) {
+            let (symbol, code) = body.provider_body(name, None).unwrap();
+            assert_eq!(
+                code.llvm_ir(&symbol, "")
+                    .contains("<frozen importlib._bootstrap_external>"),
+                name == "_frozen_importlib_external"
+            );
+        }
+    }
 }
