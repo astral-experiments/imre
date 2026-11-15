@@ -1104,6 +1104,67 @@ fn execution_operands_follow_the_selected_initializer() {
 }
 
 #[test]
+fn imported_exec_aliases_follow_the_binding_held_at_the_call() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let app = root.join("app.py");
+    let leaf = root.join("leaf.py");
+    let producer = root.join("producer.py");
+    fs::write(
+        &app,
+        "import bridge\nfrom producer import consume\nconsume('ok')\n",
+    )
+    .unwrap();
+    fs::write(&leaf, "raise LookupError()\n").unwrap();
+    fs::write(root.join("bridge.py"), "import leaf\n").unwrap();
+    fs::write(
+        &producer,
+        "launch = exec\ndef consume(value):\n    launch(input())\n",
+    )
+    .unwrap();
+    let mut compiler = crate::IncrementalCompiler::default();
+    compiler.check_file(&app, None).unwrap();
+
+    fs::write(&leaf, "pass\n").unwrap();
+    let error = compiler.check_file(&app, None).unwrap_err();
+    assert!(
+        error.contains("producer.py:3:12: Imre: this call may select builtins.exec"),
+        "{error}"
+    );
+
+    let bindings =
+        "launch = exec\nheld = launch\ndef record(value): print(value)\nlaunch = record\n";
+    let mut check = |name: &str| {
+        fs::write(
+            &producer,
+            format!("{bindings}def consume(value):\n    {name}(input())\n"),
+        )
+        .unwrap();
+        compiler.check_file(&app, None)
+    };
+    let error = check("held").unwrap_err();
+    assert!(
+        error.contains("producer.py:6:10: Imre: this call may select builtins.exec"),
+        "{error}"
+    );
+    check("launch").unwrap();
+
+    fs::write(
+        &producer,
+        "def consume(value):\n    exec(\"print('producer')\")\n",
+    )
+    .unwrap();
+    let compiled = crate::compile_file(&app, None, &crate::CompileOptions::default()).unwrap();
+    assert_eq!(
+        compiled
+            .llvm_ir
+            .matches("call i64 @imre_dyn_exec_operand(")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn a_nested_import_resumes_the_checked_caller_only_on_its_normal_edge() {
     let root = tempdir().unwrap();
     let paths = ["app.py", "bridge.py", "leaf.py"].map(|name| root.path().join(name));

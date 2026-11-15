@@ -1,5 +1,6 @@
 //! Scalar contracts at module initialization, before either native representation is selected.
 
+use super::execution::ExecutionIntrinsic;
 use super::{ScalarMatch, Session, concrete_scalar};
 use crate::frontend::phase::{Diagnostic, Kind};
 use ruff_python_ast::helpers::Truthiness;
@@ -416,18 +417,20 @@ impl Session {
                     }
                 }
                 // Copying a function bound on this passive prefix does not invoke it.
+                // A builtin source callable has no declaration in this module.
                 // Resolve subsequent calls at their own load, after any redefinition.
                 if let Stmt::Assign(assign) = stmt
                     && assign.targets.iter().all(Expr::is_name_expr)
                     && assign.value.is_name_expr()
-                    && self
-                        .copied_name_binding(module, &parsed, &assign.value)
-                        .is_some_and(|def| {
-                            matches!(
-                                def.kind(&self.db),
-                                DefinitionKind::Function(_) | DefinitionKind::ImportFrom(_)
-                            )
-                        })
+                    && (ExecutionIntrinsic::resolve(&model, &assign.value).is_some()
+                        || self
+                            .copied_name_binding(module, &parsed, &assign.value)
+                            .is_some_and(|def| {
+                                matches!(
+                                    def.kind(&self.db),
+                                    DefinitionKind::Function(_) | DefinitionKind::ImportFrom(_)
+                                )
+                            }))
                 {
                     continue;
                 }
