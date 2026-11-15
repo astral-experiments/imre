@@ -599,7 +599,8 @@ pub(crate) fn check_registered_project<'a>(
                 || graph.session.clone(),
                 winners.filter(|(id, winner)| {
                     let physical = &graph.modules[*id];
-                    physical.path == winner.path && physical.original_source() == winner.source
+                    physical.path == winner.path
+                        && (file_entry || physical.original_source() == winner.source)
                 }),
             ));
         }
