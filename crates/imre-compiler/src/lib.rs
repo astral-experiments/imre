@@ -2037,13 +2037,52 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn a_mixed_list_consumer_keeps_the_scalar_body_on_its_first_graph() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("publisher.py");
+        let source = format!(
+            "def release_count(count: int) -> int:\n    return count * 3 + 1\n\n\
+             {INFERRED_SET_GATHER}\nnames = gather('cab')\n\
+             names.append(release_count(4))\nprint('publish', names)\n"
+        );
+        std::fs::write(&path, source).unwrap();
+        for module_entry in [None, Some("publisher".into())] {
+            let options = CompileOptions {
+                module_entry,
+                extension_paths: vec![root.path().to_owned()],
+                script_startup: Some((Default::default(), "imre".into())),
+                ..Default::default()
+            };
+            let mut passes = 0;
+            let mut output = super::ProgramOutput::new(super::CodegenLayout::Whole);
+            super::object_fallback(
+                Some(&mut output),
+                super::ProgramEntry::File(&path, Some(root.path())),
+                &options,
+                Default::default(),
+                None,
+                |graph, cache, call_error| {
+                    passes += 1;
+                    super::checked_lower_with(graph, cache, call_error)
+                },
+            )
+            .unwrap();
+            let llvm = output.compilation.into_whole().llvm_ir;
+            let body = registered_body_at(&llvm, "publisher.py", 2);
+            assert!(body.contains("call i64 @int_mul("));
+            assert!(body.contains("call i64 @int_add("));
+            assert_eq!(passes, 1);
+        }
+    }
+
+    #[test]
     fn set_layout_retry_uses_the_resolved_source() {
         use super::modules::LayoutHint;
 
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("main.py");
         let source = format!(
-            "{INFERRED_SET_GATHER}values = gather('ab')\nvalues.append(1)\nprint(len(values))\n"
+            "{INFERRED_SET_GATHER}def wrong() -> int:\n    return 'x'\nprint(gather('a'), wrong())\n"
         );
         std::fs::write(&path, &source).unwrap();
         let options = CompileOptions::default();
