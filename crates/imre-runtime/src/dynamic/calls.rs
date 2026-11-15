@@ -2325,26 +2325,15 @@ impl Context {
                 Error::new("ImportError", format!("native class {name} is unavailable"))
             });
         }
+        if let Some(class) = self.heap.get(obj).instance_class() {
+            return Ok(class);
+        }
         match self.heap.get(obj) {
             Value::Union(_) => Ok(super::union::class(self)),
-            Value::FrameLocalsProxy { class, .. } => Ok(*class),
-            Value::Socket { class, .. }
-            | Value::Instance { class, .. }
-            | Value::Class {
-                metaclass: Some(class),
-                ..
-            }
-            | Value::Module {
-                constructor: Some(class),
-                ..
-            } => Ok(*class),
             Value::NamedTuple {
                 class: Some(class), ..
             } => Ok(self.builtin(class)),
             Value::Raised(error) => {
-                if let Some(class) = error.class() {
-                    return Ok(class);
-                }
                 let name = error.kind.clone();
                 Ok(self.builtin(&name))
             }
@@ -8549,7 +8538,7 @@ impl Context {
         }))
     }
 
-    /// Initialize a class returned by __new__ when it is an instance of the called metaclass.
+    /// Run the actual type's initializer when __new__ returned a subtype instance.
     pub(super) fn finish_type_call(
         &mut self,
         caller: Id,
@@ -8557,8 +8546,12 @@ impl Context {
         args: Vec<Id>,
         kwargs: Vec<(String, Id)>,
     ) -> Result<Id> {
-        let actual = self.exact_type(result)?;
-        if self.direct_subclass(actual, caller)
+        let actual = match self.heap.get(result).instance_class() {
+            Some(class) => class,
+            None if self.instance_of(result, caller) => self.exact_type(result)?,
+            None => return Ok(result),
+        };
+        if self.real_subtype(actual, caller)
             && let Some(init) = self.class_attr(actual, "__init__")
         {
             self.call_initializer(init, result, actual, args, kwargs)?;
@@ -9561,6 +9554,14 @@ impl Context {
                     .find(|(base, _)| self.has_base(callable, base))
                     .map(|(_, new)| self.builtin(new))
                 });
+                if let Some(new) = new {
+                    let allocate = self.bind_attribute(new, NONE, callable)?;
+                    let positional = std::iter::once(callable)
+                        .chain(args.iter().copied())
+                        .collect();
+                    let instance = self.call(allocate, positional, kwargs.clone())?;
+                    return self.finish_type_call(callable, instance, args, kwargs);
+                }
                 let scalar_base = ["str", "bytes", "complex", "float"]
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
@@ -9568,20 +9569,7 @@ impl Context {
                 let collection_kind = imre_ast::class_attributes::COLLECTION_STORAGE_BASES
                     .into_iter()
                     .find(|kind| self.has_base(callable, kind));
-                let instance = if let Some(new) = new {
-                    let allocate = self.bind_attribute(new, NONE, callable)?;
-                    let positional = std::iter::once(callable)
-                        .chain(args.iter().copied())
-                        .collect();
-                    let instance = self.call(allocate, positional, kwargs.clone())?;
-                    if self.has_base(callable, "type") {
-                        return self.finish_type_call(callable, instance, args, kwargs);
-                    }
-                    if !self.instance_of(instance, callable) {
-                        return Ok(instance);
-                    }
-                    instance
-                } else if self.has_base(callable, "module") {
+                let instance = if self.has_base(callable, "module") {
                     self.allocate_module(callable)
                 } else if let Some(kind) = scalar_base {
                     self.new_immutable_scalar(kind, callable, &args, &kwargs)?
@@ -9609,8 +9597,7 @@ impl Context {
                 let actual = self.exact_type(instance)?;
                 if let Some(init) = self.class_attr(actual, "__init__") {
                     self.call_initializer(init, instance, actual, args, kwargs)?;
-                } else if new.is_none()
-                    && !native_tzinfo_new
+                } else if !native_tzinfo_new
                     && scalar_base.is_none()
                     && !rlock_subclass
                     && collection_kind.is_none()
