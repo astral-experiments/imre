@@ -142,6 +142,21 @@ pub(in crate::dynamic) fn prepare_descriptor(
         return Err(Error::new("TypeError", "expected a socket"));
     };
     let args = &args[1..];
+    if name == "_accept" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "socket._accept() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("socket._accept() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        return Ok(RegisteredCall::Accept(socket));
+    }
     if name == "recv" {
         check_args(name, args, kwargs, 2, &[])?;
         let size = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
@@ -154,6 +169,42 @@ pub(in crate::dynamic) fn prepare_descriptor(
         }));
     }
     call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
+}
+
+/// Accept on the owned listener, then publish the descriptor and peer in the resumed frame.
+///
+/// # Safety
+/// The registered caller owns the context through signal dispatch and return.
+pub(in crate::dynamic) unsafe fn accept(
+    socket: crate::ObjectOwner,
+    context: *mut Context,
+) -> Result<Id> {
+    use std::os::fd::{AsRawFd, IntoRawFd};
+
+    use crate::dynamic::value::ParkedExecution;
+
+    let accepted = native::read_socket(
+        &socket,
+        &mut (),
+        // SAFETY: each native wait has returned to the interrupted execution before delivery.
+        |()| unsafe { Context::dispatch_pending_signals(context) },
+        // SAFETY: only the listener fd and its original deadline enter the native poll.
+        |(), fd, deadline| unsafe {
+            ParkedExecution::wait(context, || {
+                native::poll_interruptible(fd, libc::POLLIN, Some(deadline))
+            })
+        },
+        // SAFETY: accept_once uses only the fd and returns owned address and descriptor data.
+        |(), fd| unsafe { ParkedExecution::wait(context, || native::accept_once(fd)) },
+    )?;
+    let (child, peer) = accepted.into_parts()?;
+    // SAFETY: the wait and any signal callbacks have finished.
+    let ctx = unsafe { &mut *context };
+    let peer = pack_socket_name(ctx, peer)?;
+    let fd = ctx.int(i64::from(child.as_raw_fd()));
+    let result = ctx.alloc(Value::Tuple(vec![fd, peer]));
+    let _ = child.into_raw_fd();
+    Ok(result)
 }
 
 /// The requesting thread retains the native socket across the wait and any signal callbacks.
@@ -1791,28 +1842,6 @@ fn call_method(
             offset,
             count,
         );
-    }
-    if method == "_accept" {
-        use std::os::fd::{AsRawFd, IntoRawFd};
-
-        if !kwargs.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                "socket._accept() takes no keyword arguments",
-            ));
-        }
-        if !args.is_empty() {
-            return Err(Error::new(
-                "TypeError",
-                format!("socket._accept() takes no arguments ({} given)", args.len()),
-            ));
-        }
-        let (child, peer) = native::accept_fd(&s, || ctx.dispatch_signals())?;
-        let peer = pack_socket_name(ctx, peer)?;
-        let fd = ctx.int(i64::from(child.as_raw_fd()));
-        let result = ctx.alloc(Value::Tuple(vec![fd, peer]));
-        let _ = child.into_raw_fd();
-        return Ok(result);
     }
     if matches!(method, "connect" | "connect_ex") {
         let peer = super::super::builtins::one_positional_arg(method, args, kwargs)?;

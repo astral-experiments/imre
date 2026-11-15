@@ -132,8 +132,7 @@ impl NativeWait<'_> {
             return Ok(self.wait(limit, phase));
         }
         // SAFETY: the native wait uses its lock or join handle and never borrows the heap.
-        let _parked = unsafe { super::value::ParkedExecution::park(context)? };
-        Ok(self.wait(limit, phase))
+        unsafe { super::value::ParkedExecution::wait(context, || self.wait(limit, phase)) }
     }
 
     /// # Safety
