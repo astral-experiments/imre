@@ -3,7 +3,7 @@
 use super::*;
 use crate::frontend::comprehensions::{
     ClauseLowering, Collector, EagerDisplay, acquire_in_namespace, async_pull, filter_suite,
-    scoped_result,
+    namespace_targets, scoped_result,
 };
 use imre_ast::comprehension::{Output, Plan};
 
@@ -33,8 +33,7 @@ impl SourceScope<'_> {
         let first = &plan.clauses[0];
         let mut input = self.creating_iterable(|scope| scope.input(first)).ok()?;
         let namespace = self.hidden(Type::PythonObject);
-        let mut names: Vec<_> = plan.target_names().into_iter().collect();
-        names.sort();
+        let names = namespace_targets(&plan);
         let mut targets = HashMap::new();
         for name in &names {
             let slot = self.hidden(Type::PythonObject);
