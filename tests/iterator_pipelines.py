@@ -27,6 +27,8 @@ REJECTED = {
     "min_float_generator": "print(min(float(i) for i in range(2)))\n",
     "max_generator_default": "print(max((i for i in range(2)), default=0))\n",
     "min_mixed_values": "print(min(1, 2.5))\n",
+    "min_default_wrong_return": "def result() -> int:\n    return min(['z'], default='?')\nresult()\n",
+    "max_default_wrong_argument": REQUIRE_INT + "max([1], default=require_int('bad'))\n",
     "groupby_stored": "from itertools import groupby\nruns = groupby([1])\n",
     "groupby_group_escapes": "from itertools import groupby\nfor key, group in groupby([1]):\n    members = list(group)\n    saved = group\n",
     "groupby_group_delayed": "from itertools import groupby\nfor key, group in groupby([1]):\n    print(key)\n    members = list(group)\n",
