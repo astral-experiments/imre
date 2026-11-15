@@ -2,10 +2,43 @@
 
 use std::rc::Rc;
 
+use crate::dynamic::calls::RegisteredCall;
+
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::objects::{consume_context_token, replace_context_binding};
 
 impl Context {
+    pub(in crate::dynamic) fn prepare_context_run(
+        &mut self,
+        args: &[Id],
+        kwargs: Vec<(String, Id)>,
+    ) -> Result<RegisteredCall> {
+        // Keywords belong to the callback, including those matching Context.run's receiver.
+        let (context, args) =
+            super::builtins::method_receiver_args(self, "_contextvars.Context", "run", args, &[])?;
+        let (callable, rest) = imre_ast::context_run_arguments(args)
+            .map_err(|message| Error::new("TypeError", message))?;
+        if self.heap.context_is_entered(context) {
+            return Err(Error::new(
+                "RuntimeError",
+                format!(
+                    "cannot enter context: {} is already entered",
+                    self.repr(context)
+                ),
+            ));
+        }
+        self.heap.execution.contexts.push(context);
+        match self.prepare_call(*callable, rest.into(), kwargs) {
+            Ok(call) if !matches!(call, RegisteredCall::Returned(_)) => {
+                Ok(RegisteredCall::InContext(Box::new(call)))
+            }
+            result => {
+                self.heap.execution.contexts.pop();
+                result
+            }
+        }
+    }
+
     /// Use the entered context, creating the implicit one on its first copy or set.
     fn current_context(&mut self) -> Id {
         if let Some(&current) = self.heap.execution.contexts.last() {
@@ -203,23 +236,6 @@ pub(super) fn call(
         ("Context.keys" | "Context.values" | "Context.items", [context], []) => {
             Ok(ctx.context_iterator(*context, name))
         }
-        ("Context.run", [context, args @ ..], kwargs) => {
-            let (callable, rest) = imre_ast::context_run_arguments(args)
-                .map_err(|message| Error::new("TypeError", message))?;
-            if ctx.heap.context_is_entered(*context) {
-                return Err(Error::new(
-                    "RuntimeError",
-                    format!(
-                        "cannot enter context: {} is already entered",
-                        ctx.repr(*context)
-                    ),
-                ));
-            }
-            ctx.heap.execution.contexts.push(*context);
-            let result = ctx.call(*callable, rest.to_vec(), kwargs.to_vec());
-            ctx.heap.execution.contexts.pop();
-            result
-        }
         _ => Err(Error::new(
             "TypeError",
             format!("invalid arguments to {name}"),
@@ -259,7 +275,8 @@ mod tests {
         let var = call(&mut ctx, "ContextVar", &[name], &[]).unwrap();
         let explicit = call(&mut ctx, "Context", &[], &[]).unwrap();
         let set = ctx.lookup_attr(var, "set").unwrap();
-        let token = call(&mut ctx, "Context.run", &[explicit, set, name], &[]).unwrap();
+        let run = ctx.lookup_attr(explicit, "run").unwrap();
+        let token = ctx.call(run, vec![set, name], vec![]).unwrap();
         let error = call(&mut ctx, "ContextVar.reset", &[var, token], &[]).unwrap_err();
         assert_eq!(error.kind, "ValueError");
         assert!(ctx.heap.execution.contexts.is_empty());
