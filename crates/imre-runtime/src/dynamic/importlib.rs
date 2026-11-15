@@ -722,7 +722,8 @@ impl Context {
         let Some(sources) = self.sources.get(self.str_value(name)?) else {
             return Ok(NONE);
         };
-        let selected = sources.iter().find(|source| {
+        let inputs = sources.iter().find_map(|source| {
+            let inputs = source.single_inputs.as_ref()?;
             let (entry, alternate) = match source.code {
                 ModuleInitializer::File {
                     entry,
@@ -732,25 +733,36 @@ impl Context {
                 ModuleInitializer::Native(entry)
                 | ModuleInitializer::Builtin(entry)
                 | ModuleInitializer::Zip(entry, ..) => (entry, None),
-                ModuleInitializer::Invalid { .. } => return false,
+                ModuleInitializer::Invalid { .. } => return None,
             };
-            std::ptr::fn_addr_eq(active, entry)
-                && source.single_inputs.is_some()
+            (std::ptr::fn_addr_eq(active, entry)
                 && (source.path.as_os_str() == path.as_os_str()
-                    || alternate.map(Path::as_os_str) == Some(path.as_os_str()))
+                    || alternate.map(Path::as_os_str) == Some(path.as_os_str())))
+            .then(|| inputs.clone())
         });
-        let Some(source) = selected else {
+        let Some(inputs) = inputs else {
             return Ok(NONE);
         };
-        let source = super::SourceModule {
-            path,
-            single_inputs: source.single_inputs.clone(),
-            ..*source
-        };
         let globals = self.module_globals_storage(scope)?;
+        let main_globals = self
+            .dict_named_item(self.modules, "__main__")
+            .and_then(|module| {
+                let Value::Module { scope, .. } = *self.heap.get(module) else {
+                    return None;
+                };
+                self.scope_data(scope).namespace
+            });
+        let linked_name = self.str_value(name)?;
+        let main_alias = (main_globals == Some(globals) && linked_name != "__main__")
+            .then(|| linked_name.into());
+        let source = super::DoctestSource {
+            path,
+            inputs,
+            main_alias,
+        };
         self.heap
             .linked_sources
-            .insert(globals, super::LinkedSource::Doctest(source));
+            .insert(globals, super::LinkedSource::Doctest(source.into()));
         Ok(NONE)
     }
 

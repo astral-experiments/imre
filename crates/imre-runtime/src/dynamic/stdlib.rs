@@ -1095,6 +1095,12 @@ pub(super) fn index_c_int(ctx: &mut Context, value: Id) -> Result<i32> {
         .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
 
+/// Keep the complete member path and example index when translating the entry name.
+fn doctest_member<'a>(filename: &'a str, module: &str) -> Option<&'a str> {
+    let member = filename.strip_prefix("<doctest ")?.strip_prefix(module)?;
+    member.starts_with(['.', '[']).then_some(member)
+}
+
 fn registered_single_code(ctx: &mut Context, source: Id, filename: Id, test: Id) -> Option<Id> {
     let origin = ctx.raw_instance_field(test, "filename")?;
     if !matches!(ctx.heap.get(origin), Value::Str(_) | Value::SurrogateStr(_)) {
@@ -1112,8 +1118,17 @@ fn registered_single_code(ctx: &mut Context, source: Id, filename: Id, test: Id)
     else {
         return None;
     };
-    let input = owner.single_inputs.as_ref()?.iter().find(|input| {
-        input.filename == name && input.source == text.as_bytes() && inherited & !input.flags == 0
+    let alias = owner
+        .main_alias
+        .as_deref()
+        .zip(doctest_member(name, "__main__"));
+    let input = owner.inputs.iter().find(|input| {
+        input.source == text.as_bytes()
+            && inherited & !input.flags == 0
+            && (input.filename == name
+                || alias.is_some_and(|(module, member)| {
+                    doctest_member(input.filename, module) == Some(member)
+                }))
     })?;
     Some(ctx.native_module_code(input.code, filename, Some(input.flags)))
 }
