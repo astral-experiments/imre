@@ -793,30 +793,24 @@ impl Expr {
             return false;
         };
         let call = &site.call;
-        let end = match &call.target {
-            RegisteredCallTarget::Callable {
-                end,
-                suspended_name,
-            } => {
-                if !callable.registered_invoke_target(*suspended_name)
-                    || suspended_name
-                        .is_some_and(|name| !call.range.contains_range(name) || name.end() != *end)
-                {
-                    return false;
-                }
-                *end
+        let end = call.target.end();
+        if let RegisteredCallTarget::Method {
+            attribute,
+            name_start,
+            ..
+        } = &call.target
+        {
+            if !call.range.contains_range(*attribute) || !attribute.contains(*name_start) {
+                return false;
             }
-            RegisteredCallTarget::Method {
-                attribute,
-                name_start,
-                ..
-            } => {
-                if !call.range.contains_range(*attribute) || !attribute.contains(*name_start) {
-                    return false;
-                }
-                attribute.end()
+        } else {
+            let name = call.target.suspended_name();
+            if !callable.registered_invoke_target(name)
+                || name.is_some_and(|name| !call.range.contains_range(name) || name.end() != end)
+            {
+                return false;
             }
-        };
+        }
         let valid_layout = match &call.arguments {
             RegisteredArguments::Positional => true,
             RegisteredArguments::Keywords { positional, names } => {
@@ -1717,7 +1711,7 @@ impl RegisteredCall {
     pub(crate) fn method_name_start(&self) -> Option<ruff_text_size::TextSize> {
         match &self.target {
             RegisteredCallTarget::Method { name_start, .. } => Some(*name_start),
-            RegisteredCallTarget::Callable { .. } => None,
+            RegisteredCallTarget::Callable { .. } | RegisteredCallTarget::FixedExec { .. } => None,
         }
     }
 
@@ -1735,11 +1729,35 @@ pub(crate) enum RegisteredCallTarget {
         end: ruff_text_size::TextSize,
         suspended_name: Option<ruff_text_size::TextRange>,
     },
+    /// The fixed checker resolved builtin exec and checked the written str operand.
+    FixedExec {
+        name: ruff_text_size::TextRange,
+        module: usize,
+        operand: ruff_text_size::TextRange,
+    },
     Method {
         name: ruff_python_ast::name::Name,
         attribute: ruff_text_size::TextRange,
         name_start: ruff_text_size::TextSize,
     },
+}
+
+impl RegisteredCallTarget {
+    pub(crate) fn end(&self) -> ruff_text_size::TextSize {
+        match self {
+            Self::Callable { end, .. } => *end,
+            Self::FixedExec { name, .. } => name.end(),
+            Self::Method { attribute, .. } => attribute.end(),
+        }
+    }
+
+    pub(crate) fn suspended_name(&self) -> Option<ruff_text_size::TextRange> {
+        match *self {
+            Self::Callable { suspended_name, .. } => suspended_name,
+            Self::FixedExec { name, .. } => Some(name),
+            Self::Method { .. } => None,
+        }
+    }
 }
 
 /// Positional values precede keyword values in Python call evaluation order.
