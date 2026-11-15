@@ -747,7 +747,7 @@ impl Expr {
                 Some(message.as_deref().map_or(&[], std::slice::from_ref))
             }
             ExprKind::Builtin(Builtin::GlobalGet(_), _) => None,
-            ExprKind::Builtin(_, args) => Some(args),
+            ExprKind::Builtin(op, args) => (!op.takes_call_frame()).then_some(args),
             _ => None,
         }
     }
@@ -2758,6 +2758,19 @@ pub(crate) enum Builtin {
 impl Builtin {
     pub(crate) fn process(operation: ProcessOperation) -> Self {
         Self::Process(operation, None)
+    }
+
+    /// Takes a private argument record, whose fields were bound at the source call.
+    pub(crate) fn takes_call_frame(&self) -> bool {
+        matches!(
+            self,
+            Self::Process(
+                ProcessOperation::Coroutine { .. }
+                    | ProcessOperation::IndirectCoroutine { .. }
+                    | ProcessOperation::ContextNew { .. },
+                _
+            )
+        )
     }
 
     /// Position of a read-only key that can borrow a stack tuple for the call.

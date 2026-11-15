@@ -96,15 +96,8 @@ pub(super) fn validate_storage(
             ir::Node::Expression(value) => value,
         };
         visit(value);
-        if let ExprKind::Builtin(
-            Builtin::Process(
-                ir::ProcessOperation::IndirectCoroutine { .. }
-                | ir::ProcessOperation::Coroutine { .. }
-                | ir::ProcessOperation::ContextNew { .. },
-                _,
-            ),
-            args,
-        ) = &value.kind
+        if let ExprKind::Builtin(op, args) = &value.kind
+            && op.takes_call_frame()
         {
             frames.insert(std::ptr::from_ref(&args[0]));
         }
