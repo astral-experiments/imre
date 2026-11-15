@@ -674,7 +674,10 @@ impl<'a> PreparedBody<'a> {
             text,
         };
         let docstring = (!interactive && keep_docstrings)
-            .then(|| crate::frontend::docstring(&body).or_else(|| source.bundled_docstring("")))
+            .then(|| {
+                crate::frontend::docstring(&body)
+                    .or_else(|| source.bundled_docstring("").map(str::to_owned))
+            })
             .flatten();
         drop(body);
         Ok(PreparedBody {
@@ -916,11 +919,8 @@ impl SourceInfo<'_> {
     }
 
     /// Keep documentation attached to the bundled definition, even when callers rebind its name.
-    fn bundled_docstring(&self, qualname: &str) -> Option<String> {
-        self.docs
-            .as_ref()?
-            .object_docstring(qualname)
-            .map(str::to_owned)
+    fn bundled_docstring(&self, qualname: &str) -> Option<&'static str> {
+        self.docs.as_ref()?.object_docstring(qualname)
     }
 
     #[cfg(test)]
@@ -1031,7 +1031,7 @@ impl SourceMap<'_> {
                     && let Some(doc) = prepared
                         .doc
                         .as_deref()
-                        .or_else(|| self.docs.as_ref()?.object_docstring(prefix.name))
+                        .or_else(|| self.bundled_docstring(prefix.name))
                 {
                     let value = frame.text(doc);
                     frame.bind("__doc__", &value);
@@ -1084,7 +1084,7 @@ enum Callable<'a> {
 }
 
 impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<'a, 'p, '_> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
         (&mut self.frame, &self.sites)
     }
 
@@ -1095,7 +1095,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         }
     }
 
-    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace {
+    fn class_namespace(&mut self, site: TextSize) -> CompiledClassNamespace<'p> {
         let scope = &self.source.scopes.classes[&site];
         let definition = self.compile_class_namespace(site, scope);
         let class = scope.prepared();
@@ -1107,7 +1107,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         }
     }
 
-    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition {
+    fn callable_at(&mut self, site: CallableSite, scoped: bool) -> CompiledDefinition<'p> {
         let (range, callable) = match site {
             CallableSite::Lambda(start) => (
                 TextRange::empty(start),
@@ -1192,8 +1192,8 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 }
 
-impl Function<'_, '_, '_> {
-    fn compile_declaration(&mut self, site: TextSize) -> Result<Declaration, String> {
+impl<'p> Function<'_, 'p, '_> {
+    fn compile_declaration(&mut self, site: TextSize) -> Result<Declaration<'p>, String> {
         let source = self.source;
         let (definition, type_params) = if let Some(scope) = source.scopes.classes.get(&site) {
             let class = scope.prepared();
@@ -1222,7 +1222,11 @@ impl Function<'_, '_, '_> {
         self.frame.class_locals.is_some() && self.frame.annotation_values.is_none()
     }
 
-    fn compile_callable(&mut self, site: TextRange, callable: Callable<'_>) -> CompiledDefinition {
+    fn compile_callable(
+        &mut self,
+        site: TextRange,
+        callable: Callable<'p>,
+    ) -> CompiledDefinition<'p> {
         let source = self.source;
         let (name, metadata, header) = match callable {
             Callable::Named(header) => (header.name.as_str(), &header.metadata, Some(header)),
@@ -1238,7 +1242,7 @@ impl Function<'_, '_, '_> {
             .filter(|_| self.frame.output.keep_docstrings)
             .and_then(|h| {
                 h.doc
-                    .clone()
+                    .as_deref()
                     .or_else(|| source.bundled_docstring(&qualname))
             });
         let provider = header.and_then(|h| self.parameter_provider(h, &qualname));
@@ -1285,7 +1289,7 @@ impl Function<'_, '_, '_> {
         CompiledDefinition {
             doc,
             provider,
-            default_names: metadata.defaults.clone(),
+            default_names: &metadata.defaults,
             ..CompiledDefinition::new(code, signature, name, qualname, false)
         }
     }
@@ -1294,7 +1298,7 @@ impl Function<'_, '_, '_> {
         &mut self,
         site: TextSize,
         scope: &crate::frontend::function_scope::classes::ClassScope,
-    ) -> CompiledDefinition {
+    ) -> CompiledDefinition<'p> {
         let class = scope.prepared();
         let name = self.source.private_names.definition(&class.name);
         let qualname = if self.declared_globals.contains(class.name.as_str()) {
@@ -1333,7 +1337,7 @@ impl Function<'_, '_, '_> {
         site: TextSize,
         class: &crate::frontend::RegisteredClass,
         header: &crate::frontend::CheckedProvider,
-    ) -> CompiledDefinition {
+    ) -> CompiledDefinition<'p> {
         let name = format!("<generic parameters of {}>", class.name);
         let qualname = self.prefix.qualify(&name);
         let prefix = if self.declared_globals.contains(class.name.as_str()) {
@@ -1360,7 +1364,7 @@ impl Function<'_, '_, '_> {
         }
     }
 
-    fn compile_type_alias(&mut self, site: TextSize) -> Result<Declaration, String> {
+    fn compile_type_alias(&mut self, site: TextSize) -> Result<Declaration<'p>, String> {
         let alias = &self.source.type_aliases[&site];
         // Placement can visit children of a suite that exits before the alias binds.
         let outer_diagnostic = self.frame.output.diagnostic.take();
@@ -1402,7 +1406,7 @@ impl Function<'_, '_, '_> {
         type_parameter_scope: bool,
         code: &crate::frontend::AnnotationCode,
         class: Option<&ClassBindings>,
-    ) -> CompiledDefinition {
+    ) -> CompiledDefinition<'p> {
         let qualname = self.prefix.qualify(name);
         let mut signature = json!({
             "code_flags": self.source.function_flags(self.in_function || type_parameter_scope, false),
@@ -1431,7 +1435,7 @@ impl Function<'_, '_, '_> {
     fn compile_scoped_type_parameters(
         &mut self,
         parameters: &crate::frontend::TypeParameterValues,
-    ) -> CompiledTypeParameters {
+    ) -> CompiledTypeParameters<'p> {
         let class = parameters
             .enclosing_class
             .map(|site| &self.source.scopes.classes[&site].bindings);
@@ -1442,7 +1446,7 @@ impl Function<'_, '_, '_> {
         &mut self,
         parameters: &[RegisteredTypeParameter<ParameterEvaluator>],
         class: Option<&ClassBindings>,
-    ) -> CompiledTypeParameters {
+    ) -> CompiledTypeParameters<'p> {
         parameters
             .iter()
             .map(|parameter| {
@@ -1470,7 +1474,7 @@ impl Function<'_, '_, '_> {
         &mut self,
         header: &NamedFunction<'_>,
         qualname: &str,
-    ) -> Option<Box<CompiledDefinition>> {
+    ) -> Option<Box<CompiledDefinition<'p>>> {
         let source = self.source;
         let annotations = header.annotations.as_ref()?;
         let start = annotations.start;
@@ -1504,7 +1508,7 @@ impl Function<'_, '_, '_> {
     }
 }
 
-impl SourceMap<'_> {
+impl<'p> SourceMap<'p> {
     fn finish_class_annotations(
         &self,
         frame: &mut RegisteredFrame<'_, '_>,
@@ -1550,7 +1554,7 @@ impl SourceMap<'_> {
         start: TextSize,
         signature: serde_json::Value,
         (lexical_prefix, qualname): (QualnameScope<'_>, String),
-    ) -> CompiledDefinition {
+    ) -> CompiledDefinition<'p> {
         // Class annotations already have an explicit class environment. A method's provider
         // instead captures the class namespace of the function it annotates.
         let annotation_scope = !matches!(&scope, AnnotationScope::Class { .. });
@@ -1618,7 +1622,7 @@ impl QualnameScope<'_> {
 }
 
 struct Function<'a, 'p, 'scope> {
-    sites: CheckedSites,
+    sites: CheckedSites<'p>,
     frame: RegisteredFrame<'a, 'p>,
     source: &'p SourceMap<'p>,
     prefix: &'scope QualnameScope<'scope>,

@@ -8,7 +8,7 @@ use std::path::Path;
 /// Isolated writer tests supply their completed sites without compiling a source module.
 pub(crate) struct TestFrame<'f, 'a, 'p>(
     pub(crate) &'f mut RegisteredFrame<'a, 'p>,
-    pub(crate) CheckedSites,
+    pub(crate) CheckedSites<'p>,
 );
 
 impl<'a, 'p> std::ops::Deref for TestFrame<'_, 'a, 'p> {
@@ -25,16 +25,16 @@ impl std::ops::DerefMut for TestFrame<'_, '_, '_> {
 }
 
 impl<'a, 'p> PreparedSuiteEmitter<'a, 'p> for TestFrame<'_, 'a, 'p> {
-    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites) {
+    fn frame_and_sites(&mut self) -> (&mut RegisteredFrame<'a, 'p>, &CheckedSites<'p>) {
         (self.0, &self.1)
     }
     fn place_declaration(&mut self, site: TextSize) {
         assert!(self.1.position(site).is_ok());
     }
-    fn class_namespace(&mut self, _: TextSize) -> CompiledClassNamespace {
+    fn class_namespace(&mut self, _: TextSize) -> CompiledClassNamespace<'p> {
         unreachable!("isolated writer tests have no generic class headers")
     }
-    fn callable_at(&mut self, _: CallableSite, _: bool) -> CompiledDefinition {
+    fn callable_at(&mut self, _: CallableSite, _: bool) -> CompiledDefinition<'p> {
         unreachable!("isolated writer tests have no lexical callable definitions")
     }
     fn annotation_string(&mut self, _: TextSize, _: &str) -> String {

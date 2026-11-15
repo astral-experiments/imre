@@ -209,7 +209,7 @@ pub(crate) struct CallableMetadata {
     flags: u32,
     captures_class: bool,
     /// Keys for the default values evaluated in order by the enclosing expression.
-    pub(crate) defaults: std::sync::Arc<[String]>,
+    pub(crate) defaults: Box<[String]>,
 }
 
 impl CallableMetadata {
@@ -261,11 +261,7 @@ impl CallableMetadata {
             locals,
             flags,
             captures_class: scope.captures_class,
-            defaults: if defaults.is_empty() {
-                Default::default()
-            } else {
-                defaults.into()
-            },
+            defaults: defaults.into(),
         }
     }
 
