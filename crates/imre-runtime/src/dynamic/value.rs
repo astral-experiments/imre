@@ -3958,12 +3958,18 @@ pub(super) struct ParkedExecution {
 }
 
 impl ParkedExecution {
+    /// Wait on native operands. The closure and result cannot carry a Python context borrow.
+    ///
     /// # Safety
-    /// The context must outlive the guard. Park and resume under exclusive access to
-    /// its heap, with no execution selected when restoring this one.
-    pub(super) unsafe fn park(context: *mut super::Context) -> Result<Self> {
+    /// The caller owns the active context. The native operation must not access it or
+    /// reenter Python. Restore this execution before handling signals or Python results.
+    pub(super) unsafe fn wait<T: Send>(
+        context: *mut super::Context,
+        wait: impl FnOnce() -> T + Send,
+    ) -> Result<T> {
         let slot = unsafe { &mut *context }.heap.park_execution()?;
-        Ok(Self { context, slot })
+        let _parked = Self { context, slot };
+        Ok(wait())
     }
 }
 

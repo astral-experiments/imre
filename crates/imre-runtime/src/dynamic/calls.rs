@@ -282,6 +282,7 @@ pub(super) enum RegisteredCall {
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
     Select(Vec<Id>),
+    Accept(crate::ObjectOwner),
     Recv(stdlib::socket::Recv),
 }
 
@@ -334,6 +335,8 @@ impl RegisteredCall {
                 })
             }
             // SAFETY: the caller roots the frame and owns the context on this thread.
+            Self::Accept(listener) => unsafe { stdlib::socket::accept(listener, context) },
+            // SAFETY: the registered caller owns the context and roots the active frame.
             Self::Recv(recv) => unsafe { recv.run(context) },
         }
     }
