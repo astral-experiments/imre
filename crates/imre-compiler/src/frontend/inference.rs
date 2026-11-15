@@ -1018,6 +1018,7 @@ impl Inference {
             let globals = ModuleValues::for_initializers(!registered.is_empty());
             let mut available = HashSet::new();
             let mut errors = Vec::new();
+            let mut layout_refusal = None;
             let mut checked_callers = Vec::new();
             let mut completed_calls = classes.nonreturning_functions.clone();
             let initial_nonreturning = completed_calls.len();
@@ -1476,6 +1477,15 @@ impl Inference {
                             ReturnDiscovery::Waiting(callee);
                     }
                     let owner = signature.method.is_none().then(|| owners[signature.id]);
+                    if physical
+                        && owner.is_some()
+                        && !signature.registered_frame()
+                        && checker.calls.is_empty()
+                        && matches!(&diagnostic, Failure::Diagnostic(report)
+                            if report.kind == Kind::ReturnType && report.operand_declaration().is_some())
+                    {
+                        layout_refusal = Some((body_revision, errors.len()));
+                    }
                     errors.push((*module, owner, diagnostic));
                 } else {
                     if (checked_return || implicit_none)
@@ -1590,6 +1600,7 @@ impl Inference {
                 checker.inference = Some(self);
                 checker.module_scope = true;
                 checker.nonreturning_functions = &completed_calls;
+                let entry_revision = self.revision.get();
                 let result = checker.lower_block(entry_statements, None);
                 match checker.finish_region(result) {
                     Err(Failure::PendingSignature {
@@ -1598,6 +1609,10 @@ impl Inference {
                         ..
                     }) => Some(signature),
                     Err(diagnostic) => {
+                        if matches!(&diagnostic, Failure::Diagnostic(report) if report.entry_operand().is_some())
+                        {
+                            layout_refusal = Some((entry_revision, errors.len()));
+                        }
                         errors.push((graph.entry, None, diagnostic));
                         None
                     }
@@ -1790,6 +1805,19 @@ impl Inference {
             {
                 method_returns.clear();
                 checked_bodies.clear();
+            } else if let Some((revision, index)) = layout_refusal
+                && retries_failed_layout(graph)
+                && !graph.registered_startup
+                && !graph.needs_object_runtime.get()
+                && !skipped
+                && !self.widened.get()
+                && revision == self.revision.get()
+                && !self.unresolved()
+            {
+                // This layout already failed a physical operand or declared return with the
+                // settled signatures. Let the ordinary file pass place bodies and report errors.
+                let (module, _, failure) = errors.swap_remove(index);
+                return Err(failure.terminal_in(graph, module));
             }
         };
         for (_, _, signature) in definitions.iter_mut() {
