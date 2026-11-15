@@ -6,6 +6,31 @@ mod tests {
     use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
+    fn class_method_keeps_its_checked_return_after_the_factory_needs_a_python_frame() {
+        let text = concat!(
+            include_str!("../../../../../tests/fixtures/callables/escaping_bound_method.py"),
+            "\ndef unopened() -> tuple[Callable[[], int], Callable[[], int]]:\n",
+            "    cb = outer()\n",
+            "    return cb, cb\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("capture.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        let start = TextSize::try_from(text.find("@classmethod").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let method = &functions[&graph.entry][&start];
+        assert!(matches!(method.inputs, FrameInputs::Protocol { .. }));
+        assert_eq!(method.local_names[&method.function.params[0]].name, "cls");
+        assert_eq!(method.local_names[&method.function.params[1]].name, "n");
+        let sites: Vec<_> = method.fixed_sites.iter().map(|site| &text[*site]).collect();
+        assert_eq!(sites, ["return n + 1", "n + 1", "n", "1"]);
+        assert_eq!(lowered.iter().filter(|name| *name == "pick").count(), 1);
+    }
+
+    #[test]
     fn imported_function_keeps_its_return_site_after_the_file_entry_declines() {
         let dir = tempfile::tempdir().unwrap();
         let helper = dir.path().join("helper.py");

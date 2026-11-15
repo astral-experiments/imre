@@ -1103,7 +1103,7 @@ fn lower_graph(
             let declaration = &class.methods[index];
             let physical_entry = match kind {
                 crate::classes::MethodKind::Instance => fixed_frame_entry(declaration),
-                crate::classes::MethodKind::Property => {
+                crate::classes::MethodKind::Class | crate::classes::MethodKind::Property => {
                     !declaration.is_async && fixed_frame_parameters(declaration)
                 }
                 _ => false,
@@ -1541,9 +1541,9 @@ fn lower_graph(
         if registered_body && body_checks.is_some_and(|ids| ids.contains(&signature.id)) {
             continue;
         }
-        // A bound wrapper with an unknown owner may need the method's Python
-        // frame. Keep the operand sites until its specialized layout is known.
-        let python_method = graph.registered_startup || has_wrapper_link;
+        // A registered caller, a wrapper or a prior refusal can place an unchanged
+        // method in a Python frame. Keep its checked operand sites for that binder.
+        let python_method = graph.registered_startup || has_wrapper_link || unavailable.is_some();
         let live = place_live(signature.id);
         let prepare_sites = live
             || !needs_registered_entry
@@ -2662,7 +2662,7 @@ fn lower_function(
         }
     } else if module.archive.is_none() {
         checker.fault_frame(&mut body, definition.name.as_str(), definition.start());
-        source = checker.fixed_body_source(definition, signature, statements.len(), &body);
+        source = checker.fixed_body_source(definition, signature, &params, statements.len(), &body);
     }
     let reusable = source.is_some();
     let finish = || checker.completed_body(params, body, source, cannot_return);
@@ -4199,6 +4199,7 @@ impl<'a> Checker<'a> {
         &mut self,
         definition: &ast::StmtFunctionDef,
         signature: &Signature,
+        params: &[usize],
         source_statements: usize,
         body: &[Statement],
     ) -> Option<FixedBodySource> {
@@ -4211,10 +4212,16 @@ impl<'a> Checker<'a> {
             )?),
             None => None,
         };
+        let mut names = std::mem::take(&mut self.names);
+        if let Some(receiver) = &self.class_receiver {
+            // The native adapter passes the class in the first formal slot.
+            // The Python binder owns the same formal under its written name.
+            names.insert(receiver.clone(), *params.first()?);
+        }
         sites.finish(
             source_statements,
             body,
-            std::mem::take(&mut self.names),
+            names,
             &self.locals,
             method,
             self.frame_arguments,
