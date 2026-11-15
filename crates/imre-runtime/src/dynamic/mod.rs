@@ -3447,6 +3447,7 @@ impl Context {
         let mut additional: &[&str] = &[];
         let methods = match name {
             "type" => &[
+                "__getattribute__",
                 "__call__",
                 "mro",
                 "__subclasses__",
