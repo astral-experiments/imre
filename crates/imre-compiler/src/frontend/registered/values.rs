@@ -1615,9 +1615,6 @@ impl Checker<'_> {
                 });
                 if let Err(error) = self.expect(expected, actual, arg) {
                     let declaration = signature.parameter_declaration(index);
-                    if actual != Type::PythonObject {
-                        return Err(error.expected_from(declaration, arg.range()));
-                    }
                     let contract = definition
                         .zip(declaration)
                         .filter(|(id, decl)| decl.module == id.module && expected == parameter.ty)
@@ -1629,7 +1626,8 @@ impl Checker<'_> {
                         });
                     match contract {
                         Some(crate::analysis::ArgumentContract::Checked) => {}
-                        _ if self.inference.is_none()
+                        _ if actual == Type::PythonObject
+                            && self.inference.is_none()
                             && (declaration.is_none()
                                 || matches!(
                                     contract,
