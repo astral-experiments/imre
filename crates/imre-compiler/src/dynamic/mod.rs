@@ -2528,28 +2528,33 @@ pub(crate) fn compile(
     let command_file = semantic_roots
         .contains_key(&root)
         .then(|| root.join("<string>.py"));
+    if let Some(file) = entry_file {
+        registrations.checked_units.entry(0).or_default().source = Some(file);
+    }
     let selected_sources: Vec<_> = selected_sources
         .into_iter()
         .enumerate()
         .map(|(index, (id, program, module))| {
             let application = !registrations.python_providers.contains(&id);
-            if application
-                && let (Some(graph), Some(module_id)) = (checked_graph, module)
-                && graph.modules[module_id].original_source() == sources[id].2
-            {
-                registrations.checked_units.entry(id).or_default().module = Some(module_id);
-            }
             // Emit the selected application's signature. Preserve the existing checker
             // scope: owning a declaration does not prove that a call will reach it.
             let mut registration =
                 RegisteredSource::new(&sources[id], program && application, module);
+            let checked = registrations.checked_units.get(&id);
             if !module_errors.contains_key(registration.path)
-                && let Some(open) = registrations
-                    .checked_units
-                    .get(&id)
-                    .and_then(|unit| unit.run_path.as_deref())
+                && let Some(open) = checked.and_then(|unit| unit.run_path.as_deref())
             {
                 declared_open_paths.insert(open.as_os_str().to_owned());
+            }
+            if application && let Some(module_id) = module {
+                let physical = &modules[module_id];
+                if checked
+                    .and_then(|unit| unit.source)
+                    .is_some_and(|file| std::ptr::eq(file.module(modules), physical))
+                    || physical.original_source() == registration.source
+                {
+                    registrations.checked_units.entry(id).or_default().module = Some(module_id);
+                }
             }
             registration.has_open_exec = literals.open_exec.contains(&id);
             registration.unit = output.is_some().then_some(id);
@@ -2801,9 +2806,6 @@ pub(crate) fn compile(
         })
         .unwrap_or_default();
     registrations.modules = &modules;
-    if let Some(file) = entry_file {
-        registrations.checked_units.entry(0).or_default().source = Some(file);
-    }
     let mut prepared = prepare::units(
         (&sources, &builtins),
         prepare::SourceInputs {
