@@ -40,6 +40,7 @@ impl Checker<'_> {
             | Type::StringIO
             | Type::Float
             | Type::ListInt
+            | Type::PlainObject
             | Type::Path
             | Type::PurePath(_)
             | Type::Enum(_)

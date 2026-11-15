@@ -6139,7 +6139,7 @@ impl Emitter<'_, '_> {
                 // Kind 5 denotes another object view in this ABI.
                 let concrete_object = self.module.types.mapping(other.ty).is_some()
                     || matches!(builtin, Builtin::SystemExitCodeEqual { .. })
-                        && matches!(other.ty, Type::BytesIO | Type::StringIO);
+                        && matches!(other.ty, Type::PlainObject | Type::BytesIO | Type::StringIO);
                 let kind = if concrete_object {
                     17
                 } else if matches!(builtin, Builtin::SystemExitCodeEqual { .. })

@@ -57,3 +57,8 @@ alias = hold(original)
 original.value = 5
 print(repr(alias))
 print(hold((True, (False,))) == (1, (0,)))
+
+marker = object()
+stored = hold(marker)
+print(stored is marker, marker is stored, stored is not object())
+print(stored == marker, marker == stored, stored != object())
