@@ -8426,7 +8426,9 @@ impl Context {
                 }
                 Value::Native(ref name) => {
                     let wait = match name.as_str() {
-                        "select.select" => return stdlib::select::prepare(args, &kwargs),
+                        "select.select" => {
+                            return stdlib::select::prepare(args.into_owned(), &kwargs);
+                        }
                         "_imre_thread.start" => {
                             return thread_worker::prepare_start(self, &args, &kwargs)
                                 .map(|start| RegisteredCall::Start(Box::new(start)))
