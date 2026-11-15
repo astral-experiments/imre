@@ -41,8 +41,42 @@ def selected_method_during_comparison():
     assert receiver() is None and method() is None
 
 
+def failed_metaclass_comparison():
+    events = []
+    failure = LookupError("first comparison")
+
+    class Key(str):
+        def __hash__(self):
+            events.append("hash")
+            return hash("__reduce_ex__")
+
+        def __eq__(self, other):
+            events.append(other)
+            if len(events) == 2:
+                raise failure
+            return True
+
+    key = Key("another spelling")
+    try:
+        raise RuntimeError("active handler")
+    except RuntimeError as outer:
+        try:
+            object.__getattribute__(str, key)
+        except AttributeError as missing:
+            assert missing.name is key and missing.obj is str
+            assert missing.__context__ is outer and failure.__context__ is outer
+        else:
+            raise AssertionError("object lookup retried the class namespace")
+        assert events == ["hash", "__reduce_ex__"]
+
+        events.clear()
+        assert type.__getattribute__(str, key) is object.__reduce_ex__
+        assert events == ["hash", "__reduce_ex__", "hash", "__reduce_ex__"]
+
+
 def current():
     selected_method_during_comparison()
+    failed_metaclass_comparison()
     class Key(str):
         def __hash__(self):
             return hash("payload")
