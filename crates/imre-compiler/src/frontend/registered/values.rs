@@ -1502,22 +1502,29 @@ impl Checker<'_> {
                 });
                 if let Err(error) = self.expect(expected, actual, arg) {
                     let declaration = signature.parameter_declaration(index);
-                    if actual == Type::PythonObject
-                        && self.inference.is_none()
-                        && declaration.is_none()
-                    {
-                        fixed_result = false;
-                    } else {
-                        let operands = self.graph.session.operand_types(self.module);
-                        let checked = actual == Type::PythonObject
-                            && expected == parameter.ty
-                            && declaration.is_some_and(|decl| {
-                                decl.module == id.module
-                                    && operands.accepts_argument(arg, id, index, decl.annotation)
-                            });
-                        if !checked {
-                            return Err(error.expected_from(declaration, arg.range()));
+                    if actual != Type::PythonObject {
+                        return Err(error.expected_from(declaration, arg.range()));
+                    }
+                    let contract = declaration
+                        .filter(|decl| decl.module == id.module && expected == parameter.ty)
+                        .and_then(|decl| {
+                            self.graph
+                                .session
+                                .operand_types(self.module)
+                                .argument_contract(arg, id, index, decl.annotation)
+                        });
+                    match contract {
+                        Some(crate::analysis::ArgumentContract::Checked) => {}
+                        _ if self.inference.is_none()
+                            && (declaration.is_none()
+                                || matches!(
+                                    contract,
+                                    Some(crate::analysis::ArgumentContract::Dynamic)
+                                )) =>
+                        {
+                            fixed_result = false;
                         }
+                        _ => return Err(error.expected_from(declaration, arg.range())),
                     }
                 }
                 Ok(value)

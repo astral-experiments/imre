@@ -242,6 +242,11 @@ pub(crate) struct OperandTypes<'a> {
     module: usize,
 }
 
+pub(crate) enum ArgumentContract {
+    Checked,
+    Dynamic,
+}
+
 #[derive(Clone, Copy)]
 enum ScalarMatch {
     Assignable,
@@ -286,23 +291,21 @@ impl<'session> OperandTypes<'session> {
     }
 
     /// Check the source contract of an argument that stays boxed for a live call.
-    pub(crate) fn accepts_argument(
+    pub(crate) fn argument_contract(
         self,
         operand: &Expr,
         callee: crate::modules::DefinitionId,
         index: usize,
         annotation: TextRange,
-    ) -> bool {
+    ) -> Option<ArgumentContract> {
         let session = self.session;
         let parsed = self.parsed();
-        let Some((original, _, owner)) = self.original_operand(&parsed, operand.into()) else {
-            return false;
-        };
+        let (original, _, owner) = self.original_operand(&parsed, operand.into())?;
         let file = owner
             .program(&session.db)
             .program_file(&session.db, session.files[callee.module]);
         let target = session.parsed_program_file(file);
-        let Some(parameter) = target
+        let parameter = target
             .suite()
             .get(callee.statement)
             .and_then(|stmt| stmt.as_function_def_stmt())
@@ -310,15 +313,15 @@ impl<'session> OperandTypes<'session> {
             .filter(|p| {
                 p.annotation()
                     .is_some_and(|node| node.range() == annotation)
-            })
-        else {
-            return false;
-        };
+            })?;
         let model = SemanticModel::new(&session.db, file);
-        session
-            .inferred_operand_type(owner, original)
-            .zip(parameter.inferred_type(&model))
-            .is_some_and(|(value, expected)| Self::accepts_type(&model, value, expected))
+        let value = session.inferred_operand_type(owner, original)?;
+        let expected = parameter.inferred_type(&model)?;
+        if value.is_unknown() {
+            Some(ArgumentContract::Dynamic)
+        } else {
+            Self::accepts_type(&model, value, expected).then_some(ArgumentContract::Checked)
+        }
     }
 
     fn accepts_type<'db>(

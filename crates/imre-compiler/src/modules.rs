@@ -3425,6 +3425,18 @@ impl SourceGraph {
             .insert(start, body);
     }
 
+    pub(crate) fn retain_lexical_function(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        body: crate::frontend::RegisteredFunction,
+    ) {
+        self.registered_functions
+            .borrow_mut()
+            .lexical
+            .push((module, start, body));
+    }
+
     pub(crate) fn defer_registered_function(
         &self,
         module: ModuleId,
@@ -3475,6 +3487,7 @@ impl SourceGraph {
                 FrameInputs::Deferred { sites, live: true } => {
                     body.inputs = FrameInputs::Protocol { sites };
                 }
+                FrameInputs::Protocol { .. } => {}
                 FrameInputs::Checked { .. } => {
                     // A subsequent registration can replace the provisional body at this site.
                     if !body.bind_python_arguments() {
