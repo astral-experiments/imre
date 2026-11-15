@@ -39,6 +39,7 @@ mod cache_paths;
 mod cached_properties;
 mod calendar;
 mod call_binding_errors;
+pub(crate) use call_binding_errors::bind_source;
 mod callables;
 mod caller_cache;
 mod calls;

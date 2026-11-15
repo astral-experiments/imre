@@ -853,6 +853,12 @@ fn run_path_checks_the_bound_filename_and_linked_body() {
         error.contains("main.py:3:34") && error.contains("handlers[key]()"),
         "{error}"
     );
+    check(format!("{prefix}run(sys.argv[1], path_name=sys.argv[2])")).unwrap();
+    let nested = check(format!(
+        "{prefix}run(sys.argv[1], path_name=run(sys.argv[2]))"
+    ))
+    .unwrap_err();
+    assert!(nested.contains("main.py:3:32"), "{nested}");
     check(format!("{prefix}saved = run\nprint(saved.__name__)")).unwrap();
     check(
         "import runpy, sys\nprint(sys.modules['runpy'].__name__, runpy.run_path.__name__)"
