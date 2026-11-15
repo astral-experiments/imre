@@ -440,6 +440,8 @@ fn checked_shipped_files_reuse_equivalent_inputs_and_preserve_sdk_shadows() {
     }
 }
 
+// Loading the complete server graph requires the mimetypes and select providers.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[test]
 fn checked_http_server_class_uses_the_complete_shipped_source() {
     let graph =
