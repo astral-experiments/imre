@@ -39,4 +39,28 @@ def current():
             pass
         else:
             raise AssertionError(invalid)
+    mutable = bytearray(data[:])
+    assert mutable.find(memoryview(b"aa"), 1, -2) == 1
+    assert bytearray.find(mutable, b"", len(mutable) + 1) == -1
+
+    assert mutable.rindex(b"aa", 1, -2) == 3
+    try:
+        mutable.rindex(b"aa", 5)
+    except ValueError as exc:
+        assert str(exc) == "subsection not found"
+    else:
+        raise AssertionError("missing subsection")
+
+    class Resize:
+        def __index__(self):
+            mutable.clear()
+            return 255
+
+    try:
+        mutable.find(Resize())
+    except BufferError:
+        assert mutable.find(255) == 6
+    else:
+        raise AssertionError("resized a bytearray during find")
+    mutable.clear()
     print("binary counts matched")

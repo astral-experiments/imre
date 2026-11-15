@@ -888,6 +888,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "copy",
     "endswith",
     "extend",
+    "find",
     "hex",
     "insert",
     "ljust",
@@ -896,6 +897,7 @@ pub(super) const BYTEARRAY_METHODS: &[&str] = &[
     "replace",
     "resize",
     "reverse",
+    "rindex",
     "rstrip",
     "split",
     "splitlines",
@@ -2513,9 +2515,11 @@ pub(super) fn call(
                     method,
                     "decode"
                         | "endswith"
+                        | "find"
                         | "ljust"
                         | "lstrip"
                         | "replace"
+                        | "rindex"
                         | "rstrip"
                         | "split"
                         | "splitlines"

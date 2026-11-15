@@ -899,7 +899,13 @@ impl BuiltinDescriptor {
                     ("index", "__doc__") if self.owner == "bytes" => {
                         "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start,end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
                     }
-                    ("count" | "find" | "index", _) if self.owner == "bytes" => "($self, sub[, start[, end]], /)",
+                    ("find", "__doc__") if self.owner == "bytearray" => {
+                        "Return the lowest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nReturn -1 on failure."
+                    }
+                    ("rindex", "__doc__") if self.owner == "bytearray" => {
+                        "Return the highest index in B where subsection 'sub' is found, such that 'sub' is contained within B[start:end].\n\n  start\n    Optional start position. Default: start of the bytes.\n  end\n    Optional stop position. Default: end of the bytes.\n\nRaise ValueError if the subsection is not found."
+                    }
+                    ("count" | "find" | "index" | "rindex", _) if matches!(self.owner, "bytes" | "bytearray") => "($self, sub[, start[, end]], /)",
                     ("isascii", "__doc__") => {
                         "Return True if all characters in the string are ASCII, False otherwise.\n\nASCII characters have code points in the range U+0000-U+007F.\nEmpty string is ASCII too."
                     }

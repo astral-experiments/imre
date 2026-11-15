@@ -1640,6 +1640,69 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text_codepoints(codepoints))
 }
 
+/// Search a contiguous needle while a mutable receiver keeps its buffer exported.
+/// Slice bounds have already run their Python index conversions.
+fn search_binary(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    needle: Id,
+    bounds: std::ops::Range<usize>,
+) -> Result<Id> {
+    let search = |ctx: &Context, needle: &[u8]| {
+        let window = ctx.bytes_like(receiver)?.get(bounds.clone());
+        if name == "count" {
+            let count = window.map_or(0, |v| match needle {
+                [] => v.len() + 1,
+                [byte] => memchr::memchr_iter(*byte, v).count(),
+                _ => memchr::memmem::find_iter(v, needle).count(),
+            });
+            return Ok(count as i64);
+        }
+        let offset = window.and_then(|v| {
+            if matches!(name, "rfind" | "rindex") {
+                memchr::memmem::rfind(v, needle)
+            } else {
+                memchr::memmem::find(v, needle)
+            }
+        });
+        if matches!(name, "index" | "rindex") && offset.is_none() {
+            return Err(Error::new("ValueError", "subsection not found"));
+        }
+        Ok(offset.map_or(-1, |at| (bounds.start + at) as i64))
+    };
+    let result = ctx.with_buffer_export(receiver, |ctx| {
+        let has_buffer = match ctx.heap.get(ctx.scalar_value(needle)) {
+            Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::MemoryView { .. }
+            | Value::BytesIoBuffer { .. }
+            | Value::Array(_) => true,
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => true,
+            _ => ctx.buffer_slot(needle, "__buffer__").is_some(),
+        };
+        if has_buffer {
+            return ctx.with_read_buffer(needle, |ctx, buffer| {
+                let bytes = buffer.storage(ctx)?;
+                search(ctx, &bytes.read(0..bytes.len())?)
+            });
+        }
+        let index = ctx.index_value(needle)?.ok_or_else(|| {
+            type_error(format!(
+                "argument should be integer or bytes-like object, not '{}'",
+                ctx.type_name(needle)
+            ))
+        })?;
+        let byte = index
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+        search(ctx, &[byte])
+    })?;
+    Ok(ctx.int(result))
+}
+
 /// Convert the optional start and end in argument order, honoring the index protocol.
 fn search_bounds(
     ctx: &mut Context,
@@ -2620,20 +2683,7 @@ pub(super) fn method(
         )));
     };
     let original_receiver = receiver;
-    let receiver = if owner == "bytes"
-        || (owner == "bytearray"
-            && matches!(
-                name,
-                "endswith"
-                    | "ljust"
-                    | "lstrip"
-                    | "replace"
-                    | "rstrip"
-                    | "split"
-                    | "splitlines"
-                    | "startswith"
-                    | "strip"
-            )) {
+    let receiver = if matches!(owner, "bytes" | "bytearray") {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -2718,7 +2768,9 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "index" | "rindex" | "count")
-            | ("bytes", "count" | "find" | "index" | "rfind")
+            | ("bytes", "count" | "index" | "rfind")
+            | ("bytearray", "rindex")
+            | ("bytes" | "bytearray", "find")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -2795,48 +2847,7 @@ pub(super) fn method(
                 }
                 return Ok(FALSE);
             }
-            ctx.check_buffer_exporter(needle)?;
-            let byte;
-            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
-                Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::MemoryView { .. }
-                | Value::BytesIoBuffer { .. }
-                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
-                _ => {
-                    let index = ctx.index_value(needle)?.ok_or_else(|| {
-                        type_error(format!(
-                            "argument should be integer or bytes-like object, not '{}'",
-                            ctx.type_name(needle)
-                        ))
-                    })?;
-                    byte = index
-                        .to_i64()
-                        .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
-                    std::slice::from_ref(&byte)
-                }
-            };
-            let window = ctx.bytes_like(receiver)?.get(start..end);
-            if name == "count" {
-                let count = window.map_or(0, |v| match needle {
-                    [] => v.len() + 1,
-                    [byte] => memchr::memchr_iter(*byte, v).count(),
-                    _ => memchr::memmem::find_iter(v, needle).count(),
-                });
-                return Ok(ctx.int(count as i64));
-            }
-            let offset = window.and_then(|v| {
-                if name == "rfind" {
-                    memchr::memmem::rfind(v, needle)
-                } else {
-                    memchr::memmem::find(v, needle)
-                }
-            });
-            if name == "index" && offset.is_none() {
-                return Err(Error::new("ValueError", "subsection not found"));
-            }
-            return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
+            return search_binary(ctx, receiver, name, needle, start..end);
         }
         if name == "count" {
             let value = match (
