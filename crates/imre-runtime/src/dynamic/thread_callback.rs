@@ -327,12 +327,17 @@ impl Callback {
         first_slots
             .try_reserve(count)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        for (slot, &id) in bound.iter().enumerate() {
+        // Keep one creator root per distinct bound value, in first occurrence order.
+        let mut kept = 0;
+        for slot in 0..bound.len() {
+            let id = bound[slot];
             let first = *first_slots.entry(id).or_insert(slot);
             if first != slot {
                 values.push(Argument::Alias(first));
                 continue;
             }
+            bound[kept] = id;
+            kept += 1;
             let value = match ctx.heap.get(id) {
                 Value::Native(name) if !high_level => {
                     let symbol = [
@@ -357,6 +362,7 @@ impl Callback {
             };
             values.push(value);
         }
+        retained.truncate(roots.len() + kept);
         let callback = Self::from_code(ctx, code, scope, entry, values)?;
         Ok(Some((Operation::Python(Box::new(callback)), retained)))
     }

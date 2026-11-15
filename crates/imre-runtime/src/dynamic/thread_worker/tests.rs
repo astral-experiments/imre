@@ -500,6 +500,7 @@ fn python_worker_owns_its_bound_frame_before_publication() {
         let kwargs = ctx.dict(vec![(keyword, receiver)]);
         let (operation, roots) = worker_target(&ctx, method, args, kwargs).unwrap();
         assert!(matches!(operation, Operation::Python(_)));
+        assert_eq!(roots, [method, args, receiver]);
         let handle = Arc::<Handle>::default();
         let request = Start::new(&ctx, operation, registered(&handle, false, owner), roots);
         let (ready, registration) = super::launch(request).unwrap();
