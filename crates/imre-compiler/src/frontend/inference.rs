@@ -1216,7 +1216,12 @@ impl Inference {
                     })
                     && !graph.session.is_generator_definition(*module, function)
                     && let Ok(Some((body, placement))) = registered::prepare_checked_definition(
-                        &checker, function, signature, self, None, false,
+                        &checker,
+                        function,
+                        signature,
+                        self,
+                        None,
+                        registered::ReturnCheck::Declared,
                     )
                     && !body.cannot_return
                     && self.revision.get() == before
@@ -1234,7 +1239,12 @@ impl Inference {
                 // iterator protocol. Keep its checked placement across diagnostic discovery.
                 let place_suspended = |checker: &Checker<'_>| -> Result<bool, String> {
                     let Some((_, placement)) = registered::prepare_checked_definition(
-                        checker, function, signature, self, None, false,
+                        checker,
+                        function,
+                        signature,
+                        self,
+                        None,
+                        registered::ReturnCheck::Declared,
                     )?
                     else {
                         return Ok(false);
@@ -1271,7 +1281,12 @@ impl Inference {
                     candidate.returns = Type::PythonObject;
                     placement = Some(
                         registered::prepare_checked_definition(
-                            &checker, function, &candidate, self, None, true,
+                            &checker,
+                            function,
+                            &candidate,
+                            self,
+                            None,
+                            registered::ReturnCheck::Infer,
                         )
                         .map(|placed| {
                             placed

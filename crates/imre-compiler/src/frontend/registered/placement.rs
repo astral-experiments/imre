@@ -468,6 +468,54 @@ mod tests {
     }
 
     #[test]
+    fn a_checked_match_body_keeps_its_prefix_and_enforces_its_declared_operands() {
+        let source = concat!(
+            "def label(value: float, *, better: bool = True) -> str:\n",
+            "    if value == 0: return ''\n",
+            "    increased = value > 0\n",
+            "    items: list[int] = [7]\n",
+            "    match (better, increased):\n",
+            "        case (True, True):\n",
+            "            items.append(4)\n",
+            "            return 'up'\n",
+            "        case _: return 'other'\n",
+            "print(label(3.0))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("report.py");
+        std::fs::write(&file, source).unwrap();
+        let mut graph = SourceGraph::load(&file, None, &[]).unwrap();
+        graph.registered_startup = true;
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&TextSize::default()];
+        assert!(matches!(
+            frame.function.body.last(),
+            Some(Statement::Match(_, _))
+        ));
+        assert_eq!(lowered.iter().filter(|name| *name == "label").count(), 2);
+        std::fs::write(
+            dir.path().join("__main__.py"),
+            source.replace("append(4)", "append(True)"),
+        )
+        .unwrap();
+        let options = crate::CompileOptions {
+            path_entry: true,
+            module_entry: Some("__main__".into()),
+            script_startup: Some((Default::default(), "imre".into())),
+            ..Default::default()
+        };
+        let error = crate::compile_file(dir.path(), None, &options)
+            .err()
+            .expect("the case must check its list element");
+        assert!(
+            error.contains("7:26: Imre: expected int, got bool"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn an_annotated_mapping_keeps_its_checked_python_return() {
         let source = concat!(
             "import json\n",
