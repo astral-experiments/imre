@@ -13902,9 +13902,6 @@ impl<'a> Checker<'a> {
             )) => {
                 return self.system_path_call(intrinsic, call);
             }
-            Some(Binding::Intrinsic(Intrinsic::Dedent)) => {
-                return self.dedent_call(call);
-            }
             Some(Binding::Intrinsic(Intrinsic::BinasciiUnhexlify(name))) => {
                 return self.binascii_unhexlify(call, name);
             }

@@ -1,5 +1,4 @@
 //! Recover string spellings and code points that the decoded AST does not retain.
-use compact_str::CompactString;
 use ruff_python_ast::{
     self as ast, StringFlags,
     token::{Token, TokenKind, Tokens},
@@ -286,23 +285,6 @@ pub fn common_indent<'a>(mut lines: impl Iterator<Item = &'a str>) -> usize {
         margin = &margin[..common];
     }
     margin.len()
-}
-
-/// Apply textwrap.dedent to an ordinary Unicode scalar string.
-pub fn dedent(text: &str) -> CompactString {
-    let blank = |line: &str| line.chars().all(python_whitespace);
-    let margin = common_indent(text.split('\n').filter(|line| !blank(line)));
-    // Indentation and blank lines can account for nearly the entire input.
-    let mut result = CompactString::default();
-    for (index, line) in text.split('\n').enumerate() {
-        if index != 0 {
-            result.push('\n');
-        }
-        if !blank(line) {
-            result.push_str(&line[margin..]);
-        }
-    }
-    result
 }
 
 /// CPython expands tabs at eight-character stops, then removes the common

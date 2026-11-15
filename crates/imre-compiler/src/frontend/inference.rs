@@ -1987,8 +1987,14 @@ impl Checker<'_> {
         // CPython's accelerated stat functions take an unsigned mode_t through
         // the index protocol. A boolean argument must reach their integer body
         // as 0 or 1; ordinary annotated Python functions retain their own types.
-        let stat_mode = matches!(self.resolve(&call.func), Some(Binding::Definition(id))
+        let binding = self.resolve(&call.func);
+        let stat_mode = matches!(binding, Some(Binding::Definition(id))
             if self.graph.modules[id.module].is_bundled("stat"));
+        // Only a bound input reaches dedent's runtime error. Malformed calls
+        // retain the ordinary argument checker and its first source diagnostic.
+        let dedent = matches!(binding, Some(Binding::Definition(id)) if self.graph.is_textwrap_dedent(id))
+            && call.arguments.len() == 1
+            && !calls::has_unpacking(call);
         let selector_wait = signature.method.is_some_and(|method| {
             let class = &self.classes.declarations.definitions[method.class];
             self.graph.modules[class.definition.module].is_bundled("selectors")
@@ -2014,6 +2020,11 @@ impl Checker<'_> {
                             checker.direct_value(value, site, expected, parameter.sign_only)
                         }
                     };
+                if dedent {
+                    let site = argument.site();
+                    let value = argument.value(checker)?;
+                    return checker.dedent_text(value, site);
+                }
                 if selector_wait && parameter.name == "timeout" {
                     let node = argument.site();
                     let value = argument.value(checker)?;

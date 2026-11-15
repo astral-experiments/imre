@@ -143,8 +143,6 @@ pub(crate) fn bundled_module_source(
             concat!(
                 include_str!("../../stdlib/textwrap/wrapper.py"),
                 "\n\n",
-                include_str!("../../stdlib/textwrap/functions_boxed.py"),
-                "\n\n",
                 include_str!("../../stdlib/textwrap/functions.py"),
                 "\n",
             ),

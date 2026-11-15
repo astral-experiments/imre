@@ -450,13 +450,14 @@ run()
 }
 
 #[test]
-fn textwrap_indent_keeps_its_fixed_optional_predicate() {
+fn textwrap_functions_compile_for_fixed_string_callers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("main.py");
     std::fs::write(
         &path,
-        "from textwrap import indent\ndef blank(line: str) -> bool: return line.isspace()\n\
-         print(indent('x', '>'), indent(' ', '+', predicate=blank))\n",
+        "from textwrap import dedent, indent\ndef blank(line: str) -> bool: return line.isspace()\n\
+         def normalize(text: str) -> str: return dedent(text)\n\
+         print(normalize(indent('x', '  ')), indent(' ', '+', predicate=blank))\n",
     )
     .unwrap();
     let program = compile_file(&path, None, &CompileOptions::default()).unwrap();
