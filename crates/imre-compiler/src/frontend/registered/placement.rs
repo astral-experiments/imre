@@ -9,7 +9,7 @@ mod tests {
         let text = concat!(
             "import json\n",
             "def render(data: int | None, spec: str) -> str:\n    return f'{data:{spec}}'\n\n",
-            "print(render(17, input()))\n",
+            "print(ｒｅｎｄｅｒ(17, input()))\n",
         );
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
@@ -31,7 +31,7 @@ mod tests {
         assert_eq!(suite.checked.function.body.as_ptr(), original);
         assert_eq!(suite.placed_from + 1, suite.checked.function.body.len());
         let site = suite.checked.fixed_sites[2];
-        assert_eq!(&text[site], "render(17, input())");
+        assert_eq!(&text[site], "ｒｅｎｄｅｒ(17, input())");
         let Some(FixedAttribute::Call(Some(target), _)) = suite.checked.fixed_attribute(site)
         else {
             panic!("expected the checked render call");
