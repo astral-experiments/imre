@@ -1502,16 +1502,27 @@ fn lower_graph(
         let physical_function = source_function && signature.physical_frame;
         let prepared = pending_capture.borrow_mut().as_mut().and_then(|prepared| {
             use std::collections::hash_map::Entry;
-            let Entry::Occupied(entry) = prepared.entry(signature.id) else {
+            let Entry::Occupied(mut entry) = prepared.entry(signature.id) else {
                 return None;
             };
-            match entry.get() {
-                PreparedBody::Fixed((body, _)) if prepare_sites || body.source.is_none() => {
-                    Some(entry.remove())
+            match entry.get_mut() {
+                PreparedBody::Fixed((body, _)) if prepare_sites || body.source.is_none() => {}
+                PreparedBody::Fixed((body, _))
+                    if signature.method.is_some()
+                        && graph.session.function_uses_fixed_names(
+                            *module_id,
+                            definition,
+                            false,
+                            |_| false,
+                        ) =>
+                {
+                    // Keep the instructions in the ordinary fixed method's layout.
+                    body.source = None;
                 }
-                PreparedBody::Attributes(_) if named && physical_function => Some(entry.remove()),
-                _ => None,
+                PreparedBody::Attributes(_) if named && physical_function => {}
+                _ => return None,
             }
+            Some(entry.remove())
         });
         let (inferred, mut callable_inputs) = match prepared {
             Some(PreparedBody::Fixed(body)) => (Some(body), None),
