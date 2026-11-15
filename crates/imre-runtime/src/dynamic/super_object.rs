@@ -228,7 +228,7 @@ impl Context {
             ));
         };
         let base = self.builtin("super");
-        if !self.super_subtype(class, base) {
+        if !self.real_subtype(class, base) {
             return Err(self.invalid_new_subtype("super", class));
         }
         let storage = self.alloc(Value::Super {
@@ -308,8 +308,8 @@ impl Context {
         Ok(self.alloc(state))
     }
 
-    /// supercheck uses the real MRO, never an ABC registration or a metaclass hook.
-    fn super_subtype(&mut self, class: Id, base: Id) -> bool {
+    /// Test inheritance using the actual method resolution order.
+    pub(super) fn real_subtype(&mut self, class: Id, base: Id) -> bool {
         self.is_type_object(class)
             && (class == base
                 || if let Some(mro) = self.published_mro(class) {
@@ -384,16 +384,16 @@ impl Context {
     }
 
     fn super_owner(&mut self, start: Id, receiver: Id) -> Result<Id> {
-        if receiver == NONE || self.super_subtype(receiver, start) {
+        if receiver == NONE || self.real_subtype(receiver, start) {
             return Ok(receiver);
         }
         let actual = self.exact_type(receiver)?;
-        if self.super_subtype(actual, start) {
+        if self.real_subtype(actual, start) {
             return Ok(actual);
         }
         // A proxy may report its wrapped type without changing the bound receiver.
         match self.lookup_attr(receiver, "__class__") {
-            Ok(reported) if reported != actual && self.super_subtype(reported, start) => {
+            Ok(reported) if reported != actual && self.real_subtype(reported, start) => {
                 return Ok(reported);
             }
             Err(error) if !self.is_attribute_error(&error) => return Err(error),

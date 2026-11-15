@@ -24,6 +24,15 @@ def current():
         def load(self):
             pass
 
+    returned = object.__new__(Loader)
+
+    class Factory(ABC):
+        def __new__(cls, path):
+            return returned
+
+    Factory.register(Loader)
+    assert isinstance(returned, Factory) and Factory("pkg") is returned
+
     check_metaclass_new()
     check_default_state()
     check_inherited_inequality()
