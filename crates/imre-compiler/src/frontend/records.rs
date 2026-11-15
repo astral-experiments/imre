@@ -1596,6 +1596,13 @@ impl Checker<'_> {
         };
         let skip = usize::from(receiver.is_some());
         let value = self.source_call(call, &signature, receiver, skip)?;
+        if kind == MethodKind::Instance
+            && skip == 1
+            && let Some(sites) = &mut self.fixed_sites
+            && registered::values::fixed_positional_arguments(call)
+        {
+            sites.method(call, attribute, &value);
+        }
         Ok(self.evaluated_receiver(discarded, value))
     }
 

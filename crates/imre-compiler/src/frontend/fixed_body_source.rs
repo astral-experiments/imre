@@ -416,7 +416,7 @@ impl SourceSites {
     }
 
     /// Bind a method with already-checked positional arguments while the fixed
-    /// entry keeps the collection operation.
+    /// entry keeps its specialized call.
     pub(super) fn method(
         &mut self,
         call: &ast::ExprCall,
@@ -424,7 +424,7 @@ impl SourceSites {
         value: &Expr,
     ) {
         if let Some(site) = self.site_at(call.range())
-            && let ExprKind::Builtin(_, operands) = &value.kind
+            && let Some(operands) = value.named_call_arguments()
             && operands.len() == 1 + call.arguments.args.len()
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
         {
