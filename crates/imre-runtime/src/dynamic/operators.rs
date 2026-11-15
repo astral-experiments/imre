@@ -5421,17 +5421,7 @@ impl Context {
             Some(self.lookup_attr(obj, name)?)
         } else {
             match self.bound_slot(obj, name) {
-                Err(error) if !inplace && self.is_attribute_error(&error) => {
-                    // A descriptor can retain the exception whose binding failure we consume.
-                    if error
-                        .trace
-                        .as_ref()
-                        .is_some_and(|trace| trace.instance.is_some())
-                    {
-                        self.raised_instance(error);
-                    }
-                    return Ok(None);
-                }
+                Err(error) if !inplace && self.is_attribute_error(&error) => return Ok(None),
                 result => result?,
             }
         };
