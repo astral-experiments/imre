@@ -22,18 +22,25 @@ impl Checker<'_> {
         let mut values = Vec::with_capacity(args.len() + 1);
         values.push(callable);
         values.extend(args);
-        let frame = Expr {
-            ty: self.types.tuple(values.iter().map(|arg| arg.ty).collect()),
-            kind: ExprKind::Tuple(values),
-        };
-        operation(
+        self.framed_call(
             Op::IndirectCoroutine {
                 signature,
                 result: self.types.awaited(returns).unwrap(),
             },
             returns,
-            vec![frame],
+            values,
         )
+    }
+
+    fn framed_call(&self, op: Op, returns: Type, fields: Vec<Expr>) -> Expr {
+        let ty = self
+            .types
+            .tuple(fields.iter().map(|field| field.ty).collect());
+        let frame = Expr {
+            ty,
+            kind: ExprKind::Tuple(fields),
+        };
+        operation(op, returns, vec![frame])
     }
 
     pub(super) fn async_gather(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -127,18 +134,6 @@ impl Checker<'_> {
                 kind: ExprKind::Call(signature.id, args),
             };
         }
-        let slots: Vec<_> = args.values.iter().map(|arg| self.hidden(arg.ty)).collect();
-        let fields: Vec<_> = args
-            .order
-            .iter()
-            .map(|&index| self.local(slots[index]))
-            .collect();
-        let frame = Expr {
-            ty: self
-                .types
-                .tuple(fields.iter().map(|field| field.ty).collect()),
-            kind: ExprKind::Tuple(fields),
-        };
         let (ty, op) = if context {
             (
                 Type::GeneratorContext,
@@ -155,20 +150,18 @@ impl Checker<'_> {
                 },
             )
         };
-        let body = slots
-            .iter()
-            .copied()
-            .zip(args.values)
-            .map(|(slot, arg)| Statement::Assign(slot, arg))
-            .collect();
-        Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(op, ty, vec![frame])),
-                clear: slots,
-            },
+        // Initialized native locals already own their arguments. Otherwise capture
+        // every written operand before forming the private frame in parameter order.
+        let mut scope = calls::ArgumentScope::default();
+        if self.registered.is_some()
+            || !args.values.iter().all(|value| {
+                matches!(value.kind, ExprKind::Local(slot) if self.assigned.contains(&slot))
+            })
+        {
+            let values = args.values.into_iter();
+            args.values = values.map(|arg| scope.hold(self, arg)).collect();
         }
+        scope.finish(self.framed_call(op, ty, args.into_formal_order()))
     }
 
     pub(super) fn task_await(
