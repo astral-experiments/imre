@@ -2550,13 +2550,16 @@ impl<'a> SuitePreparation<'a> {
         mut placed: Option<Box<RegisteredFunction>>,
     ) -> RegisteredSuite {
         let mut scope = self.source_scope(kind);
+        let mut statements = Vec::new();
         if let Some(entry) = &mut placed {
-            // Prefix declarations allocate after the slots used by the checked tail.
+            // The caller reserved space for these declarations after its checked statements.
             scope.locals = std::mem::take(&mut entry.function.locals);
+            statements = std::mem::take(&mut entry.function.body);
         }
+        let tail_len = statements.len();
         let mut body = SuiteBody {
-            statements: Vec::new(),
-            check_from: Some(0),
+            statements,
+            check_from: Some(tail_len),
             falls_through: true,
             refusal: None,
         };
@@ -2854,8 +2857,7 @@ impl<'a> SuitePreparation<'a> {
             body.check_from = body.falls_through.then_some(body.statements.len());
         }
         body.check_run(self);
-        let placed_from = placed.as_ref().map_or(0, |_| body.statements.len());
-        let checked = if let Some(mut entry) = placed {
+        let (placed_from, checked) = if let Some(mut entry) = placed {
             // Bind the saved targets where these declarations installed their names.
             // The written global lookup stays live when this scope has no local binding.
             for attribute in entry
@@ -2874,16 +2876,17 @@ impl<'a> SuitePreparation<'a> {
                 }
             }
             if body.falls_through && body.refusal.is_none() {
-                body.refusal = self.checked_declaration_refusal(&entry.function.body);
+                body.refusal = self.checked_declaration_refusal(&body.statements[..tail_len]);
             }
-            entry.function.body.splice(..0, body.statements);
+            body.statements.rotate_left(tail_len);
+            let placed_from = body.statements.len() - tail_len;
             scope.namespaces.extend(entry.local_names);
-            let mut checked = scope.finish(entry.function.body);
+            let mut checked = scope.finish(body.statements);
             checked.fixed_sites = entry.fixed_sites;
             checked.fixed_attributes = entry.fixed_attributes;
-            checked
+            (placed_from, checked)
         } else {
-            scope.finish(body.statements)
+            (0, scope.finish(body.statements))
         };
         RegisteredSuite {
             placed_from,
