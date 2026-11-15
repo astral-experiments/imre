@@ -2654,10 +2654,10 @@ impl<'a> SuitePreparation<'a> {
                 });
                 self.retain_operand(expr, kind, suspended, checked)
             };
-            let target_input = |input: TargetInput<'_>| {
+            let target_input = |input: BindingOperand<'_>| {
                 let checked =
                     RegisteredOperand::prepare_with(self.source, kind, |scope| input.lower(scope));
-                let (TargetInput::Receiver(expr) | TargetInput::Index(expr)) = input;
+                let (BindingOperand::Value(expr) | BindingOperand::Index(expr)) = input;
                 self.retain_operand(expr, kind, suspended, checked)
             };
             if let ast::Stmt::Assert(assertion) = stmt {
@@ -2769,38 +2769,16 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             if let ast::Stmt::AugAssign(assign) = stmt {
-                let op = assign.op.as_str();
-                let mut binding = None;
-                let output = match assign.target.as_ref() {
-                    ast::Expr::Name(name) => {
-                        // The suite owns the name binding. Transfer the in-place result to it
-                        // after the original target and RHS have both been evaluated.
-                        let slot = scope.hidden(Type::PythonObject);
-                        let result = unpacking::take_pattern_temporary(
-                            Expr::local(slot, Type::PythonObject),
-                            slot,
-                        );
-                        binding = Some(scope.store(name.id.as_str(), result));
-                        Statement::Assign(
-                            slot,
-                            in_place(
-                                assign.op,
-                                keep(frame_value(&assign.target)),
-                                keep(frame_value(&assign.value)),
-                            ),
-                        )
-                    }
-                    ast::Expr::Subscript(target) => Statement::AugmentItem(
-                        keep(frame_value(&target.value)),
-                        keep(target_input(TargetInput::Index(&target.slice))),
-                        ir::ItemUpdate::Protocol(op),
-                        keep(frame_value(&assign.value)),
-                    ),
-                    _ => unreachable!("validated augmented target after attribute lowering"),
-                };
+                let statement = scope
+                    .augmented_assignment(assign, |input, _| {
+                        Some(keep(match input {
+                            BindingOperand::Value(expr) => frame_value(expr),
+                            BindingOperand::Index(_) => target_input(input),
+                        }))
+                    })
+                    .expect("validated augmented target after attribute lowering");
                 body.statements.push(checkpoint(stmt));
-                body.mixed(self, output, self.operand_refusals(&operands[start..]));
-                body.statements.extend(binding);
+                body.mixed(self, statement, self.operand_refusals(&operands[start..]));
                 continue;
             }
             let assignment = match stmt {
@@ -3239,26 +3217,11 @@ impl statements::StatementLowering for SourceScope<'_> {
                     output.push(statement);
                     return Ok(true);
                 }
-                if let Some(name) = assign.target.as_name_expr() {
-                    let left = self.ordinary_operand(&assign.target).ok_or(())?;
-                    let right = self.ordinary_operand(&assign.value).ok_or(())?;
-                    let value = in_place(assign.op, left, right);
-                    output.push(self.store(name.id.as_str(), value));
-                    return Ok(true);
-                }
-                let target = assign.target.as_subscript_expr().ok_or(())?;
-                let receiver = TargetInput::Receiver(&target.value).lower(self).ok_or(())?;
-                let key = TargetInput::Index(&target.slice).lower(self).ok_or(())?;
-                let rhs = self.ordinary_operand(&assign.value).ok_or(())?;
-                Ok((
-                    vec![Statement::AugmentItem(
-                        receiver,
-                        key,
-                        ir::ItemUpdate::Protocol(assign.op.as_str()),
-                        rhs,
-                    )],
-                    true,
-                ))
+                let statement = self
+                    .augmented_assignment(assign, |input, scope| input.lower(scope))
+                    .ok_or(())?;
+                output.push(statement);
+                return Ok(true);
             }
             ast::Stmt::TypeAlias(alias) => {
                 let name = alias.name.as_name_expr().ok_or(())?;
@@ -3372,20 +3335,20 @@ impl statements::StatementLowering for SourceScope<'_> {
 }
 
 #[derive(Clone, Copy)]
-enum TargetInput<'a> {
-    Receiver(&'a ast::Expr),
+enum BindingOperand<'a> {
+    Value(&'a ast::Expr),
     Index(&'a ast::Expr),
 }
 
-impl TargetInput<'_> {
-    /// Read the receiver or key where its binding will run, including a suspension in that frame.
+impl BindingOperand<'_> {
+    /// Read the value or key where its binding will run, including a suspension in that frame.
     fn in_binding(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         scope.with_binding_operands(|scope| self.lower(scope))
     }
 
     fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         match self {
-            Self::Receiver(expr) => scope.ordinary_operand(expr),
+            Self::Value(expr) => scope.ordinary_operand(expr),
             Self::Index(key) => {
                 values::index_key(key, &mut |expr| scope.ordinary_operand(expr).ok_or(())).ok()
             }
@@ -3393,8 +3356,8 @@ impl TargetInput<'_> {
     }
 }
 
-fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_>> + Clone) {
-    use TargetInput::{Index, Receiver};
+fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = BindingOperand<'_>> + Clone) {
+    use BindingOperand::{Index, Value};
     let (op, inputs) = match target {
         ast::Expr::Name(name) => (
             Builtin::RegisteredDeleteName(name.id.to_string(), name.range()),
@@ -3402,11 +3365,11 @@ fn deletion(target: &ast::Expr) -> (Builtin, impl Iterator<Item = TargetInput<'_
         ),
         ast::Expr::Attribute(field) => (
             attribute_opcode(ir::AttributeAction::Delete, field),
-            [Some(Receiver(&field.value)), None],
+            [Some(Value(&field.value)), None],
         ),
         ast::Expr::Subscript(sub) => (
             Builtin::DeleteItem,
-            [Some(Receiver(&sub.value)), Some(Index(&sub.slice))],
+            [Some(Value(&sub.value)), Some(Index(&sub.slice))],
         ),
         _ => unreachable!("validated deletion target"),
     };
@@ -3503,16 +3466,18 @@ impl unpacking::PatternBinder for SourceScope<'_> {
         let store = match target {
             ast::Expr::Name(name) => self.store(name.id.as_str(), value),
             ast::Expr::Attribute(attr) => {
-                let receiver = TargetInput::Receiver(&attr.value)
+                let receiver = BindingOperand::Value(&attr.value)
                     .in_binding(self)
                     .ok_or(())?;
                 attribute_statement(ir::AttributeAction::Store, attr, vec![value, receiver])
             }
             ast::Expr::Subscript(sub) => {
-                let receiver = TargetInput::Receiver(&sub.value)
+                let receiver = BindingOperand::Value(&sub.value)
                     .in_binding(self)
                     .ok_or(())?;
-                let key = TargetInput::Index(&sub.slice).in_binding(self).ok_or(())?;
+                let key = BindingOperand::Index(&sub.slice)
+                    .in_binding(self)
+                    .ok_or(())?;
                 Statement::assign_item(receiver, key, value)
             }
             _ => return Err(()),
@@ -3718,6 +3683,27 @@ impl SourceScope<'_> {
         let mut body = Vec::with_capacity(1);
         unpacking::bind_assignment(self, targets, value, &mut body)?;
         Ok(body)
+    }
+
+    fn augmented_assignment(
+        &mut self,
+        assign: &ast::StmtAugAssign,
+        mut operand: impl FnMut(BindingOperand<'_>, &mut Self) -> Option<Expr>,
+    ) -> Option<Statement> {
+        match assign.target.as_ref() {
+            ast::Expr::Name(name) => {
+                let left = operand(BindingOperand::Value(&assign.target), self)?;
+                let right = operand(BindingOperand::Value(&assign.value), self)?;
+                Some(self.store(name.id.as_str(), in_place(assign.op, left, right)))
+            }
+            ast::Expr::Subscript(target) => Some(Statement::AugmentItem(
+                operand(BindingOperand::Value(&target.value), self)?,
+                operand(BindingOperand::Index(&target.slice), self)?,
+                ir::ItemUpdate::Protocol(assign.op.as_str()),
+                operand(BindingOperand::Value(&assign.value), self)?,
+            )),
+            _ => None,
+        }
     }
 
     fn with_binding_operands<T>(&mut self, lower: impl FnOnce(&mut Self) -> T) -> T {
