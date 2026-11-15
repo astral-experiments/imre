@@ -1721,8 +1721,11 @@ fn lower_graph(
                     checker.nonreturning_functions = &completed_calls;
                     if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
                         &checker, definition, signature, inference, None, false,
-                    ) && placement.retain_for_launch(graph, &inference.source_checks)
-                        && let Some(prior) = pending_capture.borrow_mut().as_mut()
+                    ) && placement.retain_for_launch(
+                        graph,
+                        &inference.source_checks,
+                        checked.calls.is_empty(),
+                    ) && let Some(prior) = pending_capture.borrow_mut().as_mut()
                     {
                         // Earlier native callees can supply their checked operands to the
                         // Python frame selected by this caller.
@@ -1752,7 +1755,7 @@ fn lower_graph(
                                 Some(inputs),
                                 false,
                             ) {
-                                frame.retain_for_launch(graph, &inference.source_checks);
+                                frame.retain_for_launch(graph, &inference.source_checks, false);
                             }
                         }
                     }

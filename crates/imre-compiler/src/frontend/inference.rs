@@ -1851,7 +1851,7 @@ impl Inference {
             }
             match body {
                 PreparedBody::Python(frame) if !graph.registered_startup => {
-                    frame.retain_for_launch(graph, &self.source_checks);
+                    frame.retain_for_launch(graph, &self.source_checks, false);
                 }
                 body => {
                     local_returns.insert(id, body);

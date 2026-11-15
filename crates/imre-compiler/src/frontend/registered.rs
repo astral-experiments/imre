@@ -561,9 +561,23 @@ pub(super) struct CheckedPlacement {
 }
 
 impl CheckedPlacement {
-    pub(super) fn retain_for_launch(self, graph: &SourceGraph, checks: &SourceChecks) -> bool {
+    pub(super) fn retain_for_launch(
+        self,
+        graph: &SourceGraph,
+        checks: &SourceChecks,
+        final_definition: bool,
+    ) -> bool {
         if !self.check_source || checks.accepts(graph, self.module, self.range) {
-            graph.retain_lexical_function(self.module, self.range.start(), self.frame);
+            let start = self.range.start();
+            let publish = if final_definition
+                && matches!(self.frame.inputs, FrameInputs::Protocol { .. })
+                && !graph.has_registered_function(self.module, start)
+            {
+                SourceGraph::register_function
+            } else {
+                SourceGraph::retain_lexical_function
+            };
+            publish(graph, self.module, start, self.frame);
             true
         } else {
             false
