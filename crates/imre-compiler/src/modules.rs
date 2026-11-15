@@ -3457,6 +3457,12 @@ impl SourceGraph {
         }
     }
 
+    pub(crate) fn has_registered_function(&self, module: ModuleId, start: TextSize) -> bool {
+        self.registered_functions()
+            .get(&module)
+            .is_some_and(|functions| functions.contains_key(&start))
+    }
+
     pub(crate) fn registered_functions(
         &self,
     ) -> std::cell::Ref<'_, HashMap<ModuleId, crate::dynamic::CheckedFunctions>> {
