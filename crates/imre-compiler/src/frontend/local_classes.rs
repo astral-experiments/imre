@@ -139,11 +139,21 @@ impl Checker<'_> {
                 .as_ref()
                 .is_some_and(|a| !a.keywords.is_empty() || a.args.len() > 1)
         {
-            return Err(error(
+            let failure = error(
                 self.source,
                 node,
                 "local class metadata requires one fixed base and no decorators, metaclass or type parameters",
-            ));
+            );
+            return Err(
+                if self.graph.modules[self.module]
+                    .value_structs
+                    .contains(&node.start())
+                {
+                    failure.classify(Kind::UnsupportedRepresentation)
+                } else {
+                    failure
+                },
+            );
         }
         let mut fixed_base = None;
         let mut abstract_methods = HashSet::new();

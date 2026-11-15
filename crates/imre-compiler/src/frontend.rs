@@ -6807,22 +6807,21 @@ impl<'a> Checker<'a> {
     }
 
     fn require_registered_operation(&self, site: &impl Ranged) -> Result<(), String> {
-        self.require_registered_representation(site, Kind::ScopedObject)
+        self.require_registered_representation(|| {
+            self.classified_error(
+                Kind::ScopedObject,
+                site,
+                "operation requires its compiled object representation",
+            )
+        })
     }
 
     fn require_registered_representation(
         &self,
-        site: &impl Ranged,
-        kind: Kind,
+        reason: impl FnOnce() -> Failure,
     ) -> Result<(), String> {
         let mut missing = self.unrepresented.borrow_mut();
-        let failure = missing.get_or_insert_with(|| {
-            self.classified_error(
-                kind,
-                site,
-                "operation requires its compiled object representation",
-            )
-        });
+        let failure = missing.get_or_insert_with(reason);
         if self.registered_local_start.is_some() {
             return Err(failure.clone());
         }

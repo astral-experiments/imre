@@ -803,10 +803,22 @@ impl Initialization {
                             checkpoints.as_mut(),
                         )?;
                     } else if declarations.registered_classes.contains(&definition) {
-                        checker.require_registered_representation(
-                            statement,
-                            Kind::RegisteredClassDefinition,
-                        )?;
+                        checker.require_registered_representation(|| {
+                            if let Some(&(base, name)) = declarations.scoped_bases.get(&definition)
+                            {
+                                checker.classified_error(
+                                    Kind::RegisteredClassDefinition,
+                                    base,
+                                    &format!("{name} requires object lowering"),
+                                )
+                            } else {
+                                checker.classified_error(
+                                    Kind::RegisteredClassDefinition,
+                                    statement,
+                                    "operation requires its compiled object representation",
+                                )
+                            }
+                        })?;
                     }
                     available.insert(definition);
                     continue;
