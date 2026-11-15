@@ -918,6 +918,7 @@ pub(super) const BYTES_METHODS: &[&str] = &[
     "__bytes__",
     "__mod__",
     "__repr__",
+    "__str__",
     "count",
     "decode",
     "endswith",
@@ -2490,7 +2491,9 @@ pub(super) fn call(
             "float" | "complex" if method == "__bool__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
-            "str" if method == "__str__" => collections::builtin_slot(ctx, name, args, kwargs),
+            "str" | "bytes" if method == "__str__" => {
+                collections::builtin_slot(ctx, name, args, kwargs)
+            }
             "mappingproxy" if method == "__contains__" => {
                 collections::builtin_slot(ctx, name, args, kwargs)
             }
