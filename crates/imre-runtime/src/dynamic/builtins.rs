@@ -469,6 +469,15 @@ pub(super) fn constructor_owner(name: &str) -> Option<&str> {
     owns_native_new(owner).then_some(owner)
 }
 
+pub(super) fn singleton_instance(owner: &str) -> Option<Id> {
+    match owner {
+        "NoneType" => Some(NONE),
+        "NotImplementedType" => Some(NOT_IMPLEMENTED),
+        "ellipsis" => Some(ELLIPSIS),
+        _ => None,
+    }
+}
+
 /// The intrinsic allocation slot, independent of whether its Python entry is exposed.
 pub(super) fn owns_native_new(owner: &str) -> bool {
     matches!(
@@ -498,7 +507,8 @@ pub(super) fn owns_native_new(owner: &str) -> bool {
             | super::thread_local::CLASS
             | super::thread_handle::CLASS
             | super::namespace::CLASS
-    ) || super::stdlib::itertools::cursor_type(owner).is_some()
+    ) || singleton_instance(owner).is_some()
+        || super::stdlib::itertools::cursor_type(owner).is_some()
         || super::deque::iterator_class(owner).is_some()
         || is_exception(owner)
         || owner == super::stdlib::fixed_structseq::SCHED_PARAM
@@ -531,14 +541,12 @@ pub(super) fn is_exported_type(name: &str) -> bool {
 /// Static builtin types have a GC-capable metaclass, but are never themselves tracked.
 pub(super) fn is_static_gc_type(name: &str) -> bool {
     is_exported_type(name)
+        || singleton_instance(name).is_some()
         || name == super::stdlib::flags::TYPE
         || (is_iterator_type(name) && !name.contains('.'))
         || matches!(
             name,
-            "NoneType"
-                | "NotImplementedType"
-                | "ellipsis"
-                | "code"
+            "code"
                 | "coroutine"
                 | "async_generator"
                 | "cell"
@@ -2688,7 +2696,10 @@ pub(super) fn call(
                 ctx.iterator_method(owner, method, args, kwargs)
             }
             "property" => super::property::method(ctx, method, args, kwargs),
-            "function" | "cell" | "mappingproxy" if method == "__new__" => {
+            _ if method == "__new__"
+                && (matches!(owner, "function" | "cell" | "mappingproxy")
+                    || singleton_instance(owner).is_some()) =>
+            {
                 let Some((&class, args)) = args.split_first() else {
                     return Err(type_error(format!(
                         "{owner}.__new__(): not enough arguments"
@@ -3261,7 +3272,7 @@ pub(super) fn call(
             result
         }
         "print" => print::call(ctx, args, kwargs),
-        "NoneType" | "NotImplementedType" | "ellipsis" => {
+        _ if let Some(instance) = singleton_instance(name) => {
             if !args.is_empty() || !kwargs.is_empty() {
                 let ty = if name == "ellipsis" {
                     "EllipsisType"
@@ -3270,11 +3281,7 @@ pub(super) fn call(
                 };
                 return Err(type_error(format!("{ty} takes no arguments")));
             }
-            Ok(match name {
-                "NoneType" => NONE,
-                "NotImplementedType" => NOT_IMPLEMENTED,
-                _ => ELLIPSIS,
-            })
+            Ok(instance)
         }
         "cell" => {
             if !kwargs.is_empty() {
