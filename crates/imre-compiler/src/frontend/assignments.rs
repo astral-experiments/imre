@@ -823,6 +823,10 @@ impl Checker<'_> {
                 "assignment expressions cannot rebind a comprehension iteration variable",
             ));
         }
+        if expression.value.is_bool_op_expr() {
+            // An unrolled loop can check the same source with different operands.
+            self.stable_selections.remove(&expression.range());
+        }
         let existing = self.names.get(name.id.as_str()).copied();
         let value = if let Some(slot) = existing {
             self.expr_expected(&expression.value, self.locals[slot])?
@@ -843,6 +847,17 @@ impl Checker<'_> {
         self.assigned_value(slot, &stored);
         if let Some(exports) = &mut self.comprehension_exports {
             exports.insert(name.id.to_string(), slot);
+        }
+        if self.registered.is_none()
+            && !self.placement_only
+            && value.ty.builtin_scalar_name().is_some()
+            && matches!(
+                value.kind,
+                ExprKind::BooleanValue(..) | ExprKind::Boolean(..)
+            )
+            && expression.value.is_bool_op_expr()
+        {
+            self.stable_selections.insert(expression.range());
         }
         Ok(Expr {
             ty: value.ty,

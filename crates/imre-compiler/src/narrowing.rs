@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
+use ruff_text_size::{Ranged, TextRange};
 
 /// Return the other operand of a single identity test with None and whether it is present.
 pub(crate) fn none_identity(compare: &ast::ExprCompare, truth: bool) -> Option<(&ast::Expr, bool)> {
@@ -120,32 +121,45 @@ pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> 
 /// on every path; a true `and` or false `or` proves all of its operands ran.
 pub(crate) fn guaranteed_assignments(
     expression: &ast::Expr,
-    truth: Option<bool>,
+    branch: Option<(bool, &HashSet<TextRange>)>,
 ) -> HashSet<String> {
+    let truth = branch.map(|(truth, _)| truth);
     match expression {
         ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
                 && call.arguments.args.len() == 1
                 && call.arguments.keywords.is_empty() =>
         {
-            guaranteed_assignments(&call.arguments.args[0], truth)
+            guaranteed_assignments(&call.arguments.args[0], branch)
         }
         ast::Expr::Named(value) => {
-            let mut names = guaranteed_assignments(&value.value, truth);
+            let mut names = guaranteed_assignments(&value.value, None);
+            // A short circuit returns the operand that stopped it. Retesting an
+            // immutable scalar cannot reverse its truth, so the suffix must have run.
+            if let Some((truth, stable)) = branch
+                && let ast::Expr::BoolOp(boolean) = value.value.as_ref()
+                && truth == (boolean.op == ast::BoolOp::And)
+                && stable.contains(&value.range())
+            {
+                for operand in &boolean.values[1..] {
+                    names.extend(guaranteed_assignments(operand, None));
+                }
+            }
             if let ast::Expr::Name(name) = &*value.target {
                 names.insert(name.id.to_string());
             }
             names
         }
-        ast::Expr::UnaryOp(value) if value.op == ast::UnaryOp::Not => {
-            guaranteed_assignments(&value.operand, truth.map(|truth| !truth))
-        }
+        ast::Expr::UnaryOp(value) if value.op == ast::UnaryOp::Not => guaranteed_assignments(
+            &value.operand,
+            branch.map(|(truth, stable)| (!truth, stable)),
+        ),
         ast::Expr::BoolOp(value) => {
             if truth == Some(value.op == ast::BoolOp::And) {
                 value
                     .values
                     .iter()
-                    .flat_map(|value| guaranteed_assignments(value, truth))
+                    .flat_map(|value| guaranteed_assignments(value, branch))
                     .collect()
             } else {
                 guaranteed_assignments(&value.values[0], None)
@@ -163,8 +177,8 @@ pub(crate) fn guaranteed_assignments(
             .collect(),
         ast::Expr::If(value) => {
             let mut names = guaranteed_assignments(&value.test, None);
-            let yes = guaranteed_assignments(&value.body, truth);
-            let no = guaranteed_assignments(&value.orelse, truth);
+            let yes = guaranteed_assignments(&value.body, branch);
+            let no = guaranteed_assignments(&value.orelse, branch);
             names.extend(yes.intersection(&no).cloned());
             names
         }
