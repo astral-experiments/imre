@@ -3947,6 +3947,8 @@ struct Checker<'a> {
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
+    /// Stored short circuits whose selected value has immutable builtin truth.
+    stable_selections: HashSet<TextRange>,
     module_namespace: assignments::ModuleNamespace,
     /// The actual namespace supplied to Python calls in the current lexical region.
     namespace: Option<usize>,
@@ -4084,6 +4086,7 @@ impl<'a> Checker<'a> {
             frame_arguments: FrameArguments::Checked,
             unrepresented: Default::default(),
             namespace_calls: HashSet::new(),
+            stable_selections: HashSet::new(),
             module_namespace: Default::default(),
             namespace: None,
             namespace_bindings: HashMap::new(),
@@ -5587,7 +5590,8 @@ impl<'a> Checker<'a> {
     }
 
     fn apply_facts(&mut self, test: &ast::Expr, truth: bool) {
-        for name in narrowing::guaranteed_assignments(test, Some(truth)) {
+        for name in narrowing::guaranteed_assignments(test, Some((truth, &self.stable_selections)))
+        {
             if let Some(&slot) = self.names.get(&name) {
                 self.assigned.insert(slot);
             }

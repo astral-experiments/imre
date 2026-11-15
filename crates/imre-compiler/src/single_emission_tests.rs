@@ -735,6 +735,39 @@ fn eager_comprehension_exports_only_guaranteed_assignments() {
     }
 }
 
+#[test]
+fn testing_a_stored_value_can_call_bool_again() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let scalar = "def choose(a: int) -> int:\n    result: int = 0\n    if (result := (a and (bound := 1))):\n        return bound\n    return 0\n";
+    std::fs::write(&entry, scalar).unwrap();
+    check_file(&entry, None).unwrap();
+
+    let source = r#"class Flip:
+    count: int
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __bool__(self) -> bool:
+        self.count += 1
+        print("truth", self.count)
+        return self.count > 1
+
+def probe(a: Flip) -> Flip:
+    if (result := (a and (bound := a))):
+        return bound
+    return a
+
+print(probe(Flip()).count)
+"#;
+    std::fs::write(&entry, source).unwrap();
+    assert_source_diagnostic(
+        &check_file(&entry, None).unwrap_err(),
+        &entry,
+        ":13:16: Imre: local may be uninitialized on this path",
+    );
+}
+
 const DORMANT_SOCKET_WORKER: &str = r#"import socket
 import threading
 
