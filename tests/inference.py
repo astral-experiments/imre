@@ -18,6 +18,7 @@ REJECTED = {
     "conflicting_container_calls": 'def first(values):\n    return values[0]\nfirst([1])\nfirst(["one"])\n',
     "conflicting_default": 'def identity(value=1):\n    return value\nidentity("one")\n',
     "conflicting_bool_default": "def identity(value=False):\n    return value\nidentity(1)\n",
+    "explicit_none_default": 'def take(value: None = None):\n    return value\ntake("word")\n',
     "explicit_parameter_contract": 'def identity(value: int):\n    return value\nidentity("one")\n',
     "explicit_return_contract": 'def identity(value) -> int:\n    return value\nidentity("one")\n',
     "unused_explicit_return_contract": 'def unused() -> int:\n    return "one"\n',

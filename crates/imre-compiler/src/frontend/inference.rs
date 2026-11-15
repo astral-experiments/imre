@@ -975,12 +975,12 @@ impl Inference {
         // Completed returns that use only bound locals survive unrelated revisions.
         let mut local_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
-        // With declared parameters, settle open returns before checking the other bodies.
+        // An unannotated None default still needs callers to establish its payload type.
         let mut first_open_return = self
             .pending
             .borrow()
             .iter()
-            .all(|p| !p.inferred_params.contains(&true))
+            .all(|p| !p.inferred_params.contains(&true) && p.none_defaults.is_empty())
             .then_some(0);
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
