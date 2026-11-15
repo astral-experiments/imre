@@ -1415,8 +1415,8 @@ fn lower_graph(
         if recover_completed.get() {
             register(std::mem::take(completed), owners);
             capture();
-        } else {
-            // The lexical writer binds these frames after its own source checks.
+        } else if !retries_failed_layout(graph) {
+            // The ordinary retry clears lexical frames before its source checks.
             std::mem::take(completed).retain_lexical(graph, owners, defer_capture);
         }
     };
