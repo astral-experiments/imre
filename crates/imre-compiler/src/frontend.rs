@@ -9578,15 +9578,19 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn operand_binding(&self, expression: &ast::Expr) -> Result<Option<Binding>, String> {
-        let binding = self.resolve(expression);
+    fn check_module_member(
+        &self,
+        expression: &ast::Expr,
+        binding: Option<Binding>,
+        receiver: impl FnOnce(&ast::Expr) -> Option<Binding>,
+    ) -> Result<(), String> {
         if binding.is_none()
             && self.inference.is_none()
             && self.graph.modules[self.module].is_program_source()
             && let ast::Expr::Attribute(attribute) = expression
             && let ast::Expr::Name(module) = &*attribute.value
             && matches!(
-                self.resolve(&attribute.value),
+                receiver(&attribute.value),
                 Some(Binding::IntrinsicModule(_))
             )
             && self
@@ -9603,7 +9607,7 @@ impl<'a> Checker<'a> {
                 ),
             ));
         }
-        Ok(binding)
+        Ok(())
     }
 
     /// Keep the large general frame off recursive left- and right-hand arithmetic.
@@ -9614,7 +9618,7 @@ impl<'a> Checker<'a> {
         if self.unshadowed_len(expression) {
             return Ok(self.builtin_len());
         }
-        let binding = self.operand_binding(expression)?;
+        let binding = self.resolve(expression);
         if binding == Some(Binding::Intrinsic(Intrinsic::AttrGetter)) {
             return Err(self.runtime_attrgetter(expression));
         }
@@ -9639,6 +9643,7 @@ impl<'a> Checker<'a> {
         let base_binding = expression
             .as_attribute_expr()
             .and_then(|attr| self.resolve(&attr.value));
+        self.check_module_member(expression, binding, |_| base_binding)?;
         if let ast::Expr::Attribute(attr) = expression
             && let Some(Binding::Intrinsic(Intrinsic::AnnotationFormat(number))) = base_binding
         {
@@ -10266,7 +10271,7 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name)
                 if name.id == "__package__"
                     && !self.names.contains_key("__package__")
-                    && self.resolve(expression).is_none() =>
+                    && binding.is_none() =>
             {
                 match self.graph.module_package(self.module) {
                     Some(package) => (Type::Str, ExprKind::Str(package.to_owned())),
@@ -10286,7 +10291,6 @@ impl<'a> Checker<'a> {
             ast::Expr::Name(name) => {
                 let Some(&slot) = self.names.get(name.id.as_str()) else {
                     let name = name.id.as_str();
-                    let binding = self.resolve(expression);
                     if binding.is_none() {
                         if self
                             .graph
@@ -12320,7 +12324,8 @@ impl<'a> Checker<'a> {
             }
             return Err(self.scoped_builtin_error(name, call));
         }
-        let binding = self.operand_binding(&call.func)?;
+        let binding = self.resolve(&call.func);
+        self.check_module_member(&call.func, binding, |receiver| self.resolve(receiver))?;
         if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsAscii)) {
             return self.ascii_call(call);
         }
