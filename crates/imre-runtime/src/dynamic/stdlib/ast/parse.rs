@@ -1163,6 +1163,7 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             "compile() mode must be 'exec', 'eval', 'single' or 'func_type'",
         ));
     }
+    ctx.check_compile_ast(source, &mode)?;
     let text;
     let decoded;
     let source = if ctx.string_storage(source).is_some() {
@@ -1173,16 +1174,7 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
         }
         text.as_str()
     } else {
-        let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
-            Error::new(
-                "TypeError",
-                "compile() arg 1 must be a string, bytes or AST object",
-            )
-        })?;
-        decoded = crate::objects::decode_compile_source(bytes).map_err(|error| {
-            let filename_id = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
-            ctx.source_decode_error(error, filename_id)
-        })?;
+        decoded = ctx.decode_compile_buffer(source, filename_id)?;
         decoded.as_str()
     };
     parse_source(ctx, source, &filename, &mode, false)

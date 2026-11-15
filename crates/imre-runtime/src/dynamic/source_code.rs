@@ -2412,11 +2412,73 @@ impl Context {
         }
     }
 
+    /// Python tests the live source object against the AST type before requesting a buffer.
+    pub(super) fn check_compile_ast(&mut self, source: Id, mode: &str) -> Result<()> {
+        let is_ast = if let Some(&ast) = self.builtins.get("ast.AST") {
+            self.python_instance_check(source, ast)?
+        } else {
+            // AST classes are installed lazily. The reported-class getter can itself import ast.
+            let reported = self.reported_instance_class(source)?;
+            reported.is_some_and(|class| {
+                self.builtins
+                    .get("ast.AST")
+                    .is_some_and(|&ast| self.direct_subclass(class, ast))
+            })
+        };
+        if !is_ast {
+            return Ok(());
+        }
+        let root = match mode {
+            "exec" => "Module",
+            "eval" => "Expression",
+            "single" => "Interactive",
+            "func_type" => "FunctionType",
+            _ => unreachable!("validated compile mode"),
+        };
+        if let Some(&class) = self.builtins.get(&format!("ast.{root}"))
+            && self.python_instance_check(source, class)?
+        {
+            return Err(unsupported("compilation from a live Python AST"));
+        }
+        Err(Error::new(
+            "TypeError",
+            format!("expected {root} node, got {}", self.type_name(source)),
+        ))
+    }
+
+    /// Decode the byte source shared by compile and ast.parse.
+    pub(super) fn decode_compile_buffer(
+        &mut self,
+        source: Id,
+        filename: Option<Id>,
+    ) -> Result<String> {
+        use crate::objects::decode_compile_source;
+        let decoded = match self.heap.get(self.scalar_value(source)) {
+            Value::Bytes(data) | Value::ByteArray(data) => decode_compile_source(data),
+            _ => self
+                .with_read_buffer(source, |ctx, buffer| {
+                    let storage = buffer.storage(ctx)?;
+                    let bytes = storage.read(0..storage.len())?;
+                    Ok(decode_compile_source(&bytes))
+                })
+                .map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        "compile() arg 1 must be a string, bytes or AST object",
+                    )
+                })?,
+        };
+        decoded.map_err(|error| {
+            let filename = filename.unwrap_or_else(|| self.text("<unknown>"));
+            self.source_decode_error(error, filename)
+        })
+    }
+
     pub(super) fn compile_source_with_flags(
         &mut self,
         source: Id,
         filename: Id,
-        mode: Id,
+        mode: &str,
         inherited: u32,
     ) -> Result<Id> {
         let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
@@ -2427,33 +2489,23 @@ impl Context {
         &mut self,
         source: Id,
         filename: Id,
-        mode: Id,
+        mode: &str,
         strip_indent: bool,
         inherited: u32,
     ) -> Result<ParsedModule> {
         use ruff_python_parser::Mode;
-        let mode = self.str_value(mode)?;
         let interactive = mode == "single";
-        let parser_mode = match mode {
-            "exec" | "single" => Mode::Module,
-            "eval" => Mode::Expression,
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    "compile() mode must be 'exec', 'eval' or 'single'",
-                ));
-            }
+        let exec = mode == "exec";
+        let parser_mode = if mode == "eval" {
+            Mode::Expression
+        } else {
+            Mode::Module
         };
         let filename_id = filename;
-        let display = self.filename_display(filename_id)?;
-        let source = match self.heap.get(self.scalar_value(source)) {
-            Value::Bytes(data) | Value::ByteArray(data) => {
-                match crate::objects::decode_compile_source(data) {
-                    Ok(text) => Cow::Owned(text),
-                    Err(error) => return Err(self.source_decode_error(error, filename_id)),
-                }
-            }
-            _ => Cow::Borrowed(self.str_value(source)?),
+        let source = if self.string_storage(source).is_some() {
+            Cow::Borrowed(self.str_value(source)?)
+        } else {
+            Cow::Owned(self.decode_compile_buffer(source, Some(filename_id))?)
         };
         if source.contains('\0') {
             return Err(
@@ -2478,8 +2530,7 @@ impl Context {
             (true, ast::Mod::Module(module)) => module.body.first().map(Ranged::end),
             _ => None,
         };
-        if let Some(limit) =
-            IndentationDiagnostic::find(&parsed, source, mode == "exec", first_statement_end)
+        if let Some(limit) = IndentationDiagnostic::find(&parsed, source, exec, first_statement_end)
         {
             return limit.raise(self, filename_id);
         }
@@ -2492,8 +2543,7 @@ impl Context {
                 imre_ast::check_single_input(&module.body, parsed.tokens())
                     .map_err(|message| Error::new("SyntaxError", message))?;
             }
-            return IndentationDiagnostic::from_issue(source, issue, mode == "exec")
-                .raise(self, filename_id);
+            return IndentationDiagnostic::from_issue(source, issue, exec).raise(self, filename_id);
         }
         let lines = line_starts(source)?;
         let parse_error = parsed
@@ -2505,8 +2555,8 @@ impl Context {
                     .map(|(range, reason)| (range, reason.to_owned(), false))
             });
         if let Some((range, detail, prefix_filename)) = parse_error {
-            let (position, text) = parser_location(source, &lines, range, mode == "exec");
-            let display = display.into_owned();
+            let (position, text) = parser_location(source, &lines, range, exec);
+            let display = self.filename_display(filename_id)?.into_owned();
             return Err(self.parser_syntax_error(
                 filename_id,
                 &display,
@@ -3017,9 +3067,8 @@ impl Context {
             return Err(Self::undefined_source_name(self.str_value(text)?, text));
         }
         let filename = self.text("<string>");
-        let mode = self.text("eval");
         let code =
-            self.compile_source_with_flags(text, filename, mode, self.inherited_compile_flags())?;
+            self.compile_source_with_flags(text, filename, "eval", self.inherited_compile_flags())?;
         self.eval_namespace_code(code, globals, locals)
     }
 
@@ -3315,14 +3364,7 @@ impl Context {
                     && !imre_ast::forward_refs::is_starred(self.str_value(source)?);
                 let filename = self.text("<string>");
                 if !exact {
-                    let mode_id = self.text(mode);
-                    self.prepare_source_program(
-                        source,
-                        filename,
-                        mode_id,
-                        mode == "eval",
-                        inherited,
-                    )?;
+                    self.prepare_source_program(source, filename, mode, mode == "eval", inherited)?;
                 }
                 let entry =
                     entry.ok_or_else(|| Self::missing_body_error("<module>", "<string>", 1))?;
