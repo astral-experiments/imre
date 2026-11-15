@@ -1817,9 +1817,9 @@ test.test_argparse.TestProgName.test_directory	pass	pass	pass
 test.test_argparse.TestProgName.test_directory_compiled	pass	error	error
 test.test_argparse.TestProgName.test_directory_in_zipfile	pass	pass	pass
 test.test_argparse.TestProgName.test_directory_in_zipfile_compiled	pass	error	error
-test.test_argparse.TestProgName.test_module	pass	failure	failure
+test.test_argparse.TestProgName.test_module	pass	pass	pass
 test.test_argparse.TestProgName.test_module_compiled	pass	error	error
-test.test_argparse.TestProgName.test_package	pass	failure	failure
+test.test_argparse.TestProgName.test_package	pass	pass	pass
 test.test_argparse.TestProgName.test_package_compiled	pass	error	error
 test.test_argparse.TestProgName.test_script	pass	pass	pass
 test.test_argparse.TestProgName.test_script_compiled	pass	error	error
