@@ -267,7 +267,6 @@ impl<'a> Visitor<'a> for References<'_> {
                     "_getTestCaseNames",
                     "_getModuleCaseNames",
                     "_missingMethod",
-                    "_addCase",
                     "addTest",
                     "_run",
                 ]
@@ -505,7 +504,6 @@ impl Reachable {
             "_runSuite",
             "_getTestCaseNames",
             "_getModuleCaseNames",
-            "_addCase",
             "addTest",
         ] {
             self.attributes.insert(name.into());
