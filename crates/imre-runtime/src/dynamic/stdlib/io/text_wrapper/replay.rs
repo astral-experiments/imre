@@ -1,5 +1,7 @@
 //! Reconstruct a seekable decoder state at the current character, including pending newlines.
-use super::{Coder, Context, Cookie, Error, Id, Reader, RefCell, Result, Wrapper, decode_chunk};
+use super::{
+    Coder, Context, Cookie, Error, Id, Reader, RefCell, Result, Value, Wrapper, decode_chunk,
+};
 
 fn overflow() -> Error {
     Error::new("OverflowError", "text stream position out of range")
@@ -10,10 +12,13 @@ fn count(
     input: &RefCell<Reader>,
     decoder: Coder,
     newline: Option<&str>,
-    bytes: &[u8],
+    bytes: Id,
+    range: std::ops::Range<usize>,
     end: bool,
 ) -> Result<usize> {
-    let chunk = input.borrow().chunk(bytes, decoder.codec)?;
+    let chunk = input
+        .borrow()
+        .chunk(&ctx.bytes_like(bytes)?[range], decoder.codec)?;
     let mark = ctx.heap.temporary_mark();
     let result = decode_chunk(ctx, input, decoder, newline, chunk, end);
     ctx.heap.release_temporaries_since(mark);
@@ -29,7 +34,7 @@ fn count(
 impl Wrapper {
     pub(super) fn position(ctx: &mut Context, receiver: Id, end: Id) -> Result<Id> {
         let w = Self::from_receiver(ctx, receiver)?;
-        if !w.readable.get() || w.input.borrow().snapshot.is_none() {
+        if !w.readable.get() || w.snapshot.get().is_none() {
             return Ok(end);
         }
         // Coercing a raw position can run Python and consume more text or replace this stream.
@@ -39,7 +44,7 @@ impl Wrapper {
             .ok_or_else(|| Error::new("OverflowError", "int too big to convert"))?;
         let w = Self::from_receiver(ctx, receiver)?;
         let input = w.input.borrow();
-        let Some(snapshot) = input.snapshot.clone() else {
+        let Some(snapshot) = w.snapshot.get() else {
             return Ok(ctx.int(offset));
         };
         let needed = input.used_in_chunk();
@@ -47,12 +52,15 @@ impl Wrapper {
         let seen = input.seen;
         drop(input);
 
-        let bytes = snapshot.input.as_slice();
+        let Value::Tuple(pair) = ctx.heap.get(snapshot) else {
+            unreachable!("text stream snapshot is a (flags, bytes) tuple")
+        };
+        let bytes = pair[1];
+        let flags = ctx.as_integer(pair[0])? as i32;
+        let length = ctx.bytes_like(bytes)?.len();
         let cookie = Cookie {
-            start: offset
-                .checked_sub(bytes.len() as i64)
-                .ok_or_else(overflow)?,
-            flags: snapshot.flags,
+            start: offset.checked_sub(length as i64).ok_or_else(overflow)?,
+            flags,
             ..Cookie::default()
         };
         if needed == 0 {
@@ -62,6 +70,8 @@ impl Wrapper {
         let replay = RefCell::new(Reader::default());
         replay.borrow_mut().seen = seen;
 
+        // A codec callback may replace the snapshot in the live stream during replay.
+        ctx.heap.keep(snapshot);
         let result = reconstruct(ctx, &w, &replay, cookie, bytes, needed, ratio);
         // Restoring IncrementalNewlineDecoder's saved flags leaves its newline
         // history as observed during the replay, even if decoding failed.
@@ -75,7 +85,7 @@ fn reconstruct(
     wrapper: &Wrapper,
     replay: &RefCell<Reader>,
     mut cookie: Cookie,
-    bytes: &[u8],
+    bytes: Id,
     mut needed: usize,
     ratio: f64,
 ) -> Result<Cookie> {
@@ -83,7 +93,8 @@ fn reconstruct(
     ctx.heap.keep(decoder.errors);
     let newline = wrapper.decoder_newline.get();
     // Find a safe prefix, close to the logical position, with no partial code unit.
-    let mut prefix = ((ratio * needed as f64) as usize).min(bytes.len());
+    let length = ctx.bytes_like(bytes)?.len();
+    let mut prefix = ((ratio * needed as f64) as usize).min(length);
     let mut back = 1usize;
     loop {
         replay
@@ -92,7 +103,7 @@ fn reconstruct(
         if prefix == 0 {
             break;
         }
-        let chars = count(ctx, replay, decoder, newline, &bytes[..prefix], false)?;
+        let chars = count(ctx, replay, decoder, newline, bytes, 0..prefix, false)?;
         let state = replay.borrow();
         if chars <= needed {
             if state.tail.is_empty() {
@@ -112,7 +123,7 @@ fn reconstruct(
         .checked_add(prefix as i64)
         .ok_or_else(overflow)?;
     let mut chars = 0;
-    for byte in &bytes[prefix..] {
+    for offset in prefix..length {
         if needed == 0 {
             break;
         }
@@ -121,7 +132,8 @@ fn reconstruct(
             replay,
             decoder,
             newline,
-            std::slice::from_ref(byte),
+            bytes,
+            offset..offset + 1,
             false,
         )?;
         cookie.feed = cookie.feed.checked_add(1).ok_or_else(overflow)?;
@@ -141,7 +153,7 @@ fn reconstruct(
         }
     }
     if chars < needed {
-        chars += count(ctx, replay, decoder, newline, &[], true)?;
+        chars += count(ctx, replay, decoder, newline, bytes, 0..0, true)?;
         if chars < needed {
             return Err(Error::new(
                 "OSError",
