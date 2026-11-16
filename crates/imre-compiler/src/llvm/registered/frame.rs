@@ -1219,37 +1219,19 @@ impl<'p> RegisteredFrame<'_, 'p> {
         result
     }
 
-    /// Leave the item in the current block or branch directly to exhaustion.
-    pub(crate) fn pull_item(
-        &mut self,
-        cursor: &str,
-        kind: ir::IterNextKind,
-        has_else: bool,
-        exhausted: &str,
-    ) -> String {
-        match kind {
-            ir::IterNextKind::Generic => self.sync_item(cursor, has_else, exhausted),
-            ir::IterNextKind::Async(pull) => {
-                let ready = self.name("b");
-                let item = self.async_pull(cursor, pull, &ready, exhausted);
-                self.label(&ready);
-                item
-            }
-            _ => unreachable!("registered iterator kind"),
-        }
-    }
-
-    /// Advance the acquired cursor and load the rooted item on the successful edge.
-    fn sync_item(&mut self, cursor: &str, has_else: bool, exhausted: &str) -> String {
+    /// Pull directly into the checked loop's private root on the successful edge.
+    pub(super) fn sync_item(&mut self, cursor: &str, key: usize, has_else: bool, exhausted: &str) {
+        let physical = self
+            .iteration
+            .physical_slot(key)
+            .expect("checked private slot");
         let item = self.name("b");
-        self.max_live = self.max_live.max(1);
         let status = self.checked(&format!(
-            "call i32 @imre_dyn_pull_item(ptr %ctx, i64 {cursor}, ptr %live, i1 {has_else})"
+            "call i32 @imre_dyn_pull_item(ptr %ctx, i64 {cursor}, ptr %ir_slot{physical}, i1 {has_else})"
         ));
         let ready = self.value(&format!("icmp ne i32 {status}, 0"));
         self.branch(&ready, &item, exhausted);
         self.label(&item);
-        self.value("load i64, ptr %live")
     }
 
     /// Only the implicit __anext__ call and its await can exhaust an async for.

@@ -1056,23 +1056,29 @@ impl<'f> Frame<'f, '_, '_> {
             .loops
             .last()
             .is_some_and(|(target, _)| target.edges.exhausted != target.edges.done);
-        let item = if let ir::IterNextKind::Pair(target) = kind {
-            let second = second.expect("checked Python pair output");
-            self.pull_pair(&cursor, has_else, target, [key, second], empty);
-            None
-        } else {
-            let item = self.code.pull_item(&cursor, kind, has_else, empty);
-            self.store_private(key, &item);
-            Some(item)
-        };
+        match kind {
+            ir::IterNextKind::Pair(target) => {
+                let second = second.expect("checked Python pair output");
+                self.pull_pair(&cursor, has_else, target, [key, second], empty);
+            }
+            ir::IterNextKind::Generic => self.code.sync_item(&cursor, key, has_else, empty),
+            ir::IterNextKind::Async(pull) => {
+                let landed = self.code.name("b");
+                let item = self.code.async_pull(&cursor, pull, &landed, empty);
+                self.code.label(&landed);
+                self.store_private(key, &item);
+            }
+            _ => unreachable!("registered iterator kind"),
+        }
         self.store_private(ready, &permanent::TRUE.to_string());
-        if let (Some(item), [Statement::Assign(target, rhs), rest @ ..]) = (item, *tail)
+        if let [Statement::Assign(target, rhs), rest @ ..] = *tail
             && exhaust.is_some()
             && kind == ir::IterNextKind::Generic
             && key != ready
             && matches!(rhs.kind, ExprKind::Local(slot) if slot == key)
         {
             // The private slot roots the item across the replaced target's finalizer.
+            let item = self.load_private(key);
             self.assign(*target, CheckedValue::handle(item));
             *tail = rest;
         }
