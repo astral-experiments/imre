@@ -31,7 +31,9 @@ impl JoinBuffer {
             && let Some(extra) = self.separator.len().checked_add(part.len())
             && let Some(total) = prefix.len().checked_add(extra)
         {
-            if let Some(text) = StrOwner::get_mut(prefix) {
+            if total != 0
+                && let Some(text) = StrOwner::get_mut(prefix)
+            {
                 if text.try_reserve(extra).is_ok() {
                     text.push_str(&self.separator);
                     text.push_str(&part);
@@ -41,7 +43,7 @@ impl JoinBuffer {
                 text.push_str(prefix);
                 text.push_str(&self.separator);
                 text.push_str(&part);
-                if let Ok(owner) = StrOwner::try_new(text) {
+                if let Ok(owner) = super::stdlib::own_joined(text) {
                     *prefix = owner;
                     return true;
                 }
@@ -57,22 +59,14 @@ impl JoinBuffer {
 
     fn finish(&mut self) -> Option<StrOwner> {
         let Some(prefix) = self.prefix.take() else {
-            return Some(crate::objects::text::owned_string(""));
+            return super::text::try_owned_string("").ok();
         };
         if self.rest.is_empty() {
             return Some(prefix);
         }
-        let length = self.rest.iter().try_fold(prefix.len(), |size, part| {
-            size.checked_add(self.separator.len())?
-                .checked_add(part.len())
-        })?;
-        let mut text = Str::try_with_capacity(length).ok()?;
-        text.push_str(&prefix);
-        for part in &self.rest {
-            text.push_str(&self.separator);
-            text.push_str(part);
-        }
-        StrOwner::try_new(text).ok()
+        let parts = std::iter::once(prefix.as_str()).chain(self.rest.iter().map(|s| s.as_str()));
+        let joined = super::stdlib::join_native_parts(&self.separator, self.rest.len() + 1, parts)?;
+        super::stdlib::own_joined(joined).ok()
     }
 }
 

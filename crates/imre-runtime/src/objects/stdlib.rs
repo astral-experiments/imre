@@ -553,9 +553,10 @@ unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize])
 pub(crate) fn join_utf8<'a>(
     separator: &str,
     content_bytes: Option<usize>,
-    parts: impl ExactSizeIterator<Item = &'a str>,
+    count: usize,
+    parts: impl Iterator<Item = &'a str>,
 ) -> Option<Str> {
-    let separators = separator.len().checked_mul(parts.len().saturating_sub(1))?;
+    let separators = separator.len().checked_mul(count.saturating_sub(1))?;
     let length = separators.checked_add(content_bytes?)?;
     let mut result = Str::try_with_capacity(length).ok()?;
     for (index, part) in parts.enumerate() {
@@ -565,6 +566,27 @@ pub(crate) fn join_utf8<'a>(
         result.push_str(part);
     }
     Some(result)
+}
+
+/// Native inputs already have validated UTF-8 storage.
+pub(super) fn join_native_parts<'a>(
+    separator: &str,
+    count: usize,
+    parts: impl Iterator<Item = &'a str> + Clone,
+) -> Option<Str> {
+    let content_bytes = parts
+        .clone()
+        .try_fold(0usize, |length, part| length.checked_add(part.len()));
+    join_utf8(separator, content_bytes, count, parts)
+}
+
+/// A constructed nonempty join is fresh, including one Latin-1 character.
+pub(super) fn own_joined(text: Str) -> crate::Result<StrOwner> {
+    if text.is_empty() {
+        super::text::try_owned_string("")
+    } else {
+        StrOwner::try_new(text).map_err(|_| Error::memory_error())
+    }
 }
 
 /// Joins an exact string sequence, retaining a single item without copying it.
@@ -599,17 +621,11 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 .values
                 .iter()
                 .map(|&word| (&*(word as *const Str)).as_str());
-            let content_bytes = parts
-                .clone()
-                .try_fold(0usize, |length, part| length.checked_add(part.len()));
-            let Some(result) = join_utf8(separator, content_bytes, parts) else {
+            let Some(result) = join_native_parts(separator, parts.len(), parts) else {
                 super::exceptions::sequence_allocation_failed();
                 return std::ptr::null();
             };
-            StrOwner::try_new(result).map_or_else(
-                |_| Error::memory_error().returning(std::ptr::null()),
-                StrOwner::into_raw,
-            )
+            super::finish(own_joined(result).map(StrOwner::into_raw), std::ptr::null())
         })
     }
 }

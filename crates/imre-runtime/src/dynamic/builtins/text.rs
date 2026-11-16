@@ -2514,6 +2514,9 @@ fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Resul
             }
         },
     };
+    if values.is_empty() {
+        return ctx.heap.string_literal("");
+    }
     let mut content_bytes = Some(0usize);
     let mut surrogate = matches!(
         ctx.heap.get(ctx.scalar_value(receiver)),
@@ -2557,14 +2560,14 @@ fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Resul
     }
     let sep = ctx.str_value(receiver)?;
     if content_bytes == Some(0) && sep.is_empty() {
-        return Ok(ctx.string_storage(receiver).unwrap());
+        return ctx.heap.string_literal("");
     }
     let parts = values
         .iter()
         .map(|&item| ctx.str_value(item).expect("validated UTF-8 string"));
-    let output = crate::objects::join_utf8(sep, content_bytes, parts)
+    let output = crate::objects::join_utf8(sep, content_bytes, values.len(), parts)
         .ok_or_else(crate::Error::memory_error)?;
-    Ok(ctx.text(output))
+    ctx.heap.fresh_string(Value::Str(output))
 }
 
 pub(super) fn method(

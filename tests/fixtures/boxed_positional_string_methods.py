@@ -26,6 +26,10 @@ def current():
             return ("overridden", separator)
 
     assert Text("abc").split("-") == ("overridden", "-")
+    letter = "é"
+    joined = letter.join(["", ""])
+    assert joined == letter and joined is not letter
+    assert "".join([letter, ""]) is not letter
     owners = ["-".join(["a", "b"])]
 
     def drop_owner():
