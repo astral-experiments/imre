@@ -411,8 +411,8 @@ fn fixed_arguments(args: &ast::Arguments, expanded: bool) -> bool {
 }
 
 impl ir::RegisteredArguments {
-    fn bind_arguments(self, args: &ast::Arguments, fixed: bool) -> Self {
-        if !fixed {
+    pub(in crate::frontend) fn bind_arguments(self, args: &ast::Arguments, expanded: bool) -> Self {
+        if !fixed_arguments(args, expanded) {
             return Self::Packed(packed_arguments(args));
         }
         if args.keywords.is_empty() {
@@ -433,10 +433,6 @@ impl ir::RegisteredArguments {
             names,
         }
     }
-}
-
-pub(in crate::frontend) fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
-    ir::RegisteredArguments::Positional.bind_arguments(args, true)
 }
 
 pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
@@ -630,8 +626,7 @@ fn prepared_arguments<E>(
         expanded |= unpack;
         values.push(child(arg)?);
     }
-    let fixed = fixed_arguments(&call.arguments, expanded);
-    Ok((layout.bind_arguments(&call.arguments, fixed), values))
+    Ok((layout.bind_arguments(&call.arguments, expanded), values))
 }
 
 /// Keep the evaluated callable and its argument layout together on the invocation.
@@ -666,9 +661,8 @@ impl ir::RegisteredCallTarget {
         layout: Option<ir::RegisteredArguments>,
     ) -> (Box<ir::RegisteredCall>, Box<Expr>) {
         let arguments = layout.unwrap_or_else(|| {
-            let fixed = matches!(self, Self::Method { .. })
-                || fixed_arguments(&call.arguments, calls::has_unpacking(call));
-            ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, fixed)
+            let expanded = !matches!(self, Self::Method { .. }) && calls::has_unpacking(call);
+            ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, expanded)
         });
         (
             ir::RegisteredCall::new(call.range(), self, arguments),

@@ -565,7 +565,7 @@ impl Builtin {
             | Self::ListGetStable(_)
             | Self::ListSliceSum
             | Self::Slice
-            | Self::StringFormat
+            | Self::StringFormat(_)
             | Self::RegexCollect { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern

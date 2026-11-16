@@ -2330,7 +2330,8 @@ pub(crate) enum Builtin {
     JoinBufferNew,
     JoinBufferAppend,
     JoinBufferFinish,
-    StringFormat,
+    /// Native field labels. The receiver and written values remain method operands.
+    StringFormat(RegisteredArguments),
     /// Convert the field value before evaluating its nested format specification.
     FormatConversion(char),
     /// Format an already converted value with its checked specification. The

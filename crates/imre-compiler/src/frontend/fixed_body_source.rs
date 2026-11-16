@@ -821,7 +821,10 @@ impl SourceSites {
             let mut invoke = ir::RegisteredCall::new(
                 range,
                 registered::values::method_target(field),
-                registered::values::fixed_argument_layout(&call.arguments),
+                match &value.kind {
+                    ExprKind::Builtin(Builtin::StringFormat(layout), _) => layout.clone(),
+                    _ => ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, false),
+                },
             );
             invoke.checked_nullable_receiver = matches!(operands[0].ty, Type::Optional(_))
                 && matches!(
