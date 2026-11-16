@@ -18,6 +18,14 @@ def current():
     received.clear()
     assert original == {key: 1}
 
+    field = "".join(("fi", "eld"))
+    original = {field: 1, "second": 7}
+    first, rest, second, extras = f(3, **original)
+    assert (first, rest, second) == (3, (), 7)
+    assert next(iter(extras)) is field
+    extras.clear()
+    assert original == {field: 1, "second": 7}
+
     slot = FunctionType.__call__
     bound = f.__call__
     assert slot is type(f).__call__

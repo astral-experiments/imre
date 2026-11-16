@@ -1145,6 +1145,16 @@ impl Context {
         }
     }
 
+    fn exact_keyword_entries(&self, mapping: Id) -> Option<&dictionary::Entries> {
+        let Value::Dict(entries) = self.heap.get(mapping) else {
+            return None;
+        };
+        entries
+            .iter()
+            .all(|&(key, _)| matches!(self.heap.get(key), Value::Str(_)))
+            .then_some(entries)
+    }
+
     /// Merge mapping entries, rejecting duplicate keys when constructing call arguments.
     pub(super) fn merge_mapping(
         &mut self,
@@ -1155,10 +1165,7 @@ impl Context {
         // A fresh keyword dictionary can copy a dense table of exact names in one pass.
         if matches!(operation, MappingOperation::Keywords(_))
             && matches!(self.heap.get(target), Value::Dict(entries) if entries.is_empty())
-            && let Value::Dict(entries) = self.heap.get(input)
-            && entries
-                .iter()
-                .all(|&(key, _)| matches!(self.heap.get(key), Value::Str(_)))
+            && let Some(entries) = self.exact_keyword_entries(input)
             && let Some(copy) = entries.clone_dense()?
         {
             *self.heap.get_mut(target) = Value::Dict(copy);
@@ -8762,7 +8769,7 @@ impl Context {
             .map(RegisteredCall::Returned)
     }
 
-    /// Bind the call's private keyword dictionary directly when every key belongs in **kwargs.
+    /// Preserve packed keyword objects for variadic Python functions when names can be matched directly.
     pub(super) fn prepare_call_with_keyword_dict(
         &mut self,
         scope: Id,
@@ -8786,11 +8793,18 @@ impl Context {
             && self.code_object(code).parameters != NONE
         {
             let sig = self.parsed_parameters(code)?;
-            if sig.kwargs.is_some() && sig.positional.is_empty() && sig.keyword_only.is_empty() {
-                self.validate_keyword_keys(mapping)?;
+            if sig.kwargs.is_some() {
+                let kwargs = if sig.positional.is_empty() && sig.keyword_only.is_empty() {
+                    self.validate_keyword_keys(mapping)?;
+                    Vec::new()
+                } else {
+                    self.keyword_args(mapping)?
+                };
+                let packed = (kwargs.is_empty() || self.exact_keyword_entries(mapping).is_some())
+                    .then_some(mapping);
                 return self.prepare_function_call(
                     callable,
-                    FunctionArguments::Written(args.into(), Vec::new(), Some(mapping)),
+                    FunctionArguments::Written(args.into(), kwargs, packed),
                 );
             }
         }
@@ -9793,16 +9807,24 @@ impl Context {
                     self.bind_argument(local, n, extra)?;
                 }
                 let mut extra = Vec::new();
-                for ((key, value), slot) in kwargs.into_iter().zip(binding.keywords) {
+                let intact = variadic.filter(|_| binding.keywords.iter().all(Option::is_none));
+                for (i, ((key, value), slot)) in
+                    kwargs.into_iter().zip(binding.keywords).enumerate()
+                {
                     if let Some(slot) = slot {
                         self.bind_argument(local, shape.parameter(slot), value)?;
-                    } else {
-                        let k = self.text(key);
-                        extra.push((k, value));
+                    } else if intact.is_none() {
+                        let key = match variadic {
+                            Some(mapping) => {
+                                self.dict_entries(mapping).expect("packed keyword dict")[i].0
+                            }
+                            None => self.text(key),
+                        };
+                        extra.push((key, value));
                     }
                 }
                 if let Some(n) = sig.kwargs.as_deref() {
-                    let v = variadic.unwrap_or_else(|| self.dict(extra));
+                    let v = intact.unwrap_or_else(|| self.dict(extra));
                     self.bind_argument(local, n, v)?;
                 }
                 binding.defaults
