@@ -1243,7 +1243,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
         exhausted: &str,
     ) -> String {
         if let Some(header) = pull.header {
-            self.set_statement_line(self.positions.line(header));
+            self.set_statement_at(header);
         }
         let handler = self.name("b");
         let outer = std::mem::replace(&mut self.body.error_target, handler.clone());
@@ -1990,8 +1990,7 @@ impl RegisteredFrame<'_, '_> {
         test: TextRange,
         message: Option<&str>,
     ) {
-        let statement_line = self.positions.line(statement);
-        self.set_statement_line(statement_line);
+        self.set_statement_at(statement);
         let name = self.text("AssertionError");
         let class = self.op("builtin", &[&name]);
         let error = match message {
@@ -2013,6 +2012,10 @@ impl RegisteredFrame<'_, '_> {
             "call i64 @imre_dyn_op_at(ptr %ctx, ptr {op}, i64 {exc}, i64 {cause}, i64 {explicit}, ptr null)"
         ));
         self.jump(&self.body.error_target.clone());
+    }
+
+    pub(super) fn set_statement_at(&mut self, start: TextSize) {
+        self.set_statement_line(self.positions.line(start));
     }
 
     pub(crate) fn set_statement_line(&mut self, line: usize) {

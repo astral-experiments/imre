@@ -96,6 +96,14 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                 required.entry(binding.entered).or_insert(ENTERED);
                 require(frame.locals.get(binding.entered) == Some(&Type::PythonObject), ENTERED)
             }
+            ir::Node::Statement(Statement::ContainerFor(input)) => {
+                let [iterator, item] = input.slots;
+                for slot in input.slots { required.entry(slot).or_insert(PULL); }
+                local(input.target, &mut required).and_then(|()| require(
+                    iterator != item
+                    && frame.locals.get(iterator) == Some(&Type::PythonObject)
+                    && frame.locals.get(item) == Some(&Type::PythonObject), PULL))
+            }
             ir::Node::Statement(Statement::IterNext {
                 kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
                 iterator,
@@ -396,6 +404,16 @@ impl Verifier<'_> {
                 same(test.ty, Type::Bool)?;
                 self.block(yes)?;
                 self.block(no)
+            }
+            Statement::ContainerFor(input) => {
+                self.expression(&input.iterable)?;
+                same(self.local(input.slots[0])?, input.iterable.ty)?;
+                self.local(input.target)?;
+                same(self.local(input.slots[1])?, Type::Int)?;
+                self.slots(&input.slots)?;
+                self.expression(&input.item)?;
+                same(self.local(input.target)?, input.item.ty)?;
+                self.block(&input.body)
             }
             Statement::For {
                 target,

@@ -119,6 +119,11 @@ pub(crate) fn frame_inputs(
                         }
                         true
                     }
+                    Statement::ContainerFor(input) => {
+                        uses_python_protocol = true;
+                        protocol_reads += protocol_parameter(&input.iterable);
+                        uses_slot(&input.target, false) && input.slots.iter().all(|s| uses_slot(s, true))
+                    }
                     Statement::Position(..)
                     | Statement::Expr(_)
                     | Statement::Scope { .. }
@@ -1024,6 +1029,23 @@ impl<'f> Frame<'f, '_, '_> {
     pub(crate) fn leave_loop(&mut self) {
         self.code.loops.pop();
     }
+    pub(super) fn begin_container(&mut self, input: &ir::ContainerFor) {
+        self.code.set_statement_at(input.range.start());
+        let value = self.evaluate_handle(&input.iterable);
+        let cursor = self.acquire_iterator(ir::IteratorOp::Loop(input.range), &value);
+        self.store_private(input.slots[0], &cursor);
+    }
+
+    pub(super) fn container_item(&mut self, input: &ir::ContainerFor, exhausted: &str) {
+        let [iterator, item] = input.slots;
+        self.code.set_statement_at(input.range.start());
+        let cursor = self.load_private(iterator);
+        self.code.sync_item(&cursor, item, false, exhausted);
+        let value = self.load_private(item);
+        self.assign(input.target, CheckedValue::handle(value));
+        self.clear_slots(&[item]);
+    }
+
     pub(crate) fn begin_step(&mut self, mark: &str) {
         self.code.line(&format!(
             "call void @imre_dyn_comprehension_step(ptr %ctx, i64 {mark})"

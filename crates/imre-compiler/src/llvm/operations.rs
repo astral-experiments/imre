@@ -1429,6 +1429,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             Statement::Clear(slot) => self.clear_iteration_slots(&[*slot]),
             Statement::Scope { body, clear } => self.scoped_suite(body, clear),
+            Statement::ContainerFor(input) => self.container_suite(stmt, input),
             Statement::While(test, body, otherwise) => {
                 self.while_suite(stmt, test, body, otherwise)
             }

@@ -557,6 +557,7 @@ impl Analyzer {
                 .or_insert(small);
         }
         match statement {
+            Statement::ContainerFor(_) => return Flow::next(State::unknown(state.0.len())),
             Statement::Position(..) => {}
             Statement::Assign(slot, value) => {
                 state.0[*slot] = self.expression(value, &mut state, record)

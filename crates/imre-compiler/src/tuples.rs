@@ -282,6 +282,11 @@ fn inspect(
                     }
                 }
             }
+            Statement::ContainerFor(input) => {
+                candidates[input.target].eligible = false;
+                inspect_expression(&input.iterable, candidates, producers);
+                inspect(&input.body, candidates, producers, &mut HashSet::new());
+            }
             Statement::For {
                 target,
                 args,

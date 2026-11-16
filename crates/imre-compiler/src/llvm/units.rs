@@ -379,7 +379,6 @@ impl crate::ProgramOutput {
         sanitize: bool,
         program: crate::callables::Layouts,
     ) {
-        fixed.prepare_native_sources(graph);
         let (module, owners) = &fixed.ir;
         let split = matches!(self.layout, crate::CodegenLayout::Split);
         let source = &graph.modules[graph.entry];

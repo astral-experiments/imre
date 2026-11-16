@@ -105,6 +105,10 @@ impl<'a> RegisteredRegion<'a> {
         let mut cursors = HashMap::new();
         let mut visit = |node, parent, positions| {
             match &node {
+                ir::Node::Statement(Statement::ContainerFor(input)) => {
+                    slots.extend(input.slots);
+                    cursors.insert(input.slots[0], ir::IterNextKind::Generic);
+                }
                 ir::Node::Statement(Statement::Scope { clear, .. })
                 | ir::Node::Expression(Expr {
                     kind: ExprKind::Scope { clear, .. },

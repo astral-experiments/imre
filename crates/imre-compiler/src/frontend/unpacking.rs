@@ -1525,6 +1525,7 @@ impl Checker<'_> {
             input,
             &[],
             Vec::new(),
+            None,
             |checker, body| {
                 let item = checker.local(checker.names[&name]);
                 let item = checker.coerce(item, expected, target)?;
