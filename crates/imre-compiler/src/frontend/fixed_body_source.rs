@@ -168,6 +168,7 @@ pub(super) enum FixedNode {
     ),
     Branch(usize, usize),
     TryFinally(usize, usize),
+    TryExcept(usize, u32, TextRange, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
     Indexed(std::mem::Discriminant<ExprKind>, usize, Type),
     NamedCall(std::mem::Discriminant<ExprKind>, usize, usize, Type),
@@ -254,6 +255,19 @@ impl FixedNode {
                 finalbody,
             }) if handlers.is_empty() && orelse.is_empty() && !finalbody.is_empty() => {
                 Self::TryFinally(body.len(), finalbody.len())
+            }
+            ir::Node::Statement(Statement::Try {
+                body,
+                handlers,
+                orelse,
+                finalbody,
+            }) if orelse.is_empty()
+                && finalbody.is_empty()
+                && let [handler] = handlers.as_slice()
+                && handler.name.is_none()
+                && let ir::ExceptionMatcher::WrittenCategory(kind, range, _) = &handler.matcher =>
+            {
+                Self::TryExcept(body.len(), *kind, *range, handler.body.len())
             }
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
@@ -503,16 +517,33 @@ impl SourceSites {
         let Some(sites) = self.sites.get(site.index + 1..) else {
             return false;
         };
-        sites.len() == call.arguments.len()
-            && values.len() >= sites.len()
+        let flat = sites.len() == call.arguments.len();
+        let mut sites = sites.iter();
+        values.len() >= call.arguments.len()
             && imre_ast::argument_values(&call.arguments)
-                .zip(sites.iter().zip(values))
-                .all(|(arg, ((range, node), value))| {
-                    arg.range() == *range
-                        && node
-                            .as_ref()
-                            .is_some_and(|node| node.matches(&ir::Node::Expression(value)))
+                .zip(values)
+                .all(|(arg, value)| {
+                    if !sites
+                        .as_slice()
+                        .first()
+                        .is_some_and(|(range, _)| *range == arg.range())
+                    {
+                        return false;
+                    }
+                    let mut matches = |node: ir::Node<'_>| {
+                        sites.next().is_some_and(|(range, key)| {
+                            arg.range().contains_range(*range)
+                                && key.as_ref().is_some_and(|key| key.matches(&node))
+                        })
+                    };
+                    if flat {
+                        return matches(ir::Node::Expression(value));
+                    }
+                    ir::all_operand_nodes(value, None, &mut |node, parent| {
+                        !node.has_fixed_site_in(parent) || matches(node)
+                    })
                 })
+            && sites.len() == 0
     }
 
     /// Visit composed operation sites, retaining each operand's own source range where available.

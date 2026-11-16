@@ -5997,6 +5997,49 @@ print(capture(["echo", "capture"], cwd=Path(".")))
     }
 
     #[test]
+    fn a_file_keeps_the_checked_command_inside_its_exception_handler() {
+        let source = r#"import json
+import subprocess
+import sys
+
+def process(path: str, cwd: str) -> None:
+    try:
+        subprocess.run(["tool", path], cwd=cwd, capture_output=True, check=False)
+    except ＦileNotFoundError:
+        pass
+
+def main() -> None:
+    args = json.load(sys.stdin)
+    process(args["path"], args["cwd"])
+
+if __name__ == "__main__":
+    main()
+"#;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let module = &graph.modules[graph.entry];
+        let def = module.parsed.syntax().body[3]
+            .as_function_def_stmt()
+            .unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&def.start()];
+        let [Statement::Try { handlers, .. }] = frame.function.body.as_slice() else {
+            panic!("expected the original fixed protected suite");
+        };
+        assert!(matches!(&handlers[0].matcher,
+            ir::ExceptionMatcher::WrittenCategory(_, range, name)
+                if name == "FileNotFoundError" && &source[*range] == "ＦileNotFoundError"));
+        let protected = def.body[0].as_try_stmt().unwrap();
+        assert!(matches!(
+            frame.fixed_attribute(protected.body[0].range()),
+            Some(FixedAttribute::Call(..))
+        ));
+    }
+
+    #[test]
     fn a_checked_frame_keeps_the_parser_truth_test_and_protected_suite() {
         let text = r#"import argparse
 import tempfile
