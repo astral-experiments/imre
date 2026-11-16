@@ -294,7 +294,6 @@ mod tests {
             }
         }
         let module = Module {
-            list_builds: Default::default(),
             command_flags: None,
             builtin_module_sources: None,
             types,
@@ -348,7 +347,6 @@ mod tests {
         let mut module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
-            list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
             builtin_module_sources: None,
@@ -411,7 +409,6 @@ mod tests {
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
-            list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
             builtin_module_sources: None,
@@ -475,7 +472,6 @@ def integers(values: list[int]) -> int:
         let module = Module {
             types: Default::default(),
             class_fields: Vec::new(),
-            list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
             builtin_module_sources: None,

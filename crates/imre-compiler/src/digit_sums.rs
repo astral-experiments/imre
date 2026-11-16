@@ -6,7 +6,7 @@
 //! weighted = sum([3 * d for d in digits[-2::-2]])
 //! ```
 
-use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Module, Statement, Type};
 use crate::reductions::{count_writes, literal};
 use ruff_python_ast::CmpOp;
 
@@ -20,12 +20,11 @@ struct Lane {
 }
 
 /// Work on checked integer operations after fixed tuples have been scalarized.
-/// Source frame inspection can observe the original comprehension call.
+/// Source frame inspection can observe the original digit list.
 pub(crate) fn specialize(module: &mut Module) {
     if !module.source_frames.is_empty() {
         return;
     }
-    let helpers: Vec<_> = module.functions.iter().map(mapped_helper).collect();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         let mut reads = vec![0usize; function.locals.len()];
         let mut producer = false;
@@ -43,22 +42,17 @@ pub(crate) fn specialize(module: &mut Module) {
             writes[param] += 1;
         }
         let private = |id: usize| reads[id] == 2 && writes[id] == 1;
-        fuse(&mut function.body, &mut function.locals, &helpers, &private);
+        fuse(&mut function.body, &mut function.locals, &private);
     }
 }
 
 /// Keep the original statements as the fallback. No Python-visible assignment
 /// takes place until all bytes and both subtotals have passed the runtime guard.
-fn fuse(
-    body: &mut Vec<Statement>,
-    locals: &mut Vec<Type>,
-    helpers: &[Option<Lane>],
-    private: &impl Fn(usize) -> bool,
-) {
+fn fuse(body: &mut Vec<Statement>, locals: &mut Vec<Type>, private: &impl Fn(usize) -> bool) {
     for statement in &mut *body {
         ir::statement_children_mut(statement, |child| {
             if let ir::ChildMut::Suite(body) = child {
-                fuse(body, locals, helpers, private);
+                fuse(body, locals, private);
             }
         });
     }
@@ -79,7 +73,10 @@ fn fuse(
         if !private(*list) || a == b || !matches!(text.kind, ExprKind::Local(_)) {
             continue;
         }
-        let (Some(x), Some(y)) = (lane(first, *list, helpers), lane(second, *list, helpers)) else {
+        let (Some(x), Some(y)) = (
+            lane(first, *list, locals.len()),
+            lane(second, *list, locals.len()),
+        ) else {
             continue;
         };
         if x.phase == y.phase {
@@ -133,7 +130,7 @@ fn fuse(
     }
 }
 
-fn lane(value: &Expr, list: usize, helpers: &[Option<Lane>]) -> Option<Lane> {
+fn lane(value: &Expr, list: usize, local_count: usize) -> Option<Lane> {
     match &value.kind {
         ExprKind::Builtin(Builtin::ListSliceSum, args) => {
             let (source, start, step) = ir::reverse_slice(args)?;
@@ -145,11 +142,8 @@ fn lane(value: &Expr, list: usize, helpers: &[Option<Lane>]) -> Option<Lane> {
                 table: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             })
         }
-        ExprKind::Call(id, args)
-            if matches!(args.values.as_slice(), [arg] if is_local(arg, list))
-                && args.order == [0] =>
-        {
-            helpers[*id]
+        ExprKind::Scope { body, value, clear } => {
+            mapped_lane(body, value, clear, list, local_count)
         }
         _ => None,
     }
@@ -157,18 +151,17 @@ fn lane(value: &Expr, list: usize, helpers: &[Option<Lane>]) -> Option<Lane> {
 
 /// Prove the traversal independently of the term: one input, exact reverse
 /// cursor, one load and one addition per iteration, and no other effects.
-fn mapped_helper(function: &Function) -> Option<Lane> {
-    let [param] = function.params.as_slice() else {
-        return None;
-    };
-    if function.locals[*param] != Type::ListInt || function.returns != Type::Int {
-        return None;
-    }
+fn mapped_lane(
+    body: &[Statement],
+    result: &Expr,
+    private: &[usize],
+    param: usize,
+    local_count: usize,
+) -> Option<Lane> {
     let [
         Statement::Assign(sum, zero),
         Statement::Scope { body, clear },
-        Statement::Return(result),
-    ] = function.body.as_slice()
+    ] = body
     else {
         return None;
     };
@@ -203,15 +196,18 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
     let ExprKind::Binary(Binary::Add, subtotal, term) = &add.kind else {
         return None;
     };
-    let slots = [*param, *sum, *list, *cursor, *item];
+    let slots = [param, *sum, *list, *cursor, *item];
     if slots
         .iter()
         .enumerate()
         .any(|(i, s)| slots[..i].contains(s))
+        || !slots[1..].iter().all(|slot| private.contains(slot))
+        || !clear.iter().all(|slot| private.contains(slot))
         || literal(zero) != Some(0)
         || !is_local(result, *sum)
         || clear.contains(sum)
-        || !is_local(input, *param)
+        || input.ty != Type::ListInt
+        || !is_local(input, param)
         || !orelse.is_empty()
         || !matches!(ops.as_slice(), [CmpOp::GtE])
         || !matches!(test.as_slice(),[c,z] if is_local(c,*cursor) && literal(z)==Some(0))
@@ -227,7 +223,7 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
     }
     Some(Lane {
         phase: phase(literal(offset)?)?,
-        table: terms::table(term, *item, &slots, function.locals.len())?,
+        table: terms::table(term, *item, &slots, local_count)?,
     })
 }
 

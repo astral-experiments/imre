@@ -32,18 +32,23 @@ impl Initial {
 }
 
 /// Rewrites eligible statement loops using the integer bounds of their original addends.
-/// Expression-scoped loops do not have statement-level entry facts.
 pub(crate) fn specialize(module: &mut Module) {
     let ranges = crate::ranges::analyze(module).into_original_integers();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         if function.has_expression_bindings() {
             continue;
         }
-        rewrite(
-            &mut function.body,
-            &mut vec![Initial::Unknown; function.locals.len()],
-            &ranges,
-        );
+        let mut initial = vec![Initial::Unknown; function.locals.len()];
+        crate::ir::walk_expressions_mut(&mut function.body, &mut |value| {
+            if let ExprKind::Scope { body, .. } = &mut value.kind {
+                // A display establishes its own accumulator and cursor. Earlier
+                // operands may already have changed any enclosing local.
+                initial.fill(Initial::Unknown);
+                rewrite(body, &mut initial, &ranges);
+            }
+        });
+        initial.fill(Initial::Unknown);
+        rewrite(&mut function.body, &mut initial, &ranges);
     }
 }
 
@@ -481,9 +486,11 @@ def total(text: str) -> int:
         assert!(llvm.contains("call void @llvm.assume"));
         assert!(llvm.contains("call i64 @int_add"));
         assert!(llvm.contains("call i64 @imre_list_borrow_index(ptr"));
-        let (_, read) = llvm
-            .split_once("call i64 @imre_list_borrow_index_proven(")
+        let (_, view) = llvm
+            .split_once("call ptr @imre_list_data_readonly(")
             .unwrap();
+        let (_, address) = view.split_once("getelementptr inbounds i64").unwrap();
+        let (_, read) = address.split_once("load i64").unwrap();
         let (before_tag, _) = read.split_once("call void @llvm.assume").unwrap();
         assert!(before_tag.contains("and i64"));
         assert!(

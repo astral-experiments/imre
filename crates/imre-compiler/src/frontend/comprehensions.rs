@@ -1,8 +1,5 @@
-//! Eager displays normally use private functions. Displays containing assignment
-//! expressions run inline with private iteration slots so writes reach their
-//! enclosing function, including when a later iteration raises.
+//! Eager displays use private iteration slots in their enclosing frame.
 
-use ruff_python_ast::UnaryOp;
 use std::cell::{Cell, RefCell};
 
 use imre_ast::comprehension::{Output, Plan};
@@ -35,8 +32,7 @@ pub(super) struct Helper {
     pub source_frame: bool,
 }
 
-/// Source functions reserve the leading IDs; nested displays reserve an ID before
-/// checking their bodies, then fill it without disturbing earlier call targets.
+/// Source functions reserve the leading IDs. Helpers reserve subsequent call targets.
 pub(super) struct Helpers {
     first: usize,
     // Inference needs stable call edges even when it never emits a helper body.
@@ -45,7 +41,6 @@ pub(super) struct Helpers {
     /// Lifted functions normally leave scope after checking their enclosing body.
     pub(super) local_annotations:
         RefCell<HashMap<usize, (ModuleId, std::rc::Rc<ast::StmtFunctionDef>)>>,
-    pub(super) list_builds: RefCell<HashMap<usize, ir::ListBuild>>,
 }
 
 impl Helpers {
@@ -55,7 +50,6 @@ impl Helpers {
             reserved: Cell::new(0),
             functions: RefCell::new(Vec::new()),
             local_annotations: RefCell::default(),
-            list_builds: RefCell::default(),
         }
     }
 
@@ -107,7 +101,7 @@ impl Helpers {
         assert_eq!(functions.len(), self.reserved.replace(0));
         functions
             .into_iter()
-            .map(|helper| helper.expect("checked comprehension filled its helper"))
+            .map(|helper| helper.expect("reserved helper has a checked body"))
     }
 }
 
@@ -500,6 +494,8 @@ impl<'a> Visitor<'a> for FunctionReads {
 pub(super) struct ComprehensionScope {
     state: LocalState,
     names: HashMap<String, usize>,
+    functions: Vec<(String, local_functions::Binding)>,
+    classes: Vec<(String, local_classes::Binding)>,
     class_receiver: Option<String>,
     targets: HashSet<String>,
     outer_exports: Option<HashMap<String, usize>>,
@@ -515,10 +511,19 @@ impl Checker<'_> {
         let [clause] = display.generators.as_slice() else {
             return None;
         };
-        let ExprKind::Call(_, args) = &set.kind else {
+        let ExprKind::Scope { body, .. } = &set.kind else {
             return None;
         };
-        let [input] = args.values.as_slice() else {
+        let [
+            Statement::Assign(_, _),
+            Statement::Scope {
+                body: iteration, ..
+            },
+        ] = body.as_slice()
+        else {
+            return None;
+        };
+        let Some(Statement::Assign(_, input)) = iteration.first() else {
             return None;
         };
         let (ast::Expr::Name(source), ExprKind::Local(slot)) = (&clause.iter, &input.kind) else {
@@ -596,14 +601,6 @@ impl Checker<'_> {
         })
     }
 
-    /// Evaluates the first iterable outside the target scope and passes rooted
-    /// values into a private helper. Captures are local bindings, never delayed
-    /// field/index reads, so mutation through aliases remains visible in the body.
-    ///
-    /// ```python
-    /// x = [1, 2]
-    /// values = [x + 1 for x in x]  # the iterable reads the enclosing x
-    /// ```
     pub(super) fn comprehension(
         &mut self,
         expression: &ast::Expr,
@@ -611,12 +608,11 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        self.comprehension_display(expression, &display, Collector::Display(expected))
+        self.comprehension_display(&display, Collector::Display(expected))
     }
 
     pub(super) fn comprehension_display(
         &mut self,
-        expression: &ast::Expr,
         display: &Plan<'_>,
         collector: Collector,
     ) -> Result<Expr, String> {
@@ -642,242 +638,127 @@ impl Checker<'_> {
                 return Ok(value);
             }
         }
-        let prepared = matches!(input, Iteration::Prepared(_));
-        if prepared
-            // A typed await uses the enclosing coroutine's task and frame.
-            || display.body_suspends()
-            || pipelines::is_pipeline_expression(self, display.outer)
-        {
-            let writes = if prepared && self.narrowed.is_empty() {
-                HashSet::new()
-            } else {
-                narrowing::expression_assignments(expression)
+        let first_private = self.locals.len();
+        let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
+        // Acquire the outer iterator before declaring the comprehension's shadowing names.
+        let enclosing = self.namespace;
+        let (mut prefix, targets) = if self.registered.is_some() {
+            let Iteration::Prepared(cursor) = &mut input else {
+                unreachable!("Python iterables have an explicit acquisition")
             };
-            return self.inline_comprehension(display, collector, input, writes);
-        }
-        // Only the body enters the helper. Its outer iterable was checked in the caller.
-        let (targets, captures, writes) = function_scope::display_bindings(display);
-        let check_only = self.registered.is_none() && self.discarded_function_body();
-        if !writes.is_empty()
-            || captures
-                .iter()
-                .any(|name| self.local_functions.contains_key(name))
-            || check_only && captures.iter().all(|name| !self.names.contains_key(name))
-        {
-            return self.inline_comprehension(
-                display,
-                collector,
-                input,
-                writes.into_iter().collect(),
-            );
-        }
-        let id = self.helpers.reserve();
-        // Eager displays share the enclosing Python frame, even when lowered to a helper.
-        let omitted_locals = self.omitted_assert_locals.clone();
-        let omitted_free = self.omitted_assert_free.clone();
-        let mut helper = Checker::new(
-            self.graph,
-            self.module,
-            self.functions,
-            self.classes,
-            self.types,
-            self.helpers,
-            self.globals,
-        );
-        helper.frame = LexicalFrame::Positioned(self.fixed_frame());
-        helper.omitted_assert_locals = omitted_locals;
-        helper.omitted_assert_free = omitted_free;
-        helper.inference = self.inference;
-        helper.class = self.class;
-        helper.class_receiver = self
-            .class_receiver
-            .clone()
-            .filter(|name| !targets.contains(name));
-        helper.comprehension_targets = targets;
-        let mut params = Vec::new();
-        let mut args = Vec::new();
-        let mut parameter = |value: Expr, helper: &mut Checker<'_>| {
-            // Literal range bounds stay visible to interval analysis. Moving an
-            // immutable literal into the helper cannot reorder observable work.
-            let mut literal = &value;
-            while let ExprKind::Unary(UnaryOp::USub, inner) = &literal.kind {
-                literal = inner;
-            }
-            if matches!(literal.kind, ExprKind::Int(_)) {
-                return value;
-            }
-            let slot = helper.hidden(value.ty);
-            helper.assigned.insert(slot);
-            params.push(slot);
-            args.push(value);
-            helper.local(slot)
+            let slot = self.hidden(Type::PythonObject);
+            let targets = namespace_targets(display);
+            let prefix = acquire_in_namespace(cursor, slot, enclosing, targets.clone());
+            self.namespace = Some(slot);
+            (prefix, targets)
+        } else {
+            (Vec::new(), display.collect_target_names())
         };
-        let input = match input {
-            Iteration::Range(values) => Iteration::Range(
-                values
-                    .into_iter()
-                    .map(|value| parameter(value, &mut helper))
-                    .collect(),
-            ),
-            Iteration::Container { iterable, items } => Iteration::Container {
-                iterable: parameter(iterable, &mut helper),
-                items,
-            },
-            Iteration::Prepared(_) => unreachable!("prepared inputs were dispatched inline"),
-        };
-        for name in captures {
-            let Some(&source_slot) = self.names.get(&name) else {
-                continue;
-            };
-            if !self.assigned.contains(&source_slot) {
-                return Err(error(
-                    self.source,
-                    expression,
-                    "captured local may be uninitialized on this path",
-                ));
-            }
-            let value = self.read_local(source_slot);
-            let slot = helper.declare(&name, value.ty, expression)?;
-            helper.assigned.insert(slot);
-            params.push(slot);
-            args.push(value);
-        }
-        // The leaf establishes the result type after its target/filter facts are
-        // known. No expression can read this private slot before initialization.
-        let plain_iterable = match &input {
-            Iteration::Container {
+        let gather_input = if matches!(collector, Collector::Display(_))
+            && matches!(display.output, Output::List(_))
+            && matches!(display.clauses, [clause] if clause.ifs.is_empty())
+            && let Iteration::Container {
                 iterable,
                 items: false,
-            } => Some(iterable),
-            _ => None,
-        };
-        let gather_input = plain_iterable
-            .filter(|value| value.ty == Type::Str)
-            .cloned();
-        let list_binding = if self.inference.is_none()
-            && matches!(collector, Collector::Display(_))
-            && matches!(display.output, Output::List(_))
-            && let [clause] = display.clauses
-            && clause.ifs.is_empty()
-            && let Some(target) = clause.target.as_name_expr()
-            && let Some(Expr {
-                ty,
-                kind: ExprKind::Local(iterable),
-            }) = plain_iterable
-            && self.types.element(*ty).is_some()
+            } = &input
+            && iterable.ty == Type::Str
         {
-            Some((*iterable, target.id.as_str()))
+            Some(iterable.clone())
         } else {
             None
         };
-        let slice = matches!(collector, Collector::IntegerSum)
-            && display.clauses.len() == 1
-            && args
-                .first()
-                .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
-        let mut body = Vec::new();
-        let first_private = helper.locals.len();
-        let result =
-            (self.inference.is_none() && !check_only || slice).then(|| helper.hidden(Type::None));
+        let scope = self.enter_comprehension(targets);
+        let result = self.hidden(Type::None);
+        self.before_pull(display, 0);
         let mut mapping = None;
-        let ty = helper.comprehension_body(
+        let emit = (self.inference.is_none() || self.registered.is_some())
+            && !self.discarded_function_body();
+        let checked = self.comprehension_body(
             display,
             input,
             collector,
-            result.map(|slot| (slot, &mut body)),
-            |checker, item, ty| {
-                if gather_input.is_some() && ty == Type::ListInt {
-                    mapping = checker.dictionary_gather_mapping(display, item);
+            emit.then_some((result, &mut prefix)),
+            |cx, item, ty| {
+                if emit && gather_input.is_some() && ty == Type::ListInt {
+                    mapping = cx.dictionary_gather_mapping(display, item);
                 }
-                mapping.is_some()
+                mapping.is_some() || cx.registered.is_none() && cx.unrepresented.borrow().is_some()
             },
-        )?;
-        if let (Some(result), Some((iterable, target))) = (result, list_binding) {
-            self.helpers.list_builds.borrow_mut().insert(
-                id,
-                ir::ListBuild {
-                    iterable,
-                    item: helper.names[target],
-                    result,
-                },
-            );
-        }
-        if let Some(mut input) = gather_input
-            && let Some(mapping) = mapping
-        {
-            // Validate at exactly the original decode's evaluation point, before
-            // subsequent captures and before entering the helper. Immutable bytes
-            // then keep the gather's borrowed UTF-8 view valid without a Str copy.
-            if let ExprKind::Local(slot) = &input.kind
-                && params.first() == Some(slot)
-                && let Some(argument) = args.first_mut()
-                && let ExprKind::Builtin(operation, decoded) = &mut argument.kind
-                && matches!(operation, Builtin::Decode)
-                && matches!(decoded.as_slice(), [value] if value.ty == Type::Bytes)
+        );
+        self.namespace = enclosing;
+        let exports = self.leave_comprehension(scope);
+        self.locals[result] = checked?;
+        if let (Some(mut input), Some(mapping)) = (gather_input, mapping) {
+            // Root the outer operand once, before the lazy mapping lookup. An
+            // exact decode can validate the bytes here and gather from them directly.
+            if let ExprKind::Builtin(operation @ Builtin::Decode, args) = &mut input.kind
+                && matches!(args.as_slice(), [value] if value.ty == Type::Bytes)
             {
                 *operation = Builtin::BytesValidateUtf8;
-                argument.ty = Type::Bytes;
-                helper.locals[*slot] = Type::Bytes;
                 input.ty = Type::Bytes;
             }
+            self.locals[result] = input.ty;
+            let rooted = self.local(result);
             let operation = if input.ty == Type::Bytes {
                 Builtin::DictGatherBytesInt
             } else {
                 Builtin::DictGatherStrInt
             };
-            let gather = Expr {
-                ty: Type::ListInt,
-                kind: ExprKind::Conditional(
-                    Box::new(Expr {
-                        ty: Type::Bool,
-                        kind: ExprKind::Builtin(Builtin::Bool, vec![input.clone()]),
-                    }),
-                    Box::new(Expr {
-                        ty: Type::ListInt,
-                        kind: ExprKind::Builtin(operation, vec![input, mapping]),
-                    }),
-                    Box::new(Expr {
-                        ty: Type::ListInt,
-                        kind: ExprKind::List(Vec::new()),
-                    }),
-                ),
-            };
-            // The gather uses only the incoming iterable and a captured or global mapping.
-            helper.locals.truncate(first_private);
-            body.push(Statement::Return(gather));
-        } else if let Some(result) = result {
-            helper.locals[result] = ty;
-            body.push(Statement::Return(helper.local(result)));
-        }
-        if slice {
-            slices::fuse(&mut body, &params, &mut args);
-        }
-        helper.finish_region(Ok(()))?;
-        if self.inference.is_none() {
-            self.helpers.finish(
-                id,
-                Helper {
-                    module: self.module,
-                    function: ir::Function {
-                        params,
-                        returns: ty,
-                        locals: helper.locals,
-                        body,
-                    },
-                    calls: helper.calls,
-                    class_reads: helper.class_reads.into_inner(),
-                    source_frame: false,
+            prefix.push(Statement::Assign(result, input));
+            return Ok(Expr::scope(
+                prefix,
+                Expr {
+                    ty: Type::ListInt,
+                    kind: ExprKind::Conditional(
+                        Box::new(Expr {
+                            ty: Type::Bool,
+                            kind: ExprKind::Builtin(Builtin::Bool, vec![rooted.clone()]),
+                        }),
+                        Box::new(Expr {
+                            ty: Type::ListInt,
+                            kind: ExprKind::Builtin(operation, vec![rooted, mapping]),
+                        }),
+                        Box::new(Expr {
+                            ty: Type::ListInt,
+                            kind: ExprKind::List(Vec::new()),
+                        }),
+                    ),
                 },
-            );
+                vec![result],
+            ));
         }
-        self.calls.insert(id);
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
-        })
+        if matches!(collector, Collector::IntegerSum) && exports.is_empty() {
+            slices::fuse(&mut prefix);
+        }
+        if first_pull && !exports.is_empty() {
+            // A filter runs before it can suppress the output or the next clause.
+            let mut bind = |expression| {
+                for name in narrowing::guaranteed_assignments(expression, None) {
+                    if let Some(&slot) = exports.get(&name) {
+                        self.assigned.insert(slot);
+                    }
+                }
+            };
+            let passes = display.clauses[0].ifs.iter().all(|test| {
+                bind(test);
+                ast::helpers::Truthiness::from_expr(test, |_| false).into_bool() == Some(true)
+            });
+            if passes && display.clauses.len() == 1 {
+                display.output.elements().for_each(bind);
+            }
+        }
+        for slot in exports.values() {
+            self.narrowed.remove_mut(slot);
+        }
+        Ok(scoped_result(
+            prefix,
+            self.local(result),
+            first_private..self.locals.len(),
+            exports.into_values(),
+        ))
     }
 
-    /// The fused helper reads the same mapping as the accepted character lookup.
+    /// The fused gather reads the same mapping as the accepted character lookup.
     fn dictionary_gather_mapping(&self, display: &Plan<'_>, item: &Expr) -> Option<Expr> {
         let [clause] = display.clauses else {
             return None;
@@ -902,15 +783,23 @@ impl Checker<'_> {
     }
 
     pub(super) fn enter_comprehension(&mut self, targets: Vec<String>) -> ComprehensionScope {
-        let scope = ComprehensionScope {
+        let mut scope = ComprehensionScope {
             state: self.local_state(),
             names: self.names.clone(),
+            functions: Vec::new(),
+            classes: Vec::new(),
             class_receiver: self.class_receiver.clone(),
             targets: self.comprehension_targets.clone(),
             outer_exports: self.comprehension_exports.replace(HashMap::new()),
         };
         for name in targets {
             self.names.remove(&name);
+            if let Some(binding) = self.local_functions.remove_entry(&name) {
+                scope.functions.push(binding);
+            }
+            if let Some(binding) = self.local_classes.remove_entry(&name) {
+                scope.classes.push(binding);
+            }
             if self.class_receiver.as_ref() == Some(&name) {
                 self.class_receiver = None;
             }
@@ -927,6 +816,8 @@ impl Checker<'_> {
             .expect("entered comprehension");
         self.comprehension_targets = scope.targets;
         self.names = scope.names;
+        self.local_functions.extend(scope.functions);
+        self.local_classes.extend(scope.classes);
         self.class_receiver = scope.class_receiver;
         for (name, &slot) in &exports {
             if !self.comprehension_targets.contains(name) {
@@ -938,81 +829,6 @@ impl Checker<'_> {
         }
         self.restore_state(scope.state);
         exports
-    }
-
-    /// Shares enclosing bindings while reserving private targets and owners.
-    /// Exported assignments survive cleanup; all remaining private slots are
-    /// cleared on both normal completion and exceptional loop exits.
-    fn inline_comprehension(
-        &mut self,
-        display: &Plan<'_>,
-        collector: Collector,
-        input: Iteration,
-        writes: HashSet<String>,
-    ) -> Result<Expr, String> {
-        let first_private = self.locals.len();
-        let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
-        // Acquire the outer iterator before declaring the comprehension's shadowing names.
-        let mut input = input;
-        let enclosing = self.namespace;
-        let (mut prefix, targets) = if self.registered.is_some() {
-            let Iteration::Prepared(cursor) = &mut input else {
-                unreachable!("Python iterables have an explicit acquisition")
-            };
-            let slot = self.hidden(Type::PythonObject);
-            let targets = namespace_targets(display);
-            let prefix = acquire_in_namespace(cursor, slot, enclosing, targets.clone());
-            self.namespace = Some(slot);
-            (prefix, targets)
-        } else {
-            (Vec::new(), display.collect_target_names())
-        };
-        let scope = self.enter_comprehension(targets);
-        let result = self.hidden(Type::None);
-        // The outer loop can only invalidate a narrowing when the display writes a name.
-        // Displays checked in a private helper have already proved this set empty.
-        if !writes.is_empty() {
-            self.before_pull(display, 0);
-        }
-        let checked = self.comprehension_body(
-            display,
-            input,
-            collector,
-            (!self.discarded_function_body()).then_some((result, &mut prefix)),
-            // A refused fixed region still needs the element checks and result type.
-            |cx, _, _| cx.registered.is_none() && cx.unrepresented.borrow().is_some(),
-        );
-        self.namespace = enclosing;
-        let exports = self.leave_comprehension(scope);
-        self.locals[result] = checked?;
-        if first_pull && !writes.is_empty() {
-            // A filter runs before it can suppress the output or the next clause.
-            let mut bind = |expression| {
-                for name in narrowing::guaranteed_assignments(expression, None) {
-                    if let Some(&slot) = exports.get(&name) {
-                        self.assigned.insert(slot);
-                    }
-                }
-            };
-            let passes = display.clauses[0].ifs.iter().all(|test| {
-                bind(test);
-                ast::helpers::Truthiness::from_expr(test, |_| false).into_bool() == Some(true)
-            });
-            if passes && display.clauses.len() == 1 {
-                display.output.elements().for_each(bind);
-            }
-        }
-        for name in writes {
-            if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove_mut(slot);
-            }
-        }
-        Ok(scoped_result(
-            prefix,
-            self.local(result),
-            first_private..self.locals.len(),
-            exports.into_values(),
-        ))
     }
 
     pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {
@@ -1071,7 +887,7 @@ mod tests {
     use crate::{CompileOptions, check, compile};
 
     #[test]
-    fn provisional_displays_keep_call_edges_and_slice_rewrites_without_filling_helpers() {
+    fn provisional_displays_check_their_types_without_emitting_loops_or_functions() {
         use super::{
             Checker, ClassInfo, Classes, HashMap, Helpers, ModuleValues, SourceGraph, Types, ast,
             inference,
@@ -1113,14 +929,13 @@ mod tests {
             };
             let value = checker.expr(&stmt.value).unwrap();
             assert_eq!(value.ty, [Type::Int, Type::Int, Type::ListInt][id]);
-            let ExprKind::Call(callee, args) = value.kind else {
-                panic!("expected a helper call")
+            let ExprKind::Scope { body, .. } = value.kind else {
+                panic!("expected the checked display in its owning function")
             };
-            assert_eq!(callee, id);
-            assert!(matches!(args.values[0].kind, ExprKind::List(_)));
-            assert!(checker.calls.contains(&id));
+            assert!(body.is_empty());
         }
-        assert_eq!(helpers.len(), 3);
+        assert!(checker.calls.is_empty());
+        assert_eq!(helpers.len(), 0);
         assert_eq!(helpers.functions.borrow().capacity(), 0);
     }
 
@@ -1224,21 +1039,29 @@ async def invalid(values: list[int]) -> int:
     }
 
     #[test]
-    fn an_entry_comprehension_before_a_nonreturning_call_has_one_helper() {
+    fn an_entry_comprehension_before_a_nonreturning_call_has_one_inline_append() {
         let graph = crate::modules::SourceGraph::single(
             "def stop(selected: bool) -> None:\n    if selected:\n        raise ValueError('first')\n    else:\n        raise LookupError('second')\ndef emit(value: int) -> None:\n    print(value)\nif __name__ == '__main__':\n    print([str(i) for i in range(4)])\n    stop(True)\n    emit(0)\n",
         )
         .unwrap();
         let module = crate::frontend::lower(&graph).unwrap();
-        let helpers = module
-            .functions
-            .iter()
-            .filter(|function| module.types.element(function.returns) == Some(Type::Str));
-        assert_eq!(helpers.count(), 1);
+        assert!(
+            module
+                .functions
+                .iter()
+                .all(|function| module.types.element(function.returns) != Some(Type::Str))
+        );
+        let mut appends = 0;
+        walk_expressions(&module.entry.body, &mut |value| {
+            if matches!(value.kind, ExprKind::Builtin(Builtin::Append, _)) {
+                appends += 1;
+            }
+        });
+        assert_eq!(appends, 1);
     }
 
     #[test]
-    fn decoded_gather_validates_before_calling_the_lazy_global_helper() {
+    fn decoded_gather_validates_in_its_caller_before_reading_the_nonempty_mapping() {
         let directory = tempfile::tempdir().unwrap();
         let entry = directory.path().join("entry.py");
         std::fs::write(
@@ -1253,35 +1076,37 @@ async def invalid(values: list[int]) -> int:
         .unwrap();
         let graph = crate::modules::SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
         let module = crate::frontend::lower(&graph).unwrap();
-        let mut helper = None;
-        walk_expressions(&module.functions[0].body, &mut |value| {
-            if let ExprKind::Call(id, arguments) = &value.kind {
-                assert_eq!(arguments.values.len(), 1);
-                assert_eq!(arguments.values[0].ty, Type::Bytes);
-                assert!(matches!(
-                    arguments.values[0].kind,
-                    ExprKind::Builtin(Builtin::BytesValidateUtf8, _)
-                ));
-                helper = Some(*id);
-            }
-        });
-        let helper = &module.functions[helper.unwrap()];
-        assert_eq!(helper.locals.len(), helper.params.len());
-        assert_eq!(helper.locals[helper.params[0]], Type::Bytes);
-        let [Statement::Return(value)] = helper.body.as_slice() else {
-            panic!("the fused helper must contain only its conditional gather")
+        let gather = &module.functions[0];
+        let [Statement::Return(value)] = gather.body.as_slice() else {
+            panic!("expected the fused gather in its source function")
         };
+        let ExprKind::Scope { body, value, clear } = &value.kind else {
+            panic!("the byte validation must run before testing the saved input")
+        };
+        let [Statement::Assign(input, checked)] = body.as_slice() else {
+            panic!("the byte input must be validated only once")
+        };
+        assert_eq!(clear, &[*input]);
+        let ExprKind::Builtin(Builtin::BytesValidateUtf8, bytes) = &checked.kind else {
+            panic!("expected byte validation")
+        };
+        assert!(
+            matches!(bytes.as_slice(), [value] if matches!(value.kind, ExprKind::Local(slot) if slot == gather.params[0]))
+        );
+        assert_eq!(gather.locals[*input], Type::Bytes);
         let ExprKind::Conditional(condition, nonempty, empty) = &value.kind else {
             panic!("empty input must bypass the mapping load")
         };
         let ExprKind::Builtin(Builtin::Bool, predicate) = &condition.kind else {
-            panic!("the helper must test only whether the byte input is empty")
+            panic!("expected a truth test of the validated bytes")
         };
-        assert_eq!(predicate[0].ty, Type::Bytes);
-        assert!(matches!(predicate[0].kind, ExprKind::Local(slot) if slot == helper.params[0]));
+        assert!(
+            matches!(predicate.as_slice(), [value] if matches!(value.kind, ExprKind::Local(slot) if slot == *input))
+        );
         let ExprKind::Builtin(Builtin::DictGatherBytesInt, arguments) = &nonempty.kind else {
             panic!("the nonempty arm must gather from the validated bytes")
         };
+        assert!(matches!(arguments[0].kind, ExprKind::Local(slot) if slot == *input));
         assert!(matches!(
             arguments[1].kind,
             ExprKind::Builtin(Builtin::GlobalGet(_), _)
@@ -1358,7 +1183,7 @@ class Values:
     }
 
     #[test]
-    fn literal_outer_range_bounds_survive_helper_capture() {
+    fn literal_outer_range_bounds_reach_the_entry_owned_loop() {
         for (arguments, small_cursor) in [
             ("3", true),
             ("3, -4, -2", true),
@@ -1367,14 +1192,15 @@ class Values:
             let source = format!("values = [item for item in range({arguments})]\n");
             let graph = crate::modules::SourceGraph::single(&source).unwrap();
             let module = super::super::lower(&graph).unwrap();
-            assert_eq!(module.functions.len(), 1);
-            assert!(module.functions[0].params.is_empty());
-            let super::Statement::Scope { body, .. } = &module.functions[0].body[1] else {
-                panic!("scoped range")
-            };
-            assert!(matches!(&body[0], super::Statement::For { .. }));
+            assert!(module.functions.is_empty());
             let ranges = crate::ranges::analyze(&module);
-            assert_eq!(ranges.range_cursor(&body[0]).is_some(), small_cursor);
+            let mut cursors = Vec::new();
+            crate::ir::walk_statements(&module.entry.body, &mut |statement| {
+                if matches!(statement, Statement::For { .. }) {
+                    cursors.push(ranges.range_cursor(statement).is_some());
+                }
+            });
+            assert_eq!(cursors, [small_cursor]);
         }
     }
 }
