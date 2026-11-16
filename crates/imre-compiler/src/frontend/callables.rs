@@ -1029,6 +1029,10 @@ impl<'a> Checker<'a> {
         }
         let mut args = ir::CallArgs::positional(values);
         if let Some(id) = saved {
+            if self.module_scope {
+                // This call can end the initializer just like a direct source call.
+                self.calls.insert(id);
+            }
             args.site = ir::CallSite::SavedFunction(self.call_origin(call), id);
         }
         let value = Expr {
