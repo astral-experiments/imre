@@ -9166,6 +9166,15 @@ impl<'a> Checker<'a> {
             && (value.ty == Type::None || self.types.payload(nullable) == Some(value.ty))
         {
             self.coerce(value, nullable, target)?
+        } else if value.ty == Type::None
+            && !self.module_scope
+            && self.graph.modules[self.module].is_program_source()
+            && let Some(payload) = self
+                .graph
+                .session
+                .inferred_optional_payload(self.module, target)
+        {
+            self.coerce(value, self.types.optional(payload), target)?
         } else if let Some(signature) = self.types.method_signature(value.ty) {
             self.coerce(value, signature, target)?
         } else {

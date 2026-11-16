@@ -56,6 +56,41 @@ fn a_dormant_async_method_preserves_an_unrelated_definitions_field_contract() {
 }
 
 #[test]
+fn an_inferred_loop_local_accepts_none_and_its_written_scalar() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let reader = project.path().join("reader.py");
+    fs::write(
+        &main,
+        "from reader import select\nprint(select(['body', '']))\n",
+    )
+    .unwrap();
+    let source = concat!(
+        "def select(items: list[str]) -> str:\n",
+        "    for item in items:\n",
+        "        value = None\n",
+        "        if item:\n",
+        "            value = item\n",
+        "        if value is not None:\n",
+        "            return value\n",
+        "    return 'empty'\n",
+    );
+    fs::write(&reader, source).unwrap();
+    crate::check_file(&main, None).unwrap();
+
+    fs::write(
+        &reader,
+        source.replace("value = None", "value: None = None"),
+    )
+    .unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(
+        error.contains("reader.py:5:21: Imre: expected None, got str"),
+        "{error}"
+    );
+}
+
+#[test]
 fn rebound_imported_cells_keep_their_storage_through_checking() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
