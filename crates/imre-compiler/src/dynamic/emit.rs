@@ -255,9 +255,18 @@ impl Prompt {
         module: ParsedModule<'static, '_>,
         python_optimization: i32,
     ) -> Option<(Self, HashSet<TextRange>)> {
+        imre_ast::check_single_input(&module.parsed.syntax().body, module.parsed.tokens()).ok()?;
         let mut unreachable = HashSet::new();
-        let body =
-            PreparedBody::interactive(filename, module, python_optimization, 0, &mut unreachable)?;
+        let body = PreparedBody::from_parsed(
+            "<module>",
+            filename,
+            module,
+            python_optimization,
+            ModuleOrigin::Interactive(0, &mut unreachable),
+            LiteralSites::default(),
+            Default::default(),
+        )
+        .ok()?;
         Some((Self(body), unreachable))
     }
 }
@@ -368,28 +377,6 @@ impl<'a> PreparedBody<'a> {
             Default::default(),
         )?;
         use_module(module)
-    }
-
-    /// Prepare a finite `single` input in the same lexical scope as module code.
-    fn interactive(
-        path: impl Into<Cow<'a, Path>>,
-        module: ParsedModule<'a, '_>,
-        python_optimization: i32,
-        inherited_flags: u32,
-        unreachable_imports: &mut HashSet<TextRange>,
-    ) -> Option<Self> {
-        let path = path.into();
-        imre_ast::check_single_input(&module.parsed.syntax().body, module.parsed.tokens()).ok()?;
-        Self::from_parsed(
-            "<module>",
-            path,
-            module,
-            python_optimization,
-            ModuleOrigin::Interactive(inherited_flags, unreachable_imports),
-            LiteralSites::default(),
-            Default::default(),
-        )
-        .ok()
     }
 
     pub(super) fn from_parsed<'p>(
@@ -1756,9 +1743,10 @@ mod tests {
         }
     }
 
-    fn interactive<'a>(path: &'a Path, text: &'a str) -> Option<PreparedBody<'a>> {
-        let module = ParsedModule::parse(path, text.into()).ok()?;
-        PreparedBody::interactive(path, module, 0, 0, &mut HashSet::new())
+    fn interactive(path: &Path, text: &str) -> Option<PreparedBody<'static>> {
+        let module = ParsedModule::parse(path, text.to_owned().into()).ok()?;
+        let (Prompt(body), _) = Prompt::from_parsed(path.to_owned(), module, 0)?;
+        Some(body)
     }
 
     #[test]
