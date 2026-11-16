@@ -6202,6 +6202,19 @@ publish(5, callback)
             _ => {}
         });
         assert_eq!((adds, callbacks), (1, 1));
+
+        let source = &graph.modules[graph.entry].source;
+        let init = TextSize::try_from(source.find("def __init__").unwrap()).unwrap();
+        let method = &registered[&graph.entry][&init];
+        let fields = method
+            .function
+            .body
+            .iter()
+            .map(|statement| match statement {
+                Statement::SetField(_, ir::StoreField::Written(_, name), _) => name.as_str(),
+                _ => panic!("expected a checked field store"),
+            });
+        assert_eq!(fields.collect::<Vec<_>>(), ["name", "fail"]);
     }
 
     #[test]
