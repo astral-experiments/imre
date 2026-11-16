@@ -775,7 +775,7 @@ impl Reachable {
                                             | "_assert_called_once_with"
                                     ),
                                     "_PatchFactory" => name == "_dictionary",
-                                    "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
+                                    "_DictionaryPatch" => matches!(name, "__enter__" | "_exit"),
                                     _ => false,
                                 };
                             if (property
