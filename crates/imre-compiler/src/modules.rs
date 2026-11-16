@@ -530,6 +530,7 @@ pub(crate) fn bundled_runtime_source(name: &str) -> Option<(&'static str, &'stat
         // CPython 3.14.5 Lib/optparse.py. See licenses/Optik.txt and licenses/CPython.txt.
         "optparse" => bundled_source!("optparse.py"),
         "gettext" => bundled_source!("gettext.py"),
+        "_imre_uuid" => bundled_source!("_imre_uuid.py"),
         "uuid" => bundled_source!("uuid.py"),
         _ => charmap_provider_path(name, false)
             .map(|path| (path, include_str!("../stdlib/encodings/charmap.py"))),

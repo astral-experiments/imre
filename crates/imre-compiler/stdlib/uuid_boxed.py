@@ -60,6 +60,7 @@ import os
 import sys
 import time
 
+from _imre_uuid import _format_uuid, _swap_fields
 from enum import Enum
 
 
@@ -221,8 +222,7 @@ class UUID:
             if len(bytes_le) != 16:
                 raise ValueError('bytes_le is not a 16-char string')
             assert isinstance(bytes_le, bytes_), repr(bytes_le)
-            bytes = (bytes_le[4-1::-1] + bytes_le[6-1:4-1:-1] +
-                     bytes_le[8-1:6-1:-1] + bytes_le[8:])
+            bytes = _swap_fields(bytes_le)
             int = int_.from_bytes(bytes)  # big endian
         elif bytes is not None:
             if len(bytes) != 16:
@@ -328,8 +328,7 @@ class UUID:
         raise TypeError('UUID objects are immutable')
 
     def __str__(self):
-        x = self.hex
-        return f'{x[:8]}-{x[8:12]}-{x[12:16]}-{x[16:20]}-{x[20:]}'
+        return _format_uuid(self.hex)
 
     @property
     def bytes(self):
@@ -337,9 +336,7 @@ class UUID:
 
     @property
     def bytes_le(self):
-        bytes = self.bytes
-        return (bytes[4-1::-1] + bytes[6-1:4-1:-1] + bytes[8-1:6-1:-1] +
-                bytes[8:])
+        return _swap_fields(self.bytes)
 
     @property
     def fields(self):
