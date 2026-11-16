@@ -416,6 +416,7 @@ pub(crate) fn frame_inputs(
                 }
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..) | Builtin::ListGet(_), operands) => {
+                operands.iter().for_each(&mut read_scalar_protocol);
                 operands.len() == 2
             }
             ExprKind::Builtin(Builtin::RegisteredName(_), scope) => scope.len() <= 1,
