@@ -1,3 +1,5 @@
+use super::attribute_name::AttributeName;
+use super::calls::AttributeLookup;
 use super::{Context, Error, Id, NONE, Result, Value, builtins};
 
 pub(super) const DOC: &str = "Create a module object.\n\nThe name must be a string; the optional doc argument can have any type.";
@@ -123,9 +125,10 @@ impl Context {
         original: Option<Id>,
         report_missing: bool,
     ) -> Result<Id> {
-        match self.default_get_attr(module, name) {
+        let attr = AttributeName::from_lookup(name, original);
+        match self.default_attr(module, attr, AttributeLookup::Value) {
             Err(error) if self.is_attribute_error(&error) => {
-                let Some(hook) = self.scope_name(scope, "__getattr__") else {
+                let Some(hook) = self.lookup_scope_name(scope, "__getattr__")? else {
                     // Optional lookups suppress the diagnostic without probing a user spec.
                     if report_missing
                         && let Some(label) = self.scope_name(scope, "__name__")
@@ -148,16 +151,7 @@ impl Context {
                             ));
                         }
                     }
-                    // ModuleType reports a failed descriptor lookup in the module's namespace.
-                    if let Value::Module {
-                        constructor: Some(class),
-                        ..
-                    } = *self.heap.get(module)
-                        && self.class_attr(class, name).is_some()
-                    {
-                        return Err(self.missing_module_attribute(scope, name));
-                    }
-                    return Err(error);
+                    return Err(self.missing_module_attribute(scope, name));
                 };
                 let attribute = original.unwrap_or_else(|| self.text(name));
                 self.call(hook, vec![attribute], Vec::new())
