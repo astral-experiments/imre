@@ -199,7 +199,7 @@ impl Builtin {
                     | TextOperation::Upper
                     | TextOperation::CaseMap { .. }
                     | TextOperation::Capitalize
-                    | TextOperation::Split(_)
+                    | TextOperation::Split { .. }
                     | TextOperation::Partition
                     | TextOperation::Translate
                     | TextOperation::UrlQuote

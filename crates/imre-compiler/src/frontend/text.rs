@@ -755,11 +755,14 @@ impl Checker<'_> {
             });
         }
         let optional_string = self.types.optional(Type::Str);
-        let (operation, returns, parameters) = match name {
+        let (mut operation, returns, parameters) = match name {
             "lower" => (TextOperation::Lower, Type::Str, vec![]),
             "upper" => (TextOperation::Upper, Type::Str, vec![]),
             "split" | "rsplit" => (
-                TextOperation::Split(name == "rsplit"),
+                TextOperation::Split {
+                    reverse: name == "rsplit",
+                    written: None,
+                },
                 self.types.list(Type::Str),
                 vec![
                     parameter("sep", optional_string, Some(Expr::absent(optional_string))),
@@ -833,6 +836,18 @@ impl Checker<'_> {
                     checker.direct_argument(arg, parameter.ty, parameter.sign_only)
                 }
             })?;
+        if let TextOperation::Split { written, .. } = &mut operation
+            && !calls::has_unpacking(call)
+            && arguments
+                .order
+                .iter()
+                .copied()
+                .eq(0..arguments.values.len())
+        {
+            // The binder appends omitted defaults after the receiver and supplied arguments.
+            // A permutation into native formal order would no longer be a written prefix.
+            *written = Some((1 + call.arguments.len()) as u8);
+        }
         Ok(self.ordered_builtin(Builtin::Text(operation), returns, arguments))
     }
 

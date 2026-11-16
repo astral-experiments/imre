@@ -7,7 +7,6 @@ use ruff_python_ast::UnaryOp;
 
 use super::comprehensions::{ClauseLowering, filter_suite};
 use super::*;
-use crate::ir::TextOperation;
 
 mod groupby;
 
@@ -25,10 +24,7 @@ fn byte_split_source(source: &Iteration) -> Option<(&Expr, u8)> {
 
 /// The immutable input and the exact byte consumed by the field cursor.
 pub(super) fn byte_split(iterable: &Expr) -> Option<(&Expr, u8)> {
-    let ExprKind::Builtin(Builtin::Text(TextOperation::Split(false)), args) = &iterable.kind else {
-        return None;
-    };
-    let [text, separator, limit] = args.as_slice() else {
+    let (false, [text, separator, limit]) = iterable.split_operands()? else {
         return None;
     };
     let ExprKind::Present(separator) = &separator.kind else {

@@ -822,10 +822,7 @@ impl Expr {
     pub(crate) fn attribute_operands(&self) -> Option<&[Expr]> {
         match &self.kind {
             ExprKind::Field(receiver, _) => Some(std::slice::from_ref(receiver)),
-            ExprKind::Builtin(Builtin::Process(_, ProcessSite::Written(site)), operands) => {
-                operands.get(..site.written)
-            }
-            ExprKind::Builtin(_, operands) => Some(operands),
+            ExprKind::Builtin(op, operands) => operands.get(..op.written_operands(operands)?),
             _ => None,
         }
     }
@@ -1064,7 +1061,8 @@ impl Expr {
 
     /// Operands of the checked text split, in binding order.
     pub(crate) fn split_operands(&self) -> Option<(bool, &[Self; 3])> {
-        let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
+        let ExprKind::Builtin(Builtin::Text(TextOperation::Split { reverse, .. }), args) =
+            &self.kind
         else {
             return None;
         };
@@ -2922,6 +2920,31 @@ pub(crate) enum Builtin {
 }
 
 impl Builtin {
+    /// Omitted native defaults have no operand site in a Python call.
+    fn written_operands(&self, operands: &[Expr]) -> Option<usize> {
+        match self {
+            Self::Process(_, ProcessSite::Written(site)) => Some(site.written),
+            Self::Text(TextOperation::Split { written, .. }) => {
+                let count = usize::from((*written)?);
+                let [_, separator, limit] = operands else {
+                    return None;
+                };
+                match count {
+                    1 if !omitted(separator) => None,
+                    1 | 2
+                        if limit.ty == Type::Int
+                            && matches!(&limit.kind, ExprKind::Int(n) if n == "-1") =>
+                    {
+                        Some(count)
+                    }
+                    3 => Some(count),
+                    _ => None,
+                }
+            }
+            _ => Some(operands.len()),
+        }
+    }
+
     pub(crate) fn process(operation: ProcessOperation) -> Self {
         Self::Process(operation, ProcessSite::Fixed(None))
     }
@@ -3181,8 +3204,11 @@ pub(crate) enum TextOperation {
     CaseMap {
         title: bool,
     },
-    /// True splits from the right.
-    Split(bool),
+    Split {
+        reverse: bool,
+        /// Receiver and written arguments when they form a prefix of the native operands.
+        written: Option<u8>,
+    },
     /// 0 strips both ends, 1 the leading end, and 2 the trailing end.
     Strip(u32),
     StartsWith,
@@ -4719,8 +4745,9 @@ macro_rules! expression_children {
                     $visit(value);
                 }
             }
-            ExprKind::Builtin(Builtin::Process(_, ProcessSite::Written(site)), values) => {
-                for value in values.into_iter().take(site.written) {
+            ExprKind::Builtin(op, values) => {
+                let written = op.written_operands(values).unwrap_or(values.len());
+                for value in values.into_iter().take(written) {
                     $visit(value);
                 }
             }
@@ -4729,7 +4756,6 @@ macro_rules! expression_children {
             | ExprKind::Tuple(values)
             | ExprKind::Compare(values, _)
             | ExprKind::Boolean(_, values)
-            | ExprKind::Builtin(_, values)
             | ExprKind::Call(_, CallArgs { values, .. })
             | ExprKind::Construct {
                 args: CallArgs { values, .. },

@@ -826,6 +826,47 @@ mod tests {
     }
 
     #[test]
+    fn placed_split_keeps_its_written_operands_and_native_limit() {
+        let text = concat!(
+            "import argparse\n",
+            "def split_parts(name: str) -> list[str]:\n    return name.split('-')\n",
+            "parser = argparse.ArgumentParser()\nparser.add_argument('name')\n",
+            "print(split_parts(parser.parse_args().name))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "split_parts").count(),
+            1
+        );
+        let start = TextSize::try_from(text.find("def split_parts").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&start];
+        let positions: Vec<_> = frame
+            .fixed_sites
+            .iter()
+            .map(|range| &text[*range])
+            .collect();
+        assert_eq!(
+            positions,
+            ["return name.split('-')", "name.split('-')", "name", "'-'"]
+        );
+        let [Statement::Return(value)] = frame.function.body.as_slice() else {
+            panic!("expected the checked split return");
+        };
+        let (_, operands) = value.split_operands().unwrap();
+        assert_eq!(operands[2].tagged_integer_literal(), Some(-1));
+        assert!(std::ptr::eq(
+            value.named_call_arguments().unwrap(),
+            &operands[..2]
+        ));
+    }
+
+    #[test]
     fn named_entry_places_the_checked_arithmetic_body() {
         let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
         let dir = tempfile::tempdir().unwrap();
