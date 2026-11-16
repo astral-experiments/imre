@@ -117,6 +117,8 @@ impl crate::ProgramOutput {
     ) -> Result<bool, String> {
         let split = !matches!(self.layout, crate::CodegenLayout::Whole);
         let whole_requested = matches!(self.layout, crate::CodegenLayout::SplitWithWhole);
+        let mut unidentified = providers.len();
+        let mut archive_names = HashSet::new();
         let mut used_archive = false;
         let root = ModuleLauncher::new(config, python_optimization < 2);
         // The requested whole IR and split native root share their exact prefix.
@@ -153,7 +155,10 @@ impl crate::ProgramOutput {
                     Initializer::Archived(_) => (true, 0, &[][..]),
                 };
                 let loader = prepared.loader(bundled, future_flags);
-                let check_archive = bundled && !providers.is_empty();
+                // A provider's full hash includes its registration name. Once every export
+                // has an owner, a different name can go straight to ordinary placement.
+                let check_archive =
+                    bundled && (unidentified != 0 || archive_names.contains(name.as_str()));
                 let mut placed = None;
                 let mut whole_entry = None;
                 let mut external = None;
@@ -177,6 +182,14 @@ impl crate::ProgramOutput {
                     let (symbol, body) = initializer.provider_body(name, target)?;
                     suspends = body.suspends;
                     archived = check_archive && providers.contains(&symbol);
+                    // A seal selects this registration only. A full match also proves which
+                    // name was hashed into the export, even in a mixed archive.
+                    if archived && (!split || whole_requested) {
+                        if !root.declares(&symbol) {
+                            unidentified -= 1;
+                        }
+                        archive_names.insert(name.as_str());
+                    }
                     if !archived && separate && !root.declares(&symbol) {
                         if whole.is_none() && whole_requested {
                             *whole = Some(fork.unwrap_or_else(|| root.clone()));
@@ -7083,6 +7096,67 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             );
         }
         assert_eq!(refs(&[project.clone(), bundled.clone()]), [false, true]);
+
+        let variant = compiled("example", &changed.1, "value = t'{456}'", 0).0;
+        let last = ("last".into(), root.join("last.py"), source.into());
+        let last_symbol = compiled("last", &last.1, source, 0).0;
+        let stale = (
+            bundled.0.clone(),
+            bundled.1.clone(),
+            "value = t'{123}'\n".into(),
+        );
+        let later = ("later".into(), root.join("later.py"), source.into());
+        let sequence = [
+            bundled.clone(),
+            bundled.clone(),
+            changed.clone(),
+            last,
+            stale,
+            changed.clone(),
+            later,
+        ];
+        use crate::single_emission_tests::{Phase, observe_preparation};
+        let later_path = root.join("later.py");
+        let measured = |exports: &HashSet<String>| {
+            let ((mut units, _, _), events) = observe_preparation(|| {
+                emit_modules(
+                    (&sequence, &[], None),
+                    "{}",
+                    0,
+                    root,
+                    exports,
+                    crate::CodegenLayout::Whole,
+                    initializers,
+                )
+                .unwrap()
+            });
+            let starts = events
+                .iter()
+                .filter(|event| matches!(event, Phase::Llvm(Some(path)) if path == &later_path))
+                .count();
+            (units.remove(0).llvm_ir, starts)
+        };
+        let mut exports = HashSet::from([symbol.clone(), variant.clone(), last_symbol.clone()]);
+        let (ir, starts) = measured(&exports);
+        assert_eq!(starts, 1);
+        let calls: Vec<_> = ir
+            .lines()
+            .filter(|line| line.contains("call void @imre_dyn_register_source("))
+            .map(|line| {
+                [symbol.as_str(), &variant, &last_symbol]
+                    .into_iter()
+                    .find(|s| line.ends_with(&format!("@{s})")))
+            })
+            .collect();
+        let (a, b, c) = (
+            Some(symbol.as_str()),
+            Some(variant.as_str()),
+            Some(last_symbol.as_str()),
+        );
+        assert_eq!(calls, [a, a, b, c, None, b, None]);
+        // An available but never selected export keeps ordinary hash lookup active throughout.
+        exports.insert(compiled("unused", &root.join("unused.py"), source, 0).0);
+        assert_eq!((ir, 2), measured(&exports));
 
         let (units, used, _) = emit_modules(
             (&[bundled.clone(), project.clone()], &[], None),

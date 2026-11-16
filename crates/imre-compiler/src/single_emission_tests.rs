@@ -1,7 +1,7 @@
 use super::*;
 use std::cell::{Cell, RefCell};
 
-enum Phase {
+pub(crate) enum Phase {
     Prepared(PathBuf, bool),
     Llvm(Option<PathBuf>),
 }
@@ -10,7 +10,7 @@ thread_local! {
     static PHASES: RefCell<Option<Vec<Phase>>> = const { RefCell::new(None) };
 }
 
-fn observe_preparation<T>(run: impl FnOnce() -> T) -> (T, Vec<Phase>) {
+pub(crate) fn observe_preparation<T>(run: impl FnOnce() -> T) -> (T, Vec<Phase>) {
     PHASES.set(Some(Vec::new()));
     let result = run();
     (result, PHASES.take().unwrap())
