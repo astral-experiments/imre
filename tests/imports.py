@@ -1340,9 +1340,10 @@ ACCEPTED = {
     },
     "optional_stdlib_from_in_dependency": {
         "main.py": (
-            "from os.path import expandvars, isabs\n"
+            "from os.path import expandvars, isabs, isdir, isfile, islink\n"
             "from pkg.consumer import witness\n"
             "print(witness.checked, isabs(b'/'), expandvars('relative'))\n"
+            "print(isdir('.'), isfile(b'.'), islink('.'))\n"
         ),
         "pkg/__init__.py": "",
         "pkg/consumer.py": (

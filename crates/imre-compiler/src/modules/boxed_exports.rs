@@ -471,14 +471,30 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         M::Math => exports!("math", "copysign", "cos", "isinf", "isnan", "isqrt", "log"),
         M::Numbers => exports!("numbers", "Complex", "Integral", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
-        M::PosixPath => exports!(
-            "posixpath",
-            "expanduser",
-            "expandvars",
-            "isabs",
-            "ismount",
-            "split"
-        ),
+        M::GenericPath | M::PosixPath => match (module, name) {
+            (M::PosixPath, "expanduser") => "posixpath.expanduser",
+            (M::PosixPath, "expandvars") => "posixpath.expandvars",
+            (M::PosixPath, "isabs") => "posixpath.isabs",
+            (M::PosixPath, "ismount") => "posixpath.ismount",
+            (M::PosixPath, "split") => "posixpath.split",
+            // Public genericpath functions re-exported by the shipped posixpath.py.
+            _ => exports!(
+                "genericpath",
+                "commonprefix",
+                "getatime",
+                "getctime",
+                "getmtime",
+                "getsize",
+                "isdir",
+                "isfile",
+                "isjunction",
+                "islink",
+                "lexists",
+                "samefile",
+                "sameopenfile",
+                "samestat"
+            ),
+        },
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         M::Termios => match name {
             "tcgetattr" => "termios.tcgetattr",
