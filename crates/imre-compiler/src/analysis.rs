@@ -424,6 +424,22 @@ impl<'session> OperandTypes<'session> {
         )
     }
 
+    /// A dynamically typed item can keep its original handle in a Python container.
+    pub(crate) fn dynamic_operand(self, operand: &Expr) -> bool {
+        let parsed = self.parsed();
+        let Some((original, _, file)) = self.original_operand(&parsed, operand.into()) else {
+            return false;
+        };
+        self.session
+            .inferred_operand_type(file, original)
+            .is_some_and(Self::is_dynamic_operand)
+    }
+
+    fn is_dynamic_operand(value: ty_python_semantic::types::Type<'_>) -> bool {
+        use ty_python_semantic::types::{DynamicType, Type};
+        value.is_unknown() || matches!(value, Type::Dynamic(DynamicType::Any))
+    }
+
     /// Check the source contract of an argument that stays boxed for a live call.
     pub(crate) fn argument_contract(
         self,
@@ -451,10 +467,9 @@ impl<'session> OperandTypes<'session> {
         let model = SemanticModel::new(&session.db, file);
         let value = session.inferred_operand_type(owner, original)?;
         let expected = parameter.inferred_type(&model)?;
-        use ty_python_semantic::types::{DynamicType, Type as Ty};
         if Self::accepts_type(&model, value, expected) {
             Some(ArgumentContract::Checked)
-        } else if value.is_unknown() || matches!(value, Ty::Dynamic(DynamicType::Any)) {
+        } else if Self::is_dynamic_operand(value) {
             // A live Python call can consume the original value without a fixed result layout.
             Some(ArgumentContract::Dynamic)
         } else {

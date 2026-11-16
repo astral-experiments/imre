@@ -139,6 +139,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("main.py");
         let source = r#"from __future__ import annotations
+import json
 import urllib.request
 request = urllib.request.Request("data:,ok")
 class Crate:
@@ -146,7 +147,7 @@ class Crate:
 def url_from(request) -> str:
     return request.full_url
 def crates(url: str) -> list[Crate]:
-    items: list[int] = [1]
+    items: list[int] = [1, json.loads("true")]
     return VALUE
 print(crates(url_from(request)))
 "#;
