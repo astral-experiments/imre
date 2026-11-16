@@ -1,3 +1,4 @@
+import re
 import textwrap
 
 
@@ -38,3 +39,10 @@ def current():
                 raise AssertionError("expected TypeError")
     finally:
         textwrap.TextWrapper = original
+
+    wrapper = original(width=3, break_long_words=False)
+    wrapper.unicode_whitespace_trans = {ord("/"): ord("-")}
+    wrapper.wordsep_re = re.compile(r"(-)")
+    print(wrapper.wrap("a/bcd"))
+    wrapper.break_on_hyphens = 1
+    print(wrapper.wrap("a/bcd"))
