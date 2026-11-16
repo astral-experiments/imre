@@ -5800,10 +5800,8 @@ impl Heap {
 
     pub(super) fn observe_fault_workers(&self, workers: &Arc<()>) {
         self.fault_workers.replace(Some(Arc::downgrade(workers)));
-        let generation = crate::fault_handler::generation();
-        if self.fault_generation.get() != Some(generation) {
-            self.publish_fault_frames(generation);
-        }
+        // A newly entered native publication needs its own copy of the current frames.
+        self.publish_fault_frames(crate::fault_handler::generation());
     }
 
     fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
@@ -8048,6 +8046,52 @@ mod tests {
             ctx.heap.execution = ExecutionState::default();
         }
         assert_eq!(ctx.heap.buffer_exports().count(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resumed_worker_publishes_its_stack_in_the_new_native_slot() {
+        use crate::fault_handler::{FramePublication, dump_traceback};
+        use std::io::{self, Seek};
+        use std::os::fd::AsRawFd;
+
+        fn enter(ctx: &mut Context, name: &str, line: u32) {
+            let scope = ctx.scope("parked", None);
+            let name = ctx.text(name);
+            let file = ctx.text("parked.py");
+            let code = ctx.prelinked_code(
+                Body::Parsed { constants: NONE },
+                scope,
+                name,
+                NONE,
+                (name, NONE),
+                (file, line),
+            );
+            ctx.heap.enter(scope, code, FrameOwner::Module(NONE));
+        }
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let interpreter = Arc::clone(&ctx.interpreter);
+        let _outer = FramePublication::enter(&interpreter.finalizing);
+        enter(&mut ctx, "worker", 11);
+        let workers = ctx.heap.begin_fault_worker();
+        let worker = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        enter(&mut ctx, "caller", 22);
+        ctx.heap.observe_fault_workers(&workers);
+        let _caller = ctx.heap.park_execution().unwrap();
+
+        let _inner = FramePublication::enter(&interpreter.finalizing);
+        ctx.heap.resume_execution(worker);
+        ctx.heap.observe_fault_workers(&workers);
+        let mut output = std::fs::File::from(
+            rustix::fs::memfd_create(c"worker-stack", rustix::fs::MemfdFlags::CLOEXEC).unwrap(),
+        );
+        dump_traceback(output.as_raw_fd(), false);
+        output.rewind().unwrap();
+        let trace = io::read_to_string(output).unwrap();
+        assert!(trace.contains("line 11 in worker"), "{trace}");
+        assert!(!trace.contains("line 22 in caller"), "{trace}");
     }
 
     #[test]
