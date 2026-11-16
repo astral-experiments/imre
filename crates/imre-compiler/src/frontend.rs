@@ -1802,9 +1802,7 @@ fn lower_graph(
                 && (named_scalar || types.element(signature.returns).is_some())
                 || (defer_capture && unavailable.is_none()
                     || named && recover_completed.get() && unavailable.is_some())
-                    && signature.params.is_empty()
-                    && definition.returns.is_some()
-                    && signature.returns == Type::None)
+                    && definition.returns.is_some())
         {
             lower_function(checker, definition, signature, None, Some(inference))
         } else if let Some(cache) = cache.as_deref_mut().filter(|_| signature.method.is_none()) {
@@ -2670,7 +2668,9 @@ fn lower_function(
                 statements,
                 Some(&mut body),
                 Some(&mut |cx, stored| {
-                    if cx.types.element(signature.returns).is_some()
+                    let lost = cx.unrepresented.borrow();
+                    if lost.is_none()
+                        && cx.types.element(signature.returns).is_some()
                         && !stored.is_some_and(|value| {
                             cx.types.element(value.ty).is_some()
                                 && matches!(value.kind, ExprKind::Scope { .. })
@@ -2678,10 +2678,8 @@ fn lower_function(
                         || !cx
                             .helpers
                             .only_direct_locals_since(helpers, &cx.local_functions)
-                        || cx.unrepresented.borrow().as_ref().is_some_and(|reason| {
+                        || lost.as_ref().is_some_and(|reason| {
                             !reason.is_object()
-                                || signature.returns != Type::None
-                                || !signature.params.is_empty()
                                 || !inference.source_checks.accepts(
                                     cx.graph,
                                     cx.module,
@@ -2696,6 +2694,7 @@ fn lower_function(
                     {
                         return false;
                     }
+                    drop(lost);
                     let mut inputs = cx.settled_attributes.take();
                     placed = registered::place_checked_definition(
                         cx,
