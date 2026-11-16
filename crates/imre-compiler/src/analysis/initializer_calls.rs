@@ -539,7 +539,8 @@ impl Session {
         let loaded = attr.is_none()
             && (binding.is_some()
                 || name.as_name_expr().is_some_and(|n| {
-                    imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                    (imre_ast::providers::BUILTIN_FUNCTIONS.contains(&n.id.as_str())
+                        || imre_ast::providers::BUILTIN_TYPES.contains(&n.id.as_str()))
                         && self.is_unbound_module_read(module, name)
                 }));
         let mut actuals = Vec::new();
@@ -575,8 +576,15 @@ impl Session {
                         .as_call_expr()?;
                     return self.initializer_call(site, nested, false)?.err().map(Err);
                 }
-                match self.initializer_call(site, value.as_call_expr()?, false)? {
-                    Ok(actual) => actuals.push(actual),
+                // Reading an attribute first evaluates its receiver. A failing call
+                // there precedes the descriptor; its result cannot stand for the attribute.
+                let mut receiver = value;
+                while let Expr::Attribute(attribute) = receiver {
+                    receiver = &attribute.value;
+                }
+                match self.initializer_call(site, receiver.as_call_expr()?, false)? {
+                    Ok(actual) if value.is_call_expr() => actuals.push(actual),
+                    Ok(_) => return None,
                     error @ Err(_) => return Some(error),
                 }
             }
@@ -628,12 +636,14 @@ impl Session {
             if !iterated
                 && !function.is_async
                 && function.returns.is_some()
-                && !generator()?
                 && self.unconditional_module_operand(module, site.guard_start, call.range())
             {
                 let index = ty_python_core::semantic_index(&self.db, self.db.program_file(owner));
-                let scope =
-                    index.node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function));
+                let scope = index
+                    .try_node_scope(ty_python_core::scope::NodeWithScopeRef::Function(function))?;
+                if scope.is_generator_function(index) {
+                    return None;
+                }
                 // This import and invocation selected one definition in its physical module.
                 let checked = super::CheckedFile::new(
                     &self.db,

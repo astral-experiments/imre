@@ -1568,6 +1568,11 @@ fn a_linked_signature_requires_a_reaching_initializer_call() {
     let error = check(saved, declared, false).unwrap_err();
     assert!(error.contains("rules.py:3:12"), "{error}");
     check("from rules import good as read\nread()\n", declared, false).unwrap();
+    let observed = "import rules\nprint(type(rules.bad()).__name__)\n";
+    let error = check(observed, declared, false).unwrap_err();
+    assert!(error.contains("rules.py:3:12"), "{error}");
+    check(&observed.replace("bad", "good"), declared, false).unwrap();
+    check(&observed.replace("type(", "missing("), declared, false).unwrap();
 
     let caller = "from rules import bad\nbad()\n";
     let child = "class C: pass\ndef step(): raise LookupError()\ndef bad() -> C:\n    step()\n    return 42\n";
