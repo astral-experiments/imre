@@ -196,13 +196,20 @@ use comprehensions::Helpers;
 pub(crate) use function_text::{docstring, docstring_literal};
 use module_values::{Initialization, ModuleValues};
 
+#[derive(Clone, Copy)]
+enum ParameterOrigin {
+    Unspecified,
+    Stub,
+    Source(TypeDeclaration),
+}
+
 #[derive(Clone)]
 struct Signature {
     id: usize,
     physical_frame: bool,
     may_have_display: bool,
     asynchronous: bool,
-    parameter_declarations: Arc<[Option<TypeDeclaration>]>,
+    parameter_declarations: Arc<[ParameterOrigin]>,
     params: Vec<Parameter>,
     returns: Type,
     method: Option<records::MethodContext>,
@@ -210,7 +217,10 @@ struct Signature {
 
 impl Signature {
     fn parameter_declaration(&self, index: usize) -> Option<TypeDeclaration> {
-        self.parameter_declarations.get(index).copied().flatten()
+        match self.parameter_declarations.get(index)? {
+            ParameterOrigin::Source(declaration) => Some(*declaration),
+            _ => None,
+        }
     }
 
     /// An eager source frame reads its declared pack from the tuple bound by the Python caller.
@@ -1709,8 +1719,8 @@ fn lower_graph(
                 || (signature.returns == Type::None
                     && definition.returns.is_some()
                     && !signature.params.is_empty()
-                    && signature.parameter_declarations.len() == signature.params.len()
-                    && signature.parameter_declarations.iter().all(Option::is_some))
+                    && (0..signature.params.len())
+                        .all(|index| signature.parameter_declaration(index).is_some()))
                 || (named
                     && definition.returns.is_none()
                     && (callable_inputs.is_some()
@@ -2802,17 +2812,23 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     let mut parameter_declarations = Vec::new();
-    let mut declare = |index: usize, module: ModuleId, annotation: Option<&ast::Expr>| {
-        if let Some(annotation) = annotation
-            && graph.modules[module].checks_source_contracts()
-        {
-            parameter_declarations.resize(index + 1, None);
-            parameter_declarations[index] = Some(TypeDeclaration {
-                module,
-                annotation: annotation.range(),
-            });
-        }
-    };
+    let mut declare =
+        |index: usize, module: ModuleId, annotation: Option<&ast::Expr>, stub: bool| {
+            let origin = if let Some(annotation) = annotation
+                && graph.modules[module].checks_source_contracts()
+            {
+                ParameterOrigin::Source(TypeDeclaration {
+                    module,
+                    annotation: annotation.range(),
+                })
+            } else if stub {
+                ParameterOrigin::Stub
+            } else {
+                return;
+            };
+            parameter_declarations.resize(index + 1, ParameterOrigin::Unspecified);
+            parameter_declarations[index] = origin;
+        };
     let positional_contract = graph.modules[module]
         .implementation_stub()
         .filter(|_| method.is_none())
@@ -2900,6 +2916,10 @@ fn signature(
             graph.resolve(module, value) != Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                 && namedtuples::annotation(graph, module, value, types).is_none()
         });
+        let stub = positional_contract
+            .as_ref()
+            .and_then(|arguments| arguments.get(index))
+            .copied();
         let ty = if index == 0
             && method.is_some_and(|m| m.kind(classes) == crate::classes::MethodKind::Class)
         {
@@ -2954,7 +2974,7 @@ fn signature(
                         annotation_in_class(value, graph, module, classes, types, owner)
                     }
                 })
-                .or_else(|| positional_contract.as_ref()?.get(index).copied().map(Ok))
+                .or_else(|| stub.map(Ok))
                 .or_else(|| parameter
                     .default
                     .as_deref()
@@ -3043,7 +3063,12 @@ fn signature(
                 }
             })
             .transpose()?;
-        declare(params.len(), module, annotation);
+        declare(
+            params.len(),
+            module,
+            annotation,
+            parameter.annotation().is_none() && stub.is_some(),
+        );
         params.push(Parameter {
             name: parameter.name().to_string(),
             ty,
@@ -3076,7 +3101,7 @@ fn signature(
             None
         };
         parameter_types.push(ty);
-        declare(params.len(), module, pack.annotation());
+        declare(params.len(), module, pack.annotation(), false);
         params.push(Parameter {
             name: pack.name.to_string(),
             ty: ty.unwrap_or(Type::None),
@@ -3095,7 +3120,7 @@ fn signature(
         })?;
         let element = pack_element(element)?;
         let ty = types.dict(Type::Str, element);
-        declare(params.len(), module, keyword.annotation());
+        declare(params.len(), module, keyword.annotation(), false);
         params.push(Parameter {
             name: keyword.name.to_string(),
             ty,
