@@ -6435,7 +6435,7 @@ impl<'a> Checker<'a> {
             iterable,
             items: false,
         } = &mut input
-            && let ExprKind::List(values) = &mut iterable.kind
+            && let ExprKind::List(values) | ExprKind::Tuple(values) = &iterable.kind
             && (1..=8).contains(&values.len())
             && let Some(strings) = values
                 .iter()
@@ -6445,12 +6445,12 @@ impl<'a> Checker<'a> {
                 })
                 .collect::<Option<Vec<_>>>()
         {
-            // This fresh, unaliased list has no observable mutations or element
-            // effects. Prepared tuple iteration lets scalar replacement remove
-            // the container while retaining ordinary loop ownership and exits.
             item_strings = Some(self.types.string_literal(strings));
-            iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
-            iterable.kind = ExprKind::Tuple(std::mem::take(values));
+            if let ExprKind::List(values) = &mut iterable.kind {
+                // A fresh list of string literals can use the same tuple iteration.
+                iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
+                iterable.kind = ExprKind::Tuple(std::mem::take(values));
+            }
         }
         // Only the function's own statements retain a cursor until its calling convention is chosen.
         let written = if !self.module_scope
