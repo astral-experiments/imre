@@ -1628,10 +1628,6 @@ impl<'a, 'p> super::Frame<'_, 'a, 'p> {
         })
     }
 
-    pub(super) fn slice_object(&mut self, [start, stop, step]: [String; 3]) -> String {
-        self.op("slice_object", &[&start, &stop, &step])
-    }
-
     pub(in crate::llvm) fn inplace(&mut self, op: &str, left: &str, right: &str) -> String {
         self.op(&format!("inplace:{op}"), &[left, right])
     }
