@@ -222,6 +222,7 @@ impl CallerCache {
             && before == *previous
             && checker.types.matches_prefix(&self.shapes)
             && body
+                .facts
                 .default_reads
                 .as_ref()
                 .is_some_and(|reads| reads.iter().all(|id| !self.changed.contains(id)))
@@ -240,8 +241,8 @@ impl CallerCache {
         let hints = session.hint_reads();
         checker.default_reads = Some(Vec::new());
         let (body, sums) = lower_body(checker, definition, signature)?;
-        if body.default_reads.is_some()
-            && !body.calls.is_empty()
+        if body.facts.default_reads.is_some()
+            && !body.facts.calls.is_empty()
             && sums.is_empty()
             && before.shapes == types.shape_count()
             && before.helpers == helpers.len()
