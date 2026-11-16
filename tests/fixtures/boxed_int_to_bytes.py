@@ -1,4 +1,6 @@
+import inspect
 import sys
+import types
 
 
 def current():
@@ -8,6 +10,24 @@ def current():
 
     assert [x.bit_length() for x in (0, True, -8, 1 << 400)] == [0, 1, 4, 401]
     assert int.bit_length(Number(-9)) == 4 and Number(-9).bit_length() == 42
+
+    for name in ("bit_count", "bit_length", "to_bytes"):
+        method = int.__dict__[name]
+        assert type(method) is types.MethodDescriptorType
+        assert method.__objclass__ is int
+        assert method.__name__ == name and method.__qualname__ == "int." + name
+        assert getattr(int, name) is method and getattr(bool, name) is method
+        assert method.__get__(None, Number) is method
+        assert method.__get__(Number(7), Number)() == method(7)
+        bound = method.__get__(7, int)
+        assert bound.__doc__ == method.__doc__ and method.__doc__
+        assert bound.__text_signature__ == method.__text_signature__
+    assert str(inspect.signature(int.to_bytes)) == "(self, /, length=1, byteorder='big', *, signed=False)"
+    assert str(inspect.signature((7).to_bytes)) == "(length=1, byteorder='big', *, signed=False)"
+    assert list.pop.__text_signature__ == bytearray.pop.__text_signature__ == "($self, index=-1, /)"
+    assert list.pop.__doc__ != bytearray.pop.__doc__
+    for attr in ("__doc__", "__text_signature__"):
+        assert getattr(list.clear, attr, None) != list.pop.__text_signature__
 
     for literal in (bytes, bytearray):
         assert int(literal(b"  -0x_FF\t"), base=0) == -255
