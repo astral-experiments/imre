@@ -27,11 +27,9 @@ impl Checker<'_> {
     pub(super) fn defaultdict_factory_error(
         &mut self,
         call: &ast::ExprCall,
+        (factory, rest): (&ast::Expr, &[ast::Expr]),
         result: Type,
     ) -> Result<Option<Expr>, String> {
-        let Some((factory, rest)) = call.arguments.args.split_first() else {
-            return Ok(None);
-        };
         match factory {
             ast::Expr::NoneLiteral(_) | ast::Expr::Lambda(_) | ast::Expr::Starred(_) => {
                 return Ok(None);
