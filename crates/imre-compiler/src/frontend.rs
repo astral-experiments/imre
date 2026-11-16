@@ -1962,7 +1962,9 @@ fn lower_graph(
             }
             continue;
         }
-        if needs_registered_entry || (unavailable.is_some() && body.facts.source.is_none()) {
+        if needs_registered_entry
+            || (discard_unplaced || unavailable.is_some()) && body.facts.source.is_none()
+        {
             // After a fixed layout fails, only bodies with a source frame can be placed.
             // Later definitions still receive the checked transfer and wrapper facts above.
             continue;
