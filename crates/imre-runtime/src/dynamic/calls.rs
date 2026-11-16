@@ -267,6 +267,12 @@ fn method_arguments(receiver: Id, args: Cow<'_, [Id]>) -> Result<Vec<Id>> {
 
 pub(super) enum RegisteredCall {
     Returned(Id),
+    /// The caller's marked operands stay rooted while native dispatch can reenter Python.
+    Other {
+        callable: Id,
+        args: Vec<Id>,
+        kwargs: Box<[(String, Id)]>,
+    },
     Native(RegisteredFrame),
     /// The entered frame roots bare code and its namespace through the callback.
     Code {
@@ -299,6 +305,14 @@ impl RegisteredCall {
     pub(super) unsafe fn run(self, context: *mut Context) -> Result<Id> {
         match self {
             Self::Returned(value) => Ok(value),
+            Self::Other {
+                callable,
+                args,
+                kwargs,
+            } => {
+                // SAFETY: dispatch runs on the execution that prepared and rooted the operands.
+                unsafe { &mut *context }.call_other(callable, args, kwargs.into_vec())
+            }
             Self::InContext(call) => {
                 // SAFETY: the prepared callback and the entered context belong to this execution.
                 let result = unsafe { call.run(context) };
@@ -8775,8 +8789,11 @@ impl Context {
                 _ => break,
             }
         }
-        self.call_other(callable, owned_ids(args)?, kwargs)
-            .map(RegisteredCall::Returned)
+        Ok(RegisteredCall::Other {
+            callable,
+            args: owned_ids(args)?,
+            kwargs: kwargs.into_boxed_slice(),
+        })
     }
 
     /// Preserve packed keyword objects for variadic Python functions when names can be matched directly.
@@ -9360,7 +9377,14 @@ impl Context {
                     }
                 }
                 positional.extend(supplied);
-                let mut merged = self.keyword_args(keywords)?;
+                let mut merged = Vec::new();
+                for entry in self.keyword_items(keywords)? {
+                    let entry = entry?;
+                    merged
+                        .try_reserve(1)
+                        .map_err(|_| Error::new("MemoryError", ""))?;
+                    merged.push(entry);
+                }
                 let bound_keyword_count = merged.len();
                 if kwargs.len() >= 8 && merged.len().saturating_add(kwargs.len()) >= 64 {
                     stdlib::functools::merge_wide_keywords(&mut merged, kwargs)?;
@@ -10908,6 +10932,20 @@ impl Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_method_runs_after_registered_call_preparation() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let list = ctx.alloc(Value::List(Vec::new()));
+        let append = ctx.lookup_attr(list, "append").unwrap();
+        let call = ctx
+            .prepare_call(append, vec![list].into(), Vec::new())
+            .unwrap();
+        assert!(matches!(ctx.heap.get(list), Value::List(items) if items.is_empty()));
+        // SAFETY: the preparing execution still owns the context and all its operands.
+        assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
+        assert!(matches!(ctx.heap.get(list), Value::List(items) if items == &[list]));
+    }
 
     #[test]
     fn empty_exception_namespaces_are_unique_and_reused() {

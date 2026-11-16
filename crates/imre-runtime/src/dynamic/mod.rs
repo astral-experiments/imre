@@ -777,18 +777,30 @@ impl Context {
     }
 
     fn keyword_args(&self, dict: Id) -> Result<Vec<(String, Id)>> {
+        let entries = self.keyword_items(dict)?;
+        let mut kwargs = Vec::new();
+        kwargs
+            .try_reserve_exact(entries.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        for entry in entries {
+            kwargs.push(entry?);
+        }
+        Ok(kwargs)
+    }
+
+    fn keyword_items(
+        &self,
+        dict: Id,
+    ) -> Result<impl ExactSizeIterator<Item = Result<(String, Id)>>> {
         let Value::Dict(entries) = self.heap.get(dict) else {
             return Err(Error::new("TypeError", "expected keyword dict"));
         };
-        entries
-            .iter()
-            .map(|&(key, value)| {
-                let name = self
-                    .str_value(key)
-                    .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
-                Ok((name.to_owned(), value))
-            })
-            .collect()
+        Ok(entries.iter().map(|&(key, value)| {
+            let name = self
+                .str_value(key)
+                .map_err(|_| Error::new("TypeError", "keywords must be strings"))?;
+            Ok((copy_label(name)?, value))
+        }))
     }
 
     /// The immutable text backing an exact string or a Python subclass of str.
