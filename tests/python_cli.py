@@ -4879,6 +4879,7 @@ for name in ("md4", "ripemd160"):
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
         compare("-IB", fixtures / "boxed_unittest_patch.py")
+        compare_module(fixtures / "unittest_mock_patch_dict_clear.py")
         compare("-IB", fixtures / "unittest_mock_recording_order.py")
         call_args = fixtures / "unittest_mock_call_args.py"
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))

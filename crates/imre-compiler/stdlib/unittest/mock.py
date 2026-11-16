@@ -12,13 +12,22 @@ def _format_list(parts: list[str], pretty: bool) -> str:
     return "[" + entries + "]"
 
 
-def _change_mapping(target: dict[str, str], values: dict[str, str] | None, clear: bool) -> None:
+def _clear_dict(in_dict: dict[str, str]) -> None:
+    try:
+        in_dict.clear()
+    except AttributeError:
+        for key in list(in_dict):
+            del in_dict[key]
+
+
+def _change_mapping(mapping: dict[str, str], values: dict[str, str], clear: bool) -> None:
     if clear:
-        target.clear()
-    if values is None:
-        raise TypeError("'NoneType' object is not iterable")
-    for key in values:
-        target[key] = values[key]
+        _clear_dict(mapping)
+    try:
+        mapping.update(values)
+    except AttributeError:
+        for key in values:
+            mapping[key] = values[key]
 
 
 class _DictionaryPatch:
@@ -39,7 +48,12 @@ class _DictionaryPatch:
         return self.in_dict
 
     def _change(self, values: dict[str, str] | None, clear: bool) -> None:
-        _change_mapping(self.in_dict, values, clear)
+        mapping = self.in_dict
+        if values is None:
+            if clear:
+                _clear_dict(mapping)
+            raise TypeError("'NoneType' object is not iterable")
+        _change_mapping(mapping, values, clear)
 
     def _exit(self) -> bool:
         if self._original is not None:
