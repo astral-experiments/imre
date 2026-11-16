@@ -204,16 +204,21 @@ pub(super) fn units<'a>(
                 let parser = indexed.as_deref().map(Cow::Borrowed).or(syntax);
                 let module = ParsedModule::with_parser(path, text, parser)?;
                 let checked_source = file.map(|file| file.module(registrations.modules));
-                let initializer = module_id.zip(checked_source).and_then(|(id, source)| {
+                let initializer = file.zip(checked_source).and_then(|(file, source)| {
+                    let id = file.id();
+                    let owner = match origin {
+                        ModuleOrigin::Program(_) => {
+                            module_id == Some(id) && source.is_program_source()
+                        }
+                        // Only imported initializers were checked with their provider globals.
+                        ModuleOrigin::Provider(_) => entry.is_none_or(|(root, _)| root != id),
+                        _ => false,
+                    };
                     let winner = match entry {
                         Some((root, main)) if root == id => main == Some(unit),
                         _ => source.name == *name,
                     };
-                    if winner
-                        && matches!(origin, ModuleOrigin::Program(_))
-                        && source.is_program_source()
-                        && std::ptr::eq(source, &registrations.modules[id])
-                    {
+                    if owner && winner {
                         initializers.remove(&id)
                     } else {
                         None
