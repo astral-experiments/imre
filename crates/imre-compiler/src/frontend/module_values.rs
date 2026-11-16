@@ -722,7 +722,8 @@ impl Initialization {
             && output.is_some()
             && checker.graph.registered_startup
             && checker.module != checker.graph.entry
-            && module.is_program_source())
+            && !module.bundled
+            && module.archive.is_none())
         .then(|| module.executable_suffix())
         .flatten();
         for index in range {
