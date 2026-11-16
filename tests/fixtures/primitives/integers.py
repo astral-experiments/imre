@@ -17,6 +17,15 @@ def divided(left: int, right: int) -> int:
     return quotient + remainder
 
 
+def shifts(value: bool | int, count: int | bool) -> None:
+    print(value << count, value >> count)
+
+
+print(1 >> True)
+shifts(True, False)
+shifts(-(1 << 128), True)
+
+
 values = [
     -(1 << 130) - 37,
     -(1 << 63),

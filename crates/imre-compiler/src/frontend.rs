@@ -4714,15 +4714,15 @@ impl<'a> Checker<'a> {
         self.field_value(attribute, receiver)
     }
 
-    /// Obtain the exact integer payload for a checked integer method.
-    fn int_method_receiver(&self, value: Expr, node: &impl Ranged) -> Result<Expr, String> {
+    /// Read the integer value of a bool or int without changing its stored type.
+    fn integer_value(&self, value: Expr) -> Expr {
         if self.types.is_bool_or_int(value.ty) {
-            Ok(Expr {
+            Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::UnionProject, vec![value]),
-            })
+            }
         } else {
-            self.coerce(powers::integer(value), Type::Int, node)
+            powers::integer(value)
         }
     }
 
@@ -7702,7 +7702,7 @@ impl<'a> Checker<'a> {
                             "augmented items require int or float storage",
                         ));
                     }
-                    let value = Self::integer_addend(assign.op, value, element);
+                    let value = self.integer_operand(assign.op, value, element);
                     let (op, result) = self.binary_op(assign.op, element, value.ty, statement)?;
                     self.expect(element, result, statement)?;
                     Some(Statement::AugmentItem(
@@ -7757,7 +7757,7 @@ impl<'a> Checker<'a> {
                         ));
                     }
                     let value = self.expr(&assign.value)?;
-                    let value = Self::integer_addend(assign.op, value, ty);
+                    let value = self.integer_operand(assign.op, value, ty);
                     let (op, result) = self.binary_op(assign.op, ty, value.ty, statement)?;
                     self.expect(ty, result, statement)?;
                     // AugmentField keeps its old value implicit. Expose the
@@ -9234,8 +9234,10 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
-    fn integer_addend(op: ast::Operator, value: Expr, other: Type) -> Expr {
-        if matches!(op, ast::Operator::Add | ast::Operator::Sub)
+    fn integer_operand(&self, op: ast::Operator, value: Expr, other: Type) -> Expr {
+        if matches!(op, ast::Operator::LShift | ast::Operator::RShift) {
+            self.integer_value(value)
+        } else if matches!(op, ast::Operator::Add | ast::Operator::Sub)
             && matches!(other, Type::Int | Type::Bool)
         {
             powers::integer(value)
@@ -9461,8 +9463,8 @@ impl<'a> Checker<'a> {
                 ),
             });
         }
-        let left = Self::integer_addend(op, left, right.ty);
-        let right = Self::integer_addend(op, right, left.ty);
+        let left = self.integer_operand(op, left, right.ty);
+        let right = self.integer_operand(op, right, left.ty);
         let (op, ty) = self.binary_op(op, left.ty, right.ty, node)?;
         let value = Expr {
             ty,
@@ -14534,7 +14536,7 @@ impl<'a> Checker<'a> {
                     ));
                 }
                 let value = self.expr(arg)?;
-                let receiver = self.int_method_receiver(value, arg)?;
+                let receiver = self.coerce(self.integer_value(value), Type::Int, arg)?;
                 return Ok(Expr {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::IntHash, vec![receiver]),
@@ -14809,7 +14811,7 @@ impl<'a> Checker<'a> {
                 && (matches!(receiver.ty, Type::Int | Type::Bool)
                     || self.types.is_bool_or_int(receiver.ty))
             {
-                let receiver = self.int_method_receiver(receiver, attribute)?;
+                let receiver = self.integer_value(receiver);
                 if method != "to_bytes" {
                     let builtin = match method {
                         "__hash__" => Builtin::IntHash,
@@ -15832,7 +15834,7 @@ impl<'a> Checker<'a> {
                     }]
                 }
                 ty if ty == Type::Bool || self.types.is_bool_or_int(ty) => {
-                    vec![self.int_method_receiver(value.clone(), call)?]
+                    vec![self.integer_value(value.clone())]
                 }
                 _ => args,
             };
@@ -15899,7 +15901,7 @@ impl<'a> Checker<'a> {
         }
         if name == "int" && args.len() == 1 && matches!(args[0].ty, Type::Union(_)) {
             if self.types.is_bool_or_int(args[0].ty) {
-                return self.int_method_receiver(args[0].clone(), call);
+                return Ok(self.integer_value(args.into_iter().next().unwrap()));
             }
             if let Some(value) = self.int_enum_union_value(args[0].clone()) {
                 return Ok(value);
