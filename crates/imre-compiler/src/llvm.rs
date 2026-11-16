@@ -7390,8 +7390,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
-            Builtin::FloatLog1p => self.call("imre_float_log1p", Type::Float, &[&args[0].value]),
+            Builtin::FloatUnary(symbol) => self.call(symbol, Type::Float, &[&args[0].value]),
             Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
             Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
             Builtin::FloatLog2 => Value {
@@ -10482,7 +10481,13 @@ declare double @atan(double)
 declare double @imre_float_log1p(double)
 declare double @imre_float_log10(double)
 declare double @imre_int_log10(i64)
+declare double @cbrt(double)
+declare double @erf(double)
 declare double @erfc(double)
+declare double @imre_float_exp2(double)
+declare double @imre_float_expm1(double)
+declare double @imre_float_gamma(double)
+declare double @imre_float_lgamma(double)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
 declare double @imre_bytes_float(ptr)

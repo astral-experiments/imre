@@ -72,6 +72,20 @@ pub(super) enum ReverseSequence {
     Deque,
 }
 
+/// Select the scalar operation for a source-resolved math export.
+pub(super) fn unary_math_operation(member: &'static str) -> Option<Builtin> {
+    Some(match member {
+        "fabs" => Builtin::Abs,
+        "cbrt" | "erf" => Builtin::FloatUnary(member),
+        "exp2" => Builtin::FloatUnary("imre_float_exp2"),
+        "expm1" => Builtin::FloatUnary("imre_float_expm1"),
+        "gamma" => Builtin::FloatUnary("imre_float_gamma"),
+        "lgamma" => Builtin::FloatUnary("imre_float_lgamma"),
+        "log1p" => Builtin::FloatUnary("imre_float_log1p"),
+        _ => return None,
+    })
+}
+
 /// Lower a unary math operation when the argument has a native numeric representation.
 pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
     let (builtin, conversion, ty) = match (builtin, value.ty) {
