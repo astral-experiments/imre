@@ -1,5 +1,7 @@
 """UUID values constructed from hexadecimal text, bytes, integers, or operating-system randomness."""
 
+from _imre_uuid import _format_uuid, _swap_fields
+
 RESERVED_NCS = "reserved for NCS compatibility"
 RFC_4122 = "specified in RFC 4122"
 RESERVED_MICROSOFT = "reserved for Microsoft compatibility"
@@ -11,11 +13,6 @@ def _from_hex(text: str) -> int:
     if len(digits) != 32:
         raise ValueError("badly formed hexadecimal UUID string")
     return int(digits, 16)
-
-
-def _swap_fields(data: bytes) -> bytes:
-    # Little-endian UUIDs reverse the first three fields, leaving the last eight bytes intact.
-    return data[3::-1] + data[5:3:-1] + data[7:5:-1] + data[8:]
 
 
 def _value(
@@ -32,7 +29,8 @@ def _value(
     if little is not None:
         if len(little) != 16:
             raise ValueError("bytes_le is not a 16-char string")
-        return int.from_bytes(_swap_fields(little))
+        swapped: bytes = _swap_fields(little)
+        return int.from_bytes(swapped)
     assert integer is not None
     if isinstance(integer, bool):
         return int(integer)
@@ -94,8 +92,7 @@ class UUID(_UUIDValue):
         return None
 
     def __str__(self) -> str:
-        text = self.hex
-        return "-".join((text[:8], text[8:12], text[12:16], text[16:20], text[20:]))
+        return _format_uuid(self.hex)
 
     def __repr__(self) -> str:
         return "UUID('" + str(self) + "')"
