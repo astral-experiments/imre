@@ -139,7 +139,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("main.py");
         let source = r#"from __future__ import annotations
-import json
 import urllib.request
 request = urllib.request.Request("data:,ok")
 class Crate:
@@ -147,7 +146,7 @@ class Crate:
 def url_from(request) -> str:
     return request.full_url
 def crates(url: str) -> list[Crate]:
-    items: list[int] = [1, json.loads("true")]
+    items: list[int] = [1]
     return VALUE
 print(crates(url_from(request)))
 "#;
@@ -174,6 +173,34 @@ print(crates(url_from(request)))
                 assert_eq!(lowered.iter().filter(|name| *name == "crates").count(), 1);
             }
         }
+    }
+
+    #[test]
+    fn a_dynamic_list_item_keeps_its_emitting_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(
+            &path,
+            r#"import json
+import urllib.request
+
+request = urllib.request.Request("data:,ok")
+
+def url_from(request) -> str:
+    return request.full_url
+
+def numbers(url: str) -> list[int]:
+    items: list[int] = [1, json.loads("true")]
+    return items
+
+print(numbers(url_from(request)))
+"#,
+        )
+        .unwrap();
+
+        let (result, lowered) = caller_cache::observe_lowerings(|| crate::check_file(&path, None));
+        result.unwrap();
+        assert_eq!(lowered.iter().filter(|name| *name == "numbers").count(), 1);
     }
 
     #[test]
