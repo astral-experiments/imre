@@ -584,6 +584,47 @@ pub(super) fn lower_definition(
         })
 }
 
+/// Check an explicitly declared result in the Python frame selected for this definition.
+pub(super) fn check_live_result(
+    original: &Checker<'_>,
+    definition: &ast::StmtFunctionDef,
+    signature: &Signature,
+    inference: &inference::Inference,
+) -> Result<Option<RegisteredFunction>, String> {
+    let graph = original.graph;
+    let module = original.module;
+    let helpers = Helpers::new(inference.len());
+    let values = ModuleValues::default();
+    let mut checker = Checker::new(
+        graph,
+        module,
+        original.functions,
+        original.classes,
+        original.types,
+        &helpers,
+        &values,
+    );
+    checker.nonreturning_functions = original.nonreturning_functions;
+    checker.registered_result_contract = Some(signature.returns);
+    checker.registered_local_start = Some(signature.params.len());
+    let mut signature = signature.clone();
+    signature.returns = Type::PythonObject;
+    let mut failure = None;
+    let frame = graph.try_registered_body(module, || {
+        match checked_definition(checker, definition, &signature) {
+            Ok(frame) => frame.map(|(_, frame)| frame),
+            Err(error) => {
+                failure = Some(error);
+                None
+            }
+        }
+    });
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+    Ok(frame)
+}
+
 /// Which checker owns the function's result contract.
 pub(super) enum ReturnCheck<'a> {
     Declared,
@@ -1102,6 +1143,7 @@ pub(super) fn capture(
             Some(PreparedBody::Fixed(body)) => (Some(body), HashMap::new(), None),
             Some(PreparedBody::Attributes(attributes)) => (None, attributes, None),
             Some(PreparedBody::Python(frame)) => (None, HashMap::new(), Some(frame)),
+            Some(PreparedBody::Rejected) => continue,
             None => (None, HashMap::new(), None),
         };
         let placed = if prepared.is_some() || check_method {
@@ -6524,6 +6566,53 @@ publish(5, callback)
                 _ => panic!("expected a checked field store"),
             });
         assert_eq!(fields.collect::<Vec<_>>(), ["name", "fail"]);
+    }
+
+    #[test]
+    fn a_live_context_checks_its_declared_function_once() {
+        let text = r#"import urllib.request
+
+def invoke(fn):
+    fn()
+
+def available(url: str) -> bool:
+    req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req) as reply:
+            if reply.status == 200:
+                return True
+            raise ValueError("bad status")
+    except OSError:
+        return False
+"#;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(
+            lowered.iter().filter(|name| *name == "available").count(),
+            1
+        );
+        let start = TextSize::try_from(text.find("def available").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&start].function;
+        assert_eq!(frame.returns, Type::PythonObject);
+        assert!(matches!(frame.body.last(), Some(Statement::Try { .. })));
+
+        let invalid = text.replace(
+            "if reply.status",
+            "status: int = True\n            if reply.status",
+        );
+        std::fs::write(&path, invalid).unwrap();
+        let error = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            error.ends_with(
+                ":10:27: Imre: expected int, got bool; annotations are enforced contracts"
+            ),
+            "{error}"
+        );
     }
 
     #[test]

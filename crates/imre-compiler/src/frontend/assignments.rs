@@ -93,6 +93,8 @@ impl BooleanExits {
 #[derive(Clone, Default)]
 pub(super) struct Assigned {
     pub(super) has_frame_writes: bool,
+    /// Every incoming normal path has suppressed an exception from a live with suite.
+    pub(super) suppressed_exit: bool,
     alternatives: bool,
     words: rpds::HashTrieMap<usize, u64>,
     /// A value keeps its storage origin only when every incoming write agrees.
@@ -280,6 +282,7 @@ impl Assigned {
     }
 
     fn intersect(&mut self, other: &Self) {
+        self.suppressed_exit &= other.suppressed_exit;
         self.merge_type_sources(other, false);
         if !self.words.ptr_eq(&other.words) {
             for (&index, &bits) in &self.words.clone() {
@@ -292,6 +295,7 @@ impl Assigned {
     }
 
     pub(super) fn extend(&mut self, other: &Self) {
+        self.suppressed_exit |= other.suppressed_exit;
         self.merge_type_sources(other, true);
         for (&index, &bits) in &other.words {
             let old = self.words.get(&index).copied().unwrap_or(0);
