@@ -101,12 +101,7 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, **options):
     if "test_finder" in options:
         raise TypeError("DocTestSuite() got an unexpected keyword argument 'test_finder'")
     from _imre_importlib import bind_doctest
-    if module is None:
-        module = sys.modules[sys._getframemodulename(1)]
-    elif isinstance(module, str):
-        module = __import__(module, fromlist=["*"])
-    elif not isinstance(module, types.ModuleType):
-        raise TypeError("Expected a module, string, or None")
+    module = _normalize_module(module)
     namespace = (module.__dict__ if globs is None else globs).copy()
     if extraglobs is not None:
         namespace.update(extraglobs)
@@ -186,14 +181,14 @@ class DocFileCase(DocTestCase):
             ) from None
 
 
-def _docfile_package(package):
-    if package is None:
+def _normalize_module(module):
+    if module is None:
         return sys.modules[sys._getframemodulename(2)]
-    if isinstance(package, str):
-        return __import__(package, fromlist=["*"])
-    if not isinstance(package, types.ModuleType):
+    if isinstance(module, str):
+        return __import__(module, fromlist=["*"])
+    if not isinstance(module, types.ModuleType):
         raise TypeError("Expected a module, string, or None")
-    return package
+    return module
 
 
 def _docfile_path(package, path):
@@ -215,7 +210,7 @@ def DocFileTest(path, module_relative=True, package=None, globs=None,
                 parser=DocTestParser(), encoding=None, **options):
     get_data = None
     if module_relative:
-        package = _docfile_package(package)
+        package = _normalize_module(package)
         path = _docfile_path(package, path)
         loader = getattr(package, "__loader__", None)
         if loader is None:
@@ -236,7 +231,7 @@ def DocFileTest(path, module_relative=True, package=None, globs=None,
 
 def DocFileSuite(*paths, **options):
     if options.get("module_relative", True):
-        options["package"] = _docfile_package(options.get("package"))
+        options["package"] = _normalize_module(options.get("package"))
     suite = _DocTestSuite()
     for path in paths:
         suite.addTest(DocFileTest(path, **options))
