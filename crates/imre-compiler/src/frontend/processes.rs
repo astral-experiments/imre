@@ -1660,11 +1660,11 @@ impl Checker<'_> {
 
     /// Handlers share the Exception type; the runtime guards each fixed payload
     /// projection and raises AttributeError for other exception categories.
-    pub(super) fn process_error_attribute(
+    pub(super) fn process_error_field(
         &self,
         receiver: &Expr,
         attribute: &ast::ExprAttribute,
-    ) -> Option<Expr> {
+    ) -> Option<(Type, Builtin)> {
         let local = if let ExprKind::Local(slot) = receiver.kind {
             self.caught_exception(slot).map(|caught| &caught.fields)
         } else {
@@ -1696,19 +1696,15 @@ impl Checker<'_> {
             ) => error_stream(self.types, *capture, field != 3, timeout),
             _ => error_field_type(self.graph, self.types, field, timeout)?,
         };
-        Some(operation(
-            ProcessOperation::ErrorField(field | if timeout && field >= 2 { 16 } else { 0 }),
-            ty,
-            vec![receiver.clone()],
-        ))
+        let field = field | if timeout && field >= 2 { 16 } else { 0 };
+        Some((ty, Builtin::process(ProcessOperation::ErrorField(field))))
     }
 
     /// A proved timeout exposes bytes snapshots without reusing text projections.
-    pub(super) fn timeout_error_attribute(
+    pub(super) fn timeout_error_field(
         &self,
-        receiver: &Expr,
         attribute: &ast::ExprAttribute,
-    ) -> Result<Option<Expr>, String> {
+    ) -> Result<Option<(Type, Builtin)>, String> {
         let (field, ty) = match attribute.attr.as_str() {
             "cmd" => {
                 // The narrowed exception local may be wrapped in a view.
@@ -1744,10 +1740,9 @@ impl Checker<'_> {
             "output" => (4, self.types.optional(Type::Bytes)),
             _ => return Ok(None),
         };
-        Ok(Some(operation(
-            ProcessOperation::TimeoutField(field),
+        Ok(Some((
             ty,
-            vec![receiver.clone()],
+            Builtin::process(ProcessOperation::TimeoutField(field)),
         )))
     }
 }
