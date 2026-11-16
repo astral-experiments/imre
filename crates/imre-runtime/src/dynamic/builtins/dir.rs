@@ -273,7 +273,13 @@ fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
     if matches!(ctx.heap.get(class), Value::Native(name) if name != "object" && (super::is_builtin_type(name) || matches!(name.as_str(), "function" | "method")))
     {
         let mut names = BTreeSet::new();
-        class_names(ctx, class, &mut names)?;
+        if ctx.enum_scopes.contains_key(&class) {
+            for base in ctx.base_lineage(class, true) {
+                class_names(ctx, base, &mut names)?;
+            }
+        } else {
+            class_names(ctx, class, &mut names)?;
+        }
         for name in names {
             let key = ctx.text(name);
             ctx.put_item(dictionary, key, NONE)?;
@@ -665,6 +671,9 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
             } else {
                 names.extend(["__dict__".to_owned(), "__weakref__".to_owned()]);
             }
+        }
+        Value::Native(_) if let Some(&scope) = ctx.enum_scopes.get(&class) => {
+            names.extend(ctx.scope_bindings(scope).map(|(name, _)| name.to_owned()));
         }
         Value::Native(owner)
             if ctx.native_type_dicts.get(&class).is_some()

@@ -4,6 +4,35 @@ import sys as _sys
 from enum import Enum, Flag as _Flag, IntEnum as _IntEnum, IntFlag as _IntFlag, StrEnum as _StrEnum
 
 
+def __dir__(self):
+    """Return public methods and other interesting attributes of an enum member."""
+    # Native Enum exposes name and value as member attributes.
+    names = {"__class__", "__doc__", "__eq__", "__hash__", "__module__", "name", "value"}
+    if self.__class__._member_type_ is not object:
+        names.update(object.__dir__(self))
+    members = self._member_map_
+    for name in getattr(self, "__dict__", ()):
+        if name[0] != "_" and name not in members:
+            names.add(name)
+    for cls in self.__class__.mro():
+        for name, attr in cls.__dict__.items():
+            if name[0] == "_":
+                continue
+            if name not in members:
+                names.add(name)
+            elif isinstance(attr, property):
+                # The inherited getter remains visible alongside the class member.
+                if attr.fget is not None:
+                    names.add(name)
+                else:
+                    names.discard(name)
+    return sorted(names)
+
+
+Enum.__dir__ = __dir__
+del __dir__
+
+
 def _iter_bits_lsb(num):
     # num must be a positive integer
     original = num
