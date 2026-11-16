@@ -1577,6 +1577,23 @@ def getgeneratorstate(generator):
     return GEN_CREATED
 
 
+def getgeneratorlocals(generator):
+    """
+    Get the mapping of generator local variables to their current values.
+
+    A dict is returned, with the keys the local variable names and values the
+    bound values."""
+
+    if not isgenerator(generator):
+        raise TypeError("{!r} is not a Python generator".format(generator))
+
+    frame = getattr(generator, "gi_frame", None)
+    if frame is not None:
+        return generator.gi_frame.f_locals
+    else:
+        return {}
+
+
 CORO_CREATED = 'CORO_CREATED'
 CORO_RUNNING = 'CORO_RUNNING'
 CORO_SUSPENDED = 'CORO_SUSPENDED'
@@ -1633,6 +1650,13 @@ def formatannotation(annotation, base_module=None, *, quote_annotation_strings=T
     if isinstance(annotation, ForwardRef):
         return annotation.__forward_arg__
     return repr(annotation)
+
+
+def formatannotationrelativeto(object):
+    module = getattr(object, '__module__', None)
+    def _formatannotation(annotation):
+        return formatannotation(annotation, module)
+    return _formatannotation
 
 
 Arguments = namedtuple('Arguments', 'args, varargs, varkw')
