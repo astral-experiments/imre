@@ -53,6 +53,23 @@ impl ModuleLauncher {
         }
     }
 
+    /// Importlib identifies a compilation by its registered initializer address.
+    pub(crate) fn registration_entry(&mut self, unit: usize, body: &str) -> String {
+        let entry = format!("@registration{unit}");
+        super::body::write_definition(
+            &mut self.output.functions,
+            format_args!("internal i64 {entry}(ptr %ctx, i64 %scope)"),
+            |out| {
+                writeln!(
+                    out,
+                    "  %result = tail call i64 {body}(ptr %ctx, i64 %scope)\n  ret i64 %result"
+                )
+                .unwrap()
+            },
+        );
+        entry
+    }
+
     pub(crate) fn external(&mut self, symbol: &str, suspends: bool) -> String {
         self.suspending_provider |= suspends;
         if self.declarations.insert(symbol.to_owned()) {

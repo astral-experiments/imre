@@ -22,11 +22,15 @@ use std::path::Path;
 pub(crate) struct SourcePositions<'a> {
     source: SourceFile<'a>,
     names: Option<&'a imre_ast::Names>,
-    pub(crate) file: &'a str,
+    file: Option<&'a str>,
 }
 
 impl<'a> SourcePositions<'a> {
     pub(crate) fn new(path: &'a Path, text: &'a str, file: &'a str) -> Self {
+        Self::for_code(path, text, Some(file))
+    }
+
+    pub(crate) fn for_code(path: &'a Path, text: &'a str, file: Option<&'a str>) -> Self {
         Self {
             source: SourceFile::new(path, text),
             names: None,
@@ -912,16 +916,21 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         let (ptr, count) = self.live_handles(trailing);
         let line = self.positions.line(range.start());
         self.position = SourcePosition::statement(line);
-        let file = self.positions.file;
-        if count == 0 && self.caught.is_empty() {
-            self.line(&format!(
+        let caught = self.caught.last().map_or("0", String::as_str);
+        match self.positions.file {
+            Some(file) if count == 0 && self.caught.is_empty() => self.line(&format!(
                 "call void @imre_dyn_statement_at(ptr %ctx, ptr {file}, i32 {line})"
-            ));
-        } else {
-            let caught = self.caught.last().map_or("0", String::as_str);
-            self.line(&format!(
+            )),
+            Some(file) => self.line(&format!(
                 "call void @imre_dyn_statement_with_exception(ptr %ctx, ptr {ptr}, i64 {count}, ptr {file}, i32 {line}, i64 {caught})"
-            ));
+            )),
+            None => {
+                self.output.declare(|decl| &mut decl.frame_statement,
+                    "declare void @imre_dyn_frame_statement(ptr, ptr, i64, i32, i64)\n");
+                self.line(&format!(
+                    "call void @imre_dyn_frame_statement(ptr %ctx, ptr {ptr}, i64 {count}, i32 {line}, i64 {caught})"
+                ));
+            }
         }
         self.check_error();
     }

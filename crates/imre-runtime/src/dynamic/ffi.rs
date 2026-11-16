@@ -3701,6 +3701,19 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_at(
     unsafe { imre_dyn_statement_with_exception(ctx, std::ptr::null(), 0, file, line, NONE) };
 }
 
+/// The loaded Code object owns the filename when registrations share native instructions.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn imre_dyn_frame_statement(
+    ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    line: u32,
+    caught: Id,
+) {
+    // SAFETY: the caller supplies the same frame and live handles as an ordinary checkpoint.
+    unsafe { imre_dyn_statement_with_exception(ctx, live, len, std::ptr::null(), line, caught) };
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
     ctx: *mut Context,
@@ -3712,7 +3725,7 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    // SAFETY: emitted filenames are static native strings for the life of the executable.
+    // SAFETY: file is null for the active code or points to a static native filename.
     if let Err(error) = unsafe { ctx.native_statement(live, file, line, caught) } {
         finish(ctx, Err(error));
     }
@@ -3727,8 +3740,19 @@ impl Context {
         line: u32,
         caught: Id,
     ) -> Result<()> {
-        // SAFETY: both the emitted ABI and native providers pass a static native filename.
-        let file = unsafe { self.native_filename_label(file) }?;
+        let file = if file.is_null() {
+            // A shared initializer executes under the Code of this particular registration.
+            match self.heap.current_location() {
+                Some(location) => location.file.clone(),
+                None => {
+                    let filename = self.code_object(self.heap.current_code()).filename;
+                    self.filename_display(filename)?.as_ref().into()
+                }
+            }
+        } else {
+            // SAFETY: a supplied filename is a static native string.
+            unsafe { self.native_filename_label(file) }?
+        };
         self.checkpoint(
             live,
             value::Location {

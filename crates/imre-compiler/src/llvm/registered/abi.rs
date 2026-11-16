@@ -75,6 +75,7 @@ declare void @llvm.memcpy.p0.p0.i64(ptr noalias nocapture writeonly, ptr noalias
 
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Declarations {
+    pub(super) frame_statement: bool,
     pub(crate) declared_suspension: bool,
     pub(crate) declared_statement_line: bool,
     pub(crate) declared_definition_position: bool,
