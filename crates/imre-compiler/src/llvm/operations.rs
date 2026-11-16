@@ -569,6 +569,18 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         )
     }
 
+    /// Emit the exact operation for native operands or a Python frame's guarded words.
+    pub(super) fn integer_word(&mut self, op: Binary, left: &str, right: &str) -> Value {
+        let value = self.body().integer_arithmetic(op, left, right, false);
+        if let Entry::Native(emitter) = &mut self.0 {
+            if !op.is_plain_arithmetic() {
+                emitter.check_error();
+            }
+            return emitter.owned(value);
+        }
+        value
+    }
+
     fn integer_arithmetic(
         &mut self,
         op: Binary,
@@ -580,8 +592,8 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
     ) -> CheckedValue {
         let (a, check_a) = self.integer_operand(left);
         let (b, check_b) = self.integer_operand(right);
-        if let Entry::Native(emitter) = &mut self.0 {
-            return CheckedValue::owned(emitter.integer_arithmetic(op, &a, &b));
+        if matches!(self.0, Entry::Native(_)) {
+            return CheckedValue::owned(self.integer_word(op, &a, &b));
         }
         let out = self.body();
         // A declined projection is zero. Integer zero is the tagged word one.
@@ -597,10 +609,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
             _ => out.instruction(format!("icmp ne i64 {b}, 0")),
         };
-        let checks_right_value = matches!(
-            op,
-            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
-        );
+        let checks_right_value = !op.is_plain_arithmetic();
         let check_right = check_b || checks_right_value;
         let guard = match (check_a, check_right) {
             (false, false) => None,
@@ -613,7 +622,7 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
             }
         };
         let exact = |code: &mut Self| {
-            let value = code.body().integer_arithmetic(op, &a, &b, false);
+            let value = code.integer_word(op, &a, &b);
             CheckedValue::frame_integer(value, code.python(), usage, permanent)
         };
         let Some(guard) = guard else {
