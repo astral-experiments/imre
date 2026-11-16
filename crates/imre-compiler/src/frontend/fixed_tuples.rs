@@ -29,33 +29,25 @@ impl Checker<'_> {
         fields: &[Type],
         comparison: &ast::ExprCompare,
     ) -> Result<Expr, String> {
-        let key = if let Some(&ty) = fields.first() {
-            if !matches!(ty, Type::Str | Type::Int | Type::Bool | Type::Bytes)
-                || !fields.iter().all(|&field| field == ty)
-            {
-                if (key.ty == Type::PythonObject || fields.contains(&Type::PythonObject))
-                    && (self.placement_only
-                        || self
-                            .unrepresented
-                            .borrow()
-                            .as_ref()
-                            .is_some_and(Failure::is_object))
-                {
-                    return Ok(registered::values::comparison(
-                        comparison,
-                        vec![key, tuple],
-                        None,
-                    ));
-                }
-                return Err(error(
-                    self.source,
-                    comparison,
-                    "tuple membership requires homogeneous string, bytes, integer or boolean fields",
-                ));
-            }
-            self.coerce(key, ty, &comparison.operands[0])?
-        } else {
+        let scalar = match key.ty {
+            Type::StrLiteral(_) => Type::Str,
+            ty => ty,
+        };
+        if !fields.is_empty()
+            && (!matches!(scalar, Type::Str | Type::Int | Type::Bool | Type::Bytes)
+                || fields.iter().any(|&field| field != scalar))
+        {
+            self.require_registered_operation(comparison)?;
+            return Ok(registered::values::comparison(
+                comparison,
+                vec![key, tuple],
+                None,
+            ));
+        }
+        let key = if key.ty == scalar || fields.is_empty() {
             key
+        } else {
+            literals::view(key, scalar)
         };
         let key_slot = self.hidden(key.ty);
         let tuple_slot = self.hidden(tuple.ty);
