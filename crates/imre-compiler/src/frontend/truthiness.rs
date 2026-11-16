@@ -26,23 +26,28 @@ impl Checker<'_> {
             return self.conditional_with(value, false, Self::condition);
         }
         if let ast::Expr::BoolOp(boolean) = expression {
-            let and = boolean.op == ast::BoolOp::And;
-            let mut values = Vec::new();
-            let mut exits = assignments::BooleanExits::default();
-            for (index, value) in boolean.values.iter().enumerate() {
-                values.push(self.condition(value)?);
-                if index + 1 < boolean.values.len() {
-                    exits.short_circuit(self, value, !and);
-                    self.apply_facts(value, and);
+            return self.with_fixed_site(boolean.range(), |cx| {
+                let and = boolean.op == ast::BoolOp::And;
+                let mut values = Vec::new();
+                let mut exits = assignments::BooleanExits::default();
+                for (index, value) in boolean.values.iter().enumerate() {
+                    values.push(cx.condition(value)?);
+                    if index + 1 < boolean.values.len() {
+                        exits.short_circuit(cx, value, !and);
+                        cx.apply_facts(value, and);
+                    }
                 }
-            }
-            exits.finish(self, true);
-            if and && let Some(test) = guarded_string_boundary(&values) {
-                return Ok(test);
-            }
-            return Ok(Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Boolean(and, values),
+                exits.finish(cx, true);
+                if and && let Some(test) = guarded_string_boundary(&values) {
+                    return Ok(test);
+                }
+                Ok(cx.expression_at(
+                    boolean.range(),
+                    Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Boolean(and, values),
+                    },
+                ))
             });
         }
         // A fixed callable signature checks the arguments. The frame tests the

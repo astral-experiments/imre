@@ -903,9 +903,10 @@ impl FixedFunctions {
             owners,
             |module| (module != graph.entry || entry) && graph.modules[module].is_program_source(),
             |module, definition, frame| {
+                // The file's selected source contracts run before these provisional frames
+                // are taken and their Python arguments are bound.
                 if module != graph.entry
-                    || matches!(frame.inputs, FrameInputs::Checked { .. })
-                        && SourceChecks::cached(graph, module, definition) != Some(false)
+                    || SourceChecks::cached(graph, module, definition) != Some(false)
                 {
                     graph.retain_lexical_function(module, definition.start(), frame);
                 }

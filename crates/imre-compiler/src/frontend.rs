@@ -5826,16 +5826,31 @@ impl<'a> Checker<'a> {
             return Ok(self.expression_at(range, value));
         }
         let index_type = self.types.optional(Type::Int);
+        // Literal slice keys can be shared by repeated evaluations. Leave those
+        // with the writer that retained their identity.
+        let live = slice.step.is_none()
+            && bounds
+                .iter()
+                .flatten()
+                .any(|bound| !bound.is_literal_expr());
         for bound in bounds {
             args.push(if let Some(bound) = bound {
                 self.expr_expected(bound, index_type)?
             } else {
+                if live && let Some(sites) = &mut self.fixed_sites {
+                    sites.leaf(slice.range(), &Expr::none());
+                }
                 Expr::absent(index_type)
             });
         }
-        Ok(Expr {
+        let value = Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::Slice, args),
+        };
+        Ok(if live {
+            self.expression_at(range, value)
+        } else {
+            value
         })
     }
 
@@ -15407,20 +15422,11 @@ impl<'a> Checker<'a> {
         field: &ast::ExprAttribute,
         value: Expr,
     ) -> Expr {
-        let bound = match &value.kind {
-            ExprKind::Builtin(Builtin::Text(_), args) => {
-                call.arguments.is_empty() && args.len() == 1
-            }
-            ExprKind::Builtin(Builtin::StringReplace | Builtin::DictGetDefault, _) => {
-                registered::values::fixed_positional_arguments(call)
-            }
-            _ => false,
-        };
-        if bound {
+        if registered::values::fixed_positional_arguments(call)
+            && let Some(sites) = &mut self.fixed_sites
+            && sites.method(call, field, &value)
+        {
             self.frame_arguments = FrameArguments::Python;
-            if let Some(sites) = &mut self.fixed_sites {
-                sites.method(call, field, &value);
-            }
         }
         value
     }
