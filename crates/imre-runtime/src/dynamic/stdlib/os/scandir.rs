@@ -158,7 +158,7 @@ fn spelling(ctx: &mut Context, bytes: Vec<u8>, as_bytes: bool) -> Result<Id> {
     if as_bytes {
         return Ok(ctx.alloc(Value::Bytes(bytes)));
     }
-    let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+    let codec = crate::sys::filesystem_codec()?;
     Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?))
 }
 

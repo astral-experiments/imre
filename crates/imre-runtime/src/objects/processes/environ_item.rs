@@ -3,7 +3,8 @@ use super::*;
 use std::borrow::Cow;
 
 pub(super) fn encoded_key(key: &Str) -> Result<Vec<u8>> {
-    super::super::Codec::encode_str(key, &crate::sys::filesystem_encoding()?, "surrogateescape")
+    super::super::StrEncoder::Registered(crate::sys::filesystem_codec()?)
+        .encode_str(key, crate::sys::FILESYSTEM_ERRORS)
 }
 
 /// # Safety
@@ -80,7 +81,7 @@ pub unsafe extern "C" fn imre_environ_index(key: *const Str) -> *const Str {
         Err(error) => return error.returning(std::ptr::null()),
     };
     let value = with_environment_value(&encoded, |value| {
-        let codec = super::super::Codec::lookup(&crate::sys::filesystem_encoding()?)?;
+        let codec = crate::sys::filesystem_codec()?;
         codec
             .decode(value, Some("surrogateescape"))
             .map(|text| StrOwner::into_raw(StrOwner::new(Str::from(text))))

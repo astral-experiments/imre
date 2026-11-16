@@ -30,9 +30,16 @@ pub(super) struct Settings {
     pub(super) codec: Codec,
     pub(super) errors: Cow<'static, str>,
     locale: Locale,
+    filesystem_codec: OnceLock<Option<Codec>>,
 }
 
 impl Settings {
+    pub(super) fn filesystem_codec(&self) -> Option<Codec> {
+        *self
+            .filesystem_codec
+            .get_or_init(|| Codec::lookup(self.filesystem_codeset()).ok())
+    }
+
     pub(super) fn filesystem_codeset(&self) -> &str {
         // Apple and Android always encode filesystem paths as UTF-8.
         if cfg!(any(target_vendor = "apple", target_os = "android")) {
@@ -102,6 +109,7 @@ pub(super) fn settings(isolated: bool, utf8: Option<bool>) -> &'static Settings 
         Settings {
             codec,
             locale,
+            filesystem_codec: OnceLock::new(),
             errors: if errors.is_empty() {
                 default_errors.into()
             } else {

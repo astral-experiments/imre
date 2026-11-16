@@ -30,7 +30,7 @@ pub(crate) use warnoptions::startup_warning_options;
 mod input;
 pub(super) use input::read_input_line;
 mod encoding_names;
-pub(crate) use encoding_names::{default_encoding, filesystem_encoding, filesystem_errors};
+pub(crate) use encoding_names::{DEFAULT_ENCODING, FILESYSTEM_ERRORS, filesystem_codec};
 
 /// Apply startup settings in CPython's validation order before any user code can run.
 #[unsafe(no_mangle)]
@@ -109,10 +109,10 @@ pub(super) fn standard_field(descriptor: u32, errors: bool) -> StrOwner {
     thread_local! {
         static FIELDS: [(StrOwner, StrOwner); 3] = {
             let settings = encoding::settings(false, None);
-            let name = settings.codec.name_owner();
+            let name = settings.codec.name();
             std::array::from_fn(|fd| {
                 let errors = if fd == 2 { "backslashreplace" } else { settings.errors.as_ref() };
-                (crate::objects::literal_string(&name), crate::objects::literal_string(errors))
+                (crate::objects::literal_string(name), crate::objects::literal_string(errors))
             })
         };
     }

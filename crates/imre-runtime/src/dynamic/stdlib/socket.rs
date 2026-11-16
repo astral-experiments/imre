@@ -573,7 +573,7 @@ fn pack_socket_name(ctx: &mut Context, name: native::SocketName) -> Result<Id> {
             if cfg!(target_os = "linux") && path.first() == Some(&0) {
                 return Ok(ctx.alloc(Value::Bytes(path)));
             }
-            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            let codec = crate::sys::filesystem_codec()?;
             Ok(ctx.text_codepoints(codec.decode_filesystem(&path)?))
         }
         native::SocketName::NoAddress => Ok(NONE),
@@ -734,7 +734,7 @@ fn host_argument(
 }
 
 fn interface_name(ctx: &mut Context, name: &std::ffi::CStr) -> Result<Id> {
-    let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+    let codec = crate::sys::filesystem_codec()?;
     Ok(ctx.text_codepoints(codec.decode_filesystem(name.to_bytes())?))
 }
 
@@ -1673,7 +1673,7 @@ pub(super) fn call(
             check_args(name, args, kwargs, 0, &[])?;
             super::audit::event(ctx, "socket.gethostname", args)?;
             let raw = native::hostname()?;
-            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            let codec = crate::sys::filesystem_codec()?;
             Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?))
         }
         "gethostbyname" => {

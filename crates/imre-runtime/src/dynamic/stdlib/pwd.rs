@@ -41,7 +41,7 @@ impl Entry {
     }
 
     fn record(self, ctx: &mut Context) -> Result<Id> {
-        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        let codec = crate::sys::filesystem_codec()?;
         let mut values = vec![NONE; 7];
         for (index, bytes) in [0, 1, 4, 5, 6].into_iter().zip(self.strings) {
             if let Some(bytes) = bytes {
