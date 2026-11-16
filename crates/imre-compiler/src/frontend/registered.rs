@@ -1288,47 +1288,50 @@ pub(super) fn in_place(op: ast::Operator, left: Expr, right: Expr) -> Expr {
     )
 }
 
-/// The implicit format argument is checked in the lazy evaluator, before its RHS.
-pub(crate) fn type_alias_body(
-    value: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-) -> Option<AnnotationCode> {
-    let mut code = AnnotationCode::prepare(value, source)?;
-    let format = operation(
-        Builtin::RegisteredAnnotationFormat,
-        Type::None,
-        vec![values::name_binding(".format")],
-    );
-    code.operand.value = Expr {
-        ty: code.operand.value.ty,
-        kind: ExprKind::Scope {
-            body: vec![Statement::Expr(format)],
-            value: Box::new(code.operand.value),
-            clear: Vec::new(),
-        },
-    };
-    Some(code)
+pub(crate) enum AnnotationExpression {
+    Decoded,
+    FormatEvaluator,
+}
+
+impl AnnotationExpression {
+    /// Compile the expression in the frame that will evaluate its annotations.
+    pub(crate) fn prepare(
+        self,
+        rhs: &ast::Expr,
+        source: values::RegisteredSource<'_>,
+    ) -> Option<Box<RegisteredFunction>> {
+        let mut scope = SourceScope::new(
+            RegisteredScope::Function { is_async: false },
+            source,
+            None,
+            false,
+        );
+        let body = match self {
+            Self::Decoded => RegisteredFunction::returning(rhs.range(), scope.operand(rhs)?),
+            Self::FormatEvaluator => {
+                let value = super::annotation_operands::checked_annotation_value(rhs, |expr| {
+                    scope.operand(expr)
+                })?;
+                let format = operation(
+                    Builtin::RegisteredAnnotationFormat,
+                    Type::None,
+                    vec![values::name_binding(".format")],
+                );
+                vec![
+                    Statement::Position(rhs.range(), None),
+                    Statement::Expr(format),
+                    Statement::Return(value),
+                ]
+            }
+        };
+        Some(Box::new(scope.finish(body)))
+    }
 }
 
 pub(crate) struct ParameterEvaluator {
     pub(crate) range: TextRange,
     reads: super::function_scope::ParameterReads,
-    pub(crate) body: Option<AnnotationCode>,
-}
-
-pub(crate) fn parameter_evaluator_body(
-    rhs: &ast::Expr,
-    source: values::RegisteredSource<'_>,
-) -> Option<AnnotationCode> {
-    if let ast::Expr::Starred(starred) = rhs {
-        type_alias_body(&starred.value, source).map(|mut code| {
-            code.operand.value = super::annotation_operands::unpack_annotation(code.operand.value);
-            code.range = rhs.range();
-            code
-        })
-    } else {
-        type_alias_body(rhs, source)
-    }
+    pub(crate) body: Option<Box<RegisteredFunction>>,
 }
 
 impl ParameterEvaluator {
@@ -1336,7 +1339,7 @@ impl ParameterEvaluator {
         Self {
             range: rhs.range(),
             reads: super::function_scope::parameter_reads(&[("", rhs)], false),
-            body: parameter_evaluator_body(rhs, source),
+            body: AnnotationExpression::FormatEvaluator.prepare(rhs, source),
         }
     }
 
@@ -1417,7 +1420,7 @@ pub(crate) struct DeferredAnnotation {
     pub(crate) value: StdResult<Expr, (TextRange, &'static str)>,
 }
 
-pub(crate) type CheckedProvider = StdResult<RegisteredFunction, (TextRange, &'static str)>;
+pub(crate) type CheckedProvider = StdResult<RegisteredFunction, OperandRefusal>;
 pub(crate) type AnnotationProvider = CheckedProvider;
 
 pub(crate) struct ParameterAnnotations {

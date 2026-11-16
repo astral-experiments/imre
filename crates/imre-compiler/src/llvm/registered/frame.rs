@@ -1176,7 +1176,7 @@ impl<'p> RegisteredFrame<'_, 'p> {
         ))
     }
 
-    pub(crate) fn use_class_annotation_names(&mut self, class: &'p ClassBindings) {
+    pub(super) fn use_class_annotation_names(&mut self, class: &'p ClassBindings) {
         let scope = self.op("annotation_scope", &[&self.scope.clone()]);
         self.annotation_names = Some((class, scope));
     }

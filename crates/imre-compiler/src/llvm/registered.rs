@@ -1495,6 +1495,9 @@ impl<'f> Frame<'f, '_, '_> {
                 "0".to_owned()
             }
             (Builtin::RegisteredAnnotationFormat, [format]) => {
+                if let AnnotationScope::Class { bindings, .. } = self.code.annotation_scope {
+                    self.code.use_class_annotation_names(bindings);
+                }
                 let format = self.evaluate_handle(format);
                 self.code.op("annotation_format", &[&format])
             }

@@ -13,7 +13,8 @@ use crate::dynamic::literal::LiteralSites;
 use crate::frontend::function_scope::{ClassBindings, NamedFunction};
 use crate::frontend::module_source::{self, ParsedModule};
 use crate::frontend::{
-    ParameterEvaluator, RegisteredBody, RegisteredGenerator, RegisteredLambda, RequiredSite,
+    AnnotationExpression, OperandRefusal, ParameterEvaluator, RegisteredBody, RegisteredFunction,
+    RegisteredGenerator, RegisteredLambda, RequiredSite,
 };
 use crate::ir::RegisteredTypeParameter;
 use crate::llvm::registered::sites::{
@@ -640,7 +641,8 @@ impl<'a> PreparedBody<'a> {
                         private_names.string_annotations,
                     ),
                     name: private_names.source_name(name.start(), &name.id).to_owned(),
-                    body: crate::frontend::type_alias_body(&alias.value, values)
+                    body: AnnotationExpression::FormatEvaluator
+                        .prepare(&alias.value, values)
                         .ok_or(alias.value.range()),
                     parameters: alias.type_params.as_deref().map(|params| {
                         crate::frontend::TypeParameterValues::prepare(
@@ -776,7 +778,7 @@ impl<'a> PreparedBody<'a> {
             |_, _| {},
             |site| lexical.prepare(site, values, false),
         );
-        let code = crate::frontend::AnnotationCode::prepare(
+        let code = AnnotationExpression::Decoded.prepare(
             expr,
             values.with_children(&lexical.lambdas, &lexical.generators),
         )?;
@@ -914,13 +916,11 @@ impl<'a> PreparedBody<'a> {
 enum Body<'a> {
     Module(&'a PreparedBody<'a>, &'a str),
     Namespace(&'a crate::frontend::function_scope::classes::ClassScope),
-    CheckedProvider(&'a crate::frontend::CheckedProvider, AnnotationScope<'a>),
-    Registered(&'a Callable<'a>),
-    Operand(
-        TextRange,
-        &'a crate::frontend::RegisteredOperand,
-        Option<&'a ClassBindings>,
+    CheckedProvider(
+        Result<&'a RegisteredFunction, &'a OperandRefusal>,
+        AnnotationScope<'a>,
     ),
+    Registered(&'a Callable<'a>),
 }
 
 struct SourceMap<'a> {
@@ -943,7 +943,7 @@ impl<'a> std::ops::Deref for SourceMap<'a> {
 struct TypeAliasDefinition {
     scope: crate::frontend::function_scope::FunctionScope,
     name: String,
-    body: Result<crate::frontend::AnnotationCode, TextRange>,
+    body: Result<Box<RegisteredFunction>, TextRange>,
     parameters: Option<crate::frontend::TypeParameterValues>,
 }
 
@@ -1139,21 +1139,6 @@ impl SourceMap<'_> {
                     }
                 }
             }
-            Body::Operand(range, operand, class) => {
-                let frame = &mut function.frame;
-                frame.current_range = range;
-                frame.checkpoint(range);
-                if let Some(class) = class {
-                    frame.use_class_annotation_names(class);
-                }
-                let value = crate::llvm::registered::Frame::evaluate_operand(
-                    &mut function,
-                    &operand.value,
-                    Some(operand),
-                    false,
-                );
-                function.frame.return_value(&value);
-            }
         }
         function.frame.finish_callable(start)
     }
@@ -1225,7 +1210,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 location.code(
                     self.frame.output,
                     QualnameScope::MODULE,
-                    Body::Operand(body.code.range, &body.code.operand, None),
+                    Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
                     false,
                     None,
                 )
@@ -1440,7 +1425,7 @@ impl<'p> Function<'_, 'p, '_> {
         let code = self.source.code(
             self.frame.output,
             prefix,
-            Body::CheckedProvider(header, AnnotationScope::Plain),
+            Body::CheckedProvider(header.as_ref(), AnnotationScope::Plain),
             true,
             Some((site, 0)),
         );
@@ -1490,7 +1475,7 @@ impl<'p> Function<'_, 'p, '_> {
         name: &str,
         scope: &crate::frontend::function_scope::FunctionScope,
         type_parameter_scope: bool,
-        code: &crate::frontend::AnnotationCode,
+        code: &RegisteredFunction,
         class: Option<&ClassBindings>,
     ) -> CompiledDefinition<'p> {
         let qualname = self.prefix.qualify(name);
@@ -1508,7 +1493,13 @@ impl<'p> Function<'_, 'p, '_> {
                 name: &qualname,
                 function_locals: true,
             },
-            Body::Operand(code.range, &code.operand, class),
+            Body::CheckedProvider(
+                Ok(code),
+                class.map_or(AnnotationScope::Plain, |bindings| AnnotationScope::Class {
+                    bindings,
+                    conditional: false,
+                }),
+            ),
             true,
             Some((site, 0)),
         );
@@ -1544,7 +1535,7 @@ impl<'p> Function<'_, 'p, '_> {
                         )
                     })?;
                     Ok(self.compile_evaluator(
-                        body.range.start(),
+                        provider.range.start(),
                         &parameter.name,
                         &provider.scope(class),
                         true,
@@ -1648,7 +1639,7 @@ impl<'p> SourceMap<'p> {
         let code = self.code(
             output,
             lexical_prefix,
-            Body::CheckedProvider(body, scope),
+            Body::CheckedProvider(body.as_ref(), scope),
             true,
             Some((start, 0)),
         );
@@ -3082,8 +3073,16 @@ mod tests {
             panic!("expected constraints followed by a default");
         };
         let code = default.body.as_mut().unwrap();
-        assert_eq!(&text[code.range], "select()");
-        code.operand.value = crate::ir::Expr::none();
+        let [
+            crate::ir::Statement::Position(range, None),
+            _,
+            crate::ir::Statement::Return(value),
+        ] = code.function.body.as_mut_slice()
+        else {
+            panic!("expected a located evaluator return");
+        };
+        assert_eq!(&text[*range], "select()");
+        *value = crate::ir::Expr::none();
         assert_ne!(module.standalone().unwrap(), before);
     }
 
@@ -5292,7 +5291,7 @@ mod tests {
 
     #[test]
     fn decoded_template_annotation_keeps_its_checked_interpolation() {
-        use crate::frontend::{AnnotationBody, AnnotationCode};
+        use crate::frontend::AnnotationBody;
         use crate::ir::{Builtin, ExprKind};
 
         let prepared = PreparedBody::module(
@@ -5304,16 +5303,12 @@ mod tests {
         )
         .unwrap();
         let mut sites = prepared.source.annotation_children.values();
-        let Some(AnnotationBody {
-            code: AnnotationCode { operand: child, .. },
-            ..
-        }) = sites.next()
-        else {
+        let Some(AnnotationBody { code, .. }) = sites.next() else {
             panic!("decoded template annotation needs a checked child");
         };
         assert!(sites.next().is_none());
         let mut captures = Vec::new();
-        crate::ir::walk_operand_expressions(&child.value, &mut |value| {
+        crate::ir::walk_expressions(&code.function.body, &mut |value| {
             if let ExprKind::Builtin(
                 Builtin::RegisteredInterpolation {
                     expression,
@@ -5807,10 +5802,8 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             .iter()
             .filter_map(ast::Stmt::as_type_alias_stmt)
         {
-            let shared = crate::frontend::AnnotationCode::prepare(
-                &alias.value,
-                prepared.source.registered_source(),
-            );
+            let shared = AnnotationExpression::Decoded
+                .prepare(&alias.value, prepared.source.registered_source());
             let checked = prepared.source.type_aliases[&alias.start()].body.is_ok();
             let name = alias.name.as_name_expr().unwrap().id.as_str();
             assert_eq!(checked, shared.is_some(), "{name}");
@@ -5950,10 +5943,10 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             .body
             .as_ref()
             .expect("checked alias value")
-            .operand
-            .value;
+            .function
+            .body;
         let mut sites = Vec::new();
-        crate::ir::walk_operand_expressions(body, &mut |expr| {
+        crate::ir::walk_expressions(body, &mut |expr| {
             if let ExprKind::Builtin(Builtin::RegisteredLambda(site, _), _) = &expr.kind {
                 sites.push(*site);
             }
@@ -5976,18 +5969,22 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
         assert_eq!(original.functions, output.functions);
 
         let format_op = output.data(b"annotation_format");
+        let format_call = format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {format_op},");
+        let class_scope = output.data(b"annotation_scope");
         let class_lookup = output.data(b"lookup_class_annotation_global");
         let private_name = output.data(b"_Owner__secret");
         let evaluator = output
             .functions
             .split("\n}")
-            .find(|body| {
-                body.contains(&format!(
-                    "call i64 @imre_dyn_op_at(ptr %ctx, ptr {format_op},"
-                ))
-            })
+            .find(|body| body.contains(&format_call))
             .expect("alias evaluator");
-        assert!(evaluator.lines().any(|line| {
+        let (before_format, _) = evaluator.split_once(&format_call).unwrap();
+        let (before_scope, _) = before_format
+            .split_once(&format!(
+                "call i64 @imre_dyn_op_at(ptr %ctx, ptr {class_scope},"
+            ))
+            .expect("the class scope is active before the format check");
+        assert!(before_scope.lines().any(|line| {
             line.contains("call void @imre_dyn_statement_at(")
                 && line.ends_with(&format!(", ptr {file}, i32 4)"))
         }));
@@ -6030,17 +6027,14 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             panic!("expected the prepared alias site");
         };
         assert!(args.is_empty());
-        let callback = &prepared.source.type_aliases[site]
-            .body
-            .as_ref()
-            .unwrap()
-            .operand
-            .value;
-        let ExprKind::Scope { body, value, .. } = &callback.kind else {
-            panic!("expected a guarded alias value");
-        };
-        let [Statement::Expr(format)] = body.as_slice() else {
-            panic!("expected the format check before the alias value");
+        let callback = prepared.source.type_aliases[site].body.as_ref().unwrap();
+        let [
+            Statement::Position(_, None),
+            Statement::Expr(format),
+            Statement::Return(value),
+        ] = callback.function.body.as_slice()
+        else {
+            panic!("expected the format check before the returned alias value");
         };
         assert!(
             matches!(&format.kind, ExprKind::Builtin(Builtin::RegisteredAnnotationFormat, args)
