@@ -394,9 +394,7 @@ impl CheckedBody<'_, '_, '_, '_> {
         let slot = predicate.receiver;
         let receiver = emitter.own_operand(value.into_native());
         debug_assert_eq!(receiver.ty, emitter.locals[slot]);
-        emitter
-            .cleanups
-            .push(crate::llvm::Cleanup::Slots(vec![slot]));
+        emitter.push_slot_cleanup(&[slot]);
         emitter.store(slot, &receiver);
         let truth = emitter.expr(&predicate.condition);
         emitter.cleanups.pop();
