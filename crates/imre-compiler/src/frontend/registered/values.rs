@@ -1599,7 +1599,11 @@ impl Checker<'_> {
             return (self.types.hashable_key(element) && fields.iter().all(|&ty| ty == element))
                 .then(|| self.types.set(element));
         }
-        let element = fields.first().copied().unwrap_or(Type::Int);
+        let element = match fields.first() {
+            Some(&element) => element,
+            None if self.registered_result_contract.is_some() => return None,
+            None => Type::Int,
+        };
         if fields.iter().all(|&ty| ty == element) {
             return Some(self.types.list(element));
         }

@@ -1787,19 +1787,24 @@ fn lower_graph(
             }
             early_entry = Some(entry);
         }
+        // Once this entry has lost its fixed layout, the selected Python frame can
+        // enforce a settled function's declared result as it lowers the body.
         if live
             && physical_function
-            && !procedure
             && inferred.is_none()
             && !prior_report
             && matches!(source, Cow::Borrowed(_))
             && fixed_frame_entry(definition)
             && definition.returns.is_some()
-            && signature.returns.builtin_scalar_name().is_some()
             && registered::SourceChecks::cached(graph, *module_id, definition.range()) == Some(true)
-            && *implicit_return
+            && (live_return && procedure
+                || !procedure
+                    && signature.returns.builtin_scalar_name().is_some()
+                    && *implicit_return)
         {
-            match registered::check_live_result(&checker, definition, signature, inference) {
+            match registered::check_live_result(
+                &checker, definition, signature, inference, procedure,
+            ) {
                 Ok(Some(frame)) => {
                     graph.register_function(*module_id, definition.start(), frame);
                     continue;
@@ -4129,6 +4134,7 @@ struct Checker<'a> {
     checked_call_contracts: bool,
     /// The explicit return operand contract of a function whose execution uses a Python result.
     registered_result_contract: Option<Type>,
+    checking_declared_operand: bool,
     /// A live invocation can have a nonreturning declared target. Only an eager
     /// parent uses this fact when checking its next operand.
     last_nonreturning_frame_call: Option<TextRange>,
@@ -4295,6 +4301,7 @@ impl<'a> Checker<'a> {
             python_method_frame: false,
             checked_call_contracts: false,
             registered_result_contract: None,
+            checking_declared_operand: false,
             last_nonreturning_frame_call: None,
             boxed_calls: None,
             fixed_checks_tail: false,
@@ -5284,34 +5291,51 @@ impl<'a> Checker<'a> {
                 )
             });
         }
-        self.expr_in_context(
-            source,
-            expected,
-            |_, actual| new_frame_local && actual == Type::PythonObject,
-            |checker, value, expected, site| {
-                if let Some(ValueSource::FrameBinding(written)) = checker.value_source(&value)
-                    && (value.ty == expected
-                        || written
-                            .iter()
-                            .any(|&(_, ty)| ty == expected || ty == Type::PythonObject))
-                    && expected.builtin_scalar_name().is_some()
-                    && checker
-                        .graph
-                        .session
-                        .operand_types(checker.module)
-                        .local_scalar_annotation(annotation)
-                        == Some(expected)
-                {
-                    let checked = registered::checked_local_scalar(Some(expected), value);
-                    return Ok(Expr {
-                        ty: expected,
-                        ..checked
-                    });
-                }
-                checker.coerce_supplied_result(value, expected, site)
-            },
-            Some(declaration),
-        )
+        let checked = self.with_declared_operand(|checker| {
+            checker.expr_in_context(
+                source,
+                expected,
+                |_, actual| new_frame_local && actual == Type::PythonObject,
+                |checker, value, expected, site| {
+                    if let Some(ValueSource::FrameBinding(written)) = checker.value_source(&value)
+                        && (value.ty == expected
+                            || written
+                                .iter()
+                                .any(|&(_, ty)| ty == expected || ty == Type::PythonObject))
+                        && expected.builtin_scalar_name().is_some()
+                        && checker
+                            .graph
+                            .session
+                            .operand_types(checker.module)
+                            .local_scalar_annotation(annotation)
+                            == Some(expected)
+                    {
+                        let checked = registered::checked_local_scalar(Some(expected), value);
+                        return Ok(Expr {
+                            ty: expected,
+                            ..checked
+                        });
+                    }
+                    checker.coerce_supplied_result(value, expected, site)
+                },
+                Some(declaration),
+            )
+        });
+        if self.registered_result_contract.is_some()
+            && self.types.is_display_container(expected)
+            && match &checked {
+                Ok(value) => value.checked_operand_type() == Type::PythonObject,
+                Err(Failure::Diagnostic(diagnostic)) => diagnostic.kind == Kind::ExactType,
+                Err(_) => false,
+            }
+        {
+            return Err(self.classified_error(
+                Kind::ScopedObject,
+                source,
+                "the annotated collection requires its fixed source layout",
+            ));
+        }
+        checked
     }
 
     /// A partial can accept a sentinel in place of a parameter. Preserve its type
@@ -5367,8 +5391,13 @@ impl<'a> Checker<'a> {
             coerce(checker, value, ty, site).map_err(|e| e.expected_from(declaration, site.range()))
         };
         let mut concrete = self.types.payload(expected).unwrap_or(expected);
-        // An empty list gets its element type from its destination in either frame.
+        // A Python frame can use a declared collection type to check its operands
+        // while keeping the resulting container in Python storage.
+        let declared_collection = (self.checking_declared_operand
+            && self.registered_result_contract.is_some())
+            && self.types.is_display_container(expected);
         if self.registered.is_some()
+            && !declared_collection
             && !(matches!(expression, ast::Expr::List(list) if list.elts.is_empty() || self.checked_call_contracts)
                 && self.types.element(concrete).is_some())
         {
@@ -5826,6 +5855,14 @@ impl<'a> Checker<'a> {
         Ok(Some(value))
     }
 
+    /// Supply a physical declaration's item types to the expression that initializes it.
+    fn with_declared_operand<T>(&mut self, check: impl FnOnce(&mut Self) -> T) -> T {
+        let enclosing = std::mem::replace(&mut self.checking_declared_operand, true);
+        let value = check(self);
+        self.checking_declared_operand = enclosing;
+        value
+    }
+
     /// A Python container stores the original handle when its source satisfies the item type.
     fn coerce_python_item(
         &self,
@@ -5864,7 +5901,10 @@ impl<'a> Checker<'a> {
         declaration: Option<TypeDeclaration>,
         build: fn(Vec<Expr>) -> ExprKind,
     ) -> Result<Expr, String> {
-        let coerce_item = if self.checked_call_contracts && self.registered.is_some() {
+        let coerce_item = if (self.checked_call_contracts
+            || (self.checking_declared_operand && self.registered_result_contract.is_some()))
+            && self.registered.is_some()
+        {
             Self::coerce_python_item
         } else {
             Self::coerce

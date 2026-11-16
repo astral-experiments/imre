@@ -1878,6 +1878,14 @@ impl Types {
         }
     }
 
+    /// A list, tuple, set, or dictionary annotation supplies types to a collection display.
+    pub(crate) fn is_display_container(&self, ty: Type) -> bool {
+        matches!(
+            self.payload(ty).unwrap_or(ty),
+            Type::ListInt | Type::List(_) | Type::Tuple(_) | Type::Set(_) | Type::Dict(_)
+        )
+    }
+
     pub(crate) fn element(&self, ty: Type) -> Option<Type> {
         match ty {
             Type::ListInt => Some(Type::Int),
