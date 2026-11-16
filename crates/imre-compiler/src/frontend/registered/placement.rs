@@ -904,6 +904,30 @@ mod tests {
     }
 
     #[test]
+    fn chained_method_keeps_the_parent_and_its_generator_child() {
+        let text = concat!(
+            "import argparse\n",
+            "def render(rows: str) -> str:\n",
+            "    return ''.join(c.lower() if c.isupper() else c for c in rows).strip()\n",
+            "parser = argparse.ArgumentParser()\nparser.add_argument('rows')\n",
+            "print(render(parser.parse_args().rows))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "render").count(), 1);
+        let start = TextSize::try_from(text.find("def render").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&start];
+        assert!(matches!(&frame.inputs, FrameInputs::Protocol { sites }
+            if sites.iter().any(|site| matches!(site, FrameSite::Generator(range)
+                if &text[*range] == "c.lower() if c.isupper() else c for c in rows"))));
+    }
+
+    #[test]
     fn named_entry_places_the_checked_arithmetic_body() {
         let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
         let dir = tempfile::tempdir().unwrap();

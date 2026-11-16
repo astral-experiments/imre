@@ -693,7 +693,11 @@ impl Checker<'_> {
         if let ast::Expr::Generator(generator) = source
             && let Some(method) = call.func.as_attribute_expr()
             && let Some(sites) = &mut self.fixed_sites
-            && sites.site_at(call.range()).is_some()
+            && (sites.site_at(call.range()).is_some()
+                || sites.inside_site(call.range())
+                    && sites
+                        .first_operand(method.value.range(), &receiver)
+                        .is_some())
         {
             let parent = sites.enter(generator.range());
             let parts = self.join_generator_parts(generator, call);
