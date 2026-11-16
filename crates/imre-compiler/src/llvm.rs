@@ -4326,6 +4326,19 @@ impl Emitter<'_, '_> {
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
+        if let Builtin::GeneratorInput { slots, .. } = builtin {
+            let [outer, parts] = expressions else {
+                unreachable!("checked generator input")
+            };
+            let root = [slots.start];
+            self.push_slot_cleanup(&root);
+            let outer = self.expr(outer);
+            self.store(root[0], &outer);
+            let parts = self.expr(parts);
+            self.cleanups.pop();
+            self.clear_slots(&root);
+            return parts;
+        }
         if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
         }
@@ -4531,6 +4544,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredClassNamespace(..)
             | Builtin::RegisteredLambda(..)
+            | Builtin::GeneratorInput { .. }
             | Builtin::RegisteredGenerator(..)
             | Builtin::RegisteredTypeAlias(_)
             | Builtin::RegisteredSuite(_)

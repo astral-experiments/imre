@@ -351,12 +351,12 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 !scoped || !operands.is_empty()
             }
-            ExprKind::Builtin(Builtin::RegisteredGenerator(range, scoped, _), operands) => {
+            ExprKind::Builtin(op, operands) if let Some((range, scoped, _, written)) = op.generator_site(operands) => {
                 if arguments != FrameArguments::Checked {
-                    sites.push(FrameSite::Generator(*range));
+                    sites.push(FrameSite::Generator(range));
                 }
                 uses_python_protocol = true;
-                if let Ok((_, iterable)) = ir::generator_operands(*scoped, operands) {
+                if let Ok((_, iterable)) = ir::generator_operands(scoped, written) {
                     protocol_reads += protocol_parameter(iterable);
                     true
                 } else {
@@ -1403,19 +1403,17 @@ impl<'f> Frame<'f, '_, '_> {
                     .collect::<Vec<_>>();
                 lambda.bind_defaults(self.code, &scope, &defaults)
             }
-            (Builtin::RegisteredGenerator(site, scoped, acquire), operands) => {
-                let generator = self
-                    .code
-                    .callable_at(CallableSite::Generator(*site), *scoped);
+            (op, args) if let Some((site, scoped, acquire, written)) = op.generator_site(args) => {
+                let generator = self.code.callable_at(CallableSite::Generator(site), scoped);
                 let (scope, iterable) =
-                    ir::generator_operands(*scoped, operands).expect("checked generator operands");
+                    ir::generator_operands(scoped, written).expect("checked generator operands");
                 let scope = scope
                     .map(|scope| Cow::Owned(self.evaluate_handle(scope)))
                     .unwrap_or_else(|| self.code.scope.clone());
                 let mark = self.temporary_mark();
                 self.unwind_operands(&mark, |frame| {
                     let iterable = frame.evaluate_handle(iterable);
-                    let cursor = frame.acquire_iterator(*acquire, &iterable);
+                    let cursor = frame.acquire_iterator(acquire, &iterable);
                     frame.keep_operands(&mark, &cursor, "0");
                     let function = generator.bind_defaults(frame.code, &scope, &[]);
                     let result = frame.op("generator", &[&function, &cursor]);

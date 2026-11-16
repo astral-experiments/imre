@@ -1400,21 +1400,28 @@ pub(super) fn operation<E>(
     }))
 }
 
-/// The defining frame evaluates the outer iterable and acquires the cursor handed to the child.
-fn generator_binding<E>(
+/// The physical generator owns the cursor acquired from its written outer iterable.
+pub(in crate::frontend) fn generator_outer(
     generator: &ast::ExprGenerator,
-    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
-) -> StdResult<Expr, E> {
+) -> (ir::IteratorOp, &ast::Expr) {
     let outer = imre_ast::comprehension::outer_clause(&generator.generators);
     let acquire = if outer.is_async {
         ir::IteratorOp::Async(outer.iter.range())
     } else {
         ir::IteratorOp::Get(outer.iter.range())
     };
+    (acquire, &outer.iter)
+}
+
+fn generator_binding<E>(
+    generator: &ast::ExprGenerator,
+    mut operand: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+) -> StdResult<Expr, E> {
+    let (acquire, outer) = generator_outer(generator);
     Ok(super::operation(
         Builtin::RegisteredGenerator(generator.range(), false, acquire),
         Type::PythonObject,
-        vec![operand(&outer.iter)?],
+        vec![operand(outer)?],
     ))
 }
 

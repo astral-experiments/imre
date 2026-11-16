@@ -711,6 +711,7 @@ impl Builtin {
             | Self::RegisteredDefinition(_)
             | Self::RegisteredClassNamespace(..)
             | Self::RegisteredLambda(..)
+            | Self::GeneratorInput { .. }
             | Self::RegisteredGenerator(..)
             | Self::RegisteredTypeAlias(_)
             | Self::RegisteredSuite(_)

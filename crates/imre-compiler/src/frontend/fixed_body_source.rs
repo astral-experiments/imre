@@ -1,6 +1,7 @@
 //! Physical sites for operations that can also consume Python frame arguments.
 
 use super::*;
+use ir::NodeOperands::Source;
 
 #[derive(Clone)]
 pub(crate) struct FixedBodySource {
@@ -48,8 +49,9 @@ impl FixedBodySource {
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
         let mut python_arguments = self.arguments == FrameArguments::Python;
+        let mut native_slots = HashSet::new();
         let mut condition = None;
-        let complete = ir::all_nodes(&function.body, &mut |node, parent| {
+        let complete = ir::all_nodes(&function.body, Source, &mut |node, parent| {
             if let ir::Node::Statement(Statement::If(test, ..)) = node {
                 condition = Some(test);
             }
@@ -69,6 +71,19 @@ impl FixedBodySource {
                 let (_, args) = attr.call_operands(range, next, expr)?;
                 Some(FixedNode::indexed(&expr.kind, args.len(), expr.ty))
             }) {
+                return false;
+            }
+            if let ir::Node::Expression(Expr {
+                kind: ExprKind::Builtin(Builtin::GeneratorInput { slots, .. }, _),
+                ..
+            }) = node
+                && (slots.is_empty()
+                    || slots.end > function.locals.len()
+                    || function.params.iter().any(|slot| slots.contains(slot))
+                    || slots.clone().any(|slot| {
+                        self.local_names.contains_key(&slot) || !native_slots.insert(slot)
+                    }))
+            {
                 return false;
             }
             if let ir::Node::Statement(Statement::ContainerFor(input)) = node {
@@ -110,7 +125,12 @@ impl FixedBodySource {
         if (matches!(frame.inputs, FrameInputs::Checked { .. })
             && python_arguments
             && !frame.bind_python_arguments())
-            || frame.local_names.len() + frame.frame_slots.slots().len()
+            || frame
+                .frame_slots
+                .slots()
+                .iter()
+                .any(|slot| native_slots.contains(slot))
+            || frame.local_names.len() + frame.frame_slots.slots().len() + native_slots.len()
                 != frame.function.locals.len()
         {
             return Err(frame
@@ -250,6 +270,7 @@ pub(super) enum FixedNode {
     Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
     Path(ir::PathOperation, usize, Type),
+    Generator(TextRange, ir::IteratorOp, Type),
     Builtin(std::mem::Discriminant<Builtin>, usize, Type),
 }
 
@@ -459,6 +480,9 @@ impl FixedNode {
                     expr.named_call_arguments()?.len(),
                     expr.ty,
                 ),
+                ExprKind::Builtin(Builtin::GeneratorInput { range, acquire, .. }, _) => {
+                    Self::Generator(range, acquire, expr.ty)
+                }
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {
                     Self::Path(op, operands.len(), expr.ty)
                 }
@@ -567,6 +591,15 @@ impl SourceSites {
         }
     }
 
+    pub(super) fn generator_input(&mut self, range: TextRange, value: &Expr) {
+        if let ExprKind::Builtin(Builtin::GeneratorInput { slots, .. }, _) = &value.kind
+            && self.site_at(range).is_some()
+        {
+            self.private_slots += slots.len();
+            self.checked_expression(range, value);
+        }
+    }
+
     pub(super) fn checked_expression(&mut self, range: TextRange, value: &Expr) {
         self.record(range, ir::Node::Expression(value));
     }
@@ -630,7 +663,7 @@ impl SourceSites {
                     if flat {
                         return matches(ir::Node::Expression(value));
                     }
-                    ir::all_operand_nodes(value, None, &mut |node, parent| {
+                    ir::all_operand_nodes(value, None, Source, &mut |node, parent| {
                         !node.has_fixed_site_in(parent) || matches(node)
                     })
                 })
@@ -643,7 +676,7 @@ impl SourceSites {
         fallback: TextRange,
         mut record: impl FnMut(&ir::Node<'_>, Option<TextRange>, TextRange),
     ) {
-        ir::all_operand_nodes(value, None, &mut |node, parent| {
+        ir::all_operand_nodes(value, None, Source, &mut |node, parent| {
             if node.has_fixed_site() {
                 let own = match node {
                     ir::Node::Expression(expr) => expr.written_range(),
