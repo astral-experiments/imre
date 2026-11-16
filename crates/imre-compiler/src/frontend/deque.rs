@@ -362,7 +362,6 @@ impl Checker<'_> {
         if let Iteration::Container {
             iterable,
             items: false,
-            start: None,
         } = &mut input
         {
             if iterable.ty == receiver.ty {

@@ -89,7 +89,6 @@ impl Checker<'_> {
             | ExpansionSource::Iteration(Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             }) if match mapped {
                 Some(_) => iterable.ty == Type::Str && element.is_none_or(|ty| ty == Type::Int),
                 None => {
@@ -286,7 +285,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } if !convert && iterable.ty == Type::ListInt => iterable,
             input => {
                 let result = self.hidden(Type::Int);
@@ -428,7 +426,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } if matches!(iterable.ty, Type::Tuple(_))
         );
         // Fixed-tuple expansion already captures its source before running
@@ -616,14 +613,9 @@ impl Checker<'_> {
                 }
                 Iteration::Range(args)
             }
-            Iteration::Container {
-                iterable,
-                items,
-                start,
-            } => Iteration::Container {
+            Iteration::Container { iterable, items } => Iteration::Container {
                 iterable: capture(iterable),
                 items,
-                start: start.map(capture),
             },
             Iteration::Prepared(mut input) => {
                 body.append(&mut input.evaluate);

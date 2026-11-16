@@ -208,7 +208,6 @@ impl Checker<'_> {
             Ok(Iteration::Container {
                 iterable: self.expr_expected(source, self.types.dict(empty_key, Type::Int))?,
                 items: false,
-                start: None,
             })
         } else {
             self.expansion_input(
@@ -320,7 +319,6 @@ impl Checker<'_> {
                     Iteration::Container {
                         iterable,
                         items: false,
-                        start: None,
                     },
                 ) if matches!(operation, Binary::Add)
                     && call.arguments.keywords.is_empty()

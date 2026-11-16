@@ -157,7 +157,6 @@ impl Checker<'_> {
                 kind: ExprKind::List(values),
             },
             items: false,
-            start: None,
         })
     }
 

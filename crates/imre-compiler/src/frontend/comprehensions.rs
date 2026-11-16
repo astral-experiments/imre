@@ -352,7 +352,7 @@ impl ClauseLowering for Checker<'_> {
         _: Output<'_>,
         body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Vec<Statement>), String>,
     ) -> Result<Vec<Statement>, String> {
-        self.lower_iteration_after(target, input, &[], Vec::new(), |checker, output| {
+        self.lower_iteration_after(target, None, input, &[], Vec::new(), |checker, output| {
             let (conditions, body) = body(checker)?;
             // A discarded display has checked its filters and item without emitting a store.
             if body.is_empty() {
@@ -638,7 +638,6 @@ impl Checker<'_> {
             && let Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } = &mut input
         {
             let filtered = match display.output {
@@ -731,14 +730,9 @@ impl Checker<'_> {
                     .map(|value| parameter(value, &mut helper))
                     .collect(),
             ),
-            Iteration::Container {
-                iterable,
-                items,
-                start,
-            } => Iteration::Container {
+            Iteration::Container { iterable, items } => Iteration::Container {
                 iterable: parameter(iterable, &mut helper),
                 items,
-                start: start.map(|start| parameter(start, &mut helper)),
             },
             Iteration::Prepared(_) => unreachable!("prepared inputs were dispatched inline"),
         };
@@ -765,7 +759,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } => Some(iterable),
             _ => None,
         };

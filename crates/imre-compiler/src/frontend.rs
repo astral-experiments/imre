@@ -4047,7 +4047,6 @@ enum Iteration {
     Container {
         iterable: Expr,
         items: bool,
-        start: Option<Expr>,
     },
     /// A nonescaping iterator whose local state is resumed by its consumer.
     Prepared(pipelines::Prepared),
@@ -6306,15 +6305,13 @@ impl<'a> Checker<'a> {
         if let Some(prepared) = self.record_iteration(&iterable, node)? {
             return Ok(Iteration::Prepared(prepared));
         }
-        Ok(Iteration::Container {
-            iterable,
-            items,
-            start: None,
-        })
+        Ok(Iteration::Container { iterable, items })
     }
 
     /// Keeps the original container rooted and owns each item before user code runs.
     fn iteration(&mut self, loop_: &ast::StmtFor, emit: bool) -> Result<statements::Block, String> {
+        let mut index = None;
+        let mut target = loop_.target.as_ref();
         let input = if loop_.is_async || self.registered.is_some() {
             self.iteration_input(&loop_.iter, None, registered::for_pull(loop_))?
         } else if let ast::Expr::Call(call) = loop_.iter.as_ref()
@@ -6325,8 +6322,13 @@ impl<'a> Checker<'a> {
             fields
         } else if let Some(items) = self.environ_items_loop(&loop_.iter)? {
             items
-        } else if let Some(input) = self.unpacked_list_enumeration(loop_)? {
-            input
+        } else if let Some((counter, item, iterable)) = self.unpacked_list_enumeration(loop_)? {
+            index = Some(counter);
+            target = item;
+            Iteration::Container {
+                iterable,
+                items: false,
+            }
         } else {
             let input = self.iteration_input(&loop_.iter, self.split_guard(loop_), None)?;
             self.fuse_split(input)
@@ -6335,7 +6337,6 @@ impl<'a> Checker<'a> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } if let Some(fields) = self.types.fields(iterable.ty)
                 && fields.windows(2).any(|pair| pair[0] != pair[1])
                 && fields.len() <= 8
@@ -6353,7 +6354,6 @@ impl<'a> Checker<'a> {
         if let Iteration::Container {
             iterable,
             items: false,
-            start: None,
         } = &mut input
             && let ExprKind::List(values) = &mut iterable.kind
             && (1..=8).contains(&values.len())
@@ -6372,7 +6372,8 @@ impl<'a> Checker<'a> {
             iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
         }
-        if matches!(&input, Iteration::Container { iterable, items: false, start: None }
+        if index.is_none()
+            && matches!(&input, Iteration::Container { iterable, items: false }
             if matches!(iterable.ty, Type::Tuple(_)) || self.consumes_list(iterable.ty, loop_.iter.range()))
         {
             input =
@@ -6391,7 +6392,8 @@ impl<'a> Checker<'a> {
             }
         }
         self.lower_iteration_after(
-            &loop_.target,
+            target,
+            index,
             input,
             &loop_.orelse,
             Vec::new(),
@@ -6457,11 +6459,13 @@ impl<'a> Checker<'a> {
 
     /// An unpacked enumerate over a known list needs only its live cursor.
     /// Keep the pipeline for escaping tuples, nested iterators and complex targets.
-    fn unpacked_list_enumeration(
+    fn unpacked_list_enumeration<'s>(
         &mut self,
-        loop_: &ast::StmtFor,
-    ) -> Result<Option<Iteration>, String> {
-        let Some([ast::Expr::Name(_), ast::Expr::Name(_)]) = pattern_elements(&loop_.target) else {
+        loop_: &'s ast::StmtFor,
+    ) -> Result<Option<(&'s ast::Expr, &'s ast::Expr, Expr)>, String> {
+        let Some([index @ ast::Expr::Name(_), item @ ast::Expr::Name(_)]) =
+            pattern_elements(&loop_.target)
+        else {
             return Ok(None);
         };
         let ast::Expr::Call(call) = &*loop_.iter else {
@@ -6486,11 +6490,7 @@ impl<'a> Checker<'a> {
         if self.types.element(ty).is_none() {
             return Ok(None);
         }
-        Ok(Some(Iteration::Container {
-            iterable: self.expr(source)?,
-            items: false,
-            start: Some(Expr::integer(0)),
-        }))
+        Ok(Some((index, item, self.expr(source)?)))
     }
 
     /// A consumer can evaluate its remaining arguments after acquiring an
@@ -6500,6 +6500,7 @@ impl<'a> Checker<'a> {
     fn lower_iteration_after(
         &mut self,
         target: &ast::Expr,
+        index: Option<&ast::Expr>,
         input: Iteration,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
@@ -6549,16 +6550,10 @@ impl<'a> Checker<'a> {
                 });
             return Ok((output, falls));
         }
-        let Iteration::Container {
-            iterable,
-            items,
-            start,
-        } = input
-        else {
+        let Iteration::Container { iterable, items } = input else {
             unreachable!("range iteration returned above")
         };
         if !items
-            && start.is_none()
             && (matches!(iterable.ty, Type::Tuple(_))
                 || self.types.sequence_union_element(iterable.ty).is_some())
         {
@@ -6571,10 +6566,7 @@ impl<'a> Checker<'a> {
                 lower_body,
             );
         }
-        if !items
-            && start.is_none()
-            && let Some(element) = self.types.cursor_element(iterable.ty)
-        {
+        if !items && let Some(element) = self.types.cursor_element(iterable.ty) {
             let cursor = self.prepare_cursor(iterable, element);
             return self.lower_prepared_iteration(
                 target,
@@ -6638,11 +6630,29 @@ impl<'a> Checker<'a> {
             && self.types.deque_element(iterable.ty).is_none()
             && !string
             && !encoded_bytes;
+        if !indexed && !items {
+            let cursor = self.container_cursor(iterable, false, false);
+            let kind = if encoded_bytes {
+                ir::IterNextKind::Utf8Byte
+            } else if string {
+                ir::IterNextKind::String
+            } else {
+                ir::IterNextKind::Generic
+            };
+            let input =
+                pipelines::Prepared::pull_cursor(cursor, element, kind, |ty, _| self.hidden(ty));
+            return self.lower_prepared_iteration(
+                target,
+                input,
+                orelse,
+                before_iteration,
+                lower_body,
+            );
+        }
         let mut output = Vec::new();
         let mut cleanup = Vec::new();
-        // Indexed loops read the container again on each pull. Enumerate evaluates
-        // its start before acquiring the iterator. Other cursors own the receiver.
-        let (iterable, captured) = if indexed || start.is_some() {
+        // Indexed loops read the container again on each pull.
+        let (iterable, captured) = if indexed {
             let source = self.hidden(iterable.ty);
             output.push(Statement::Assign(source, iterable));
             cleanup.push(source);
@@ -6651,13 +6661,6 @@ impl<'a> Checker<'a> {
             (iterable, None)
         };
         let cursor = indexed.then(|| self.hidden(Type::Int));
-        let zero_based = cursor.is_some()
-            && matches!(&start, Some(Expr { kind: ExprKind::Int(value), .. }) if value == "0");
-        let counter = start.filter(|_| !zero_based).map(|start| {
-            let slot = self.hidden(Type::Int);
-            output.push(Statement::Assign(slot, start));
-            slot
-        });
         let mut body = Vec::new();
         let (item, pull) = if let Some(cursor) = cursor {
             output.push(Statement::Assign(cursor, Expr::integer(0)));
@@ -6681,50 +6684,26 @@ impl<'a> Checker<'a> {
                 None,
             )
         } else {
-            let (key_type, value_type) = mapping.unwrap_or((element, Type::None));
+            let (key_type, value_type) = mapping.expect("items iteration requires a dictionary");
             let iterator = self.hidden(Type::Iterator);
             output.push(Statement::Assign(
                 iterator,
-                Expr {
-                    ty: Type::Iterator,
-                    kind: ExprKind::Builtin(
-                        if string || encoded_bytes {
-                            Builtin::StringIter
-                        } else if self.types.deque_element(iterable.ty).is_some() {
-                            Builtin::DequeIter { reverse: false }
-                        } else if set_element.is_some() {
-                            Builtin::SetIter
-                        } else {
-                            Builtin::DictIter(items)
-                        },
-                        vec![iterable],
-                    ),
-                },
+                self.container_cursor(iterable, true, false),
             ));
             cleanup.push(iterator);
             let key = self.hidden(key_type);
-            let value = items.then(|| self.hidden(value_type));
+            let value = self.hidden(value_type);
             let ready = self.hidden(Type::Bool);
             body.push(Statement::IterNext {
-                kind: if encoded_bytes {
-                    ir::IterNextKind::Utf8Byte
-                } else if string {
-                    ir::IterNextKind::String
-                } else {
-                    ir::IterNextKind::Generic
-                },
+                kind: ir::IterNextKind::Generic,
                 iterator,
                 key,
-                value,
+                value: Some(value),
                 ready,
             });
-            let item = if let Some(value) = value {
-                Expr {
-                    ty: element,
-                    kind: ExprKind::Tuple(vec![self.local(key), self.local(value)]),
-                }
-            } else {
-                self.local(key)
+            let item = Expr {
+                ty: element,
+                kind: ExprKind::Tuple(vec![self.local(key), self.local(value)]),
             };
             (item, Some((ready, key, value)))
         };
@@ -6734,32 +6713,23 @@ impl<'a> Checker<'a> {
             body.push(pipelines::Prepared::exhaust_if_empty(self.local(ready)));
         }
         let start = body.len();
-        if zero_based {
-            let [index, target] = pattern_elements(target).unwrap() else {
-                unreachable!()
-            };
-            self.store_value(index, self.local(cursor.unwrap()), None, Some(&mut body))?;
-            self.store_value(target, item, None, Some(&mut body))?;
-        } else {
-            let item = if let Some(counter) = counter {
-                Expr {
-                    ty: self.types.tuple(vec![Type::Int, element]),
-                    kind: ExprKind::Tuple(vec![self.local(counter), item]),
-                }
-            } else {
-                item
-            };
-            unpacking::bind_input(self, target, item, None, &mut body)?;
+        if let Some(index) = index {
+            self.store_value(
+                index,
+                self.local(cursor.expect("indexed enumeration")),
+                None,
+                Some(&mut body),
+            )?;
         }
+        unpacking::bind_input(self, target, item, None, &mut body)?;
         assignments::forget_binding_writes(&mut facts, &body[start..]);
         if let Some((_, key, value)) = pull {
-            let slots = std::iter::once(key).chain(value);
-            cleanup.extend(slots.clone());
-            body.extend(slots.map(Statement::Clear));
+            cleanup.extend([key, value]);
+            body.extend([key, value].map(Statement::Clear));
         }
         // Advance before entering the body so continue and target rebinding do
         // not alter progression. Length is read anew on every loop condition.
-        for slot in cursor.into_iter().chain(counter) {
+        if let Some(slot) = cursor {
             body.push(Statement::Assign(
                 slot,
                 Expr {
@@ -6781,7 +6751,6 @@ impl<'a> Checker<'a> {
         if !emit {
             return Ok((Vec::new(), falls));
         }
-        cleanup.extend(counter);
         output.extend(before_iteration);
         let test = match cursor.zip(captured) {
             Some((cursor, source)) => pipelines::compare(

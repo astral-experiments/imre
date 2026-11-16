@@ -124,7 +124,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable: self.expr_expected(source, self.types.list(key))?,
                 items: false,
-                start: None,
             }
         } else {
             self.expansion_input(source, hint)?

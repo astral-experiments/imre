@@ -16,7 +16,6 @@ fn byte_split_source(source: &Iteration) -> Option<(&Expr, u8)> {
     let Iteration::Container {
         iterable,
         items: false,
-        start: None,
     } = source
     else {
         return None;
@@ -158,7 +157,7 @@ impl Prepared {
             elementless: false,
             eager_list: None,
             writes: HashSet::new(),
-            clear: vec![iterator, value, ready],
+            clear: vec![iterator, value],
         }
     }
 
@@ -1300,7 +1299,6 @@ impl<'s> Checker<'s> {
                     ..
                 },
             items: false,
-            start: None,
         } = input
         {
             (Builtin::SplitLinesIter, args)
@@ -1654,13 +1652,8 @@ impl<'s> Checker<'s> {
                 "reversed requires a list, tuple, string, bytes, or range",
             )),
             Iteration::Range(args) => Ok(self.prepare_range(args, reverse)),
-            Iteration::Container {
-                iterable,
-                items,
-                start: None,
-            } => self.prepare_container(iterable, items, node, reverse),
-            Iteration::Container { start: Some(_), .. } => {
-                unreachable!("enumerate constructors use the shared pipeline path")
+            Iteration::Container { iterable, items } => {
+                self.prepare_container(iterable, items, node, reverse)
             }
         }
     }
@@ -1835,6 +1828,28 @@ impl<'s> Checker<'s> {
             eager_list: None,
             writes: HashSet::new(),
             clear: vec![source, value, ready],
+        }
+    }
+
+    /// Acquire the native cursor shared by direct loops and composed iterators.
+    pub(super) fn container_cursor(&self, value: Expr, items: bool, reverse: bool) -> Expr {
+        let ty = value.ty;
+        let builtin = if ty == Type::Str {
+            if reverse {
+                Builtin::StringReverseIter
+            } else {
+                Builtin::StringIter
+            }
+        } else if self.types.deque_element(ty).is_some() {
+            Builtin::DequeIter { reverse }
+        } else if self.types.readable_set_element(ty).is_some() {
+            Builtin::SetIter
+        } else {
+            Builtin::DictIter(items)
+        };
+        Expr {
+            ty: Type::Iterator,
+            kind: ExprKind::Builtin(builtin, vec![value]),
         }
     }
 
@@ -2044,25 +2059,9 @@ impl<'s> Checker<'s> {
         } else {
             let iterator = self.hidden(Type::Iterator);
             clear.push(iterator);
-            let builtin = if ty == Type::Str {
-                if reverse {
-                    Builtin::StringReverseIter
-                } else {
-                    Builtin::StringIter
-                }
-            } else if self.types.deque_element(ty).is_some() {
-                Builtin::DequeIter { reverse }
-            } else if set_element.is_some() {
-                Builtin::SetIter
-            } else {
-                Builtin::DictIter(items)
-            };
             acquire.push(Statement::Assign(
                 iterator,
-                Expr {
-                    ty: Type::Iterator,
-                    kind: ExprKind::Builtin(builtin, vec![self.local(source)]),
-                },
+                self.container_cursor(self.local(source), items, reverse),
             ));
             acquire.push(Statement::Clear(source));
             let key = if items {
@@ -3109,7 +3108,6 @@ impl<'s> Checker<'s> {
         if let Iteration::Container {
             iterable,
             items: false,
-            start: None,
         } = &input
             && let Some(fields) = self.types.fields(iterable.ty)
         {

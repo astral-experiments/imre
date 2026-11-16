@@ -286,7 +286,6 @@ impl Checker<'_> {
             && let Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } = &input
             && self.types.set_element(iterable.ty) == Some(Type::Str)
         {
@@ -581,7 +580,6 @@ impl Checker<'_> {
                 Iteration::Container {
                     iterable: self.local(result),
                     items: false,
-                    start: None,
                 },
                 call,
                 |checker, value| {
@@ -695,7 +693,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             }
         } else {
             self.expansion_input(source, (style == JoinStyle::Plain).then_some(Type::Str))?
@@ -724,7 +721,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } if style == JoinStyle::Plain
                 && matches!(
                     self.types.element(iterable.ty),
