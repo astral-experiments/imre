@@ -320,10 +320,7 @@ impl Checker<'_> {
         b: Input,
         answers: Answers,
     ) -> Vec<Statement> {
-        let length = |list: &Expr| Expr {
-            ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Len, vec![list.clone()]),
-        };
+        let length = |list: &Expr| pipelines::collection_length(list.clone());
         let mut branches = Vec::new();
         if let Some(result) = answers.different_lengths {
             branches.push(Statement::If(
@@ -351,18 +348,8 @@ impl Checker<'_> {
         let mut clear = Vec::new();
         let mut project = |input: Input| {
             let root = self.hidden(input.item);
-            let get = if input.list.ty == Type::ListInt {
-                Builtin::ListGet(None)
-            } else {
-                Builtin::SequenceGetInBounds
-            };
-            setup.push(Statement::Assign(
-                root,
-                Expr {
-                    ty: input.item,
-                    kind: ExprKind::Builtin(get, vec![input.list, Expr::integer(0)]),
-                },
-            ));
+            let item = pipelines::indexed_item(input.list, Expr::integer(0), input.item, false);
+            setup.push(Statement::Assign(root, item));
             clear.push(root);
             input
                 .fields
