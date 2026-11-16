@@ -1093,13 +1093,26 @@ impl Checker<'_> {
             return Ok(Formatted(text));
         }
         let value = self.expr(&field.expression)?;
-        if value.ty == Type::Str
-            && conversion == ast::ConversionFlag::None
-            && field.format_spec.is_none()
+        if field.format_spec.is_none()
+            && ((value.ty == Type::Str || value.ty.is_path())
+                && conversion == ast::ConversionFlag::None
+                || value.ty == Type::Str && conversion == ast::ConversionFlag::Repr)
         {
-            if let Some(result) = self.discarded_call(value.ty) {
+            if let Some(result) = self.discarded_call(Type::Str) {
                 return Ok(Formatted(result));
             }
+            let value = if conversion == ast::ConversionFlag::Repr {
+                let converted = Expr {
+                    ty: Type::Str,
+                    kind: ExprKind::Builtin(Builtin::FormatConversion('r'), vec![value]),
+                };
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.wrapped_operand(&field.expression, field.range(), &converted);
+                }
+                converted
+            } else {
+                value
+            };
             let formatted = Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::FormatField(Default::default()), vec![value]),

@@ -447,7 +447,7 @@ impl Checker<'_> {
             ));
         }
         if matches!(name, "read_text" | "write_text" | "write_bytes") {
-            return self.path_io(receiver, name, call);
+            return self.path_io(receiver, attribute, call);
         }
         if name == "open" {
             if let Some(ast::Expr::StringLiteral(mode)) =
@@ -501,20 +501,11 @@ impl Checker<'_> {
     fn path_io(
         &mut self,
         receiver: Expr,
-        name: &str,
+        attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
-        if name == "read_text"
-            && call.arguments.args.is_empty()
-            && call.arguments.keywords.is_empty()
-        {
-            return Ok(operation(
-                PathOperation::ReadText,
-                Type::Str,
-                vec![receiver],
-            ));
-        }
+        let name = attribute.attr.as_str();
         let write = name != "read_text";
         let binary = name == "write_bytes";
         let expected = if binary { Type::Bytes } else { Type::Str };
@@ -522,7 +513,7 @@ impl Checker<'_> {
         if write {
             params.push(parameter("data", expected, None));
         }
-        if !binary {
+        if !binary && !call.arguments.is_empty() {
             let optional = self.types.optional(Type::Str);
             let absent = Expr::absent(optional);
             for key in ["encoding", "errors", "newline"] {
@@ -592,6 +583,17 @@ impl Checker<'_> {
         } else {
             PathOperation::ReadText
         };
+        if !write && arguments.order.is_sorted() {
+            // The native reader fills its trailing options. An override sees the written call.
+            arguments.values.truncate(1 + call.arguments.len());
+            let value = operation(kind, Type::Str, arguments.values);
+            if let Some(sites) = &mut self.fixed_sites
+                && sites.method(call, attribute, &value)
+            {
+                self.frame_arguments = FrameArguments::Python;
+            }
+            return Ok(value);
+        }
         Ok(self.ordered_path_operation(kind, if write { Type::Int } else { Type::Str }, arguments))
     }
 

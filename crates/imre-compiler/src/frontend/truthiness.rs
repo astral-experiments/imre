@@ -23,7 +23,7 @@ impl Checker<'_> {
             return self.with_fixed_site(unary.range(), |cx| {
                 let value = cx.condition(&unary.operand)?;
                 if let Some(sites) = &mut cx.fixed_sites {
-                    sites.branch_test(&unary.operand, &value);
+                    sites.wrapped_operand(&unary.operand, unary.operand.range(), &value);
                 }
                 Ok(cx.expression_at(unary.range(), Expr::not(value)))
             });

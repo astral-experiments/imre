@@ -554,7 +554,10 @@ impl Checker<'_> {
                         )
                     })
             {
-                site.insert(FixedAttribute::CallValue(Box::new(checked)));
+                site.insert(FixedAttribute::CallValue {
+                    checked: Box::new(checked),
+                    placed: false,
+                });
             }
             return Ok((input, Some(source)));
         }

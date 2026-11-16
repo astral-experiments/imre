@@ -4454,6 +4454,9 @@ impl Emitter<'_, '_> {
         probe_fields: Vec<Value>,
     ) -> Value {
         let result = match builtin {
+            Builtin::FormatConversion('r') | Builtin::Repr | Builtin::ReprWithMethods(_) => {
+                self.value_repr(&args[0].value)
+            }
             Builtin::RegisteredImport(_)
             | Builtin::RegisteredSuspend(..)
             | Builtin::RegisteredAssertionFailure { .. }
@@ -7239,7 +7242,6 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Repr | Builtin::ReprWithMethods(_) => self.value_repr(&args[0].value),
             Builtin::BaseObjectRepr => {
                 let receiver = &args[0].value;
                 let name = receiver

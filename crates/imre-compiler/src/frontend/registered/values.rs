@@ -1770,7 +1770,7 @@ impl Checker<'_> {
                 return None;
             };
             match site.get() {
-                FixedAttribute::CallValue(saved)
+                FixedAttribute::CallValue { checked: saved, .. }
                     if self.namespace.is_none()
                         && first_local.is_some_and(|first| saved.slot < first)
                         && self.names.get(saved.parameter.as_str()) == Some(&saved.slot)
@@ -1792,7 +1792,7 @@ impl Checker<'_> {
             Some(site.remove())
         });
         let placed = match (node.as_call_expr(), placed) {
-            (Some(_), Some(FixedAttribute::CallValue(saved))) => {
+            (Some(_), Some(FixedAttribute::CallValue { checked: saved, .. })) => {
                 return Ok(Some(source.located_operation(node, saved.call)));
             }
             (Some(call), Some(FixedAttribute::Call(Some(target), mut site))) => {

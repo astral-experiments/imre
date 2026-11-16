@@ -7229,7 +7229,11 @@ impl<'a> Checker<'a> {
         let result = self.lower_statement(statement, output);
         if let Some(call) = std::mem::replace(&mut self.unhighlighted_call, enclosing)
             && let Some(sites) = &mut self.fixed_sites
-            && matches!(sites.attributes.get(&call), Some(FixedAttribute::Call(..)))
+            && sites
+                .attributes
+                .get(&call)
+                .and_then(FixedAttribute::call_binding)
+                .is_some()
         {
             sites
                 .attributes
@@ -8906,7 +8910,7 @@ impl<'a> Checker<'a> {
             self.branch_layouts(body, &clauses[index..])?;
             let condition = self.condition(test)?;
             if let Some(sites) = &mut self.fixed_sites {
-                sites.branch_test(test, &condition);
+                sites.wrapped_operand(test, test.range(), &condition);
             }
             let known = self.instance_condition(&condition);
             if self.graph.reachable_only()
@@ -9666,6 +9670,10 @@ impl<'a> Checker<'a> {
                 && matches!(
                     (expression, &value.kind),
                     (ast::Expr::List(_), ExprKind::List(_))
+                        | (
+                            ast::Expr::Subscript(_),
+                            ExprKind::Builtin(Builtin::ListGet(_), _)
+                        )
                         | (ast::Expr::Tuple(_), ExprKind::Tuple(_))
                         | (ast::Expr::Dict(_), ExprKind::Dict(_))
                         | (ast::Expr::Named(_), ExprKind::Bind(_, _))

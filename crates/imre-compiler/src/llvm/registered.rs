@@ -201,8 +201,8 @@ pub(crate) fn frame_inputs(
             }
             ir::Node::Expression(expr) => expr,
         };
-        if let Some((range, attribute @ crate::frontend::FixedAttribute::Call(target, _))) =
-            source.zip(attribute)
+        if let Some((range, attribute)) = source.zip(attribute)
+            && let Some((target, _)) = attribute.call_binding()
             && let Some((receiver, args)) =
                 attribute.call_operands(range, positions.get(1).copied(), expr)
         {
@@ -1720,19 +1720,25 @@ impl<'f> Frame<'f, '_, '_> {
         op: &Builtin,
         read: impl FnOnce(&mut Self, Option<[usize; 4]>) -> String,
     ) -> CheckedValue {
-        let Builtin::RegisteredSubscript(range, base_end) = op else {
-            return CheckedValue::handle(read(self, None));
+        let (range, span) = match op {
+            Builtin::RegisteredSubscript(range, base_end) => {
+                (*range, self.expression_range_span(*range, *base_end, b'['))
+            }
+            Builtin::ListGet(Some(origin)) => (
+                self.current_range,
+                origin.span.map(|[start, split, end]| {
+                    [origin.line, start, split, end].map(|value| value as usize)
+                }),
+            ),
+            _ => return CheckedValue::handle(read(self, None)),
         };
-        let read = |frame: &mut Self| {
-            let span = frame.expression_range_span(*range, *base_end, b'[');
-            read(frame, span)
-        };
+        let read = |frame: &mut Self| read(frame, span);
         // An injected exception belongs to the parked key. Once it returns,
         // the read itself can fail across several source lines.
         let value = if self.native_suspension
             && self.positions.line(range.start()) != self.positions.line(range.end())
         {
-            self.with_source_range(*range, read)
+            self.with_source_range(range, read)
         } else {
             read(self)
         };
