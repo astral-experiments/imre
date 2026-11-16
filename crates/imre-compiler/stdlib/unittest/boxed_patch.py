@@ -343,24 +343,14 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
             return patched
         return ContextDecorator.__call__(self, func)
 
-    def _enter(self):
+    def _patch_dict(self):
+        values = self.values
         if isinstance(self.in_dict, str):
             self.in_dict = _patch_owner(self.in_dict)
-        mapping = self.in_dict
-        try:
-            self._original = mapping.copy()
-        except AttributeError:
-            self._original = {key: mapping[key] for key in mapping}
-        self._change(self.values, self.clear)
-        return mapping
+        _apply_dict_patch(self, values, self.in_dict, self.clear)
 
-    def _change(self, values, clear):
-        _change_mapping(self.in_dict, values, clear)
-
-    __enter__ = _enter
-
-    def __exit__(self, *exc_info):
-        return self._exit()
+    def _unpatch_dict(self):
+        _change_mapping(self.in_dict, self._original, True)
 
 
 _PatchFactory.__call__ = _patch_attribute

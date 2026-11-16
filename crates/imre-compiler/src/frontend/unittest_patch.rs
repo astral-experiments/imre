@@ -167,7 +167,7 @@ impl Checker<'_> {
     ) -> Result<&'s mut Vec<Statement>, String> {
         let saved = self.hidden(manager.ty);
         let (enter_id, enter_ty) = {
-            let sig = &self.classes.methods[class]["_enter"];
+            let sig = &self.classes.methods[class]["__enter__"];
             (sig.id, sig.returns)
         };
         let exit = self.classes.methods[class]["_exit"].id;

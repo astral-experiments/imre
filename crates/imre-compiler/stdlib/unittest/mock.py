@@ -42,26 +42,31 @@ class _DictionaryPatch:
         self.clear = clear
         self._original = None
 
-    def _enter(self) -> dict[str, str]:
-        self._original = self.in_dict.copy()
-        _change_mapping(self.in_dict, self.values, self.clear)
+    def __enter__(self) -> dict[str, str]:
+        self._patch_dict()
         return self.in_dict
 
-    def _change(self, values: dict[str, str] | None, clear: bool) -> None:
+    def _patch_dict(self) -> None:
+        _apply_dict_patch(self, self.values, self.in_dict, self.clear)
+
+    def _unpatch_dict(self) -> None:
         mapping = self.in_dict
-        if values is None:
-            if clear:
-                _clear_dict(mapping)
+        original = self._original
+        if original is None:
+            _clear_dict(mapping)
             raise TypeError("'NoneType' object is not iterable")
-        _change_mapping(mapping, values, clear)
+        _change_mapping(mapping, original, True)
+
+    def __exit__(self, *exc_info) -> bool:
+        return self._exit()
 
     def _exit(self) -> bool:
         if self._original is not None:
-            self._change(self._original, True)
+            self._unpatch_dict()
         return False
 
     def start(self) -> dict[str, str]:
-        result = self._enter()
+        result = self.__enter__()
         _active_patches.append(self)
         return result
 
@@ -72,8 +77,20 @@ class _DictionaryPatch:
                 for tail in range(index + 1, len(_active_patches)):
                     _active_patches[tail - 1] = _active_patches[tail]
                 _active_patches.pop()
-                return self._exit()
+                return self.__exit__(None, None, None)
         return None
+
+
+def _apply_dict_patch(patcher: _DictionaryPatch, values: dict[str, str],
+                      mapping: dict[str, str], clear: bool) -> None:
+    try:
+        original = mapping.copy()
+    except AttributeError:
+        original = {}
+        for key in mapping:
+            original[key] = mapping[key]
+    patcher._original = original
+    _change_mapping(mapping, values, clear)
 
 
 _active_patches: list[_DictionaryPatch] = []
