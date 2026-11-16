@@ -1512,23 +1512,26 @@ mod tests {
             "def copied_value(values: list[int], index: int) -> int:\n    copied = [*values, *range(3)]\n    if 0 <= index < len(copied):\n        return copied[index]\n    return -1\n",
         );
         let facts = analyze(&module);
-        let accesses = expressions(&module.functions[0])
-            .into_iter()
-            .filter_map(|value| match &value.kind {
-                ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
-                _ => None,
+        let values = expressions(&module.functions[0]);
+        assert_eq!(
+            values
+                .iter()
+                .filter(|value| value.spread_operand().is_some())
+                .count(),
+            1
+        );
+        let mut indices = values.into_iter().filter_map(|value| match &value.kind {
+            ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
+            _ => None,
+        });
+        assert_eq!(
+            facts.integer(indices.next().unwrap()),
+            Some(IntRange {
+                min: 0,
+                max: MAX_LIST_LEN as i64 - 1,
             })
-            .collect::<Vec<_>>();
-        assert_eq!(accesses.len(), 2);
-        for index in accesses {
-            assert_eq!(
-                facts.integer(index),
-                Some(IntRange {
-                    min: 0,
-                    max: MAX_LIST_LEN as i64 - 1,
-                })
-            );
-        }
+        );
+        assert!(indices.next().is_none());
     }
 
     #[test]

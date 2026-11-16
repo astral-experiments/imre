@@ -992,9 +992,9 @@ impl Expr {
             || matches!(self.kind, ExprKind::Builtin(Builtin::FormatJoin, _))
     }
 
-    /// The freshly allocated list has no externally visible alias during argument evaluation.
+    /// A written element makes a fresh list nonempty even when every spread is empty.
     pub(crate) fn is_nonempty_list_literal(&self) -> bool {
-        matches!(&self.kind, ExprKind::List(items) if !items.is_empty())
+        matches!(&self.kind, ExprKind::List(items) if items.iter().any(|item| item.spread_operand().is_none()))
     }
 
     /// Read the operation beneath its diagnostic source positions.
