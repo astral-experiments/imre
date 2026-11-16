@@ -317,6 +317,9 @@ print(take(saved(), 'wrong'))\n";
         fs::write(&entry, source.replace("TARGET", target)).unwrap();
         let error = compiler.check_file(&entry, None).unwrap_err();
         assert_eq!(check_file(&entry, None).unwrap_err(), error);
-        assert!(error.contains(":7:21") && error.contains(expected), "{error}");
+        assert!(
+            error.contains(":7:21") && error.contains(expected),
+            "{error}"
+        );
     }
 }

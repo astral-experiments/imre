@@ -1577,7 +1577,8 @@ impl Checker<'_> {
                     vec![checker.local(result), item],
                 )));
                 Ok(true)
-            })?;
+            },
+        )?;
         let item = self.names.remove(&name).unwrap();
         let mut body = vec![Statement::Assign(
             result,
