@@ -83,8 +83,8 @@ impl Checker<'_> {
         let alternatives = match first {
             Type::Class(base) => self
                 .classes
+                .declarations
                 .concrete_layouts(base)
-                .into_iter()
                 .map(|class| ir::InstanceType::Exact(Type::Class(class)))
                 .collect(),
             ty => vec![ir::InstanceType::Exact(ty)],

@@ -2,20 +2,20 @@
 
 use super::*;
 
-impl ClassInfo<'_> {
-    /// Concrete layouts whose objects can inhabit a slot typed as the base class.
-    pub(super) fn concrete_layouts(&self, base: usize) -> Vec<usize> {
-        self.declarations
-            .definitions
+impl Classes<'_> {
+    /// Concrete layouts in declaration order, including the base when it is concrete.
+    pub(super) fn concrete_layouts(&self, base: usize) -> impl Iterator<Item = usize> {
+        self.definitions
             .iter()
             .enumerate()
-            .filter(|(id, class)| {
+            .filter(move |(id, class)| {
                 (*id == base || class.bases.contains(&base)) && class.abstract_methods.is_empty()
             })
             .map(|(id, _)| id)
-            .collect()
     }
+}
 
+impl ClassInfo<'_> {
     /// A generated dataclass repr shadows an inherited override even though the
     /// generated method has no source signature in the method table.
     pub(super) fn has_repr_override(&self, id: usize) -> bool {
@@ -52,7 +52,7 @@ impl ClassInfo<'_> {
                 continue;
             }
             if let Type::Class(id) = ty {
-                for layout in self.concrete_layouts(id) {
+                for layout in self.declarations.concrete_layouts(id) {
                     let class = &self.declarations.definitions[layout];
                     if let Some((owner, method)) = self.repr_override(layout) {
                         if !method.is_async && !graph.includes_method(owner.module, method) {
@@ -182,10 +182,13 @@ impl Checker<'_> {
         at: &impl Ranged,
         mut invoke: impl FnMut(&mut Self, usize, Expr) -> Result<Expr, String>,
     ) -> Result<Expr, String> {
-        let candidates = self.classes.concrete_layouts(base);
         let slot = self.hidden(Type::Class(base));
-        let mut alternatives = Vec::with_capacity(candidates.len());
-        for class in candidates {
+        let includes_base = self.classes.declarations.definitions[base]
+            .abstract_methods
+            .is_empty();
+        let count = self.types.concrete_subclasses(base).len() + usize::from(includes_base);
+        let mut alternatives = Vec::with_capacity(count);
+        for class in self.classes.declarations.concrete_layouts(base) {
             let view = Expr {
                 ty: Type::Class(class),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![self.local(slot)]),

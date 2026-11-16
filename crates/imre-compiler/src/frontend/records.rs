@@ -1777,7 +1777,7 @@ impl Checker<'_> {
     /// a different metaclass. Only use the builtin metaclass when it is exact.
     pub(super) fn has_plain_factory_metaclass(&self, factory: Type) -> bool {
         self.types.constructor_base(factory).is_some_and(|base| {
-            self.classes.concrete_layouts(base).into_iter().all(|id| {
+            self.classes.declarations.concrete_layouts(base).all(|id| {
                 let class = &self.classes.declarations.definitions[id];
                 !class.abc && class.enum_members.is_none()
             })

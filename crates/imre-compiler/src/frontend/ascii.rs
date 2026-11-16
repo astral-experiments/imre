@@ -40,7 +40,7 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::ExceptionRepr, vec![value]),
             },
             Type::Class(id)
-                if self.classes.concrete_layouts(id).iter().all(|&class| {
+                if self.classes.declarations.concrete_layouts(id).all(|class| {
                     self.classes.has_repr_override(class) || {
                         let definition = &self.classes.declarations.definitions[class];
                         definition.dataclass.is_some_and(|options| options.repr)

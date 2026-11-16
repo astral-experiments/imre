@@ -199,8 +199,8 @@ fn check_format(
     if let Type::Class(id) = ty {
         if !exact && classes.has_concrete_subclasses(id) {
             return classes
+                .declarations
                 .concrete_layouts(id)
-                .into_iter()
                 .all(|class| check_format(Type::Class(class), types, classes, seen, true));
         }
         if classes.has_repr_override(id) {
