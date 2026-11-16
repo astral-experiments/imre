@@ -69,18 +69,6 @@ impl Helpers {
         functions[id - self.first] = Some(helper);
     }
 
-    /// Only completed list producers without a frame of their own can move with the caller.
-    pub(super) fn caller_list_helpers_since(&self, start: usize, types: &Types) -> bool {
-        let helpers = self.functions.borrow();
-        start < self.len()
-            && helpers.len() == self.len()
-            && helpers[start..].iter().all(|helper| {
-                helper.as_ref().is_some_and(|helper| {
-                    !helper.source_frame && types.element(helper.function.returns).is_some()
-                })
-            })
-    }
-
     pub(super) fn only_direct_locals_since(
         &self,
         start: usize,

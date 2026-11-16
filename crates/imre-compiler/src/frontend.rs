@@ -207,7 +207,6 @@ enum ParameterOrigin {
 struct Signature {
     id: usize,
     physical_frame: bool,
-    may_have_display: bool,
     asynchronous: bool,
     parameter_declarations: Arc<[ParameterOrigin]>,
     params: Vec<Parameter>,
@@ -1228,8 +1227,7 @@ fn lower_graph(
     }
     for (module, function, signature) in &mut definitions {
         let renamed = assignments::alias_builtin_parameters(function, graph, *module);
-        let (dispatch, packed, may_have_display) = closed_calls::prepare(function, graph, *module);
-        signature.may_have_display = may_have_display;
+        let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
         if renamed || dispatch || packed {
             signature.physical_frame = false;
         }
@@ -1729,9 +1727,7 @@ fn lower_graph(
                 .all(|p| p.default.is_none() && !p.sign_only)
             && ((named_scalar
                 && unavailable.is_none()
-                && signature.may_have_display
-                // Eager displays cannot supply a fixed source operand to this frame.
-                // Keep first-party calls and method bindings on their fixed contract.
+                // The indexed comprehension and its caller must use only these bindings.
                 && graph.session.function_reads_only(
                     *module_id,
                     definition,
@@ -1791,8 +1787,7 @@ fn lower_graph(
         } else if physical_function
             && (named
                 && unavailable.is_none()
-                && (named_scalar
-                    || signature.may_have_display && types.element(signature.returns).is_some())
+                && (named_scalar || types.element(signature.returns).is_some())
                 || named
                     && place_procedures
                     && unavailable.is_some()
@@ -2656,14 +2651,15 @@ fn lower_function(
                 definition,
                 statements,
                 Some(&mut body),
-                Some(&mut |cx| {
-                    let ready = if cx.types.element(signature.returns).is_some() {
-                        cx.helpers.caller_list_helpers_since(helpers, cx.types)
-                    } else {
-                        cx.helpers
+                Some(&mut |cx, stored| {
+                    if cx.types.element(signature.returns).is_some()
+                        && !stored.is_some_and(|value| {
+                            cx.types.element(value.ty).is_some()
+                                && matches!(value.kind, ExprKind::Scope { .. })
+                        })
+                        || !cx
+                            .helpers
                             .only_direct_locals_since(helpers, &cx.local_functions)
-                    };
-                    if !ready
                         || cx.unrepresented.borrow().is_some()
                         || signature.returns == Type::None
                             && cx
@@ -3279,7 +3275,6 @@ fn signature(
     Ok(Signature {
         id,
         physical_frame: false,
-        may_have_display: false,
         asynchronous: function.is_async,
         parameter_declarations: parameter_declarations.into(),
         params,
@@ -6856,7 +6851,7 @@ impl<'a> Checker<'a> {
         &mut self,
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
-        mut place: Option<&mut dyn FnMut(&mut Self) -> bool>,
+        mut place: Option<&mut dyn FnMut(&mut Self, Option<&Expr>) -> bool>,
         function: Option<&ast::StmtFunctionDef>,
     ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
@@ -7035,7 +7030,11 @@ impl<'a> Checker<'a> {
             } else if self.discarded_function_body() {
                 // The fixed body has lost its physical operands. Continue the source
                 // checks here if the Python frame cannot validate the whole declaration.
-                if place.take().is_some_and(|place| place(self)) {
+                let stored = match body[ops..].last() {
+                    Some(Statement::Assign(_, value)) => Some(value),
+                    _ => None,
+                };
+                if place.take().is_some_and(|place| place(self, stored)) {
                     break;
                 }
                 *body = Vec::new();
