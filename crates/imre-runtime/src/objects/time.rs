@@ -46,7 +46,15 @@ impl Deadline {
 /// returning handler resumes against the same deadline, including callback time.
 pub(crate) fn sleep_ns<E: From<Error>>(
     nanos: i64,
+    dispatch: impl FnMut() -> Result<(), E>,
+) -> Result<(), E> {
+    sleep_with(nanos, dispatch, |when| Ok(sleep_once(when)))
+}
+
+pub(crate) fn sleep_with<E: From<Error>>(
+    nanos: i64,
     mut dispatch: impl FnMut() -> Result<(), E>,
+    mut wait: impl FnMut(libc::timespec) -> Result<i32, E>,
 ) -> Result<(), E> {
     if nanos < 0 {
         return Err(Error::new(Kind::ValueError, "sleep length must be non-negative").into());
@@ -68,25 +76,7 @@ pub(crate) fn sleep_ns<E: From<Error>>(
             })?,
             tv_nsec: delay.subsec_nanos().into(),
         };
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        // SAFETY: clock_nanosleep reads this absolute CLOCK_MONOTONIC timestamp.
-        let status = unsafe {
-            libc::clock_nanosleep(
-                libc::CLOCK_MONOTONIC,
-                libc::TIMER_ABSTIME,
-                &when,
-                std::ptr::null_mut(),
-            )
-        };
-        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        // SAFETY: nanosleep reads this relative delay; no remaining-time result is needed.
-        let status = if unsafe { libc::nanosleep(&when, std::ptr::null_mut()) } < 0 {
-            io::Error::last_os_error()
-                .raw_os_error()
-                .expect("nanosleep sets errno")
-        } else {
-            0
-        };
+        let status = wait(when)?;
         if status == 0 {
             return dispatch();
         }
@@ -94,6 +84,29 @@ pub(crate) fn sleep_ns<E: From<Error>>(
             return Err(super::errno_error(io::Error::from_raw_os_error(status)).into());
         }
         dispatch()?;
+    }
+}
+
+/// Perform one native sleep attempt, leaving signal dispatch to the resumed caller.
+pub(crate) fn sleep_once(when: libc::timespec) -> i32 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    // SAFETY: clock_nanosleep reads this absolute CLOCK_MONOTONIC timestamp.
+    unsafe {
+        libc::clock_nanosleep(
+            libc::CLOCK_MONOTONIC,
+            libc::TIMER_ABSTIME,
+            &when,
+            std::ptr::null_mut(),
+        )
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    // SAFETY: nanosleep reads this relative delay; no remaining-time result is needed.
+    if unsafe { libc::nanosleep(&when, std::ptr::null_mut()) } < 0 {
+        io::Error::last_os_error()
+            .raw_os_error()
+            .expect("nanosleep sets errno")
+    } else {
+        0
     }
 }
 
