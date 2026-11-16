@@ -7351,12 +7351,20 @@ impl<'a> Checker<'a> {
             return Ok(true);
         }
         let module = &self.graph.modules[self.module];
-        if let ast::Stmt::Global(global) = statement
-            && global.names.iter().all(|name| {
-                matches!(module.bindings.get(name.as_str()), Some(Binding::Value(first))
-                    if first.module == self.module && module.rebound_values.contains(&first.statement))
-            })
-        {
+        if let ast::Stmt::Global(global) = statement {
+            if !self.module_scope
+                && !global.names.iter().all(|name| {
+                    self.graph.session.unused_global_declaration(self.module, name)
+                        || matches!(module.bindings.get(name.as_str()), Some(Binding::Value(first))
+                        if first.module == self.module && module.rebound_values.contains(&first.statement))
+                })
+            {
+                // The lexical frame binds these names in its defining module.
+                let failure = self.scoped_builtin_error("a named module binding", statement);
+                if !self.missing_operation(&failure) {
+                    return Err(failure);
+                }
+            }
             return Ok(true);
         }
         if let Some(first) = module.rebound_target(self.module, statement)
@@ -10573,11 +10581,10 @@ impl<'a> Checker<'a> {
                 let Some(&slot) = self.names.get(name.id.as_str()) else {
                     let name = name.id.as_str();
                     if binding.is_none() {
-                        if self
-                            .graph
-                            .session
-                            .operand_types(self.module)
-                            .reads_deferred_global(expression)
+                        let operands = self.graph.session.operand_types(self.module);
+                        if operands.reads_deferred_global(expression)
+                            || (self.module_scope
+                                && operands.reads_nested_module_binding(expression))
                         {
                             self.require_registered_operation(expression)?;
                             return Ok(registered::values::name_binding(name));
