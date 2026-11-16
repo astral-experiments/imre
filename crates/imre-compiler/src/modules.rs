@@ -1148,13 +1148,13 @@ impl Intrinsic {
 
     pub(crate) fn unary_float_math(self) -> Option<(&'static str, Builtin)> {
         match self {
-            Self::MathAcos => Some(("math.acos", Builtin::FloatAcos)),
-            Self::MathAsin => Some(("math.asin", Builtin::FloatAsin)),
-            Self::MathAtan => Some(("math.atan", Builtin::FloatAtan)),
+            Self::MathAcos => Some(("math.acos", Builtin::FloatUnary("imre_float_acos"))),
+            Self::MathAsin => Some(("math.asin", Builtin::FloatUnary("imre_float_asin"))),
+            Self::MathAtan => Some(("math.atan", Builtin::FloatUnary("atan"))),
             Self::MathDegrees => Some(("math.degrees", Builtin::FloatDegrees)),
             Self::MathRadians => Some(("math.radians", Builtin::FloatRadians)),
             Self::MathErfc => Some(("math.erfc", Builtin::FloatUnary("erfc"))),
-            Self::MathLog10 => Some(("math.log10", Builtin::FloatLog10)),
+            Self::MathLog10 => Some(("math.log10", Builtin::FloatUnary("imre_float_log10"))),
             _ => None,
         }
     }

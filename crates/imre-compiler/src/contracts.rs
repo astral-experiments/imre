@@ -586,10 +586,7 @@ impl Builtin {
             | Self::MathFactorial
             | Self::EnumLookup(_)
             | Self::TomlDecode(_)
-            | Self::FloatAcos
             | Self::FloatFmod
-            | Self::FloatAsin
-            | Self::FloatLog10
             | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
@@ -634,7 +631,6 @@ impl Builtin {
             | Self::IntHash
             | Self::IntFromBytes
             | Self::FloatIsInteger
-            | Self::FloatAtan
             | Self::FloatDegrees
             | Self::FloatRadians
             | Self::IntSignAsFloat
@@ -1060,13 +1056,9 @@ impl Builtin {
                         .iter()
                         .all(|arg| matches!(arg.ty, Type::Int | Type::Float))
             }
-            Self::FloatAcos
-            | Self::FloatAsin
-            | Self::FloatAtan
-            | Self::FloatDegrees
-            | Self::FloatRadians
-            | Self::FloatUnary(_)
-            | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
+            Self::FloatDegrees | Self::FloatRadians | Self::FloatUnary(_) => {
+                signature(&[Type::Float], Type::Float)
+            }
             Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;

@@ -90,7 +90,7 @@ pub(super) fn unary_math_operation(member: &'static str) -> Option<Builtin> {
 pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
     let (builtin, conversion, ty) = match (builtin, value.ty) {
         // A Python int can have a finite logarithm even when float(int) overflows.
-        (Builtin::FloatLog10, Type::Int | Type::Bool) => {
+        (Builtin::FloatUnary("imre_float_log10"), Type::Int | Type::Bool) => {
             (Builtin::IntLog10, Builtin::Int(None), Type::Int)
         }
         (op, Type::Float | Type::Int | Type::Bool) => (op, Builtin::Float(None), Type::Float),
