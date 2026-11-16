@@ -4359,6 +4359,21 @@ impl Heap {
         Ok((key, value))
     }
 
+    /// Publish an inline binding after its caller has selected the instance storage.
+    pub(super) fn store_instance_field(&mut self, obj: Id, name: &str, value: Id) {
+        let Value::Instance { fields, .. } = self.get_mut(obj) else {
+            unreachable!("instance field storage")
+        };
+        if let Some(slot) = fields.get_mut(name) {
+            let previous = std::mem::replace(slot, value);
+            if previous != value {
+                self.weak_edge_removed(previous);
+            }
+        } else {
+            fields.insert(name.to_owned(), value);
+        }
+    }
+
     /// Remove one inline instance binding after its owner has selected the storage.
     pub(super) fn remove_instance_field(&mut self, obj: Id, name: &str) -> bool {
         let Value::Instance { fields, .. } = self.get_mut(obj) else {
