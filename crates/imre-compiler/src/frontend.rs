@@ -14299,7 +14299,11 @@ impl<'a> Checker<'a> {
         }
         if binding.is_some_and(Binding::is_registered_object) {
             self.require_registered_operation(call.func.as_ref())?;
-            return self.call_with_target(call, Expr::unrepresented());
+            let target = Expr::unrepresented();
+            if self.inference.is_some() {
+                return self.invoke(call, target);
+            }
+            return self.call_with_target(call, target);
         }
         let gzip = binding == Some(Binding::Intrinsic(Intrinsic::GzipOpen));
         let imported_open = binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsOpen))
