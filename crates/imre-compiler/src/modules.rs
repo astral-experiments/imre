@@ -6558,12 +6558,7 @@ impl<'a> Loader<'a> {
             )),
             needs_textwrap(TEXTWRAP_FUNCTIONS).then_some((
                 TEXTWRAP_FUNCTIONS,
-                concat!(
-                    // Preserve this module's namespace and the source lines shown in fixed frames.
-                    "\"\"\"Text wrapping functions compiled from CPython 3.14.5 Lib/textwrap.py (PSF-2.0).\"\"\"\n",
-                    "from typing import Callable\n\n\n",
-                    include_str!("../stdlib/textwrap/functions.py"),
-                ),
+                include_str!("../stdlib/textwrap/functions.py"),
             )),
             needs_textwrap(TEXTWRAP_WRAPPER).then_some((
                 TEXTWRAP_WRAPPER,

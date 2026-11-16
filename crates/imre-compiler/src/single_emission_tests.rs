@@ -452,6 +452,8 @@ run()
 #[test]
 fn textwrap_functions_compile_for_fixed_string_callers() {
     let dir = tempfile::tempdir().unwrap();
+    // Loading the bundled textwrap functions must not require a project-local Callable.
+    std::fs::write(dir.path().join("typing.py"), "").unwrap();
     let path = dir.path().join("main.py");
     std::fs::write(
         &path,
