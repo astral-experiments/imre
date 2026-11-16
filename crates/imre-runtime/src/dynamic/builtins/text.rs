@@ -1842,30 +1842,23 @@ fn remove_affix(ctx: &mut Context, receiver: Id, name: &str, affix: Id) -> Resul
 
 /// Strip matching Python code points while keeping scalar strings in UTF-8.
 fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) -> Result<Id> {
-    let chars = chars
-        .map(|id| {
-            ctx.string_storage(id)
-                .map(|storage| ctx.heap.get(storage))
-                .ok_or_else(|| type_error(format!("{name} arg must be None or str")))
-        })
-        .transpose()?;
-    let remove = |point| match chars {
-        None => char::from_u32(point).is_some_and(python_whitespace),
-        Some(Value::Str(set)) => char::from_u32(point).is_some_and(|ch| set.contains(ch)),
-        Some(Value::SurrogateStr(set)) => set.contains(&point),
-        _ => unreachable!("validated str cutset"),
+    use crate::objects::StripChars;
+    let chars = match chars {
+        None => StripChars::Whitespace,
+        Some(id) => match ctx.string_storage(id).map(|storage| ctx.heap.get(storage)) {
+            Some(Value::Str(set)) => StripChars::Text(set),
+            Some(Value::SurrogateStr(set)) => StripChars::Codepoints(set),
+            _ => return Err(type_error(format!("{name} arg must be None or str"))),
+        },
     };
+    let left = name != "rstrip";
+    let right = name != "lstrip";
     let storage = ctx
         .string_storage(receiver)
         .expect("validated str receiver");
     match ctx.heap.get(storage) {
         Value::Str(source) => {
-            let matches = |ch: char| remove(u32::from(ch));
-            let part = match name {
-                "lstrip" => source.trim_start_matches(matches),
-                "rstrip" => source.trim_end_matches(matches),
-                _ => source.trim_matches(matches),
-            };
+            let part = chars.strip(source, left, right);
             if part.len() == source.len() {
                 return ctx.unchanged_string(receiver, storage);
             }
@@ -1874,10 +1867,10 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
         Value::SurrogateStr(points) => {
             let mut start = 0;
             let mut end = points.len();
-            while name != "rstrip" && start < end && remove(points[start]) {
+            while left && start < end && chars.contains(points[start]) {
                 start += 1;
             }
-            while name != "lstrip" && start < end && remove(points[end - 1]) {
+            while right && start < end && chars.contains(points[end - 1]) {
                 end -= 1;
             }
             if start == 0 && end == points.len() {
