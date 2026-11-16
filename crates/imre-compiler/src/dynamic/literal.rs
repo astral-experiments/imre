@@ -74,7 +74,6 @@ pub(crate) struct ParsedLiteral {
     original_text: Option<Box<str>>,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) flags: u32,
-    inherited_flags: u32,
     imports: Vec<String>,
     candidates: Vec<TextRange>,
 }
@@ -99,7 +98,6 @@ impl ParsedLiteral {
             text: text.into_owned(),
             parsed,
             flags,
-            inherited_flags,
             candidates: imports.literal_calls,
             imports: imports
                 .names
@@ -124,7 +122,7 @@ impl ParsedLiteral {
             python_optimization,
             ModuleOrigin::ExecLiteral {
                 checked: &self.parsed,
-                inherited_flags: self.inherited_flags,
+                flags: self.flags,
                 python_annotations,
             },
             children,
