@@ -200,7 +200,10 @@ use module_values::{Initialization, ModuleValues};
 enum ParameterOrigin {
     Unspecified,
     Stub,
-    Source(TypeDeclaration),
+    Source {
+        declaration: TypeDeclaration,
+        checks_calls: bool,
+    },
 }
 
 #[derive(Clone)]
@@ -217,7 +220,10 @@ struct Signature {
 impl Signature {
     fn parameter_declaration(&self, index: usize) -> Option<TypeDeclaration> {
         match self.parameter_declarations.get(index)? {
-            ParameterOrigin::Source(declaration) => Some(*declaration),
+            ParameterOrigin::Source {
+                declaration,
+                checks_calls: true,
+            } => Some(*declaration),
             _ => None,
         }
     }
@@ -1736,8 +1742,11 @@ fn lower_graph(
                 || (signature.returns == Type::None
                     && definition.returns.is_some()
                     && !signature.params.is_empty()
-                    && (0..signature.params.len())
-                        .all(|index| signature.parameter_declaration(index).is_some()))
+                    && signature.parameter_declarations.len() == signature.params.len()
+                    && signature
+                        .parameter_declarations
+                        .iter()
+                        .all(|origin| matches!(origin, ParameterOrigin::Source { .. })))
                 || (named
                     && definition.returns.is_none()
                     && (callable_inputs.is_some()
@@ -2868,12 +2877,17 @@ fn signature(
                        stub: bool,
                        python_parameter: bool| {
         let origin = if let Some(annotation) = annotation
-            && (graph.modules[module].checks_source_contracts() || python_parameter)
+            && (python_parameter || graph.modules[module].is_program_source())
         {
-            ParameterOrigin::Source(TypeDeclaration {
-                module,
-                annotation: annotation.range(),
-            })
+            // A selected application on PYTHONPATH owns its written parameters.
+            // Its live call sites still use the launcher's existing contract policy.
+            ParameterOrigin::Source {
+                declaration: TypeDeclaration {
+                    module,
+                    annotation: annotation.range(),
+                },
+                checks_calls: python_parameter || graph.modules[module].checks_source_contracts(),
+            }
         } else if stub {
             ParameterOrigin::Stub
         } else {
