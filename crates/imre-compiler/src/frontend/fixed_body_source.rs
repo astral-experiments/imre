@@ -781,11 +781,16 @@ impl SourceSites {
         };
         let range = call.range();
         if let Some(site) = self.site_at(range) {
-            let invoke = ir::RegisteredCall::new(
+            let mut invoke = ir::RegisteredCall::new(
                 range,
                 registered::values::method_target(field),
                 registered::values::fixed_argument_layout(&call.arguments),
             );
+            invoke.checked_nullable_receiver = matches!(operands[0].ty, Type::Optional(_))
+                && matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::RegexCapture { .. }, _)
+                );
             self.attributes
                 .insert(range, FixedAttribute::Call(None, invoke));
             self.commit(site, node);
@@ -1374,10 +1379,13 @@ mod tests {
                 .collect();
             assert!(methods.iter().map(|m| m.0).eq(declarations.iter().copied()));
             let refused = methods[0].3[0];
-            graph
-                .registered_source_errors
-                .borrow_mut()
-                .insert(graph.entry, vec![Some(refused)]);
+            graph.registered_source_errors.borrow_mut().insert(
+                graph.entry,
+                vec![crate::analysis::RegisteredSourceError::Local {
+                    range: refused,
+                    attribute: false,
+                }],
+            );
             if early {
                 let (module, owners) = fixed.ir;
                 let checks = registered::SourceChecks::default();

@@ -16482,6 +16482,30 @@ impl<'a> Checker<'a> {
         .then_some(name)
     }
 
+    /// Bind a fixed positional call at its written module member or global name.
+    fn record_positional_call(&mut self, call: &ast::ExprCall, value: &Expr) {
+        if let Some(sites) = &mut self.fixed_sites
+            && self.namespace.is_none()
+            && let Some(field) = call.func.as_attribute_expr()
+            && let Some(module) = field.value.as_name_expr()
+            && !self.names.contains_key(module.id.as_str())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
+        {
+            sites.positional_call(call, value, || {
+                let source = self.graph.modules[self.module]
+                    .registered_values()
+                    .operands(self.source, self.graph.python_optimization());
+                source.imported_callable(
+                    module,
+                    call,
+                    self.graph.session.operand_types(self.module),
+                )
+            });
+        } else {
+            self.record_named_call(call, value);
+        }
+    }
+
     /// Retain a written global lookup for the Python entry of a checked positional call.
     fn record_named_call(&mut self, call: &ast::ExprCall, value: &Expr) {
         if let Some(name) = self.placed_call_name(call)

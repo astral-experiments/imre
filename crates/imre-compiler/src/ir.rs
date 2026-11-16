@@ -1804,6 +1804,8 @@ pub(crate) fn generator_operands(
 /// A call evaluates its callable or method receiver before the argument binder runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RegisteredCall {
+    /// The native operation checks this optional receiver at the same written method lookup.
+    pub(crate) checked_nullable_receiver: bool,
     /// The outer get position for an immediately indexed partition method call.
     pub(crate) partition_field: Option<(u32, ruff_text_size::TextRange)>,
     /// Enter the written expression before resolving the target or evaluating an argument.
@@ -1825,6 +1827,7 @@ impl RegisteredCall {
             arguments,
             partition_field: None,
             position: None,
+            checked_nullable_receiver: false,
         })
     }
 
@@ -2756,16 +2759,15 @@ pub(crate) enum Builtin {
     TextOpen(u32),
     BinaryOpen(u32),
     GzipOpen,
-    /// The compile-time validated pattern is independent of the source spelling.
+    /// Compiles its literal operand with the validated pattern and flags.
     RegexCompile {
-        spelling: Constant,
         supplied_flags: u16,
         pattern: std::sync::Arc<imre_regex::FixedPattern>,
     },
     RegexFlags,
     RegexSpelling,
     UnittestCompilePattern,
-    RegexSearch,
+    RegexSearch(Option<std::sync::Arc<imre_regex::FixedPattern>>),
     RegexSearchText {
         anchored: bool,
         verbose: bool,
@@ -2777,8 +2779,8 @@ pub(crate) enum Builtin {
     },
     RegexGroupDict,
     RegexFindIter,
-    RegexMatchStart,
-    /// A proved selector is a valid numeric index for every possible receiver.
+    RegexMatchStart(Option<std::sync::Arc<imre_regex::FixedPattern>>),
+    /// A proved written selector identifies an existing group for every possible receiver.
     RegexCapture {
         operation: RegexCapture,
         known: bool,

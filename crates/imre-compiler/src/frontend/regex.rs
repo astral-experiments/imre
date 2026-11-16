@@ -57,11 +57,11 @@ impl Checker<'_> {
         else {
             return None;
         };
-        let ExprKind::Builtin(Builtin::RegexSearch | Builtin::RegexMatchStart, search) = &rhs.kind
+        let ExprKind::Builtin(Builtin::RegexSearch(_) | Builtin::RegexMatchStart(_), _) = &rhs.kind
         else {
             return None;
         };
-        let groups = self.capture_layout(&search[0])?;
+        let groups = self.capture_layout(rhs)?;
         if narrowing::assigned_names(body)
             .iter()
             .any(|name| self.names.get(name) == Some(slot))
@@ -73,19 +73,15 @@ impl Checker<'_> {
 
     /// Resolve only a selector whose membership is proved. Unknown names,
     /// negative indices and out-of-range requests still go through IndexError.
-    fn capture_index(layout: Option<&CaptureLayout>, selector: &mut Expr) -> Option<usize> {
+    fn capture_index(layout: Option<&CaptureLayout>, selector: &Expr) -> Option<usize> {
         if matches!(&selector.kind, ExprKind::Int(n) if n == "0") {
             return Some(0);
         }
         let groups = layout?;
         match &selector.kind {
-            ExprKind::Str(name) => {
-                let index = groups
-                    .iter()
-                    .position(|group| group.name.as_deref() == Some(name))?;
-                *selector = Expr::integer(index);
-                Some(index)
-            }
+            ExprKind::Str(name) => groups
+                .iter()
+                .position(|group| group.name.as_deref() == Some(name)),
             ExprKind::Int(index) => index.parse::<usize>().ok().filter(|n| *n < groups.len()),
             _ => None,
         }
@@ -97,7 +93,11 @@ impl Checker<'_> {
         match &value.kind {
             ExprKind::Unwrap(inner) | ExprKind::Present(inner) => self.capture_layout(inner),
             ExprKind::Builtin(
-                Builtin::RegexSearch | Builtin::RegexMatchStart | Builtin::RegexGroupDict,
+                Builtin::RegexSearch(Some(pattern)) | Builtin::RegexMatchStart(Some(pattern)),
+                _,
+            ) => Some(CaptureLayout(pattern.clone())),
+            ExprKind::Builtin(
+                Builtin::RegexSearch(_) | Builtin::RegexMatchStart(_) | Builtin::RegexGroupDict,
                 args,
             ) => self.capture_layout(&args[0]),
             ExprKind::Local(slot) => self
@@ -130,7 +130,9 @@ impl Checker<'_> {
             && !matches!(
                 value.kind,
                 ExprKind::Builtin(
-                    Builtin::RegexCompile { .. } | Builtin::RegexSearch | Builtin::RegexMatchStart,
+                    Builtin::RegexCompile { .. }
+                        | Builtin::RegexSearch(_)
+                        | Builtin::RegexMatchStart(_),
                     _
                 )
             )
@@ -329,6 +331,24 @@ impl Checker<'_> {
     }
 
     pub(super) fn fixed_regex(&self, pattern: &ast::Expr, flags: i64) -> Result<Expr, String> {
+        let (spelling, pattern, ty) = self.parse_regex_literal(pattern, flags)?;
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(
+                Builtin::RegexCompile {
+                    supplied_flags: u16::try_from(flags).expect("fixed regex flag bits"),
+                    pattern,
+                },
+                vec![spelling],
+            ),
+        })
+    }
+
+    fn parse_regex_literal(
+        &self,
+        pattern: &ast::Expr,
+        flags: i64,
+    ) -> Result<(Expr, std::sync::Arc<imre_regex::FixedPattern>, Type), String> {
         let ascii = flags & ASCII_FLAG != 0;
         let verbose = flags & VERBOSE_FLAG != 0;
         let multiline = flags & MULTILINE_FLAG != 0;
@@ -337,7 +357,7 @@ impl Checker<'_> {
                 check_string(literal, self.source)?;
                 (
                     std::borrow::Cow::Borrowed(literal.value.to_str()),
-                    ir::Constant::Text(literal.value.to_str().as_bytes().to_vec()),
+                    unpacking::string(literal.value.to_str()),
                     if ascii {
                         imre_regex::Alphabet::Ascii
                     } else {
@@ -357,7 +377,10 @@ impl Checker<'_> {
                 let bytes = literal.value.bytes().collect::<Vec<_>>();
                 (
                     std::borrow::Cow::Owned(imre_regex::byte_pattern(&bytes)),
-                    ir::Constant::Bytes(bytes),
+                    Expr {
+                        ty: Type::Bytes,
+                        kind: ExprKind::Bytes(bytes),
+                    },
                     imre_regex::Alphabet::Bytes,
                     Type::RegexBytesPattern,
                 )
@@ -396,17 +419,7 @@ impl Checker<'_> {
         if ascii && !bytes_pattern && spelling.contains("(?u:") {
             return Err(self.scoped_builtin_error("re.compile", pattern));
         }
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Builtin(
-                Builtin::RegexCompile {
-                    spelling: literal,
-                    supplied_flags: u16::try_from(flags).expect("fixed regex flag bits"),
-                    pattern: std::sync::Arc::new(parsed),
-                },
-                Vec::new(),
-            ),
-        })
+        Ok((literal, std::sync::Arc::new(parsed), ty))
     }
 
     pub(super) fn compile_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -629,11 +642,22 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let flags = self.regex_flags(call, 2)?;
         let pattern = &call.arguments.args[0];
+        let mut literal = None;
         let pattern = if matches!(
             pattern,
             ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
         ) {
-            self.fixed_regex(pattern, flags)?
+            if self.fixed_sites.is_some() && call.arguments.len() == 2 {
+                let (spelling, checked, _) = self.parse_regex_literal(pattern, flags)?;
+                self.fixed_sites
+                    .as_mut()
+                    .unwrap()
+                    .leaf(pattern.range(), &spelling);
+                literal = Some(checked);
+                spelling
+            } else {
+                self.fixed_regex(pattern, flags)?
+            }
         } else {
             let value = self.expr(pattern)?;
             if value.ty == Type::Str {
@@ -675,15 +699,14 @@ impl Checker<'_> {
             }
             value
         };
-        self.pattern_search(
-            pattern,
-            &call.arguments.args[1],
-            if anchored {
-                Builtin::RegexMatchStart
-            } else {
-                Builtin::RegexSearch
-            },
-        )
+        let operation = if anchored {
+            Builtin::RegexMatchStart(literal)
+        } else {
+            Builtin::RegexSearch(literal)
+        };
+        let result = self.pattern_search(pattern, &call.arguments.args[1], operation)?;
+        self.record_positional_call(call, &result);
+        Ok(result)
     }
 
     fn pattern_search(
@@ -692,7 +715,7 @@ impl Checker<'_> {
         text: &ast::Expr,
         operation: Builtin,
     ) -> Result<Expr, String> {
-        let bytes_pattern = pattern.ty == Type::RegexBytesPattern;
+        let bytes_pattern = matches!(pattern.ty, Type::RegexBytesPattern | Type::Bytes);
         let subject_type = if bytes_pattern {
             Type::Bytes
         } else {
@@ -754,8 +777,12 @@ impl Checker<'_> {
                 {
                     self.pattern_sub(receiver, replacement, text)
                 }
-                ("search", [text]) => self.pattern_search(receiver, text, Builtin::RegexSearch),
-                ("match", [text]) => self.pattern_search(receiver, text, Builtin::RegexMatchStart),
+                ("search", [text]) => {
+                    self.pattern_search(receiver, text, Builtin::RegexSearch(None))
+                }
+                ("match", [text]) => {
+                    self.pattern_search(receiver, text, Builtin::RegexMatchStart(None))
+                }
                 _ => Err(error(
                     self.source,
                     call,
@@ -774,15 +801,18 @@ impl Checker<'_> {
         } else {
             Type::Str
         };
-        let receiver = if self.types.payload(receiver.ty).is_some() {
-            records::require_object_receiver(receiver, match_type, method)
-        } else {
-            receiver
+        let nullable = self.types.payload(receiver.ty).is_some();
+        let require_receiver = |receiver| {
+            if nullable {
+                records::require_object_receiver(receiver, match_type, method)
+            } else {
+                receiver
+            }
         };
         if method == "groupdict" && args.is_empty() {
             return Ok(Expr {
                 ty: self.types.dict(Type::Str, self.types.optional(group_type)),
-                kind: ExprKind::Builtin(Builtin::RegexGroupDict, vec![receiver]),
+                kind: ExprKind::Builtin(Builtin::RegexGroupDict, vec![require_receiver(receiver)]),
             });
         }
         if method == "groups" && args.is_empty() {
@@ -819,7 +849,7 @@ impl Checker<'_> {
             return Ok(Expr {
                 ty,
                 kind: ExprKind::Scope {
-                    body: vec![Statement::Assign(slot, receiver)],
+                    body: vec![Statement::Assign(slot, require_receiver(receiver))],
                     value: Box::new(Expr {
                         ty,
                         kind: ExprKind::Tuple(fields),
@@ -846,12 +876,15 @@ impl Checker<'_> {
                         "regex groups require a literal integer index or string name",
                     )
                 })?;
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.leaf(arg.range(), &selector);
+            }
             if let ExprKind::Unary(UnaryOp::USub, inner) = &selector.kind
                 && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
             {
                 selector.kind = ExprKind::Int("0".into());
             }
-            let index = Self::capture_index(layout.as_ref(), &mut selector);
+            let index = Self::capture_index(layout.as_ref(), &selector);
             (Some(selector), index)
         } else {
             (None, Some(0))
@@ -876,7 +909,7 @@ impl Checker<'_> {
             return Ok(Expr {
                 ty,
                 kind: ExprKind::Scope {
-                    body: vec![Statement::Assign(slot, receiver)],
+                    body: vec![Statement::Assign(slot, require_receiver(receiver))],
                     value: Box::new(Expr {
                         ty,
                         kind: ExprKind::Tuple(bounds),
@@ -905,7 +938,11 @@ impl Checker<'_> {
                 Type::Int,
             )
         };
-        Ok(capture(operation, ty, receiver, selector))
+        let value = capture(operation, ty, receiver, selector);
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.method(call, attribute, &value);
+        }
+        Ok(value)
     }
 }
 

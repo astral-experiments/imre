@@ -569,8 +569,8 @@ impl Builtin {
             | Self::RegexCollect { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
-            | Self::RegexSearch
-            | Self::RegexMatchStart
+            | Self::RegexSearch(_)
+            | Self::RegexMatchStart(_)
             | Self::RegexSearchText { .. }
             | Self::StringIterationList
             | Self::StringJoin
