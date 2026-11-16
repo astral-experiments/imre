@@ -97,7 +97,9 @@ class _DocTestSuite(unittest.TestSuite):
         pass
 
 
-def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, setUp=None, tearDown=None, checker=None):
+def DocTestSuite(module=None, globs=None, extraglobs=None, **options):
+    if "test_finder" in options:
+        raise TypeError("DocTestSuite() got an unexpected keyword argument 'test_finder'")
     from _imre_importlib import bind_doctest
     if module is None:
         module = sys.modules[sys._getframemodulename(1)]
@@ -133,7 +135,7 @@ def DocTestSuite(module=None, globs=None, extraglobs=None, *, optionflags=0, set
         suite.addTest(SkipDocTestCase(module))
         return suite
 
-    return _suite_from_tests(tests, lambda test: DocTestCase(test, optionflags, setUp, tearDown, checker))
+    return _suite_from_tests(tests, options)
 
 
 # Live cases store both hooks on the instance, including None.
