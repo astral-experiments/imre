@@ -1731,6 +1731,11 @@ fn lower_graph(
             && source_function
             && definition.returns.is_some()
             && signature.returns.builtin_scalar_name().is_some();
+        let live_return = live
+            && unavailable.is_some()
+            && !graph
+                .session
+                .call_may_return_implicitly(*module_id, definition);
         let procedure = inferred.is_none()
             && physical_function
             && signature
@@ -1748,7 +1753,7 @@ fn lower_graph(
                     |name| module_builtin_name(module, name),
                     |_| false,
                 ))
-                || (signature.returns == Type::None
+                || ((signature.returns == Type::None || live_return)
                     && definition.returns.is_some()
                     && !signature.params.is_empty()
                     && signature.parameter_declarations.len() == signature.params.len()
@@ -1796,9 +1801,10 @@ fn lower_graph(
             )
             .unwrap_or_else(|| lower_body(checker, definition, signature))
         } else if physical_function
-            && (named
-                && unavailable.is_none()
-                && (named_scalar || types.element(signature.returns).is_some())
+            && (live_return && procedure
+                || named
+                    && unavailable.is_none()
+                    && (named_scalar || types.element(signature.returns).is_some())
                 || (defer_capture && unavailable.is_none()
                     || named && recover_completed.get() && unavailable.is_some())
                     && definition.returns.is_some())
