@@ -41,6 +41,29 @@ def check_reassigned_callable_operand(imre, root, run):
     ), result
 
 
+def check_call_diagnostic_order(imre, root, run):
+    entry = root / "ordered_call_errors.py"
+    entry.write_text("""def pair(first: int, second: int) -> int:
+    return first + second
+
+def early(n: int) -> int:
+    return n
+
+def caller() -> int:
+    return early("earlier")
+
+if False:
+    pair(second="textually first", first="textually second")
+print("cold")
+""")
+    result = run(imre, "-m", entry.stem)
+    expected = [
+        f"{entry}:{site}: Imre: expected int, got str; annotations are enforced contracts".encode()
+        for site in ("8:18", "11:17", "11:42")
+    ]
+    assert (result.returncode, result.stdout, result.stderr.splitlines()) == (1, b"", expected), result
+
+
 def check_imported_call_arguments(imre, root, run):
     project = root / "imported_arguments"
     project.mkdir()
@@ -2438,6 +2461,7 @@ def main():
         check_installed_package_data(imre, root, run)
         check_module_search_root(imre, root, run)
         check_reassigned_callable_operand(imre, root, run)
+        check_call_diagnostic_order(imre, root, run)
         check_registered_entry_operand(imre, root, run)
         check_installed_return(imre, root, run)
         check_imported_call_arguments(imre, root, run)
