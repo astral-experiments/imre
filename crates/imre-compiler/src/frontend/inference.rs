@@ -1260,7 +1260,8 @@ impl Inference {
                             ));
                 // A settled native body needs its instructions even without Python operand sites.
                 checker.placement_only = !keep_return || signature.physical_frame;
-                let method_storage = keep_return.then(|| (helpers.len(), globals.types().len()));
+                let mut method_storage =
+                    keep_return.then(|| (helpers.len(), globals.types().len()));
                 let mut return_body = keep_return.then(|| {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
                     checker.fixed_sites = (signature.physical_frame
@@ -1343,7 +1344,7 @@ impl Inference {
                         .session
                         .coroutine_uses_async_iteration(*module, function))
                 .then(|| place_suspended(&checker));
-                if physical
+                let infer_namespace = physical
                     && infer_return
                     && !function.is_async
                     && signature.method.is_none()
@@ -1352,13 +1353,23 @@ impl Inference {
                         graph.resolve(*module, annotation)
                             == Some(Binding::Intrinsic(Intrinsic::ArgparseNamespace))
                     })
-                    && self.source_checks.accepts(graph, *module, function.range())
-                    && !graph
+                    && self.source_checks.accepts(graph, *module, function.range());
+                if infer_namespace
+                    && graph
                         .session
                         .returns_fixed_operand(*module, function, |range| {
                             classes.parsers.has_fixed_call(*module, range)
                         })
                 {
+                    if !graph.registered_startup
+                        && !checker.fault_enabled()
+                        && signature.params.is_empty()
+                    {
+                        checker.placement_only = false;
+                        return_body = Some((Vec::new(), Vec::new()));
+                        method_storage = Some((helpers.len(), globals.types().len()));
+                    }
+                } else if infer_namespace {
                     let mut candidate = signature.clone();
                     candidate.returns = Type::PythonObject;
                     placement = Some(
@@ -1636,7 +1647,21 @@ impl Inference {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
                     }
-                    if let Some((params, body)) = return_body
+                    if infer_return && revision == body_revision + 1 && !checked_call_cannot_return
+                        && let Some((params, body)) = &mut return_body
+                        && let [Statement::Return(value)] = body.as_slice()
+                        && let ExprKind::Builtin(Builtin::ParseArgs { process_argv: true, .. }, args) = &value.kind
+                        && matches!(args[1].kind, ExprKind::Str(_))
+                        && self.pending.borrow()[signature.id].returns == Some(value.ty)
+                        && checker.locals.is_empty() && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
+                        && method_storage == Some((helpers.len(), globals.types().len()))
+                    {
+                        // With a literal description, the schema and process argv need no other
+                        // signature or module storage. Keep the operation that settled the return.
+                        checker.returns = value.ty;
+                        let result = checker.completed_body(std::mem::take(params), std::mem::take(body), None, false);
+                        local_returns.insert(signature.id, PreparedBody::Fixed(result));
+                    } else if let Some((params, body)) = return_body
                         && checked_return && !checked_call_cannot_return && body_revision == revision
                         && checker.calls.is_empty() && checker.class_reads.borrow().is_empty()
                         && checker.unrepresented.borrow().is_none()
