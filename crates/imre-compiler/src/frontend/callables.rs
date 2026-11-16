@@ -781,7 +781,7 @@ impl<'a> Checker<'a> {
         if let Type::Class(class) = callable.ty
             && self.native_mock(class)
         {
-            return self.mock_arguments(call, class, callable, "_record");
+            return self.record_mock_call(call, class, callable);
         }
         if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
             return Ok(result);

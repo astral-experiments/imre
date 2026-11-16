@@ -12,15 +12,7 @@ impl Checker<'_> {
                     .module
             && matches!(
                 name,
-                "_at"
-                    | "_child"
-                    | "_get_child"
-                    | "_attach"
-                    | "_record"
-                    | "_name"
-                    | "_assert_called_with"
-                    | "_assert_any_call"
-                    | "_assert_called_once_with"
+                "_at" | "_child" | "_get_child" | "_attach" | "_record" | "_name"
             )
     }
 
@@ -151,15 +143,14 @@ impl Checker<'_> {
         self.coerce(value, Type::ObjectValue, node)
     }
 
-    pub(super) fn mock_arguments(
+    pub(super) fn record_mock_call(
         &mut self,
         call: &ast::ExprCall,
         class: usize,
         receiver: Expr,
-        method: &str,
     ) -> Result<Expr, String> {
         let target = self.classes.methods[class]
-            .get(method)
+            .get("_record")
             .ok_or_else(|| error(self.source, call, "missing native mock call recorder"))?;
         let (function, returns, positional, keywords) = (
             target.id,

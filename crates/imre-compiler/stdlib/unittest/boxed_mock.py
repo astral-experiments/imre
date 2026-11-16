@@ -643,9 +643,6 @@ class NonCallableMock(_FixedMock):
     def _format_mock_call_signature(self, args, kwargs):
         return _format_recorded_call(_new_call(args, kwargs), str(self._mock_name or "mock"))
 
-    def _assert_called_with(self, args, kwargs):
-        self._assert_last_with(args, kwargs, self._node.call_args, "call")
-
     def _assert_last_with(self, args, kwargs, observed, action):
         expected = _new_call(args, kwargs)
         cause = None
@@ -664,10 +661,10 @@ class NonCallableMock(_FixedMock):
         raise AssertionError(f"expected {action} not found.\nExpected: {expected_text}\n  Actual: {actual}") from cause
 
     def assert_called_with(self, /, *args, **kwargs):
-        self._assert_called_with(args, kwargs)
+        self._assert_last_with(args, kwargs, self._node.call_args, "call")
 
     def assert_called_once_with(self, /, *args, **kwargs):
-        self._assert_called_once_with(args, kwargs)
+        return _FixedMock.assert_called_once_with(self, *args, **kwargs)
 
     def assert_has_calls(self, calls, any_order=False):
         # Iterate without consulting user length hints; they may record calls.

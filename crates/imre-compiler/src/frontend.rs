@@ -2571,12 +2571,6 @@ fn lower_function(
     let classes = checker.classes;
     let types = checker.types;
     checker.frame = LexicalFrame::Named(definition.name.id.clone());
-    checker.positional_pack = definition
-        .parameters
-        .vararg
-        .as_deref()
-        .filter(|p| p.annotation().is_some())
-        .map(|p| p.name.to_string());
     checker.interactive_names = module.is_doctest_case() && definition.name.as_str() == "_run_case";
     let mut params = Vec::new();
     checker.bind_function_signature(definition, signature, |slot| params.push(slot))?;
@@ -4173,7 +4167,7 @@ struct Checker<'a> {
     namespace_bindings: HashMap<usize, registered::LocalBinding>,
     /// Doctest prompts share an exec-style namespace until the case ends.
     interactive_names: bool,
-    positional_pack: Option<String>,
+    positional_pack: Option<(String, usize)>,
     context_method: bool,
     fixed_tuple: Option<fixed_tuples::Call>,
     generator_item: Option<Type>,
@@ -4457,6 +4451,7 @@ impl<'a> Checker<'a> {
         signature: &Signature,
         mut bound: impl FnMut(usize),
     ) -> Result<(), String> {
+        self.positional_pack = None;
         self.returns = signature.returns;
         self.asynchronous = signature.asynchronous;
         self.method_context(signature.method);
@@ -4489,6 +4484,9 @@ impl<'a> Checker<'a> {
                     layout.default.as_ref(),
                 )?
             };
+            if layout.kind == ParameterKind::Variadic && parameter.annotation().is_some() {
+                self.positional_pack = Some((parameter.name().to_string(), slot));
+            }
             bound(slot);
         }
         Ok(())
@@ -5027,8 +5025,16 @@ impl<'a> Checker<'a> {
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             });
         }
-        if expected == Type::ObjectValue && self.object_value_supported(value.ty) {
-            return Ok(value.into_object_value());
+        if expected == Type::ObjectValue {
+            if self.object_value_supported(value.ty) {
+                return Ok(value.into_object_value());
+            }
+            // Every value satisfies object, even when the fixed view cannot carry it.
+            return Err(self.classified_error(
+                Kind::ScopedObject,
+                node,
+                "operand requires a Python object",
+            ));
         }
         if (expected == Type::ReadOnlyObjectMapping
             || self.types.payload(expected) == Some(Type::ReadOnlyObjectMapping))
@@ -9315,10 +9321,11 @@ impl<'a> Checker<'a> {
         if binary.op == ast::Operator::Mod
             && left.ty == Type::Str
             && self.types.element(right.ty) == Some(Type::ObjectValue)
+            && let Some((pack, _)) = &self.positional_pack
             && binary
                 .right
                 .as_name_expr()
-                .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+                .is_some_and(|name| name.id.as_str() == pack)
         {
             return Ok(Expr {
                 ty: Type::Str,
