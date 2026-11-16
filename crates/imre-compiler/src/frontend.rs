@@ -2659,14 +2659,11 @@ fn lower_function(
                 definition,
                 statements,
                 Some(&mut body),
-                Some(&mut |cx, stored| {
+                Some(&mut |cx| {
                     let lost = cx.unrepresented.borrow();
-                    if lost.is_none()
-                        && cx.types.element(signature.returns).is_some()
-                        && stored.is_some_and(|value| cx.types.element(value.ty).is_none())
-                        || !cx
-                            .helpers
-                            .only_direct_locals_since(helpers, &cx.local_functions)
+                    if !cx
+                        .helpers
+                        .only_direct_locals_since(helpers, &cx.local_functions)
                         || lost.as_ref().is_some_and(|reason| {
                             !reason.is_object()
                                 || !inference.source_checks.accepts(
@@ -5779,25 +5776,32 @@ impl<'a> Checker<'a> {
         Ok(Some(value))
     }
 
-    /// A Python container stores the original handle when the source establishes its scalar type.
+    /// A Python container stores the original handle when its source satisfies the item type.
     fn coerce_python_item(
         &self,
         mut value: Expr,
         expected: Type,
         site: &ast::Expr,
     ) -> Result<Expr, String> {
-        if site.is_name_expr() {
-            registered::values::refine_operand(
-                self.graph.session.operand_types(self.module),
-                site,
-                &mut value,
-            );
+        if value.ty == Type::PythonObject {
+            let types = self.graph.session.operand_types(self.module);
+            if site.is_name_expr() {
+                registered::values::refine_operand(types, site, &mut value);
+            }
+            if value.checked_operand_type() == expected {
+                return Ok(value);
+            }
+            if let Type::Class(id) = expected
+                && types.matches_instance(
+                    site,
+                    &value,
+                    self.classes.declarations.definitions[id].definition,
+                )
+            {
+                return Ok(value);
+            }
         }
-        if value.ty == Type::PythonObject && value.checked_operand_type() == expected {
-            Ok(value)
-        } else {
-            self.coerce(value, expected, site)
-        }
+        self.coerce(value, expected, site)
     }
 
     /// The display and its elements use the same source positions in either frame.
@@ -6987,7 +6991,7 @@ impl<'a> Checker<'a> {
         &mut self,
         statements: &[ast::Stmt],
         mut output: Option<&mut Vec<Statement>>,
-        mut place: Option<&mut dyn FnMut(&mut Self, Option<&Expr>) -> bool>,
+        mut place: Option<&mut dyn FnMut(&mut Self) -> bool>,
         function: Option<&ast::StmtFunctionDef>,
     ) -> Result<bool, String> {
         if let Some(reason) = statements.first().and_then(|first| {
@@ -7162,20 +7166,31 @@ impl<'a> Checker<'a> {
                 body.insert(start, self.fault_line(statement));
             }
             self.leave_fixed_site(parent);
-            if !emitting {
-                body.clear();
-            } else if self.discarded_function_body() {
-                // The fixed body has lost its physical operands. Continue the source
-                // checks here if the Python frame cannot validate the whole declaration.
-                let stored = match body[ops..].last() {
-                    Some(Statement::Assign(_, value)) => Some(value),
-                    _ => None,
-                };
-                if place.take().is_some_and(|place| place(self, stored)) {
+            if self.discarded_function_body() {
+                // A non-list store can lose its sites before an operation needs Python.
+                if let Some(prepare) = place.take_if(|_| {
+                    if self.unrepresented.borrow().is_some() {
+                        return true;
+                    }
+                    emitting
+                        && match body[ops..].last() {
+                            Some(Statement::Assign(_, value)) => {
+                                self.types.element(self.returns).is_none()
+                                    || self.types.element(value.ty).is_some()
+                            }
+                            _ => true,
+                        }
+                }) && prepare(self)
+                {
                     break;
                 }
-                *body = Vec::new();
-                output = None;
+                if emitting {
+                    *body = Vec::new();
+                    output = None;
+                }
+            }
+            if !emitting {
+                discarded.clear();
             }
             falls_through &= continues;
         }

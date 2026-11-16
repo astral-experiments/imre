@@ -361,6 +361,29 @@ impl<'session> OperandTypes<'session> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
 
+    /// Check a boxed source operand against the defining class of a fixed instance.
+    pub(crate) fn matches_instance(
+        self,
+        operand: &Expr,
+        value: &crate::ir::Expr,
+        class: crate::modules::DefinitionId,
+    ) -> bool {
+        use ty_python_semantic::types::Type;
+        if !matches!(value.source_position(), Some((range, _, None)) if range == operand.range()) {
+            return false;
+        }
+        let session = self.session;
+        let parsed = self.parsed();
+        let Some((original, _, owner)) = self.original_operand(&parsed, operand.into()) else {
+            return false;
+        };
+        let Some(ty @ Type::NominalInstance(_)) = session.inferred_operand_type(owner, original)
+        else {
+            return false;
+        };
+        session.is_class_declaration(&SemanticModel::new(&session.db, owner), ty, class)
+    }
+
     /// Resolve a local annotation once, without evaluating its Python spelling.
     pub(crate) fn local_scalar_annotation(self, annotation: &Expr) -> Option<crate::ir::Type> {
         let parsed = self.parsed();
@@ -2924,7 +2947,7 @@ impl Session {
         expression: &Expr,
         class: crate::modules::DefinitionId,
     ) -> bool {
-        use ty_python_semantic::types::{Type, TypeDefinition};
+        use ty_python_semantic::types::Type;
         if !expression.is_name_expr() || self.sole_binding(module, expression).is_none() {
             return false;
         }
@@ -2932,6 +2955,16 @@ impl Session {
         let Some(ty @ Type::ClassLiteral(_)) = expression.inferred_type(&model) else {
             return false;
         };
+        self.is_class_declaration(&model, ty, class)
+    }
+
+    fn is_class_declaration<'db>(
+        &'db self,
+        model: &SemanticModel<'db>,
+        ty: ty_python_semantic::types::Type<'db>,
+        class: crate::modules::DefinitionId,
+    ) -> bool {
+        use ty_python_semantic::types::TypeDefinition;
         matches!(ty.definition(&self.db, &model.program_environment()),
             Some(definition @ TypeDefinition::StaticClass(_))
                 if definition.focus_range(&self.db) == Some(self.class_declaration(class)))
