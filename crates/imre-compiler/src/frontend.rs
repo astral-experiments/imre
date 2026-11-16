@@ -7441,6 +7441,11 @@ impl<'a> Checker<'a> {
             }
         }
         let (operation, continues) = self.source_statement(statement, self.module_scope, body)?;
+        if let Some(operation @ Statement::Raise(None)) = &operation
+            && let Some(sites) = &mut self.fixed_sites
+        {
+            sites.record(statement.range(), ir::Node::Statement(operation));
+        }
         body.extend(operation);
         Ok(continues)
     }
