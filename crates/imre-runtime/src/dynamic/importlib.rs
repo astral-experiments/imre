@@ -85,7 +85,7 @@ impl Context {
         let launched = arguments.is_some();
         let sys = self.module("sys")?;
         if let Some(bytes) = arguments {
-            let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+            let codec = crate::sys::filesystem_codec()?;
             let mut original = Vec::new();
             for arg in bytes
                 .strip_suffix(&[0])

@@ -4252,7 +4252,7 @@ impl Context {
     }
 
     fn import_path_points(bytes: &[u8]) -> Result<Vec<u32>> {
-        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        let codec = crate::sys::filesystem_codec()?;
         Ok(codec.decode_filesystem(bytes)?)
     }
 

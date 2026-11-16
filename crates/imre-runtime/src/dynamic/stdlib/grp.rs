@@ -59,7 +59,7 @@ impl Entry {
     }
 
     fn record(self, ctx: &mut Context) -> Result<Id> {
-        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        let codec = crate::sys::filesystem_codec()?;
         let mut decode = |s: &CStr| -> Result<Id> {
             Ok(ctx.text_codepoints(codec.decode_filesystem(s.to_bytes())?))
         };

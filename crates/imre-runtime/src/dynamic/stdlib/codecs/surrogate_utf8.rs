@@ -16,7 +16,7 @@ impl Context {
 
     /// Encode an OS argument using the codec selected at interpreter startup.
     pub(in crate::dynamic) fn encode_os_path(&mut self, id: Id) -> Result<Vec<u8>> {
-        let codec = Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        let codec = crate::sys::filesystem_codec()?;
         match codec {
             Codec::Utf8 { signature: false } => self.encode_filesystem_string(id),
             Codec::Utf8 { signature: true } => {

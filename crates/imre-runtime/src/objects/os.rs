@@ -1024,8 +1024,7 @@ pub unsafe extern "C" fn imre_os_ptsname(
         }
         let fd = super::readiness::checked_fd(c_int(fd)?)?;
         let name = ptsname(fd).map_err(errno_error)?;
-        let encoding = crate::sys::filesystem_encoding()?;
-        let name = super::Codec::lookup(&encoding)?.decode(&name, None)?;
+        let name = crate::sys::filesystem_codec()?.decode(&name, None)?;
         super::text::try_owned_string(&name).map(StrOwner::into_raw)
     })();
     finish(result, std::ptr::null())

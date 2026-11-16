@@ -90,7 +90,7 @@ pub(in crate::dynamic::stdlib) fn call(
         else {
             return Ok(crate::dynamic::NONE);
         };
-        let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+        let codec = crate::sys::filesystem_codec()?;
         return Ok(ctx.text_codepoints(codec.decode_filesystem(&bytes)?));
     }
     let code = confname(ctx, *module, *name, "sysconf_names")?;

@@ -1155,8 +1155,8 @@ fn set_environment_bytes(key: &[u8], value: &[u8]) -> Result<()> {
 }
 
 fn set_environment_text(key: &Str, value: &Str) -> Result<()> {
-    let encoding = crate::sys::filesystem_encoding()?;
-    let encode = |text: &Str| super::Codec::encode_str(text, &encoding, "surrogateescape");
+    let encoder = super::StrEncoder::Registered(crate::sys::filesystem_codec()?);
+    let encode = |text: &Str| encoder.encode_str(text, crate::sys::FILESYSTEM_ERRORS);
     set_environment_bytes(&encode(key)?, &encode(value)?)
 }
 
@@ -1244,7 +1244,7 @@ pub unsafe extern "C" fn imre_environ_get(key: *const Str, default: *const Str) 
     // SAFETY: the compiler roots the key for this lookup.
     let key = unsafe { &*key };
     let value = environ_item::encoded_key(key).and_then(|key| {
-        let codec = Codec::lookup(&crate::sys::filesystem_encoding()?)?;
+        let codec = crate::sys::filesystem_codec()?;
         with_environment_value(&key, |bytes| decode_environment_text(codec, bytes)).transpose()
     });
     match value {
@@ -1301,8 +1301,7 @@ unsafe fn environment_snapshot(
 /// Copy the process environment using the interpreter’s filesystem codec.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_environ_copy() -> *const Object {
-    let result = crate::sys::filesystem_encoding().and_then(|encoding| {
-        let codec = Codec::lookup(&encoding)?;
+    let result = crate::sys::filesystem_codec().and_then(|codec| {
         let _guard = ENVIRONMENT.lock().unwrap();
         // SAFETY: the lock keeps the terminated environment stable during the copy.
         unsafe { environment_snapshot(native_environ(), codec) }
@@ -2372,8 +2371,7 @@ mod tests {
     #[test]
     fn environment_copy_is_owned_without_logging_host_values() {
         let copy = imre_environ_copy();
-        let encoding = crate::sys::filesystem_encoding().ok().unwrap();
-        let codec = Codec::lookup(&encoding).ok().unwrap();
+        let codec = crate::sys::filesystem_codec().ok().unwrap();
         if initial_environment().iter().any(|(key, value)| {
             [key, value]
                 .into_iter()

@@ -1788,8 +1788,7 @@ pub(super) fn call(
             #[cfg(target_os = "linux")]
             "posix.uname" => {
                 let values = system::with_uname_fields(|fields| {
-                    let codec =
-                        crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+                    let codec = crate::sys::filesystem_codec()?;
                     fields
                         .into_iter()
                         .map(|field| Ok(ctx.text_codepoints(codec.decode_filesystem(field)?)))
@@ -1811,8 +1810,7 @@ pub(super) fn call(
             #[cfg(target_os = "linux")]
             "posix.ctermid" => {
                 let bytes = system::ctermid().map_err(os_error)?;
-                let codec =
-                    crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
+                let codec = crate::sys::filesystem_codec()?;
                 ctx.text_codepoints(codec.decode_filesystem(&bytes)?)
             }
             #[cfg(target_os = "linux")]
@@ -1823,12 +1821,10 @@ pub(super) fn call(
             }
             "posix._create_environ" => os::environment(ctx),
             "posix.getcwd" | "posix.getcwdb" => os::getcwd(ctx, name == "posix.getcwdb")?,
-            "sys.getfilesystemencoding" => ctx
-                .heap
-                .code_name(crate::sys::filesystem_encoding()?.as_str()),
-            "sys.getfilesystemencodeerrors" => {
-                ctx.heap.code_name(crate::sys::filesystem_errors().as_str())
+            "sys.getfilesystemencoding" => {
+                ctx.heap.code_name(crate::sys::filesystem_codec()?.name())
             }
+            "sys.getfilesystemencodeerrors" => ctx.heap.code_name(crate::sys::FILESYSTEM_ERRORS),
             "_locale.getencoding" => ctx.text(crate::sys::file_encoding(Some("locale"))),
             // SAFETY: C abort takes no arguments and terminates the calling process.
             #[cfg(unix)]
