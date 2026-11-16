@@ -7,6 +7,8 @@ def current():
     random.seed(41)
     assert source.choices("abcd", k=12) == choices("abcd", k=12)
     assert source.choices("ab", weights=[2, 1], k=7) == choices("ab", weights=[2, 1], k=7)
+    assert source.gauss() == random.gauss()
+    assert source.gauss(5, 0.25) == random.gauss(5, 0.25)
     assert source.random() == random.random()
 
     class Fixed(random.Random):
