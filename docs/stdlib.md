@@ -2,7 +2,7 @@
 
 Imre checks every name in the [CPython 3.14.5](https://github.com/python/cpython/tree/5607950ef232dad16d75c0cf53101d9649d89115/Lib) top-level module registry (`sys.stdlib_module_names`) on Linux. The first tables cover 194 names without a leading underscore; [the appendix](#names-beginning-with-an-underscore) covers the other 103. Dotted APIs such as `os.path` appear under their parent.
 
-**At a glance:** 157 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
+**At a glance:** 159 of 297 modules accept an ordinary import; 1 more accept it only with `--reachable-only`. Across 44 modules with recorded suites, 322 complete test executions pass natively at both optimization levels; 15,152 of 15,426 upstream executions have a classification.
 
 **Import** checks an otherwise empty file containing `import module`, in ordinary and reachable-only compilation. A successful import does not establish that any function works. Follow the evidence links for the supported operations and their limits.
 
@@ -127,6 +127,7 @@ The last two columns show where CPython still helps at O3. **CPython fixture**: 
 | `threading` | Yes | No API example recorded. | — | — | — |
 | `time` | Yes | Read the clock, sleep, and convert a local `struct_time` to epoch seconds with `mktime`. [Evidence](../benchmarks/cpython_stdlib/full/time/README.md) | [0 / 63](../benchmarks/cpython_stdlib/full/time/) | 4 | 0 |
 | `token` | Yes | No API example recorded. | — | — | — |
+| `tokenize` | Yes | No API example recorded. | — | — | — |
 | `tomllib` | Yes | Parse nested TOML tables and arrays from a binary stream with `load` or from a string with `loads`. [Evidence](../tests/fixtures/paths/toml_document.py) | — | — | — |
 | `traceback` | Yes | No API example recorded. | — | — | — |
 | `tracemalloc` | Yes | No API example recorded. | — | — | — |
@@ -200,7 +201,6 @@ Both import probes reject these names. No native API example or full-suite ledge
 | `tabnanny` |
 | `tarfile` |
 | `timeit` |
-| `tokenize` |
 | `trace` |
 | `tty` |
 | `venv` |
@@ -260,6 +260,7 @@ These include documented interfaces such as `__future__` and `_thread`, as well 
 | `_ssl` | Yes | No API example recorded. | — | — | — |
 | `_string` | Yes | `formatter_parser` and `formatter_field_name_split` iterate format fields and their components. [Evidence](../tests/fixtures/text/formatter_ownership.py) | — | — | — |
 | `_thread` | Yes | No API example recorded. | — | — | — |
+| `_tokenize` | Yes | No API example recorded. | — | — | — |
 | `_tracemalloc` | Yes | No API example recorded. | — | — | — |
 | `_warnings` | Yes | No API example recorded. | — | — | — |
 
@@ -330,7 +331,6 @@ Both import modes reject the following names. They have no recorded API example 
 | `_sysconfig` |
 | `_threading_local` |
 | `_tkinter` |
-| `_tokenize` |
 | `_types` |
 | `_typing` |
 | `_uuid` |
