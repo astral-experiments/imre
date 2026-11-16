@@ -848,10 +848,11 @@ impl Checker<'_> {
         if pack.is_none() && rest.is_none() && !has_unpacking(call) {
             let mut written = (offset == 1
                 && self.settled_attributes.is_some()
-                && self
-                    .fixed_sites
-                    .as_ref()
-                    .is_some_and(|sites| sites.inside_site(call.range()))
+                && self.fixed_sites.as_ref().is_some_and(|sites| {
+                    sites.inside_site(call.range())
+                        || call.arguments.len() < params.len()
+                            && sites.site_at(call.range()).is_some()
+                })
                 && matches!(&values[0].kind, ExprKind::Local(_))
                 && call
                     .func
