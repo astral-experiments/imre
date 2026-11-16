@@ -543,8 +543,8 @@ pub(super) fn lower_definition(
     signature: &Signature,
 ) -> Result<RegisteredFunction, String> {
     let source = checker.source;
-    let (body, local_names) = checked_definition(checker, definition, signature)?;
-    RegisteredFunction::from_checked_body(body.function, local_names, body.frame_arguments)
+    checked_definition(checker, definition, signature)?
+        .map(|(_, frame)| frame)
         .ok_or_else(|| {
             error(
                 source,
@@ -580,12 +580,17 @@ pub(super) fn place_checked_definition(
         callable_inputs,
         result,
     )?
-    .map(|(mut body, placement)| {
+    .map(|(facts, placement)| {
         let frame = &placement.frame.function;
-        body.function.params = frame.params.clone();
-        body.function.locals = frame.locals.clone();
+        // Native call validation still consumes the checked formal and local layouts.
+        let function = ir::Function {
+            params: frame.params.clone(),
+            returns: signature.returns,
+            locals: frame.locals.clone(),
+            body: Vec::new(),
+        };
         placement.place(original.graph, &inference.source_checks);
-        body
+        LoweredBody { function, facts }
     }))
 }
 
@@ -639,7 +644,7 @@ pub(super) fn prepare_checked_definition(
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
     result: ReturnCheck<'_>,
-) -> Result<Option<(LoweredBody, CheckedPlacement)>, String> {
+) -> Result<Option<(FunctionFacts, CheckedPlacement)>, String> {
     let graph = original.graph;
     let module = original.module;
     let checks = &inference.source_checks;
@@ -676,22 +681,10 @@ pub(super) fn prepare_checked_definition(
     checker.registered_local_start = Some(signature.params.len());
     let placed = graph
         .try_registered_body(module, || {
-            let (mut body, names) = match checked_definition(checker, definition, signature) {
-                Ok(checked) => checked,
-                Err(failure) => return Some(Err(failure)),
-            };
-            let frame =
-                RegisteredFunction::from_checked_body(body.function, names, body.frame_arguments)?;
-            body.function = ir::Function {
-                params: Vec::new(),
-                returns: signature.returns,
-                locals: Vec::new(),
-                body: Vec::new(),
-            };
-            Some(Ok((body, frame)))
+            checked_definition(checker, definition, signature).transpose()
         })
         .transpose()?;
-    let Some((body, frame)) = placed else {
+    let Some((facts, frame)) = placed else {
         return Ok(None);
     };
     if deferred.is_none()
@@ -713,7 +706,7 @@ pub(super) fn prepare_checked_definition(
         *after_fixed = Some(placement);
         return Ok(None);
     }
-    Ok(Some((body, placement)))
+    Ok(Some((facts, placement)))
 }
 
 /// The selected Python return has no later checked statements that depend on
@@ -750,7 +743,7 @@ fn checked_definition(
     mut checker: Checker<'_>,
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
-) -> Result<(LoweredBody, HashMap<usize, LocalBinding>), String> {
+) -> Result<Option<(FunctionFacts, RegisteredFunction)>, String> {
     checker.registered = Some(checker.graph.modules[checker.module].registered_values());
     let source = checker.source;
     let source_calls = checker.checked_call_contracts;
@@ -759,7 +752,7 @@ fn checked_definition(
     let mut local_names = HashMap::new();
     let (body, _) = lower_function(checker, definition, signature, Some(&mut local_names), None)
         .map_err(|refusal| refusal.failure)?;
-    if !source_calls && !body.calls.is_empty() || helpers.len() != first_helper {
+    if !source_calls && !body.facts.calls.is_empty() || helpers.len() != first_helper {
         return Err(error(
             source,
             definition,
@@ -767,7 +760,12 @@ fn checked_definition(
         )
         .classify(Kind::ScopedObject));
     }
-    Ok((body, local_names))
+    let frame = RegisteredFunction::from_checked_body(
+        body.function,
+        local_names,
+        body.facts.frame_arguments,
+    );
+    Ok(frame.map(|frame| (body.facts, frame)))
 }
 
 /// A rejected fixed placement must fall back to its original source. A registered
@@ -1059,7 +1057,8 @@ pub(super) fn capture(
             let Some((body, _)) = body else {
                 continue;
             };
-            body.source
+            body.facts
+                .source
                 .and_then(|source| match source.place(body.function) {
                     Ok(placed) => Some(placed),
                     Err(settled) => {

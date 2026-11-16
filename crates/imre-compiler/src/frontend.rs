@@ -1661,7 +1661,7 @@ fn lower_graph(
                 return None;
             };
             match entry.get_mut() {
-                PreparedBody::Fixed((body, _)) if collect_sites || body.source.is_none() => {}
+                PreparedBody::Fixed((body, _)) if collect_sites || body.facts.source.is_none() => {}
                 PreparedBody::Fixed((body, _))
                     if !signature.physical_frame
                         || signature.method.is_some_and(|method| {
@@ -1684,7 +1684,7 @@ fn lower_graph(
                         .as_ref()
                         .is_some_and(FixedBodySource::has_method_store)
                     {
-                        body.source = None;
+                        body.facts.source = None;
                     }
                 }
                 PreparedBody::Attributes(_) if named && physical_function => {}
@@ -1807,7 +1807,9 @@ fn lower_graph(
             if signature.method.is_none() {
                 return !attributes.is_empty();
             }
-            result.as_ref().is_ok_and(|(body, _)| body.source.is_none())
+            result
+                .as_ref()
+                .is_ok_and(|(body, _)| body.facts.source.is_none())
                 && completed_calls.len() == classes.nonreturning_functions.len()
                 && !graph.needs_object_runtime.get()
                 && !graph.has_object_constructor_fallback.get()
@@ -1817,7 +1819,7 @@ fn lower_graph(
             prepared.insert(signature.id, PreparedBody::Attributes(attributes));
         }
         let cannot_return = match &result {
-            Ok((body, _)) => body.cannot_return,
+            Ok((body, _)) => body.facts.cannot_return,
             Err(refusal) => refusal.cannot_return,
         };
         let placed = match checked_region(
@@ -1924,12 +1926,12 @@ fn lower_graph(
         let Some((mut body, sums)) = placed else {
             continue;
         };
-        has_wrapper_link |= !after_refusal && body.wrapper_link;
+        has_wrapper_link |= !after_refusal && body.facts.wrapper_link;
         if live || after_refusal {
             // A prior refusal skips native placement, but the checked sibling still
             // belongs to its original signature slot when the Python frame takes it.
             if signature.physical_frame
-                && let Some(source) = &mut body.source
+                && let Some(source) = &mut body.facts.source
                 && let Some(prepared) = pending_capture.borrow_mut().as_mut()
             {
                 source.arguments = FrameArguments::Python;
@@ -1937,18 +1939,19 @@ fn lower_graph(
             }
             continue;
         }
-        if needs_registered_entry || (unavailable.is_some() && body.source.is_none()) {
+        if needs_registered_entry || (unavailable.is_some() && body.facts.source.is_none()) {
             // After a fixed layout fails, only bodies with a source frame can be placed.
             // Later definitions still receive the checked transfer and wrapper facts above.
             continue;
         }
-        let LoweredBody {
-            function,
+        let LoweredBody { function, facts } = body;
+        let FunctionFacts {
             calls,
             class_reads: mut reads,
+            source,
             ..
-        } = body;
-        if let Some(source) = body.source
+        } = facts;
+        if let Some(source) = source
             && (signature.physical_frame || provider_frame)
         {
             let slot = completed.functions.len();
@@ -2498,12 +2501,17 @@ fn registered_entry(
 
 #[derive(Clone)]
 struct LoweredBody {
+    function: ir::Function,
+    facts: FunctionFacts,
+}
+
+#[derive(Clone)]
+struct FunctionFacts {
     needs_fixed_callee: bool,
     python_call_result: bool,
     cannot_return: bool,
     frame_arguments: FrameArguments,
     wrapper_link: bool,
-    function: ir::Function,
     source: Option<FixedBodySource>,
     calls: HashSet<usize>,
     class_reads: HashSet<DefinitionId>,
@@ -4238,21 +4246,23 @@ impl<'a> Checker<'a> {
         }
         (
             LoweredBody {
-                needs_fixed_callee,
-                python_call_result: self.python_result_tail.is_some(),
-                cannot_return,
-                frame_arguments: self.frame_arguments,
-                wrapper_link: self.wrapper_link.get(),
-                source,
                 function: ir::Function {
                     params,
                     returns: self.returns,
                     locals: self.locals,
                     body,
                 },
-                calls: self.calls,
-                class_reads: self.class_reads.into_inner(),
-                default_reads: self.default_reads,
+                facts: FunctionFacts {
+                    needs_fixed_callee,
+                    python_call_result: self.python_result_tail.is_some(),
+                    cannot_return,
+                    frame_arguments: self.frame_arguments,
+                    wrapper_link: self.wrapper_link.get(),
+                    source,
+                    calls: self.calls,
+                    class_reads: self.class_reads.into_inner(),
+                    default_reads: self.default_reads,
+                },
             },
             self.zip_sums,
         )
