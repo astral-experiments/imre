@@ -1843,10 +1843,17 @@ fn lower_graph(
         ) {
             Ok(body) => body,
             Err(report) => {
+                // Capture will bind any operands this definition already checked.
+                let recovering = recover_completed.get();
                 if defer_capture
                     && physical_function
                     && *module_id == graph.entry
                     && matches!(source, Cow::Borrowed(_))
+                    && (!recovering
+                        || pending_capture
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|pending| !pending.contains_key(&signature.id)))
                 {
                     let for_launch = |module| {
                         let mut checker = checker_for(module);
@@ -1855,12 +1862,8 @@ fn lower_graph(
                         checker
                     };
                     let mut checker = for_launch(*module_id);
-                    checker.boxed_calls = (recover_completed.get()
-                        && !graph.has_registered_function(*module_id, definition.start())
-                        && pending_capture
-                            .borrow()
-                            .as_ref()
-                            .is_some_and(|pending| !pending.contains_key(&signature.id)))
+                    checker.boxed_calls = (recovering
+                        && !graph.has_registered_function(*module_id, definition.start()))
                     .then(HashSet::new);
                     if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
                         &checker,
