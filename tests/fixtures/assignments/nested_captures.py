@@ -35,4 +35,9 @@ def execute() -> None:
             print("wrong subject")
 
 
+def shadowed_input(input: str) -> str:
+    return (lambda input: input.upper())("inside") + input
+
+
 execute()
+print(shadowed_input(input="outside"))

@@ -1229,12 +1229,8 @@ fn lower_graph(
         inference.discover_packed_arguments();
     }
     for (module, function, signature) in &mut definitions {
-        let renamed = !signature
-            .method
-            .is_some_and(|method| method.generated_initializer(classes.declarations))
-            && assignments::alias_builtin_parameters(function, graph, *module);
         let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
-        if renamed || dispatch || packed {
+        if dispatch || packed {
             signature.physical_frame = false;
         }
         if packed {
@@ -4191,8 +4187,8 @@ struct Checker<'a> {
     module_scope: bool,
     class: Option<usize>,
     class_receiver: Option<String>,
-    /// Earlier assignments in the executing class body shadow module definitions.
-    class_lexical: HashSet<String>,
+    /// Parameters and class-body locals that take precedence over module and builtin lookup.
+    shadowing_locals: HashSet<String>,
     super_method_owner: Option<usize>,
     iterator_source: Option<TextRange>,
     super_initializer: Option<records::BaseInitializer>,
@@ -4332,7 +4328,7 @@ impl<'a> Checker<'a> {
             module_scope: false,
             class: None,
             class_receiver: None,
-            class_lexical: HashSet::new(),
+            shadowing_locals: HashSet::new(),
             super_method_owner: None,
             iterator_source: None,
             super_initializer: None,
@@ -4452,6 +4448,18 @@ impl<'a> Checker<'a> {
         Ok(())
     }
 
+    fn parameter_shadows_builtin(&self, name: &str) -> bool {
+        RESERVED.contains(&name)
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && self.graph.modules[self.module]
+                .bindings
+                .get(name)
+                .is_none_or(|&binding| {
+                    self.graph.builtin_function_shadow(name, binding).is_some()
+                        || binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint)
+                })
+    }
+
     fn bind_parameter(
         &mut self,
         parameter: &ast::Parameter,
@@ -4460,12 +4468,11 @@ impl<'a> Checker<'a> {
         default: Option<&Expr>,
     ) -> Result<usize, String> {
         let name = parameter.name().as_str();
-        let slot = if self.initializing {
-            // Generated fields copy their incoming parameters, even when a keyword
-            // such as `len` or an imported name has a different module binding.
+        let slot = if self.initializing || self.parameter_shadows_builtin(name) {
+            // The parameter shadows the module-level spelling for reads and calls.
             let slot = self.hidden(ty);
             self.names.insert(name.to_owned(), slot);
-            self.class_lexical.insert(name.to_owned());
+            self.shadowing_locals.insert(name.to_owned());
             slot
         } else {
             self.declare_binding(name, ty, parameter, true, default)?
@@ -4500,11 +4507,13 @@ impl<'a> Checker<'a> {
         bound: bool,
         default: Option<&Expr>,
     ) -> Result<usize, String> {
+        let local = self.shadowing_locals.contains(name);
         let shadows = || {
-            self.parameter_shadows_binding(name, ty, bound)
+            local
+                || self.parameter_shadows_binding(name, ty, bound)
                 || default.is_some_and(Expr::is_unrepresented)
         };
-        if reserved(name)
+        if reserved(name) && !local
             || (self.graph.modules[self.module].bindings.get(name).is_some_and(|binding| {
                     !matches!(binding, Binding::Value(def) if self.graph.modules[def.module].implicit_value_name(def.statement).is_some())
                 })
@@ -9905,8 +9914,8 @@ impl<'a> Checker<'a> {
         // Calls and binary operators recursively check their operands. Keep
         // the large general expression frame off both paths in debug builds.
         match expression {
-            ast::Expr::Name(name) if self.class_lexical.contains(name.id.as_str()) => {
-                Ok(self.local(self.names[name.id.as_str()]))
+            ast::Expr::Name(name) if self.shadowing_locals.contains(name.id.as_str()) => {
+                self.read_name_slot(expression, name.id.as_str(), self.names[name.id.as_str()])
             }
             ast::Expr::Call(call) => {
                 let mut result = self.call(call)?;
@@ -9930,6 +9939,38 @@ impl<'a> Checker<'a> {
             ast::Expr::BinOp(binary) => self.binary_operation(binary),
             _ => self.non_call_expr(expression, base_binding),
         }
+    }
+
+    fn read_name_slot(
+        &mut self,
+        expression: &ast::Expr,
+        name: &str,
+        slot: usize,
+    ) -> Result<Expr, String> {
+        if self.reachable && !self.assigned.contains(&slot) {
+            if let Some(&flag) = self.bound_flags.get(name) {
+                self.graph
+                    .checked_unbound_local_read(self.module, expression.range());
+                return Ok(self.checked_bound_read(slot, flag, name));
+            }
+            return Err(error(
+                self.source,
+                expression,
+                "local may be uninitialized on this path",
+            ));
+        }
+        if let Some(ValueSource::FrameBinding(_)) = self.assigned.value_source(slot) {
+            self.require_registered_operation(expression)?;
+            return Ok(self.local(slot));
+        }
+        let value = self.read_local(slot);
+        if let Some(sites) = &mut self.fixed_sites
+            && matches!(value.kind, ExprKind::Local(read) if read == slot)
+            && value.ty == self.locals[slot]
+        {
+            sites.checked_expression(expression.range(), &value);
+        }
+        Ok(value)
     }
 
     fn check_module_member(
@@ -10720,30 +10761,7 @@ impl<'a> Checker<'a> {
                         "name is not a local value; globals and first-class functions are unsupported",
                     ));
                 };
-                if self.reachable && !self.assigned.contains(&slot) {
-                    if let Some(&flag) = self.bound_flags.get(name.id.as_str()) {
-                        self.graph
-                            .checked_unbound_local_read(self.module, expression.range());
-                        return Ok(self.checked_bound_read(slot, flag, name.id.as_str()));
-                    }
-                    return Err(error(
-                        self.source,
-                        expression,
-                        "local may be uninitialized on this path",
-                    ));
-                }
-                if let Some(ValueSource::FrameBinding(_)) = self.assigned.value_source(slot) {
-                    self.require_registered_operation(expression)?;
-                    return Ok(self.local(slot));
-                }
-                let value = self.read_local(slot);
-                if let Some(sites) = &mut self.fixed_sites
-                    && matches!(value.kind, ExprKind::Local(read) if read == slot)
-                    && value.ty == self.locals[slot]
-                {
-                    sites.checked_expression(expression.range(), &value);
-                }
-                return Ok(value);
+                return self.read_name_slot(expression, name.id.as_str(), slot);
             }
             ast::Expr::List(list) => {
                 if list
