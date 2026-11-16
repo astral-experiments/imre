@@ -7632,6 +7632,19 @@ impl<'a> Checker<'a> {
                         }
                         return Ok((vec![self.statement_at(rhs, Statement::Expr(value))], false));
                     }
+                    let value = if self.registered.is_some()
+                        && !self.module_scope
+                        && value.ty == Type::PythonObject
+                    {
+                        let scalar = self
+                            .graph
+                            .session
+                            .operand_types(self.module)
+                            .local_scalar_annotation(&assign.annotation);
+                        registered::checked_local_scalar(scalar, value)
+                    } else {
+                        value
+                    };
                     if replacement.is_some() {
                         let statements = self.replace_local(name.id.as_str(), slot, ty, value);
                         self.bind_declared_type(self.names[name.id.as_str()], declaration);

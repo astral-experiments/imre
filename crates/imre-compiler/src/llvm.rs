@@ -4542,6 +4542,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredUnpack { .. }
             | Builtin::RegisteredIter(_)
             | Builtin::RegisteredName(_)
+            | Builtin::RegisteredLocalScalar(_)
             | Builtin::Unrepresented
             | Builtin::UnrepresentedCall
             | Builtin::RegisteredInPlace(_)

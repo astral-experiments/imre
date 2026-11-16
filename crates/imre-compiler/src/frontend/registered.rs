@@ -1218,6 +1218,16 @@ pub(super) fn assertion_statements(
     ]
 }
 
+pub(super) fn checked_local_scalar(expected: Option<Type>, value: Expr) -> Expr {
+    if expected == value.kind.scalar_literal_type() {
+        return value;
+    }
+    match expected.and_then(Type::builtin_scalar_name) {
+        Some(name) => operation(Builtin::RegisteredLocalScalar(name), value.ty, vec![value]),
+        None => value,
+    }
+}
+
 fn operation(op: Builtin, ty: Type, operands: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -2967,6 +2977,11 @@ impl<'a> SuitePreparation<'a> {
                         let rhs = frame_value(rhs);
                         let refusal = self.operand_refusal(&rhs);
                         let value = self.bind_value(&mut operands, rhs);
+                        let value = if let ast::Stmt::AnnAssign(ann) = stmt {
+                            scope.local_initializer(ann, value)
+                        } else {
+                            value
+                        };
                         body.mixed(self, Statement::Assign(input, value), refusal);
                         targets
                     }
@@ -3489,6 +3504,7 @@ impl SourceScope<'_> {
                 }
                 let mut body = if let Some(value) = &ann.value {
                     let value = self.frame_value(value).ok_or(())?;
+                    let value = self.local_initializer(ann, value);
                     self.assignment_targets(std::slice::from_ref(ann.target.as_ref()), value)?
                 } else {
                     Vec::new()
@@ -3842,6 +3858,17 @@ fn definition_value(
 }
 
 impl SourceScope<'_> {
+    fn local_initializer(&self, ann: &ast::StmtAnnAssign, value: Expr) -> Expr {
+        if !matches!(self.kind, RegisteredScope::Function { .. }) || !ann.target.is_name_expr() {
+            return value;
+        }
+        let expected = self
+            .source
+            .operand_types
+            .and_then(|types| types.local_scalar_annotation(&ann.annotation));
+        checked_local_scalar(expected, value)
+    }
+
     fn assignment_targets(
         &mut self,
         targets: &[ast::Expr],
