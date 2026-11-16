@@ -78,6 +78,19 @@ fn emit_registered_body(source: &str, function: &crate::frontend::RegisteredFunc
 }
 
 #[test]
+fn a_typed_parameter_keeps_its_python_slice_receiver() {
+    let source = "def section(text: str) -> str:\n    return text[:2] + text[4:]\nprint(section('example'))\n";
+    let mut graph = SourceGraph::single(source).unwrap();
+    graph.registered_startup = true;
+    crate::checked_lower(&mut graph).unwrap();
+    let frames = graph.registered_functions();
+    let function = &frames[&graph.entry][&TextSize::default()];
+    assert_eq!(function.function.returns, crate::ir::Type::Str);
+    let output = emit_registered_body(source, function);
+    assert_eq!(output.functions.matches("_slice_at(").count(), 2);
+}
+
+#[test]
 fn returning_a_callback_keeps_the_checked_parameter_operand() {
     use crate::ir::{ExprKind, Statement};
     use ruff_text_size::Ranged;
