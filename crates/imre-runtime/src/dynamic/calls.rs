@@ -8103,8 +8103,11 @@ impl Context {
                 }
                 self.register_stream_with_attributes(obj, class);
             }
+            if Some(&class) != self.builtins.get("object") {
+                self.heap.store_instance_field(obj, name, value);
+                return Ok(());
+            }
         }
-        let object_class = self.builtins.get("object").copied();
         match self.heap.get_mut(obj) {
             Value::Property(property) if name == "__doc__" => property.doc = value,
             Value::Complex(_) if matches!(name, "real" | "imag") => {
@@ -8117,13 +8120,6 @@ impl Context {
                 let scope = *scope;
                 self.update_module_annotations(scope, name, Some(value))?;
                 self.bind(scope, name, value);
-            }
-            Value::Instance { class, fields, .. } if Some(*class) != object_class => {
-                if let Some(previous) = fields.insert(name.to_owned(), value)
-                    && previous != value
-                {
-                    self.heap.weak_edge_removed(previous);
-                }
             }
             Value::Native(_) if let Some(&scope) = self.enum_scopes.get(&obj) => {
                 self.update_enum_base(scope, name, Some(value))?;

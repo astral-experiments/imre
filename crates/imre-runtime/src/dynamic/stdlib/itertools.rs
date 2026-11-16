@@ -42,17 +42,17 @@ pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             let child = ctx
                 .next_item(source)
                 .and_then(|item| item.ok_or_else(|| Error::new("StopIteration", "")))
-                .inspect_err(|_| set_chain_field(ctx, *receiver, "_sources", NONE))?;
+                .inspect_err(|_| ctx.heap.store_instance_field(*receiver, "_sources", NONE))?;
             ctx.heap.keep(child);
             let active = match ctx.iterator(child) {
                 Ok(active) => active,
                 Err(error) => {
-                    set_chain_field(ctx, *receiver, "_active", NONE);
-                    set_chain_field(ctx, *receiver, "_sources", NONE);
+                    ctx.heap.store_instance_field(*receiver, "_active", NONE);
+                    ctx.heap.store_instance_field(*receiver, "_sources", NONE);
                     return Err(error);
                 }
             };
-            set_chain_field(ctx, *receiver, "_active", active);
+            ctx.heap.store_instance_field(*receiver, "_active", active);
             active
         } else {
             active
@@ -62,23 +62,12 @@ pub(super) fn chain_next(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
         if let Some(item) = ctx.next_item(active)? {
             return Ok(item);
         }
-        set_chain_field(ctx, *receiver, "_active", NONE);
+        ctx.heap.store_instance_field(*receiver, "_active", NONE);
         ctx.heap.release_temporaries_since(step);
         ctx.collect_streaming_garbage(&mut limit);
     })();
     ctx.heap.release_temporaries_since(roots);
     result
-}
-
-fn set_chain_field(ctx: &mut Context, receiver: Id, key: &str, value: Id) {
-    let Value::Instance { fields, .. } = ctx.heap.get_mut(receiver) else {
-        unreachable!("live chain instance")
-    };
-    if let Some(slot) = fields.get_mut(key) {
-        *slot = value;
-    } else {
-        fields.insert(key.to_owned(), value);
-    }
 }
 
 const COUNT: &str = "itertools.count";
