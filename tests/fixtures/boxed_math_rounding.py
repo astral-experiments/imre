@@ -2,7 +2,7 @@
 
 import math
 from fractions import Fraction
-from math import atan2, ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
+from math import atan2, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
 from math import sin, tan, ulp
 
@@ -65,6 +65,22 @@ class FloatOverride(float):
 
 
 def current():
+    class CeilName(str):
+        def __hash__(self):
+            return hash("ceil")
+
+        def __eq__(self, other):
+            return str.__eq__(other, "ceil")
+
+    stored = getattr(math, CeilName("other spelling"))
+    from math import ceil
+    assert stored is ceil
+    del math.ceil
+    try:
+        assert not hasattr(math, "ceil")
+    finally:
+        math.ceil = ceil
+
     assert float.__trunc__(Real(-1.75)) == -1
     assert type(int.__trunc__(True)) is int
     assert bool.__trunc__ is int.__trunc__

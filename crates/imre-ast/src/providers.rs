@@ -182,8 +182,8 @@ provider_groups! {
 }
 
 provider_groups! {
-    /// These providers synthesize attributes on lookup. Their dictionaries alone
-    /// do not enumerate their exports.
+    /// These dictionaries do not enumerate the complete public namespace. Most
+    /// of these providers also synthesize attributes on lookup.
     pub fn has_lazy_attributes, LAZY;
     (
         "sys"
