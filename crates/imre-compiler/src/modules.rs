@@ -6872,7 +6872,8 @@ impl<'a> Loader<'a> {
             )),
             _ => {
                 path_first = name == "ssl" && self.allow_imports;
-                registered_namespace = source_exports || matches!(name, "bisect" | "email" | "ssl");
+                registered_namespace = source_exports
+                    || matches!(name, "_tokenize" | "bisect" | "email" | "ssl" | "tokenize");
                 bundled_runtime_source(name)
             }
         };
