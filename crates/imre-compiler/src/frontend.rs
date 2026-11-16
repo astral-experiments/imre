@@ -1539,16 +1539,9 @@ fn lower_graph(
     // An entry checked at the final layout revision can schedule the ordinary check.
     // Its own reached call prefix decides whether fixed IR can be released.
     let guarded = guarded_owner.is_some();
-    let mut early_entry = (guarded || defer_capture && unavailable.is_none() && entry_needs_object)
-        .then(|| lower_entry(&classes.nonreturning_functions, false));
-    if guarded
-        && let Some(Err(Failure::Diagnostic(error))) = &early_entry
-        && error.kind.is_exact_contract()
-    {
-        return Err((**error)
-            .clone()
-            .with_path(&graph.modules[graph.entry].path));
-    }
+    let mut early_entry =
+        (!guarded && defer_capture && unavailable.is_none() && entry_needs_object)
+            .then(|| lower_entry(&classes.nonreturning_functions, false));
     let discard_unplaced = matches!(&early_entry, Some(Err(reason)) if Failure::is_object(reason))
         && entry_refusal_calls.take().is_some_and(|calls| {
             // An implicitly returning callee cannot later make the refusal unreachable.
@@ -1807,6 +1800,7 @@ fn lower_graph(
                                     definition.range(),
                                 ) == Some(true)))));
         if procedure
+            && !guarded
             && !recover_completed.get()
             && defer_capture
             && !prior_report
@@ -2009,7 +2003,7 @@ fn lower_graph(
             }
         };
         let after_refusal = !body_reports.is_empty();
-        if !after_refusal
+        if (!after_refusal || guarded)
             && cannot_return
             && completed_calls.insert(signature.id)
             && !needs_registered_entry
@@ -2086,6 +2080,17 @@ fn lower_graph(
     if needs_registered_entry {
         capture();
     }
+    if guarded {
+        let entry = lower_entry(&completed_calls, false);
+        if let Err(Failure::Diagnostic(error)) = &entry
+            && error.kind.is_exact_contract()
+        {
+            return Err((**error)
+                .clone()
+                .with_path(&graph.modules[graph.entry].path));
+        }
+        early_entry = Some(entry);
+    }
     let mut reports = body_reports.into_iter();
     if let Some(primary) = reports.next() {
         place_completed(&mut completed, &owners);
@@ -2108,7 +2113,7 @@ fn lower_graph(
         }
     }
     let result = early_entry
-        .filter(|_| unavailable.is_none())
+        .filter(|_| guarded || unavailable.is_none())
         .unwrap_or_else(|| {
             lower_entry(
                 &completed_calls,
