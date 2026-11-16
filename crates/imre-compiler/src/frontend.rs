@@ -4030,6 +4030,8 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// After a layout refusal the outer fixed body can only be used with its source sites.
     placement_only: bool,
+    // These reads exist only while validating a statically impossible isinstance arm.
+    unevaluated_views: Vec<(usize, Type)>,
     /// A physical method checked for Python placement can bind its written operands.
     python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
@@ -4181,6 +4183,7 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             placement_only: false,
+            unevaluated_views: Vec::new(),
             python_method_frame: false,
             checked_call_contracts: false,
             fixed_checks_tail: false,
@@ -8847,6 +8850,22 @@ impl<'a> Checker<'a> {
             }
             let before = self.local_state();
             self.apply_facts(test, true);
+            let view = if self.registered.is_none()
+                && known == Some(false)
+                && let ExprKind::Builtin(Builtin::IsInstance(classes), operands) = &condition.kind
+                && let [ir::InstanceType::Exact(ty)] = classes.as_slice()
+                && let [operand] = operands.as_slice()
+                && let ExprKind::Local(slot) = operand.kind
+            {
+                Some((slot, *ty))
+            } else {
+                None
+            };
+            let view_depth = self.unevaluated_views.len();
+            if let Some((slot, ty)) = view {
+                self.narrowed.insert_mut(slot, ty);
+                self.unevaluated_views.push((slot, ty));
+            }
             let guard_depth = self.regex_guards.len();
             if let Some(guard) = self.regex_guard(&condition, body) {
                 self.regex_guards.push(guard);
@@ -8877,8 +8896,18 @@ impl<'a> Checker<'a> {
             {
                 Ok(false)
             } else {
-                self.lower_if_suite(body, yes, imports)
+                if view.is_some() {
+                    // Evaluate the original condition. The selected layout cannot enter
+                    // this suite, but every written statement still gets checked.
+                    let sites = self.fixed_sites.take();
+                    let result = self.lower_if_suite(body, None, imports);
+                    self.fixed_sites = sites;
+                    result
+                } else {
+                    self.lower_if_suite(body, yes, imports)
+                }
             };
+            self.unevaluated_views.truncate(view_depth);
             self.present_fields.truncate(field_depth);
             self.regex_guards.truncate(guard_depth);
             self.present_subscripts.truncate(subscript_depth);
