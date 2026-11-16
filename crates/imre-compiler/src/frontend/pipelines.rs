@@ -157,7 +157,7 @@ impl Prepared {
             elementless: false,
             eager_list: None,
             writes: HashSet::new(),
-            clear: vec![iterator, value],
+            clear: vec![iterator, value, ready],
         }
     }
 
