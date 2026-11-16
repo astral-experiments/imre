@@ -346,7 +346,8 @@ impl Checker<'_> {
         if let ast::Expr::Name(name) = target {
             self.stored_name(name.id.as_str())
                 .map(|slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
-        } else if self.registered.is_some() && target.is_attribute_expr() {
+        } else if target.is_attribute_expr() && (self.registered.is_some() || self.initializing) {
+            // A generated field's parameter already has a type. Its store checks the destination.
             None
         } else {
             self.assignment_context(target, rhs)

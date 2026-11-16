@@ -1164,9 +1164,6 @@ fn lower_graph(
                         };
                     }
                 }
-                if class.generated_initializer {
-                    records::private_initializer_parameters(method.to_mut(), module);
-                }
             } else if method.name.as_str() == "__post_init__" && signature.returns != Type::None {
                 return Err(module.diagnostic(method.as_ref(), "__post_init__ must return None"));
             } else if matches!(method.name.as_str(), "__str__" | "__repr__")
@@ -1232,7 +1229,10 @@ fn lower_graph(
         inference.discover_packed_arguments();
     }
     for (module, function, signature) in &mut definitions {
-        let renamed = assignments::alias_builtin_parameters(function, graph, *module);
+        let renamed = !signature
+            .method
+            .is_some_and(|method| method.generated_initializer(classes.declarations))
+            && assignments::alias_builtin_parameters(function, graph, *module);
         let (dispatch, packed) = closed_calls::prepare(function, graph, *module);
         if renamed || dispatch || packed {
             signature.physical_frame = false;
@@ -4459,7 +4459,17 @@ impl<'a> Checker<'a> {
         declaration: Option<TypeDeclaration>,
         default: Option<&Expr>,
     ) -> Result<usize, String> {
-        let slot = self.declare_binding(parameter.name().as_str(), ty, parameter, true, default)?;
+        let name = parameter.name().as_str();
+        let slot = if self.initializing {
+            // Generated fields copy their incoming parameters, even when a keyword
+            // such as `len` or an imported name has a different module binding.
+            let slot = self.hidden(ty);
+            self.names.insert(name.to_owned(), slot);
+            self.class_lexical.insert(name.to_owned());
+            slot
+        } else {
+            self.declare_binding(name, ty, parameter, true, default)?
+        };
         self.assigned.insert(slot);
         if let Some(declaration) = declaration {
             self.bind_declared_type(slot, declaration);

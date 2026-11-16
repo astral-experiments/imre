@@ -207,52 +207,6 @@ fn private_items(
     !uses.escapes
 }
 
-/// Generated initializer locals must not shadow module imports or builtin
-/// operations. Public keyword labels stay in `Signature`; only this executable
-/// AST receives private names, so a field called `len` remains usable.
-pub(super) fn private_initializer_parameters(
-    method: &mut ast::StmtFunctionDef,
-    module: &crate::modules::SourceModule,
-) {
-    let mut names = module.bindings.keys().cloned().collect::<HashSet<_>>();
-    let mut renamed = HashMap::new();
-    let mut next = 0;
-    for parameter in method
-        .parameters
-        .args
-        .iter_mut()
-        .chain(&mut method.parameters.kwonlyargs)
-    {
-        let name = loop {
-            let name = format!("__imre_parameter_{next}");
-            next += 1;
-            if names.insert(name.clone()) {
-                break name;
-            }
-        };
-        renamed.insert(parameter.name().to_string(), name.clone());
-        parameter.parameter.name = ast::Identifier::new(name, parameter.parameter.name.range());
-    }
-    for statement in &mut method.body {
-        let ast::Stmt::Assign(assignment) = statement else {
-            continue;
-        };
-        let ast::Expr::Name(value) = &mut *assignment.value else {
-            unreachable!("generated fields copy parameters")
-        };
-        value.id = renamed[value.id.as_str()].clone().into();
-        for target in &mut assignment.targets {
-            let ast::Expr::Attribute(attribute) = target else {
-                unreachable!("generated assignments target fields")
-            };
-            let ast::Expr::Name(receiver) = &mut *attribute.value else {
-                unreachable!("generated fields use their receiver")
-            };
-            receiver.id = renamed[receiver.id.as_str()].clone().into();
-        }
-    }
-}
-
 /// Class receivers use a compile-time type object, including quoted annotations.
 fn class_receiver_annotation(
     expression: &ast::Expr,
