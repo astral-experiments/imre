@@ -317,13 +317,16 @@ impl StatementLowering for Checker<'_> {
                 self.expr(value)?
             } else {
                 origin = value.range();
-                self.expr_in_context(
-                    value,
-                    self.returns,
-                    |_, _| false,
-                    |_, value, _, _| Ok(value),
-                    None,
-                )?
+                let expected = self.registered_result_contract.unwrap_or(self.returns);
+                self.with_declared_operand(|checker| {
+                    checker.expr_in_context(
+                        value,
+                        expected,
+                        |_, _| false,
+                        |_, value, _, _| Ok(value),
+                        None,
+                    )
+                })?
             }
         } else {
             Expr::none()
@@ -351,6 +354,7 @@ impl StatementLowering for Checker<'_> {
         } else {
             let source_result = !terminates
                 && self.checked_call_contracts
+                && self.registered_result_contract.is_none()
                 && value.ty == Type::PythonObject
                 && if self.returns.builtin_scalar_name().is_some() {
                     ret.value.as_deref().is_some_and(|expression| {
@@ -370,6 +374,21 @@ impl StatementLowering for Checker<'_> {
                     // operand carries a checked type from a live call.
                     let actual = value.checked_operand_type();
                     if actual == Type::PythonObject {
+                        if self.types.is_display_container(expected)
+                            && let (Some(site), Some(declaration)) =
+                                (ret.value.as_deref(), self.return_declaration)
+                            && !self
+                                .graph
+                                .session
+                                .operand_types(self.module)
+                                .accepts_return_operand(site, declaration.annotation)
+                        {
+                            return Err(self.classified_error(
+                                Kind::ScopedObject,
+                                site,
+                                "the return requires its fixed source layout",
+                            ));
+                        }
                         Ok(value)
                     } else {
                         self.expect(expected, actual, &origin).map(|()| value)

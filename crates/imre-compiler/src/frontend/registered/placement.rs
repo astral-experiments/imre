@@ -135,6 +135,47 @@ mod tests {
     }
 
     #[test]
+    fn a_live_return_checks_the_elements_of_its_declared_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        let source = r#"from __future__ import annotations
+import urllib.request
+request = urllib.request.Request("data:,ok")
+class Crate:
+    pass
+def url_from(request) -> str:
+    return request.full_url
+def crates(url: str) -> list[Crate]:
+    items: list[int] = [1]
+    return VALUE
+print(crates(url_from(request)))
+"#;
+        for (value, error) in [
+            ("[]", None),
+            ("[] if url else []", None),
+            ("[] + []", None),
+            ("[Crate()]", None),
+            ("[True]", Some("expected main.Crate, got bool")),
+            ("True", Some("expected list[main.Crate], got bool")),
+            (
+                "__import__('json').loads('[]')",
+                Some("unknown function or unsupported builtin arguments"),
+            ),
+        ] {
+            std::fs::write(&path, source.replace("VALUE", value)).unwrap();
+            let (result, lowered) =
+                caller_cache::observe_lowerings(|| crate::check_file(&path, None));
+            if let Some(expected) = error {
+                let message = result.unwrap_err();
+                assert!(message.contains(expected), "{message}");
+            } else {
+                result.unwrap();
+                assert_eq!(lowered.iter().filter(|name| *name == "crates").count(), 1);
+            }
+        }
+    }
+
+    #[test]
     fn method_recovery_uses_the_operands_from_its_completed_fixed_check() {
         let text = concat!(
             "class Row:\n",

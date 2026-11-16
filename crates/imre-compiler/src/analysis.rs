@@ -462,6 +462,40 @@ impl<'session> OperandTypes<'session> {
         }
     }
 
+    /// Can this physical return keep its Python handle under the declared result type?
+    pub(crate) fn accepts_return_operand(self, operand: &Expr, declaration: TextRange) -> bool {
+        use ty_python_core::scope::NodeWithScopeKind;
+        use ty_python_semantic::types::Type;
+
+        let parsed = self.parsed();
+        let Some((operand, scope, file)) = self.original_operand(&parsed, operand.into()) else {
+            return false;
+        };
+        let db = &self.session.db;
+        let index = ty_python_core::semantic_index(db, file);
+        let NodeWithScopeKind::Function(node) = index.scope(scope).node() else {
+            return false;
+        };
+        let Some(annotation) = node
+            .node(&parsed)
+            .returns
+            .as_deref()
+            .filter(|e| e.range() == declaration)
+        else {
+            return false;
+        };
+        let model = SemanticModel::new(db, file);
+        let Some(expected) = annotation_type(db, &model, annotation) else {
+            return false;
+        };
+        self.session.inferred_operand_type(file, operand).is_some_and(|value| {
+            let dynamic = |value| matches!(value, Type::Dynamic(_));
+            !dynamic(value)
+                && !matches!(value, Type::Union(union) if union.elements(db).iter().copied().any(dynamic))
+                && Self::accepts_type(&model, value, expected)
+        })
+    }
+
     fn accepts_type<'db>(
         model: &SemanticModel<'db>,
         value: ty_python_semantic::types::Type<'db>,

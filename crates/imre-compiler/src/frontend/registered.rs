@@ -590,6 +590,7 @@ pub(super) fn check_live_result(
     definition: &ast::StmtFunctionDef,
     signature: &Signature,
     inference: &inference::Inference,
+    checked_calls: bool,
 ) -> Result<Option<RegisteredFunction>, String> {
     let graph = original.graph;
     let module = original.module;
@@ -605,6 +606,12 @@ pub(super) fn check_live_result(
         &values,
     );
     checker.nonreturning_functions = original.nonreturning_functions;
+    checker.checked_call_contracts = checked_calls;
+    if checked_calls {
+        checker.boxed_calls = original.boxed_calls.as_ref().map(|_| HashSet::new());
+        checker.inference = original.inference;
+        checker.frame_arguments = original.frame_arguments;
+    }
     checker.registered_result_contract = Some(signature.returns);
     checker.registered_local_start = Some(signature.params.len());
     let mut signature = signature.clone();
