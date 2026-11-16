@@ -179,13 +179,9 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         def build(source, level):
-            selector_fixture = source in (
-                HERE / "selector_reuse.py", HERE / "boxed_fileobjs.py"
-            )
-            timeout = 360 if level == 3 and selector_fixture else 180
             exe = work / "native"
             require([args.compiler, "build", source, "--no-cache", "--runtime", args.runtime,
-                     "--opt-level", str(level), "--clang", args.clang, "-o", exe], timeout=timeout)
+                     "--opt-level", str(level), "--clang", args.clang, "-o", exe], timeout=180)
             return exe
         for level in args.opt_levels:
             observations = {}

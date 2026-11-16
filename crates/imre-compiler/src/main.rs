@@ -299,8 +299,8 @@ fn run() -> Result<ExitCode, String> {
         } else {
             None
         };
-    let split =
-        !whole_program && (native.is_some() || (native_objects && options.address_sanitizer));
+    let split = !whole_program
+        && (native.is_some() || (native_objects && (clang.is_some() || options.address_sanitizer)));
     if split && linux && !options.address_sanitizer {
         options.bundled_provider_archive = build_cache::provider_archive(&optimization);
     }

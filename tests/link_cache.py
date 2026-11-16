@@ -164,6 +164,10 @@ def main():
             assert all(str(tools / "bin/ld.lld") not in line for line in override), override
             explicit = invoke("--clang", "/usr/bin/clang-18", "--verbose-link", events=["bypass"])
             assert all(str(tools) not in line for line in explicit), explicit
+            assert any("unit-0.o" in line and "unit-1.o" in line for line in explicit), explicit
+            explicit_whole = invoke("--clang", "/usr/bin/clang-18", "--whole-program",
+                                    "--verbose-link", events=["bypass"])
+            assert any(".ll" in line for line in explicit_whole), explicit_whole
     print("Passed native link option, cache identity, and external input checks")
 
 
