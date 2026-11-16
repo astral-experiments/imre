@@ -213,7 +213,7 @@ impl Context {
                     // Sliced source keeps the code filename but uses the pinned warning call site.
                     self.heap
                         .current_location()
-                        .map(|loc| loc.file)
+                        .map(|loc| loc.file.clone())
                         .unwrap_or("<sys>".into())
                 };
                 (filename, line, module, globals)

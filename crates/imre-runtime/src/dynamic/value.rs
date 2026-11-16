@@ -5906,8 +5906,8 @@ impl Heap {
         std::mem::replace(&mut self.execution.current_mut().expression, position)
     }
 
-    pub fn current_location(&self) -> Option<Location> {
-        self.execution.frames.last()?.location.clone()
+    pub fn current_location(&self) -> Option<&Location> {
+        self.execution.frames.last()?.location.as_ref()
     }
 
     /// Trace the same roots for collection and for a weak interning lookup between collections.

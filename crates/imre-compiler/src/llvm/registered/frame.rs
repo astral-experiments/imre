@@ -2020,6 +2020,10 @@ impl RegisteredFrame<'_, '_> {
 
     pub(crate) fn set_statement_line(&mut self, line: usize) {
         self.position = SourcePosition::statement(line);
+        self.write_statement_line(line);
+    }
+
+    pub(super) fn write_statement_line(&mut self, line: impl std::fmt::Display) {
         self.output.declare(
             |d| &mut d.declared_statement_line,
             "declare void @imre_dyn_set_statement_line(ptr, i32)\n",

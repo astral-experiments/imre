@@ -3647,6 +3647,17 @@ pub(super) unsafe extern "C" fn imre_dyn_definition_position(
     ctx.heap.set_definition_position(position.copied());
 }
 
+/// Read the interrupted instruction before a context manager runs its exit hook.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_statement_line(ctx: *const Context) -> u32 {
+    // SAFETY: the generated handler owns the frame of the failing statement.
+    unsafe { &*ctx }
+        .heap
+        .current_location()
+        .expect("active statement")
+        .line
+}
+
 /// Move the executing frame to an implicit call site without releasing statement temporaries.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, line: u32) {

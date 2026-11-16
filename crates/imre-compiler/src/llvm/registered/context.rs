@@ -245,6 +245,9 @@ impl Frame<'_, '_, '_> {
         self.live.pop();
 
         let raised = self.take_handler_error(&failed, Some(&context.callable));
+        // An unsuppressed exit resumes the interrupted instruction. The exit hook can
+        // replace the traceback, so save the frame's line independently of the exception.
+        let interrupted = self.value("call i32 @imre_dyn_statement_line(ptr %ctx)");
         region.enter(
             &mut self.body,
             Completion::Error,
@@ -252,16 +255,23 @@ impl Frame<'_, '_, '_> {
         );
         self.finish_exits(
             region,
-            |frame, _, error| {
+            |frame, region, error| {
+                let line = region.phi(&mut frame.body, "i32", |edge| {
+                    if edge.exception.is_some() {
+                        interrupted.clone()
+                    } else {
+                        "0".into()
+                    }
+                });
                 let outer_roots = frame.live.len() + frame.live_slots.len();
                 let result = if site.is_async {
                     frame.exit_async(&context, &error, outer_roots)
                 } else {
                     frame.exit_sync(&context, &error)
                 };
-                (error, result, outer_roots)
+                (error, result, outer_roots, line)
             },
-            |frame, target, (error, result, outer_roots)| {
+            |frame, target, (error, result, outer_roots, line)| {
                 if matches!(target, Completion::Error) {
                     let suppress = if site.is_async {
                         frame.call_position(site.range);
@@ -275,6 +285,7 @@ impl Frame<'_, '_, '_> {
                     let propagate = frame.name("b");
                     frame.branch(&suppress, &done, &propagate);
                     frame.label(&propagate);
+                    frame.write_statement_line(line);
                     frame.raise(error, None, true);
                 } else if site.is_async {
                     frame.discard_truth(&outer_roots.to_string());
