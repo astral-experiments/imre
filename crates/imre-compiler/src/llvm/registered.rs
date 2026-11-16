@@ -46,23 +46,26 @@ pub(crate) fn frame_inputs(
     arguments: FrameArguments,
 ) -> Option<(FrameInputs, FrameSlots)> {
     use crate::frontend::FrameSite;
-    let has_scalar = arguments != FrameArguments::Checked
-        && checked.function.params.iter().any(|&slot| {
-            checked.function.locals[slot]
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum ScalarSlot {
+        Unread,
+        ReadAsLocal,
+        Argument,
+    }
+    let mut scalar_slots = Vec::new();
+    if arguments != FrameArguments::Checked {
+        for &slot in &checked.function.params {
+            if checked.function.locals[slot]
                 .builtin_scalar_name()
                 .is_some()
-        });
-    let scalar_parameter = |value: &Expr| {
-        has_scalar
-            && value.ty != Type::PythonObject
-            && value.viewed_local().is_some_and(|slot| {
-                checked.function.params.contains(&slot)
-                    && checked.function.locals[slot]
-                        .builtin_scalar_name()
-                        .is_some()
-            })
-    };
-    let protocol_parameter = |value: &Expr| usize::from(scalar_parameter(value));
+            {
+                scalar_slots.resize(checked.function.locals.len(), ScalarSlot::Unread);
+                scalar_slots[slot] = ScalarSlot::Argument;
+            }
+        }
+    }
+    let has_scalar = !scalar_slots.is_empty();
     let mut scalar_reads = 0usize;
     let mut protocol_reads = 0usize;
     let mut sites = Vec::new();
@@ -84,13 +87,30 @@ pub(crate) fn frame_inputs(
         }
         let source = positions.first().copied();
         let attribute = source.and_then(|range| checked.fixed_attribute(range));
+        let protocol_parameter = |value: &Expr| {
+            usize::from(has_scalar && value.ty != Type::PythonObject
+                && value.viewed_local().is_some_and(|slot| {
+                    scalar_slots.get(slot) == Some(&ScalarSlot::Argument)
+                }))
+        };
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 return match stmt {
                     Statement::Assign(slot, value) => {
-                        // An object local stores the original handle supplied by the caller.
                         if checked.function.locals.get(*slot) == Some(&Type::PythonObject) {
                             protocol_reads += protocol_parameter(value);
+                        } else if source.is_some()
+                            && let ExprKind::Local(input) = value.kind
+                            && scalar_slots.get(input) == Some(&ScalarSlot::Argument)
+                            && checked.function.locals[input] == value.ty
+                            && checked.function.locals.get(*slot) == Some(&value.ty)
+                            && checked.local_names.contains_key(slot)
+                            && scalar_slots[*slot] != ScalarSlot::ReadAsLocal
+                        {
+                            // The named store carries the original handle. An earlier read may
+                            // see it on a loop backedge, so every use must get the argument proof.
+                            scalar_slots[*slot] = ScalarSlot::Argument;
+                            protocol_reads += 1;
                         }
                         uses_slot(slot, false)
                     }
@@ -257,7 +277,10 @@ pub(crate) fn frame_inputs(
         };
         match &expr.kind {
             ExprKind::Local(slot) => {
-                scalar_reads += usize::from(scalar_parameter(expr));
+                scalar_reads += protocol_parameter(expr);
+                if let Some(state @ ScalarSlot::Unread) = scalar_slots.get_mut(*slot) {
+                    *state = ScalarSlot::ReadAsLocal;
+                }
                 uses_slot(slot, false)
             }
             ExprKind::Bind(slot, _) => {
