@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+use super::{Context, Error, FALSE, Id, Result, TRUE, Value};
 
 /// Supply filesystem operations and real module initialization to the shared discovery code.
 pub(super) fn call(
@@ -29,10 +29,6 @@ pub(super) fn call(
         } else {
             FALSE
         }),
-        "find_module" => {
-            let name = text.to_owned();
-            Ok(ctx.find_module(&name)?.unwrap_or(NONE))
-        }
         "find_spec" => ctx.resource_spec(*value),
         _ => unreachable!(),
     }
