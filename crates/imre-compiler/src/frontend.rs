@@ -241,9 +241,14 @@ impl Signature {
             && self
                 .params
                 .iter()
-                // A definition-time Python default belongs to the enclosing header.
-                // It does not select the checker for the rest of the function.
-                .any(|param| param.ty == Type::PythonObject && !param.has_python_default())
+                // An unrepresented default alone belongs to the header. An incoming
+                // Python argument with a written type also belongs to this frame.
+                .enumerate()
+                .any(|(index, param)| {
+                    param.ty == Type::PythonObject
+                        && (!param.has_python_default()
+                            || self.parameter_declaration(index).is_some())
+                })
     }
 }
 
@@ -2835,23 +2840,26 @@ fn signature(
     let mut params = Vec::new();
     let mut parameter_types = Vec::new();
     let mut parameter_declarations = Vec::new();
-    let mut declare =
-        |index: usize, module: ModuleId, annotation: Option<&ast::Expr>, stub: bool| {
-            let origin = if let Some(annotation) = annotation
-                && graph.modules[module].checks_source_contracts()
-            {
-                ParameterOrigin::Source(TypeDeclaration {
-                    module,
-                    annotation: annotation.range(),
-                })
-            } else if stub {
-                ParameterOrigin::Stub
-            } else {
-                return;
-            };
-            parameter_declarations.resize(index + 1, ParameterOrigin::Unspecified);
-            parameter_declarations[index] = origin;
+    let mut declare = |index: usize,
+                       module: ModuleId,
+                       annotation: Option<&ast::Expr>,
+                       stub: bool,
+                       python_parameter: bool| {
+        let origin = if let Some(annotation) = annotation
+            && (graph.modules[module].checks_source_contracts() || python_parameter)
+        {
+            ParameterOrigin::Source(TypeDeclaration {
+                module,
+                annotation: annotation.range(),
+            })
+        } else if stub {
+            ParameterOrigin::Stub
+        } else {
+            return;
         };
+        parameter_declarations.resize(index + 1, ParameterOrigin::Unspecified);
+        parameter_declarations[index] = origin;
+    };
     let positional_contract = graph.modules[module]
         .implementation_stub()
         .filter(|_| method.is_none())
@@ -2860,6 +2868,7 @@ fn signature(
     let mut sequence_parameters = Vec::new();
     let mut document_parameters = Vec::new();
     for (index, parameter) in function.parameters.iter_non_variadic_params().enumerate() {
+        let mut python_parameter = false;
         let origin = defaults
             .forwarded
             .filter(|(first, _)| index >= *first)
@@ -2994,7 +3003,19 @@ fn signature(
                             Type::ObjectValue
                         })
                     } else {
-                        annotation_in_class(value, graph, module, classes, types, owner)
+                        annotation_in_class(value, graph, module, classes, types, owner).or_else(|error| {
+                            if method.is_some() || origin.is_some() || !crate::analysis::ClosedSource::supplies_declarations(&graph.modules[module])
+                                || !graph.session.has_union_parameter(module, parameter)
+                                || !inference.source_checks.accepts(graph, module, parameter.range())
+                            {
+                                return Err(error);
+                            }
+                            python_parameter = true;
+                            if default.is_some() {
+                                fixed_default = Some(Expr::unrepresented());
+                            }
+                            Ok(Type::PythonObject)
+                        })
                     }
                 })
                 .or_else(|| stub.map(Ok))
@@ -3091,6 +3112,7 @@ fn signature(
             module,
             annotation,
             parameter.annotation().is_none() && stub.is_some(),
+            python_parameter,
         );
         params.push(Parameter {
             name: parameter.name().to_string(),
@@ -3124,7 +3146,7 @@ fn signature(
             None
         };
         parameter_types.push(ty);
-        declare(params.len(), module, pack.annotation(), false);
+        declare(params.len(), module, pack.annotation(), false, false);
         params.push(Parameter {
             name: pack.name.to_string(),
             ty: ty.unwrap_or(Type::None),
@@ -3143,7 +3165,7 @@ fn signature(
         })?;
         let element = pack_element(element)?;
         let ty = types.dict(Type::Str, element);
-        declare(params.len(), module, keyword.annotation(), false);
+        declare(params.len(), module, keyword.annotation(), false, false);
         params.push(Parameter {
             name: keyword.name.to_string(),
             ty,

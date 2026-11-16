@@ -81,3 +81,49 @@ def characters(keys: set[str]) -> set[str]:
         assert!(llvm.contains(&format!("call ptr @{kernel}(")), "{kernel}");
     }
 }
+
+#[test]
+fn a_deferred_nullable_parameter_keeps_the_imported_call_and_source_contract() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(
+        root.path().join("sink.py"),
+        "def send(value):\n    print(value)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.path().join("provider.py"),
+        r#"from __future__ import annotations
+from collections.abc import Sequence
+import sys
+
+def forward(argv: Sequence[str] | None = None) -> None:
+    from sink import send
+    send(argv or sys.argv[1:])
+"#,
+    )
+    .unwrap();
+    let main = root.path().join("main.py");
+    std::fs::write(&main, "from provider import forward\nforward(('ok',))\n").unwrap();
+    check_file(&main, Some(root.path())).unwrap();
+    std::fs::write(&main, "from provider import forward\nforward(42)\n").unwrap();
+    let error = check_file(&main, Some(root.path())).unwrap_err();
+    assert!(error.contains("main.py:2:9"), "{error}");
+    assert!(error.contains("Expected `Sequence[str] | None`"), "{error}");
+}
+
+#[test]
+fn an_incoming_union_keeps_its_written_argument_contract() {
+    let root = tempfile::tempdir().unwrap();
+    let main = root.path().join("main.py");
+    let header = "from collections.abc import Sequence\n\
+                  def forward(value: Sequence[str] | int | None) -> None:\n    print(value)\n";
+    std::fs::write(&main, format!("{header}forward(('ok',))\n")).unwrap();
+    check_file(&main, Some(root.path())).unwrap();
+    std::fs::write(&main, format!("{header}forward(1.5)\n")).unwrap();
+    let error = check_file(&main, Some(root.path())).unwrap_err();
+    assert!(error.contains("main.py:4:9"), "{error}");
+    assert!(
+        error.contains("Expected `Sequence[str] | int | None`"),
+        "{error}"
+    );
+}
