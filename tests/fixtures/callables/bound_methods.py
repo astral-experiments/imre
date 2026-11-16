@@ -78,8 +78,8 @@ class Reader:
 
 
 class BytesReader(Reader):
-    def read(self, value: str) -> bytes:
-        return value.encode()
+    def read(self, value: str | None) -> bytes:
+        return b"absent" if value is None else value.encode()
 
 
 def saved_read(reader: Reader) -> str | bytes:

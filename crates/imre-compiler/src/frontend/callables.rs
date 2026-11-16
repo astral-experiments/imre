@@ -189,14 +189,14 @@ impl<'a> Checker<'a> {
         target: usize,
         returns: Type,
         at: &impl Ranged,
-        call: impl FnOnce(ir::CallArgs) -> Expr,
+        call: impl FnOnce(ir::CallArgs) -> Result<Expr, String>,
     ) -> Result<usize, String> {
         let args = params
             .iter()
             .enumerate()
             .map(|(slot, &ty)| Expr::local(slot, ty))
             .collect();
-        let result = self.coerce(call(ir::CallArgs::positional(args)), returns, at)?;
+        let result = self.coerce(call(ir::CallArgs::positional(args))?, returns, at)?;
         Ok(self.returning_adapter(params, returns, result, HashSet::from([target])))
     }
 
