@@ -6371,14 +6371,14 @@ impl<'a> Checker<'a> {
             Iteration::Container {
                 iterable,
                 items: false,
-            } if let Some(fields) = self.types.fields(iterable.ty)
-                && fields.windows(2).any(|pair| pair[0] != pair[1])
-                && fields.len() <= 8
+            } if let [ast::Stmt::If(guard)] = loop_.body.as_slice()
+                && guard.elif_else_clauses.is_empty()
+                && matches!(guard.body.as_slice(), [ast::Stmt::Return(_)])
                 && let ast::Expr::Name(target) = loop_.target.as_ref()
                 && !self.names.contains_key(target.id.as_str())
-                && let [ast::Stmt::If(guard)] = loop_.body.as_slice()
-                && guard.elif_else_clauses.is_empty()
-                && matches!(guard.body.as_slice(), [ast::Stmt::Return(_)]) =>
+                && let Some(fields) = self.types.fields(iterable.ty)
+                && fields.len() <= 8
+                && fields.windows(2).any(|pair| pair[0] != pair[1]) =>
             {
                 return self.tuple_search(loop_, target, iterable, &fields, emit);
             }
