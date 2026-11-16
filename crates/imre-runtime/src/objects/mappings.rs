@@ -164,6 +164,15 @@ unsafe fn hash_tuple<H: Hasher>(value: *const usize, state: &mut H) -> Result<()
                     }
                     7 if layout.is_value_struct() => super::structs::float_key(word).hash(state),
                     8 => (&*(word as *const Bytes)).hash(state),
+                    9 => {
+                        let (member, kind) = super::unions::member(word);
+                        let hash = match kind.base() {
+                            1 => member as i64,
+                            2 => crate::python_hash::integer_hash(&Int::borrow(member)),
+                            _ => unreachable!("only bool | int is a hashable union field"),
+                        };
+                        hash.hash(state);
+                    }
                     _ => unreachable!("the checker excludes mutable and float tuple keys"),
                 }
             }
