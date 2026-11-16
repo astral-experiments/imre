@@ -6201,6 +6201,7 @@ def process(path: str, cwd: str) -> None:
         subprocess.run(["tool", path], cwd=cwd, capture_output=True, check=False)
     except ＦileNotFoundError:
         pass
+        raise
 
 def main() -> None:
     args = json.load(sys.stdin)
@@ -6226,6 +6227,10 @@ if __name__ == "__main__":
         assert!(matches!(&handlers[0].matcher,
             ir::ExceptionMatcher::WrittenCategory(_, range, name)
                 if name == "FileNotFoundError" && &source[*range] == "ＦileNotFoundError"));
+        assert!(matches!(
+            handlers[0].body.last(),
+            Some(Statement::Raise(None))
+        ));
         let protected = def.body[0].as_try_stmt().unwrap();
         assert!(matches!(
             frame.fixed_attribute(protected.body[0].range()),

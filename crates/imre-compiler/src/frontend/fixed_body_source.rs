@@ -208,6 +208,7 @@ pub(super) enum FixedNode {
     Return,
     Container(usize, TextRange),
     Effect,
+    Reraise,
     Raise {
         cause: bool,
     },
@@ -343,6 +344,7 @@ impl FixedNode {
             }
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
+            ir::Node::Statement(Statement::Raise(None)) => Self::Reraise,
             ir::Node::Statement(Statement::Raise(Some(raised))) => Self::Raise {
                 cause: raised.cause.is_some(),
             },
