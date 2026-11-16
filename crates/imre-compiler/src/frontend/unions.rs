@@ -150,6 +150,9 @@ impl Checker<'_> {
         if ty == value.ty {
             return value;
         }
+        if self.unevaluated_views.contains(&(slot, ty)) {
+            return Expr::local(slot, ty);
+        }
         if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Calendar(CalendarType::Date)
             && ty == Type::Calendar(CalendarType::DateTime)
         {
