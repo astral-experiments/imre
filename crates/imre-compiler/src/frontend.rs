@@ -9839,13 +9839,17 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Call(call) => {
                 let mut result = self.call(call)?;
-                if let ExprKind::Call(_, args) | ExprKind::Invoke { args, .. } = &mut result.kind {
+                let constructor = matches!(result.kind, ExprKind::Construct { .. });
+                if let ExprKind::Call(_, args)
+                | ExprKind::Invoke { args, .. }
+                | ExprKind::Construct { args, .. } = &mut result.kind
+                {
                     // A conversion can return an unchanged, already positioned operand.
                     let origin = match args.site {
                         ir::CallSite::Written(range, end) => {
                             self.fixed_origin(range, Some((end, b'(')))
                         }
-                        ir::CallSite::None => self.call_origin(call),
+                        ir::CallSite::None if !constructor => self.call_origin(call),
                         _ => return Ok(result),
                     };
                     args.site = ir::CallSite::Fixed(origin);

@@ -9360,7 +9360,7 @@ impl Emitter<'_, '_> {
                 self.retain(input);
             }
         }
-        self.user_call(initializer, Type::None, &inputs, false, None);
+        self.user_call(initializer, Type::None, &inputs, false, args.site.fixed());
         if values
             .iter()
             .any(|arg| self.resource_types.contains(&arg.value.ty))
