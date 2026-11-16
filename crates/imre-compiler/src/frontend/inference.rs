@@ -758,7 +758,7 @@ impl Inference {
         let payload = types.payload(value).unwrap_or(value);
         if !matches!(
             payload,
-            Type::Str | Type::Bytes | Type::Bool | Type::Int | Type::Float
+            Type::Str | Type::Bytes | Type::Bool | Type::Int | Type::Float | Type::Class(_)
         ) {
             return Type::None;
         }
@@ -2511,6 +2511,21 @@ print(Reader().read())
         std::fs::write(&file, source.replace("Reader(), 2", "Reader(), 'bad'")).unwrap();
         let error = crate::check_file(&file, None).unwrap_err();
         assert!(error.contains("expected int, got str"), "{error}");
+    }
+
+    #[test]
+    fn a_none_default_accepts_a_guarded_record() {
+        let mut graph = SourceGraph::single(concat!(
+            "class Parcel:\n    def __init__(self, n: int): self.n = n\n",
+            "class Scale:\n    def weight(self, value=None) -> int:\n",
+            "        if value is not None: return value.n\n        return -1\n",
+            "scale = Scale()\nprint(scale.weight(), scale.weight(Parcel(7)), scale.weight(value=None))\n",
+        ))
+        .unwrap();
+        assert!(matches!(
+            crate::checked_lower(&mut graph).unwrap(),
+            crate::CheckedProgram::Native(_)
+        ));
     }
 
     #[test]
