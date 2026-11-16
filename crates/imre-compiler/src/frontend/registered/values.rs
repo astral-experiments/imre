@@ -1631,6 +1631,30 @@ impl Checker<'_> {
         self.classes.declarations.ids.get(&declaration).copied()
     }
 
+    /// The written call still needs every operand if a rebound callable returns.
+    /// After a known transfer, prepare later operands with their live Python types.
+    fn eager_call_operand(
+        &mut self,
+        node: &ast::Expr,
+        result: ResultUse<'_>,
+        stopped: &mut bool,
+    ) -> Result<Expr, String> {
+        let contract = self.registered_result_contract;
+        if contract.is_none() {
+            return self.expr_for(node, result);
+        }
+        if *stopped {
+            self.registered_result_contract = None;
+        }
+        self.last_nonreturning_frame_call = None;
+        let value = self.expr_for(node, result);
+        self.registered_result_contract = contract;
+        let value = value?;
+        *stopped |= self.last_nonreturning_frame_call.take() == Some(node.range())
+            || self.terminating_operand(&value);
+        Ok(value)
+    }
+
     pub(in crate::frontend) fn registered_operand(
         &mut self,
         node: &ast::Expr,
@@ -1776,7 +1800,8 @@ impl Checker<'_> {
                 return Err(refused());
             }
             let (binding, target) = source.call_target(call);
-            let target = self.expr(target)?;
+            let mut stopped = false;
+            let target = self.eager_call_operand(target, ResultUse::Fixed, &mut stopped)?;
             // A live Python argument can satisfy an inferred layout only at dispatch.
             // Forward it unchanged and leave the result untyped on that edge.
             let mut fixed_result = true;
@@ -1785,7 +1810,10 @@ impl Checker<'_> {
             let value = binding.prepare(call, target, |arg| {
                 let index = skip + indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
-                let value = self.expr(arg)?;
+                let value = self.eager_call_operand(arg, ResultUse::Fixed, &mut stopped)?;
+                if stopped {
+                    return Ok(value);
+                }
                 let actual = value.checked_operand_type();
                 let expected = self.inference.map_or(parameter.ty, |inference| {
                     inference.learn_parameter(signature.id, index, actual)
@@ -1846,8 +1874,15 @@ impl Checker<'_> {
             if self.registered_result_contract.is_some() {
                 // Keep the checked result hint on the handle. The Python namespace
                 // owns the callable, so this frame needs no native call edge.
-                if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
-                    *hint = Some(signature.returns);
+                if !stopped {
+                    let returns =
+                        self.enter_source_call(call, signature, inference::CallEdge::Live)?;
+                    if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
+                        *hint = Some(returns);
+                    }
+                }
+                if stopped || self.nonreturning_functions.contains(&signature.id) {
+                    self.last_nonreturning_frame_call = Some(call.range());
                 }
                 return Ok(Some(located));
             }
@@ -1865,7 +1900,12 @@ impl Checker<'_> {
                     located.ty = signature.returns;
                 }
             } else if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
-                *hint = Some(self.enter_source_call(call, signature, boxed)?);
+                let edge = if boxed {
+                    inference::CallEdge::Boxed
+                } else {
+                    inference::CallEdge::Fixed
+                };
+                *hint = Some(self.enter_source_call(call, signature, edge)?);
             } else {
                 self.apply_caller_frame_stores(signature, call);
                 self.calls.insert(signature.id);
@@ -1932,7 +1972,8 @@ impl Checker<'_> {
                 return sites.remove(&node.range());
             }
             let call = node.as_call_expr()?;
-            let std::collections::hash_map::Entry::Occupied(site) = sites.entry(call.range()) else {
+            let std::collections::hash_map::Entry::Occupied(site) = sites.entry(call.range())
+            else {
                 return None;
             };
             match site.get() {
@@ -1941,7 +1982,10 @@ impl Checker<'_> {
                         && first_local.is_some_and(|first| saved.slot < first)
                         && self.names.get(saved.parameter.as_str()) == Some(&saved.slot)
                         && self.locals[saved.slot] == saved.ty
-                        && source.direct_method(call).is_some() == saved.call.python_call().is_some_and(|call| matches!(call.target, ir::RegisteredCallTarget::Method { .. }))
+                        && source.direct_method(call).is_some()
+                            == saved.call.python_call().is_some_and(|call| {
+                                matches!(call.target, ir::RegisteredCallTarget::Method { .. })
+                            })
                         && operands.is_original_operand(node) => {}
                 _ if self.namespace.is_none() && nonlocal_callable(call, &self.names) => {
                     return site.remove().original_callable(call, operands);
@@ -1953,6 +1997,7 @@ impl Checker<'_> {
         });
         let bound_imports = self.bound_function_imports;
         let mut live_receiver = false;
+        let mut stopped = false;
         let Some(mut value) = operation(
             node,
             source,
@@ -1999,11 +2044,20 @@ impl Checker<'_> {
                         .as_call_expr()
                         .is_some_and(|call| is_bound_method(&call.func))
             },
-            |child, result| self.expr_for(child, result),
+            |child, result| {
+                if node.is_call_expr() {
+                    self.eager_call_operand(child, result, &mut stopped)
+                } else {
+                    self.expr_for(child, result)
+                }
+            },
         )?
         else {
             return Ok(None);
         };
+        if stopped {
+            self.last_nonreturning_frame_call = Some(node.range());
+        }
         if let Some(slot) = self.namespace {
             in_namespace(&mut value, self.local(slot));
         }
