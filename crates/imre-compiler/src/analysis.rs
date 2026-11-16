@@ -1986,15 +1986,19 @@ impl Session {
             .to(Arc::clone(&REGISTERED_BODY_RULES));
     }
 
-    pub(crate) fn current_registered_source_errors(
-        &self,
-        module: usize,
-    ) -> Option<Vec<Option<TextRange>>> {
+    pub(crate) fn uses_registered_body_rules(&self) -> bool {
         Arc::ptr_eq(
             DiagnosticRules::get(&self.db).rules(&self.db),
             &REGISTERED_BODY_RULES,
         )
-        .then(|| self.db.source_error_ranges(self.files[module]))
+    }
+
+    pub(crate) fn current_registered_source_errors(
+        &self,
+        module: usize,
+    ) -> Option<Vec<Option<TextRange>>> {
+        self.uses_registered_body_rules()
+            .then(|| self.db.source_error_ranges(self.files[module]))
     }
 
     pub(crate) fn registered_source_error_ranges(

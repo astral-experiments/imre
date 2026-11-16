@@ -744,7 +744,9 @@ fn lower_current(
     registered::SourceChecks,
 ) {
     let mut inference = inference::Inference::default();
-    inference.source_checks.solved = defer_solved.then(Default::default);
+    // Queue source checks only when they need to borrow the session under different rules.
+    inference.source_checks.solved =
+        (defer_solved && !graph.session.uses_registered_body_rules()).then(Default::default);
     let mut layout_error = None;
     let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
     (layout_error.map_or(result, Err), inference.source_checks)
@@ -16594,6 +16596,29 @@ fn literal_binding_names(suite: &[ast::Stmt]) -> Option<std::collections::HashSe
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_active_source_check_keeps_the_original_optional_match_fallback() {
+        use crate::modules::SourceGraph;
+
+        let directory = tempfile::tempdir().unwrap();
+        let entry = directory.path().join("example.py");
+        let source = r#"import re
+
+def get_indent(line: str) -> str:
+    return re.match(r"^\s*", line).group()
+
+print(get_indent("  source"))
+"#;
+        std::fs::write(&entry, source).unwrap();
+        let mut graph = SourceGraph::load(&entry, Some(directory.path()), &[]).unwrap();
+        graph.registered_startup = true;
+        graph.session.use_registered_body_rules();
+        let (_, checks) = super::lower_current(&graph, None, None, true);
+        assert!(!super::registered::finish_source_checks(
+            &mut graph, checks, None
+        ));
+    }
+
     #[test]
     fn checked_conversions_keep_their_operand_fault_sites() {
         use crate::ir::{Builtin, ExprKind, walk_expressions};
