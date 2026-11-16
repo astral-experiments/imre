@@ -91,6 +91,40 @@ fn a_typed_parameter_keeps_its_python_slice_receiver() {
 }
 
 #[test]
+fn a_negated_branch_keeps_the_operand_and_next_expression_positions() {
+    let source = concat!(
+        "def quotient(word: str, left: int, right: int) -> int:\n",
+        "    if not word:\n",
+        "        return left // right\n",
+        "    return left\n",
+        "print(quotient('', 10, 2))\n",
+    );
+    let mut graph = SourceGraph::single(source).unwrap();
+    graph.registered_startup = true;
+    crate::checked_lower(&mut graph).unwrap();
+    let frames = graph.registered_functions();
+    let function = &frames[&graph.entry][&TextSize::default()];
+    let sites: Vec<_> = function
+        .fixed_sites
+        .iter()
+        .map(|range| &source[*range])
+        .collect();
+    assert!(
+        sites
+            .windows(3)
+            .any(|sites| sites == ["not word", "word", "word"]),
+        "{sites:?}"
+    );
+    let mut output = emit_registered_body(source, function);
+    let floor = output.data(b"//");
+    let position = output.positions[&[3, 15, 20, 28]];
+    assert!(output.functions.lines().any(|line| {
+        line.contains(&format!("call i64 @imre_dyn_op_at(ptr %ctx, ptr {floor},"))
+            && line.ends_with(&format!("ptr @pos{position})"))
+    }));
+}
+
+#[test]
 fn returning_a_callback_keeps_the_checked_parameter_operand() {
     use crate::ir::{ExprKind, Statement};
     use ruff_text_size::Ranged;

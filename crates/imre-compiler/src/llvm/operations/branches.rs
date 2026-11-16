@@ -366,10 +366,12 @@ impl CheckedBody<'_, '_, '_, '_> {
         let depth = match &self.0 {
             Entry::Native(_) => Self::logical_depth(expr),
             Entry::Registered(frame)
-                if matches!(expr.kind, ExprKind::Boolean(..))
-                    && frame
-                        .next_fixed_site(crate::ir::Node::Expression(expr))
-                        .is_some() =>
+                if matches!(
+                    expr.kind,
+                    ExprKind::Boolean(..) | ExprKind::Unary(ruff_python_ast::UnaryOp::Not, _)
+                ) && frame
+                    .next_fixed_site(crate::ir::Node::Expression(expr))
+                    .is_some() =>
             {
                 Depth::Root
             }
