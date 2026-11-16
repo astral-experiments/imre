@@ -172,7 +172,7 @@ pub(super) enum FixedNode {
     Integer(i64),
     Scalar(ir::Constant),
     String(Box<str>),
-    Positive(Type),
+    Unary(ast::UnaryOp, Type),
     Binary(Binary, Type),
     Comparison(ast::CmpOp),
     Logical(bool, usize),
@@ -357,7 +357,9 @@ impl FixedNode {
                 ExprKind::Builtin(Builtin::GlobalGet(slot), ref args) if args.is_empty() => {
                     Self::indexed(&expr.kind, slot, expr.ty)
                 }
-                ExprKind::Unary(ast::UnaryOp::UAdd, _) => Self::Positive(expr.ty),
+                ExprKind::Unary(op @ (ast::UnaryOp::UAdd | ast::UnaryOp::Not), _) => {
+                    Self::Unary(op, expr.ty)
+                }
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
                 ExprKind::Boolean(and, ref values) => Self::Logical(and, values.len()),
                 ExprKind::Compare(ref values, ref ops)
@@ -1409,7 +1411,7 @@ mod tests {
         ]));
         assert!(matches!(
             positive.sites[1].1,
-            Some(FixedNode::Positive(Type::Int))
+            Some(FixedNode::Unary(ast::UnaryOp::UAdd, Type::Int))
         ));
     }
 }

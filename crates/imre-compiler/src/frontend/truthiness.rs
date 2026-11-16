@@ -20,7 +20,13 @@ impl Checker<'_> {
         if let ast::Expr::UnaryOp(unary) = expression
             && unary.op == UnaryOp::Not
         {
-            return self.condition(&unary.operand).map(Expr::not);
+            return self.with_fixed_site(unary.range(), |cx| {
+                let value = cx.condition(&unary.operand)?;
+                if let Some(sites) = &mut cx.fixed_sites {
+                    sites.branch_test(&unary.operand, &value);
+                }
+                Ok(cx.expression_at(unary.range(), Expr::not(value)))
+            });
         }
         if let ast::Expr::If(value) = expression {
             return self.conditional_with(value, false, Self::condition);
