@@ -6,6 +6,15 @@ pub(crate) fn bundled_module_source(
     name: &str,
     standalone: bool,
 ) -> Option<(&'static str, &'static str)> {
+    module_source(name, standalone, |_| false)
+}
+
+/// Leave installed source files to ordinary path discovery when the SDK supplies them.
+pub(super) fn module_source(
+    name: &str,
+    standalone: bool,
+    installed: impl FnOnce(&str) -> bool,
+) -> Option<(&'static str, &'static str)> {
     if let Some(path) = crate::modules::charmap_provider_path(name, true) {
         return Some((path, include_str!("../../stdlib/encodings/charmap.py")));
     }
@@ -30,7 +39,7 @@ pub(crate) fn bundled_module_source(
         )),
         "enum" => bundled_source!("enum.py"),
         "json" => bundled_source!("json/__init__.py"),
-        "argparse" => bundled_source!("argparse.py"),
+        "argparse" => bundled_source!("argparse.py").filter(|(member, _)| !installed(member)),
         "_json" => bundled_source!("_json.py"),
         "json.encoder" => bundled_source!("json/encoder.py"),
         "json.decoder" => bundled_source!("json/decoder.py"),

@@ -61,6 +61,7 @@ jobs:
           # ensurepip needs a real wheel filename when it passes the resource to pip.
           ensurepip_dir="$ARCHIVE_NAME/lib/imre3.14/ensurepip"
           mkdir -p "$ensurepip_dir/_bundled"
+          install -m 644 crates/imre-compiler/stdlib/argparse.py "$ARCHIVE_NAME/lib/imre3.14/"
           install -m 644 stdlib/ensurepip/*.py licenses/CPython.txt "$ensurepip_dir/"
           install -m 644 stdlib/ensurepip/_bundled/*.whl "$ensurepip_dir/_bundled/"
           cp examples/conformance_report/upstream/LICENSE "$ARCHIVE_NAME/LICENSE-Ruff"
@@ -82,6 +83,7 @@ jobs:
         run: |
           tar -xzf "imre-$TARGET.tar.gz" -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
+          cmp "$GITHUB_WORKSPACE/crates/imre-compiler/stdlib/argparse.py" "./imre-$TARGET/lib/imre3.14/argparse.py"
           cmp "$GITHUB_WORKSPACE"/stdlib/ensurepip/_bundled/*.whl "./imre-$TARGET"/lib/imre3.14/ensurepip/_bundled/*.whl
           "./imre-$TARGET/imre" -m ensurepip --version
           "./imre-$TARGET/imre" build-target --output-dir sdk > reported-target.json
@@ -184,6 +186,8 @@ jobs:
           sh target/distrib/imre-installer.sh
           sh target/distrib/imre-installer.sh
           test -s "$IMRE_UNMANAGED_INSTALL/imre-stdlib.zip"
+          origin=$("$IMRE_UNMANAGED_INSTALL/imre" -c 'import argparse; print(argparse.__file__)')
+          cmp crates/imre-compiler/stdlib/argparse.py "$origin"
           cmp stdlib/ensurepip/_bundled/*.whl "$IMRE_UNMANAGED_INSTALL"/lib/imre3.14/ensurepip/_bundled/*.whl
           "$IMRE_UNMANAGED_INSTALL/imre" -m ensurepip --version
           echo 'print(40 + 2)' > "$RUNNER_TEMP/hello.py"

@@ -1780,7 +1780,18 @@ pub(crate) fn compile(
                 {
                     continue;
                 }
-                let mut bundled = bundled_module_source(&prefix, startup.is_none());
+                let mut installed_root = None;
+                let mut bundled =
+                    import_module::module_source(&prefix, startup.is_none(), |member| {
+                        let Some(root) = options.stdlib_dir.as_ref() else {
+                            return false;
+                        };
+                        let path = root.join(member);
+                        let present = filesystem.is_file(&path);
+                        inputs.file_checks.insert(path, present);
+                        installed_root = present.then_some(root);
+                        present
+                    });
                 // Standalone programs can run without the launcher's stdlib ZIP.
                 if bundled.is_none()
                     && startup.is_none()
@@ -1917,7 +1928,11 @@ pub(crate) fn compile(
                 } else {
                     &roots
                 };
-                for (index, root) in search_roots.iter().enumerate().filter(|_| !bundled_only) {
+                for (index, root) in search_roots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, root)| !bundled_only || Some(*root) == installed_root)
+                {
                     if implicit_dirs.contains(root) && before_site.contains(&prefix) {
                         continue;
                     }
