@@ -140,39 +140,18 @@ pub(super) fn prepare(
     function: &mut Cow<'_, ast::StmtFunctionDef>,
     graph: &SourceGraph,
     module: ModuleId,
-) -> (bool, bool, bool) {
+) -> (bool, bool) {
     let dispatch = dispatch::specialize(function, graph, module);
-    if matches!(function, Cow::Owned(_)) {
-        return (
-            dispatch,
-            keywords::scalarize(function, graph, module),
-            false,
-        );
-    }
-    let mut keywords = false;
-    let mut display = false;
-    let mut brackets = 0;
-    // Both a keyword expansion and a comprehension have an unambiguous written token.
-    for token in graph.modules[module]
-        .parsed
-        .tokens()
-        .in_range(function.range())
-    {
-        match token.kind() {
-            TokenKind::DoubleStar => keywords = true,
-            TokenKind::Lsqb | TokenKind::Lbrace => brackets += 1,
-            TokenKind::Rsqb | TokenKind::Rbrace => brackets -= 1,
-            TokenKind::For if brackets > 0 => display = true,
-            _ => continue,
-        }
-        if keywords && display {
-            break;
-        }
-    }
+    let keywords = matches!(function, Cow::Owned(_))
+        || graph.modules[module]
+            .parsed
+            .tokens()
+            .in_range(function.range())
+            .iter()
+            .any(|token| token.kind() == TokenKind::DoubleStar);
     (
         dispatch,
         keywords && keywords::scalarize(function, graph, module),
-        display,
     )
 }
 
