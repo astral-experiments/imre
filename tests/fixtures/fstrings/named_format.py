@@ -61,6 +61,9 @@ def main() -> None:
         "{label:",
         "{missing!s:}",
         "{missing}{label!}",
+        "{missing[not closed}",
+        "{missing:{width}",
+        "{missing}{bad[}",
     ]:
         check(template)
     try:
