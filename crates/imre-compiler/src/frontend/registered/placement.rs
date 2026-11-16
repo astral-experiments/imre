@@ -444,7 +444,8 @@ mod tests {
         for named in [false, true] {
             let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
             graph.registered_startup = named;
-            let program = crate::checked_lower(&mut graph).unwrap();
+            let (program, lowerings) =
+                caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
             let (functions, _) = graph.take_registered_functions();
             let frame = functions
                 .get(&graph.entry)
@@ -463,6 +464,10 @@ mod tests {
                     panic!("expected a fixed namespace result");
                 };
                 assert!(frame.is_none());
+                assert!(
+                    !lowerings.iter().any(|name| name == "options"),
+                    "{lowerings:?}"
+                );
                 let function = &fixed.ir.0.functions[0];
                 let [Statement::Return(value)] = function.body.as_slice() else {
                     panic!("expected the fixed parser return");
