@@ -18,7 +18,7 @@ class Right(Root):
     pass
 
 
-def observe(value: Root) -> None:
+def observe(value: Root | None) -> None:
     if isinstance(value, Left):
         print(value.label)
         value.label = value.label + "!"
@@ -38,6 +38,7 @@ def forget(value: Root, replacement: Root) -> None:
             print("replaced")
 
 
+observe(None)
 observe(Root())
 observe(Left("parent"))
 leaf = Leaf("leaf")
