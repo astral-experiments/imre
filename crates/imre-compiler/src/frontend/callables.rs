@@ -336,9 +336,8 @@ impl<'a> Checker<'a> {
         let method_site = signature
             .method
             .filter(|_| class_method || (receiver.is_some() && !signature.asynchronous));
-        let mut signature = Cow::Borrowed(signature);
         // A saved method with defaults can infer missing formals at its later source-bound call.
-        if let Some(inference) = self.inference
+        let signature = if let Some(inference) = self.inference
             && (expected.is_some()
                 || method_site.is_none()
                 || class_method
@@ -346,7 +345,7 @@ impl<'a> Checker<'a> {
         {
             let asynchronous = signature.asynchronous;
             inference.callable_signature(
-                signature.to_mut(),
+                signature,
                 skip,
                 expected
                     .and_then(|ty| self.types.signature(ty))
@@ -360,8 +359,10 @@ impl<'a> Checker<'a> {
                     }),
                 self,
                 node,
-            )?;
-        }
+            )?
+        } else {
+            Cow::Borrowed(signature)
+        };
         let ty = signature.callable_type(self.types, skip);
         let unbound = receiver.is_none();
         let ty = if let Some(method) = method_site {

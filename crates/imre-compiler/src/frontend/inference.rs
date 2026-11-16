@@ -714,6 +714,25 @@ impl Inference {
         }
     }
 
+    /// Borrow the round's layout when applying the pending types cannot change it.
+    /// A known parameter with a default may also need its default operand rewritten.
+    fn updated_signature<'s>(&self, signature: &'s Signature) -> Cow<'s, Signature> {
+        let pending = self.pending.borrow();
+        let inferred = &pending[signature.id];
+        if inferred.returns.is_none_or(|ty| ty == signature.returns)
+            && inferred
+                .params
+                .iter()
+                .zip(&signature.params)
+                .all(|(ty, param)| ty.is_none_or(|ty| ty == param.ty && param.default.is_none()))
+        {
+            return Cow::Borrowed(signature);
+        }
+        let mut updated = signature.clone();
+        self.update(&mut updated);
+        Cow::Owned(updated)
+    }
+
     pub(super) fn parameter(&self, id: usize, index: usize) -> Option<Type> {
         self.pending.borrow()[id].params[index]
     }
@@ -848,14 +867,14 @@ impl Inference {
             })
     }
 
-    pub(super) fn callable_signature(
+    pub(super) fn callable_signature<'s>(
         &self,
-        signature: &mut Signature,
+        signature: &'s Signature,
         skip: usize,
         expected: Option<(Vec<Type>, Type)>,
         checker: &Checker<'_>,
         site: &impl Ranged,
-    ) -> Result<(), String> {
+    ) -> Result<Cow<'s, Signature>, String> {
         self.lookup(
             signature,
             SignatureUse::Callable { skip, expected },
@@ -863,8 +882,7 @@ impl Inference {
             site.range(),
         )
         .map_err(|failure| failure.at(checker.source, site))?;
-        self.update(signature);
-        Ok(())
+        Ok(self.updated_signature(signature))
     }
 
     /// Inherited copies of one method have distinct receivers but identical
@@ -1190,13 +1208,12 @@ impl Inference {
                     continue;
                 }
                 // The round already updated each signature. Earlier calls can refine its inputs.
-                let mut updated;
+                let updated;
                 let signature = if self.revision.get() == before {
                     signature
                 } else {
-                    updated = signature.clone();
-                    self.update(&mut updated);
-                    &updated
+                    updated = self.updated_signature(signature);
+                    updated.as_ref()
                 };
                 let discover_returns = infer_return || document_return.is_some();
                 // Local scalar and Python values cannot refine another declaration.
@@ -2383,6 +2400,32 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_method_uses_its_later_inferred_return() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = r"from typing import Callable
+import logging
+class Reader:
+    def read(self, n=0): return later()
+class Saver:
+    def save(self, r: Reader):
+        saved = r.read
+        accept(saved)
+def accept(fn: Callable[[int], None]) -> None: pass
+def later(): return payload()
+def payload(): return 9
+Saver().save(Reader())
+print(Reader().read())
+";
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("8:16: Imre: expected Callable[[int], None], got Callable[[int], int]"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn a_late_bound_method_keeps_the_other_parameter_contract() {
