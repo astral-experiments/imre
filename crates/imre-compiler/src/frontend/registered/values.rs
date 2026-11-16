@@ -116,13 +116,29 @@ impl<'a> RegisteredSource<'a> {
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr, ResultUse<'_>) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
+        let accepts =
+            |method: Option<&ast::Expr>, node: &ast::Expr, facts: (Type, Option<usize>)| {
+                allow_typed_receiver(method, node, facts) || facts.0 == Type::PythonObject
+            };
+        if let ast::Expr::Call(call) = node
+            && let Some(FixedAttribute::CallValue { checked, .. }) = placed
+        {
+            // Selection already verified the target and the original parameter at this call.
+            let admitted = call.func.as_attribute_expr().is_none_or(|field| {
+                accepts(
+                    Some(&call.func),
+                    &field.value,
+                    (checked.ty, Some(checked.slot)),
+                )
+            });
+            return Ok(admitted.then_some(checked.call));
+        }
         let receiver = |node: &ast::Expr, needs_protocol: bool, method, result| {
             if needs_protocol && !dynamic_receiver(node) {
                 return Ok(None);
             }
             let value = child(node, result)?;
-            let accepts = allow_typed_receiver(method, node, receiver_facts(&value));
-            Ok((accepts || value.ty == Type::PythonObject).then_some(value))
+            Ok(accepts(method, node, receiver_facts(&value)).then_some(value))
         };
         match node {
             ast::Expr::Call(call) => {
@@ -1792,9 +1808,6 @@ impl Checker<'_> {
             Some(site.remove())
         });
         let placed = match (node.as_call_expr(), placed) {
-            (Some(_), Some(FixedAttribute::CallValue { checked: saved, .. })) => {
-                return Ok(Some(source.located_operation(node, saved.call)));
-            }
             (Some(call), Some(FixedAttribute::Call(Some(target), mut site))) => {
                 // Forwarding can preserve the imported target and replace its arguments.
                 let (layout, args) = prepared_arguments(call, |arg| self.expr(arg))?;
