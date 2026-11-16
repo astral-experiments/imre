@@ -109,7 +109,7 @@ impl RequiredSite {
                         return false;
                     }
                 }
-                Statement::While(test, body, otherwise) => {
+                Statement::While(test, body, otherwise) if visit.is_some() => {
                     Self::visit_operand(test, literals, visit);
                     Self::visit_block(body, physical, literals, visit);
                     Self::visit_block(otherwise, physical, literals, visit);
