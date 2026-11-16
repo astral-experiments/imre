@@ -2663,10 +2663,7 @@ fn lower_function(
                     let lost = cx.unrepresented.borrow();
                     if lost.is_none()
                         && cx.types.element(signature.returns).is_some()
-                        && !stored.is_some_and(|value| {
-                            cx.types.element(value.ty).is_some()
-                                && matches!(value.kind, ExprKind::Scope { .. })
-                        })
+                        && stored.is_some_and(|value| cx.types.element(value.ty).is_none())
                         || !cx
                             .helpers
                             .only_direct_locals_since(helpers, &cx.local_functions)
@@ -5782,6 +5779,27 @@ impl<'a> Checker<'a> {
         Ok(Some(value))
     }
 
+    /// A Python container stores the original handle when the source establishes its scalar type.
+    fn coerce_python_item(
+        &self,
+        mut value: Expr,
+        expected: Type,
+        site: &ast::Expr,
+    ) -> Result<Expr, String> {
+        if site.is_name_expr() {
+            registered::values::refine_operand(
+                self.graph.session.operand_types(self.module),
+                site,
+                &mut value,
+            );
+        }
+        if value.ty == Type::PythonObject && value.checked_operand_type() == expected {
+            Ok(value)
+        } else {
+            self.coerce(value, expected, site)
+        }
+    }
+
     /// The display and its elements use the same source positions in either frame.
     fn contextual_display(
         &mut self,
@@ -5792,11 +5810,18 @@ impl<'a> Checker<'a> {
         declaration: Option<TypeDeclaration>,
         build: fn(Vec<Expr>) -> ExprKind,
     ) -> Result<Expr, String> {
+        let coerce_item = if self.checked_call_contracts && self.registered.is_some() {
+            Self::coerce_python_item
+        } else {
+            Self::coerce
+        };
         self.with_expression_site(expression, |checker| {
             let values = items
                 .iter()
                 .zip(fields)
-                .map(|(value, ty)| checker.expr_expected_from(value, ty, declaration))
+                .map(|(value, ty)| {
+                    checker.expr_in_context(value, ty, |_, _| false, coerce_item, declaration)
+                })
                 .collect::<StdResult<Vec<_>, _>>()?;
             Ok(Expr {
                 ty,
@@ -15455,24 +15480,11 @@ impl<'a> Checker<'a> {
             let (builtin, ty) = match attribute.attr.as_str() {
                 "append" if call.arguments.args.len() == 1 => {
                     let arg = &call.arguments.args[0];
-                    let live = self.checked_call_contracts && matches!(append, Builtin::Append);
                     let coerce_item =
-                        |checker: &Self, mut value: Expr, expected: Type, site: &ast::Expr| {
-                            if live && site.is_name_expr() {
-                                registered::values::refine_operand(
-                                    checker.graph.session.operand_types(checker.module),
-                                    site,
-                                    &mut value,
-                                );
-                            }
-                            if live
-                                && value.ty == Type::PythonObject
-                                && value.checked_operand_type() == expected
-                            {
-                                Ok(value)
-                            } else {
-                                checker.coerce(value, expected, site)
-                            }
+                        if self.checked_call_contracts && matches!(append, Builtin::Append) {
+                            Self::coerce_python_item
+                        } else {
+                            Self::coerce
                         };
                     let value = if let Some(inference) = self.inference
                         && let Some(ValueSource::InferredList(owner)) = self.value_source(&receiver)
