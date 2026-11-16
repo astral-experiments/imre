@@ -149,14 +149,11 @@ class FileHandler(StreamHandler):
         self.delay = delay
         self._builtin_open = open
 
-        # Subclasses can override _open, including during eager construction.
-        stream = None
-        if not delay:
-            stream = self._open()
-            if stream is None:
-                stream = sys.stderr
-        Handler.__init__(self)
-        self.stream = stream
+        if delay:
+            Handler.__init__(self)
+            self.stream = None
+        else:
+            StreamHandler.__init__(self, self._open())
 
     def _open(self):
         return self._builtin_open(self.baseFilename, self.mode,
