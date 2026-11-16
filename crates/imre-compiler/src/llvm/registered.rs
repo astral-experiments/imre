@@ -1559,22 +1559,15 @@ impl<'f> Frame<'f, '_, '_> {
                     .end();
                 let op = Builtin::RegisteredSubscript(self.code.current_range, end);
                 let base = self.evaluate_handle(receiver);
-                if let [lower, upper, step] = rest {
-                    let start = self.evaluate_handle(lower);
-                    let stop = self.evaluate_handle(upper);
-                    debug_assert!(ir::omitted(step));
-                    self.evaluate_handle(step);
-                    return self.read_slice(&op, &base, &start, &stop, None);
-                }
-                debug_assert!(rest.is_empty());
-                let key = ir::Constant::slice([const { ir::Constant::None }; 3]);
-                return self.read_slice(&op, &base, "0", "0", Some(key));
+                debug_assert!(rest.is_empty() || matches!(rest, [_, _, step] if ir::omitted(step)));
+                let key = rest
+                    .is_empty()
+                    .then(|| ir::Constant::slice([const { ir::Constant::None }; 3]));
+                return self.read_slice(&op, &base, rest, key);
             }
             (Builtin::RegisteredSlice, bounds) => {
-                let bounds = [bounds.first(), bounds.get(1), bounds.get(2)].map(|value| {
-                    value.map_or_else(|| "0".into(), |value| self.evaluate_handle(value))
-                });
-                self.slice_object(bounds)
+                let [start, stop, step] = self.slice_bounds(bounds);
+                self.op("slice_object", &[&start, &stop, &step])
             }
             (Builtin::RegisteredInPlace(op), [left, right]) => {
                 let left = self.evaluate_handle(left);
@@ -1681,24 +1674,30 @@ impl<'f> Frame<'f, '_, '_> {
                 _ => (value, None),
             };
             if let ExprKind::Builtin(Builtin::RegisteredSlice, bounds) = &value.kind
-                && let [lower, upper] = bounds.as_slice()
+                && bounds.len() == 2
             {
-                let start = self.evaluate_handle(lower);
-                let stop = self.evaluate_handle(upper);
-                return Some(self.read_slice(op, base, &start, &stop, constant.cloned()));
+                return Some(self.read_slice(op, base, bounds, constant.cloned()));
             }
         }
         None
+    }
+
+    fn slice_bounds(&mut self, bounds: &[Expr]) -> [Cow<'static, str>; 3] {
+        [bounds.first(), bounds.get(1), bounds.get(2)].map(|bound| {
+            bound.map_or(Cow::Borrowed("0"), |value| {
+                Cow::Owned(self.evaluate_handle(value))
+            })
+        })
     }
 
     fn read_slice(
         &mut self,
         op: &Builtin,
         base: &str,
-        start: &str,
-        stop: &str,
+        bounds: &[Expr],
         constant: Option<ir::Constant>,
     ) -> CheckedValue {
+        let [start, stop, _] = self.slice_bounds(bounds);
         let slot = constant.map(|key| self.constant_slot(key));
         self.subscript_at(op, |frame, span| {
             frame.take_matching_check();
