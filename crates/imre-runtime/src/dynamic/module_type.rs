@@ -160,34 +160,34 @@ impl Context {
         }
     }
 
-    /// Module attributes use the live namespace and the concrete module subclass's descriptors.
-    pub(super) fn module_instance_attribute(
+    /// Install an intrinsic export in its module's own namespace on first lookup.
+    pub(super) fn lazy_module_field(
         &mut self,
         module: Id,
-        class: Id,
         scope: Id,
         name: &str,
-    ) -> Result<Id> {
-        if name == "builtin_module_names" {
-            self.publish_builtin_module_names(scope)?;
-        }
-        let field = self.scope_name(scope, name);
-        if field.is_some() || self.class_attr(class, name).is_some() {
-            return self.instance_attribute(module, class, field, name);
-        }
-        match name {
-            "__setattr__" | "__str__" => {
-                let method = self.builtin(&format!("object.{name}"));
-                return self.bind_attribute(method, module, class);
+    ) -> Result<Option<Id>> {
+        let Value::Module { name: provider, .. } = self.heap.get(module) else {
+            unreachable!("module attribute receiver")
+        };
+        let bind_to_module = provider == "functools" && name == "cmp_to_key";
+        match super::stdlib::attribute(self, &provider.to_owned(), name) {
+            Ok(value) => {
+                let value = if bind_to_module {
+                    self.alloc(Value::Method {
+                        callable: value,
+                        receiver: module,
+                        explicit: false,
+                    })
+                } else {
+                    value
+                };
+                self.bind(scope, name, value);
+                Ok(Some(value))
             }
-            "__doc__" => return Ok(self.text(DOC)),
-            _ => {}
+            Err(error) if self.is_attribute_error(&error) => Ok(None),
+            Err(error) => Err(error),
         }
-        match self.instance_attribute(module, class, None, name) {
-            Err(error) if self.is_attribute_error(&error) => {}
-            result => return result,
-        }
-        Err(self.missing_module_attribute(scope, name))
     }
 
     fn missing_module_attribute(&self, scope: Id, name: &str) -> Error {
