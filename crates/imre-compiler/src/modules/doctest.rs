@@ -238,7 +238,7 @@ impl<'a> Visitor<'a> for Uses<'_> {
                     .find(|kw| kw.arg.as_ref().is_some_and(|arg| arg == "module"))
                     .map(|kw| &kw.value)
             });
-            if let Some(arg) = arg {
+            if let Some(arg) = arg.filter(|arg| !arg.is_none_literal_expr()) {
                 if let Some(binding) = resolve_binding(self.modules, self.origin, arg) {
                     self.targets.push(binding);
                 } else if let Some(name) = arg.as_name_expr() {
@@ -830,6 +830,22 @@ mod tests {
         let subject = graph.modules.iter().find(|m| m.name == "subject").unwrap();
         assert_eq!(subject.doctest_prompts.len(), 1);
         assert_eq!(graph.doctest_imports, ["kept"]);
+    }
+
+    #[test]
+    fn explicit_none_prepares_the_calling_modules_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("app.py");
+        std::fs::write(&entry, "import owner\nowner.run()\n").unwrap();
+        for module in ["None", "module=None"] {
+            let source = format!(
+                "'''>>> 1 + 1\n2\n'''\nimport doctest\ndef run():\n    doctest.DocTestSuite({module}, checker=None, optionflags=0).debug()\n"
+            );
+            std::fs::write(dir.path().join("owner.py"), source).unwrap();
+            let graph = SourceGraph::load(&entry, Some(dir.path()), &[]).unwrap();
+            let owner = graph.modules.iter().find(|m| m.name == "owner").unwrap();
+            assert_eq!(owner.doctest_prompts.len(), 1);
+        }
     }
 
     #[test]
