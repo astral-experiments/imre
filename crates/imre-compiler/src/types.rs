@@ -689,6 +689,7 @@ impl Types {
             | Type::Socket
             | Type::LogManager
             | Type::None => true,
+            Type::Union(_) => self.is_bool_or_int(ty),
             Type::Class(id) => self.0.borrow().hashable_records.contains(&id),
             Type::Tuple(_) if self.is_callback_storage(ty) => false,
             Type::Tuple(_) => self

@@ -384,8 +384,7 @@ pub(super) fn metadata(classes: &ClassInfo, graph: &SourceGraph) -> Vec<ir::Clas
                 .iter()
                 .map(|field| ir::ClassFieldMetadata {
                     name: field.name.clone(),
-                    // A UUID's integer determines equality even when its input was a bool.
-                    compare: field.compare && (!class.is_uuid(graph) || field.name == "_value"),
+                    compare: field.compare,
                     repr: field.repr,
                 })
                 .collect(),

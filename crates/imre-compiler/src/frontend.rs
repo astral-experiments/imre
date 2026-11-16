@@ -15810,22 +15810,15 @@ impl<'a> Checker<'a> {
             if matches!(value.ty, Type::CmpKey(..)) {
                 return Ok(self.cmp_key_hash(value.clone()));
             }
-            // UUID hashes its integer value; the bool discriminator of UUID.int
-            // affects its Python type but never participates in equality or hashing.
             let args = match value.ty {
                 Type::Class(id)
                     if self.classes.declarations.definitions[id].is_uuid(self.graph)
                         && self.types.immutable_key_field(value.ty) =>
                 {
-                    let fields = &self.classes.declarations.definitions[id].fields;
-                    let field = fields
-                        .iter()
-                        .position(|field| field.name == "_value")
-                        .unwrap();
-                    vec![Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Field(Box::new(value.clone()), field),
-                    }]
+                    vec![self.integer_value(Expr {
+                        ty: self.classes.fields[id][0],
+                        kind: ExprKind::Field(Box::new(value.clone()), 0),
+                    })]
                 }
                 ty if ty == Type::Bool || self.types.is_bool_or_int(ty) => {
                     vec![self.integer_value(value.clone())]

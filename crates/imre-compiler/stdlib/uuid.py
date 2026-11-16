@@ -17,7 +17,7 @@ def _from_hex(text: str) -> int:
 
 def _value(
     hex: str | None, data: bytes | None, little: bytes | None, integer: int | bool | None
-) -> int:
+) -> int | bool:
     if (hex is not None) + (data is not None) + (little is not None) + (integer is not None) != 1:
         raise TypeError("one of the hex, bytes, bytes_le, fields, or int arguments must be given")
     if hex is not None:
@@ -32,16 +32,13 @@ def _value(
         swapped: bytes = _swap_fields(little)
         return int.from_bytes(swapped)
     assert integer is not None
-    if isinstance(integer, bool):
-        return int(integer)
     if not 0 <= integer < (1 << 128):
         raise ValueError("int is out of range (need a 128-bit value)")
     return integer
 
 
 class _UUIDValue:
-    _value: int
-    _was_bool: bool
+    _value: int | bool
 
     def __init__(
         self,
@@ -52,14 +49,11 @@ class _UUIDValue:
         int: int | bool | None = None,
     ) -> None:
         self._value = _value(hex, bytes, bytes_le, int)
-        self._was_bool = isinstance(int, bool)
 
 
 class UUID(_UUIDValue):
     @property
     def int(self):
-        if self._was_bool:
-            return bool(self._value)
         return self._value
 
     @property
@@ -76,7 +70,7 @@ class UUID(_UUIDValue):
 
     @property
     def variant(self) -> str:
-        value = self._value
+        value = int(self._value)
         if not value & (1 << 63):
             return RESERVED_NCS
         if not value & (1 << 62):
