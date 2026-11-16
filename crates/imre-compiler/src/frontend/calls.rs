@@ -509,12 +509,14 @@ pub(super) fn rest_keywords<'a>(
     let keywords = call.arguments.keywords.as_ref();
     if let [spread] = keywords
         && spread.arg.is_none()
-        && !starred(call)
         && let Some((rest, positional)) = params.split_last()
         && rest.kind == ParameterKind::KeywordRest
-        && positional
-            .iter()
-            .all(|p| p.kind == ParameterKind::PositionalOnly)
+        && positional.iter().all(|p| {
+            matches!(
+                p.kind,
+                ParameterKind::PositionalOnly | ParameterKind::Variadic
+            )
+        })
     {
         return (&[], Some(&spread.value));
     }
@@ -927,24 +929,30 @@ impl Checker<'_> {
         }
         let mut packed = Vec::new();
         let mut forwarded = None;
+        let source_pack = self.positional_pack.as_ref().map(|(_, slot)| *slot);
         let mut extra = Vec::new();
         let mut positional = 0;
         for (at, arg) in call.arguments.args.iter().enumerate() {
-            // A callee's *args has the same private, read-only storage as the
-            // caller's pack. Reuse it when all fixed arguments have been bound.
+            // After the fixed arguments, a trailing list supplies the whole pack.
+            // Only the caller's bound pack is private. Capture a mutable list
+            // before a subsequent keyword expression can change its elements.
             if let ast::Expr::Starred(star) = arg
                 && let Some(index) = pack
                 && index == positional
                 && self.types.element(params[index].ty).is_some()
                 && packed.is_empty()
                 && at + 1 == call.arguments.args.len()
-                && star
-                    .value
-                    .as_name_expr()
-                    .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
+                && let Some(name) = star.value.as_name_expr()
+                && let Some(&slot) = self.names.get(name.id.as_str())
+                && (source_pack == Some(slot) || self.locals[slot] == params[index].ty)
             {
                 let value =
                     self.expr_expected_from(&star.value, params[index].ty, declaration(index))?;
+                let value = if source_pack == Some(slot) {
+                    value
+                } else {
+                    self.list_snapshot(value)
+                };
                 forwarded = Some(if let Some(scope) = scope.as_deref_mut() {
                     scope.hold(self, value)
                 } else {

@@ -1428,11 +1428,10 @@ impl Checker<'_> {
         {
             return self.mapping_get(call, value.clone());
         }
-        if call
-            .arguments
-            .keywords
-            .iter()
-            .any(|keyword| keyword.arg.is_none())
+        if calls::unpacked_keywords(call)
+            && !self.classes.methods[class]
+                .get(attribute.attr.as_str())
+                .is_some_and(|method| calls::rest_keywords(call, &method.params).1.is_some())
         {
             return Err(error(
                 self.source,
@@ -1575,28 +1574,10 @@ impl Checker<'_> {
         }
         if self.native_mock(class)
             && let Some(object) = &receiver
+            && !self.classes.methods[class].contains_key(attribute.attr.as_str())
         {
-            match attribute.attr.as_str() {
-                "assert_any_call" => {
-                    return self.mock_arguments(call, class, object.clone(), "_assert_any_call");
-                }
-                "assert_called_with" => {
-                    return self.mock_arguments(call, class, object.clone(), "_assert_called_with");
-                }
-                "assert_called_once_with" => {
-                    return self.mock_arguments(
-                        call,
-                        class,
-                        object.clone(),
-                        "_assert_called_once_with",
-                    );
-                }
-                name if !self.classes.methods[class].contains_key(name) => {
-                    let child = self.mock_child(class, object.clone(), attribute)?;
-                    return self.mock_arguments(call, class, child, "_record");
-                }
-                _ => {}
-            }
+            let child = self.mock_child(class, object.clone(), attribute)?;
+            return self.record_mock_call(call, class, child);
         }
         let signature = self.classes.methods[class]
             .get(attribute.attr.as_str())

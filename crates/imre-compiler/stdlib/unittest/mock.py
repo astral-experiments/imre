@@ -282,8 +282,8 @@ class Mock:
         if self._node.call_count != 1:
             raise AssertionError(f"Expected '{self._name()}' to have been called once. Called {self._node.call_count} times." + self._calls_repr())
 
-    def _assert_called_with(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
-        expected = _new_call(args, kwargs)
+    def assert_called_with(self, /, *args: object, **kwargs: object) -> None:
+        expected = _new_call((*args,), kwargs)
         observed = self._node.call_args
         if observed is not None and observed == expected:
             return
@@ -291,14 +291,16 @@ class Mock:
         actual = "not called." if observed is None else _format_recorded_call(observed, self._name())
         raise AssertionError("expected call not found.\nExpected: " + expected_text + "\n  Actual: " + actual)
 
-    def _assert_any_call(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
-        expected = _new_call(args, kwargs)
+    def assert_any_call(self, /, *args: object, **kwargs: object) -> None:
+        expected = _new_call((*args,), kwargs)
         for actual in self._node.call_args_list:
             if expected == actual:
                 return
         raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
-    def _assert_called_once_with(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
-        if self._node.call_count != 1:
-            raise AssertionError(f"Expected '{self._name()}' to be called once. Called {self._node.call_count} times." + self._calls_repr())
-        self._assert_called_with(args, kwargs)
+    def assert_called_once_with(self, /, *args: object, **kwargs: object):
+        if not self.call_count == 1:
+            msg = (f"Expected '{self._mock_name or 'mock'!s}' to be called once. "
+                   f"Called {self.call_count!s} times.{self._calls_repr()!s}")
+            raise AssertionError(msg)
+        return self.assert_called_with(*args, **kwargs)

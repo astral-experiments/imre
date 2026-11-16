@@ -766,14 +766,7 @@ impl Reachable {
                             let mock_dispatch = source.bundled
                                 && source.name == "unittest.mock"
                                 && match class.name.as_str() {
-                                    "Mock" => matches!(
-                                        name,
-                                        "_child"
-                                            | "_record"
-                                            | "_assert_any_call"
-                                            | "_assert_called_with"
-                                            | "_assert_called_once_with"
-                                    ),
+                                    "Mock" => matches!(name, "_child" | "_record"),
                                     "_PatchFactory" => name == "_dictionary",
                                     "_DictionaryPatch" => matches!(name, "__enter__" | "_exit"),
                                     _ => false,

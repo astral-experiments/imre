@@ -4887,6 +4887,7 @@ for name in ("md4", "ripemd160"):
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
         compare_module(boxed_call_args)
+        compare_module(fixtures / "unittest_mock_check_override.py")
         compare_module(fixtures / "boxed_doctest_results.py")
         compare_module(fixtures.parents[1] / "benchmarks/cpython_stdlib/full/doctest/controls/prompt_imports.py")
         compare_module(fixtures / "boxed_doctest_bundled.py")
