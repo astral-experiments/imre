@@ -285,6 +285,7 @@ pub(super) enum RegisteredCall {
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
     Expat(stdlib::pyexpat::Call),
+    Sleep(i64),
     Select(Vec<Id>),
     Accept(Id),
     Recv(stdlib::socket::Recv),
@@ -340,6 +341,27 @@ impl RegisteredCall {
                 let result = unsafe { call.run(context) };
                 result.map_err(|error| {
                     // SAFETY: the parse and its handlers returned to this execution.
+                    stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
+                })
+            }
+            Self::Sleep(nanos) => {
+                let result = crate::objects::time::sleep_with(
+                    nanos,
+                    || {
+                        // SAFETY: the wait has returned to the thread that owns this execution.
+                        unsafe { Context::dispatch_pending_signals(context) }
+                    },
+                    |when| {
+                        // SAFETY: only the native timestamp crosses the parked execution.
+                        unsafe {
+                            super::value::ParkedExecution::wait(context, || {
+                                crate::objects::time::sleep_once(when)
+                            })
+                        }
+                    },
+                );
+                result.map(|()| NONE).map_err(|error| {
+                    // SAFETY: the interrupted caller is active again.
                     stdlib::io::qualify_error(unsafe { &mut *context }, error, None)
                 })
             }
@@ -8694,6 +8716,10 @@ impl Context {
                     let wait = match name.as_str() {
                         "_contextvars.Context.run" => {
                             return self.prepare_context_run(&args, kwargs);
+                        }
+                        "time.sleep" => {
+                            return stdlib::time::prepare_sleep(self, &args, &kwargs)
+                                .map_err(|error| stdlib::io::qualify_error(self, error, None));
                         }
                         "select.select" => {
                             return stdlib::select::prepare(args.into_owned(), &kwargs);

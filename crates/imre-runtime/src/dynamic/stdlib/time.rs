@@ -173,16 +173,47 @@ fn tuple_time(ctx: &mut Context, value: Id, name: &str) -> Result<LocalTime> {
     Ok(local)
 }
 
+/// Convert the delay on its Python execution before the native sleep can park it.
+pub(in crate::dynamic) fn prepare_sleep(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<crate::dynamic::calls::RegisteredCall> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "time.sleep() takes no keyword arguments",
+        ));
+    }
+    let [seconds] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "time.sleep() takes exactly one argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    audit::event(ctx, "time.sleep", args)?;
+    Ok(crate::dynamic::calls::RegisteredCall::Sleep(timeout_ns(
+        ctx, *seconds,
+    )?))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "sleep" {
+        let call = prepare_sleep(ctx, args, kwargs)?;
+        // SAFETY: direct callers retain the originating execution through sleep and signal dispatch.
+        return unsafe { call.run(ctx) };
+    }
     let function = match name {
         "time" => "time.time",
         "time_ns" => "time.time_ns",
-        "sleep" => "time.sleep",
         "monotonic" => "time.monotonic",
         "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
@@ -261,21 +292,6 @@ pub(super) fn call(
             let resolution = ctx.alloc(Value::Float(resolution));
             ctx.set_attr(info, "resolution", resolution)?;
             Ok(info)
-        }
-        "sleep" => {
-            let [seconds] = args else {
-                return Err(Error::new(
-                    "TypeError",
-                    format!(
-                        "time.sleep() takes exactly one argument ({} given)",
-                        args.len()
-                    ),
-                ));
-            };
-            audit::event(ctx, "time.sleep", args)?;
-            let nanos = timeout_ns(ctx, *seconds)?;
-            crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
-            Ok(NONE)
         }
         "time" if args.is_empty() => Ok(ctx.alloc(Value::Float(wall_time()))),
         "time_ns" if args.is_empty() => {
@@ -398,5 +414,44 @@ pub(super) fn call(
             Ok(struct_time(ctx, fields.into(), zone, offset))
         }
         _ => unreachable!("unregistered time function"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registered_sleep_parks_and_restores_the_calling_execution() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let sleep = ctx.builtin("time.sleep");
+        let delay = ctx.alloc(Value::Float(0.1));
+        let call = ctx
+            .prepare_call(sleep, vec![delay].into(), Vec::new())
+            .unwrap();
+        let parked = Arc::new(AtomicUsize::new(0));
+        ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+        std::thread::scope(|scope| {
+            let (ready, started) = mpsc::sync_channel(0);
+            let observed = &parked;
+            let peer = scope.spawn(move || {
+                ready.send(()).unwrap();
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while observed.load(Ordering::Acquire) == 0 {
+                    assert!(Instant::now() < deadline, "sleep did not park the frame");
+                    std::thread::yield_now();
+                }
+            });
+            started.recv().unwrap();
+            // SAFETY: the registered call is rooted on this owning context.
+            assert_eq!(unsafe { call.run(&raw mut ctx) }.unwrap(), NONE);
+            peer.join().unwrap();
+        });
+        assert_eq!(parked.load(Ordering::Acquire), 0);
     }
 }
