@@ -5704,6 +5704,20 @@ else:
     }
 
     #[test]
+    fn an_unread_scalar_parameter_allows_a_python_frame_to_fall_through() {
+        let body = ir::Function {
+            params: vec![0],
+            returns: Type::PythonObject,
+            locals: vec![Type::Str],
+            body: vec![Statement::Position(TextRange::default(), None)],
+        };
+        let frame =
+            RegisteredFunction::from_checked_body(body, HashMap::new(), FrameArguments::Python)
+                .expect("a fallthrough frame does not read its argument");
+        assert!(matches!(frame.inputs, FrameInputs::Protocol { .. }));
+    }
+
+    #[test]
     fn a_scalar_parameter_can_be_forwarded_through_an_object_local() {
         use crate::llvm::registered::frame_inputs;
 
