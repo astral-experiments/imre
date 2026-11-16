@@ -2933,11 +2933,9 @@ fn signature(
                     }))
                 .transpose()?
         };
-        if parameter.annotation().is_none()
-            && matches!(
-                parameter.default.as_deref(),
-                Some(ast::Expr::NoneLiteral(_))
-            )
+        if ty == Some(Type::None)
+            && parameter.annotation().is_none()
+            && matches!(default, Some(ast::Expr::NoneLiteral(_)))
         {
             none_defaults.push(index);
         }
