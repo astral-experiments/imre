@@ -4445,7 +4445,8 @@ impl Context {
             return result;
         }
         let mut locations = Vec::new();
-        let source = if stdlib::is_module(name) || self.is_frozen(name) {
+        let frozen_original = self.frozen_original_name(name);
+        let source = if stdlib::is_module(name) || frozen_original.is_some() {
             if matches!(name, "email" | "importlib" | "json" | "re" | "urllib") {
                 locations.push(PathBuf::from(format!("<imre stdlib>/{name}")));
             } else if name == "collections" {
@@ -4453,7 +4454,7 @@ impl Context {
             }
             // A sealed namespace may have both native operations and bundled Python classes.
             // Only its bundled initializer may extend it, never a same-named file on sys.path.
-            self.bundled_source(name)
+            self.bundled_source(name, frozen_original)
         } else {
             let (search, child) = if let Some((parent, child)) = parent {
                 (self.parent_import_path(name, key, parent)?, child)
@@ -5462,7 +5463,7 @@ impl Context {
             self.builtin_initializer(name).map(|body| {
                 (
                     body.path.to_path_buf(),
-                    importlib::SourceBody::Registered(body.code),
+                    importlib::SourceBody::Registered(body.code, None),
                     None,
                 )
             })
@@ -5471,7 +5472,7 @@ impl Context {
             let native_random = name == "random"
                 && matches!(
                     body,
-                    importlib::SourceBody::Registered(ModuleInitializer::Builtin(_))
+                    importlib::SourceBody::Registered(ModuleInitializer::Builtin(_), _)
                 );
             let result = match body {
                 importlib::SourceBody::Namespace if self.sources.contains_key("importlib") => {
@@ -5487,7 +5488,7 @@ impl Context {
                     origin.expect("ZIP source has a filename"),
                     body,
                 ),
-                importlib::SourceBody::Registered(_)
+                importlib::SourceBody::Registered(..)
                     if let Some(origin) = origin
                         && ((matches!(
                             name,
@@ -5500,8 +5501,8 @@ impl Context {
                 {
                     self.initialize_source(module, scope, name_id, origin, body)
                 }
-                importlib::SourceBody::Registered(entry) => self
-                    .module_code(entry, &path)
+                importlib::SourceBody::Registered(entry, direct_filename) => self
+                    .module_code(entry, direct_filename.as_deref().unwrap_or(&path))
                     .and_then(|code| self.execute(code, scope, FrameOwner::Module(name_id))),
                 importlib::SourceBody::Filesystem => match origin {
                     Some(file) => self.initialize_source(module, scope, name_id, file, body),
