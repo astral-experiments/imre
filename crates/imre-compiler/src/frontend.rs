@@ -2706,6 +2706,22 @@ fn lower_function(
             Type::None => {}
             // A registered frame returns the None handle on fallthrough.
             Type::PythonObject if checker.registered.is_some() => {}
+            Type::PythonObject
+                if definition.returns.as_deref().is_some_and(|value| {
+                    checker
+                        .graph
+                        .session
+                        .bottom_return_annotation(checker.module, value)
+                }) =>
+            {
+                return Err(checker
+                    .classified_error(
+                        Kind::ScopedObject,
+                        definition,
+                        "the return needs its checked Python frame",
+                    )
+                    .into());
+            }
             ty @ Type::Optional(_) => body.push(Statement::Return(Expr::absent(ty))),
             _ => {
                 return Err(error(
@@ -3176,7 +3192,12 @@ fn signature(
         parameter_types.push(Some(ty));
     }
     // A .pyi describes the linked C function. Its ellipsis is not an executable body.
-    let inert = graph.modules[module].archive.is_none() && annotations::inert_body(function);
+    let inert = graph.modules[module].archive.is_none()
+        && annotations::inert_body(function)
+        && !function
+            .returns
+            .as_deref()
+            .is_some_and(|value| graph.session.bottom_return_annotation(module, value));
     if inert && let Some(annotation) = function.returns.as_deref() {
         graph.checked_inert_return(module, annotation.range());
         if let ast::Expr::Name(name) = annotation {
@@ -3196,7 +3217,7 @@ fn signature(
                 && namedtuples::annotation(graph, module, value, types).is_none()
         })
         .map(|value| {
-            if let ast::Expr::Subscript(subscript) = value
+            let layout = if let ast::Expr::Subscript(subscript) = value
                 && annotations::sequence_annotation(graph.resolve(module, &subscript.value))
             {
                 annotation_in_class(&subscript.slice, graph, module, classes, types, owner)
@@ -3205,7 +3226,20 @@ fn signature(
                 Ok(Type::ObjectValue)
             } else {
                 annotation_in_class(value, graph, module, classes, types, owner)
-            }
+            };
+            layout.or_else(|error| {
+                if graph.modules[module].archive.is_some()
+                    || !graph.session.bottom_return_annotation(module, value)
+                    || !inference
+                        .source_checks
+                        .accepts_return(graph, module, function, value)
+                {
+                    return Err(error);
+                }
+                // A later Python replacement can return a value. The written
+                // contract does not prove a native call is unreachable.
+                Ok(Type::PythonObject)
+            })
         })
         .transpose()?
         .or(inert.then_some(Type::None))

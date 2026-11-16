@@ -8150,6 +8150,15 @@ else:
                 .contains("native declarations currently support")
         );
 
+        fs::write(
+            &stub,
+            "import typing\ndef combine(data: bytes, /) -> typing.Never: ...\n",
+        )
+        .unwrap();
+        let error = crate::compile_file(&entry, None, &options).err().unwrap();
+        assert!(error.contains("native.pyi:2:32"), "{error}");
+        assert!(error.contains("unsupported type annotation"), "{error}");
+
         for invalid in [
             "def combine(data: bytes) -> int: ...",
             "def combine(data: bytes = b'', /) -> int: ...",
