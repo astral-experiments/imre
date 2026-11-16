@@ -3507,7 +3507,7 @@ struct SourceScope<'a> {
     suite_operations: Option<&'a HashMap<TextRange, Expr>>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
-    namespaces: HashMap<usize, LocalBinding>,
+    namespaces: Vec<(usize, LocalBinding)>,
     comprehension: Option<eager::Namespace>,
     generator_expression: bool,
     locals: Vec<Type>,
@@ -3621,7 +3621,7 @@ impl<'a> SourceScope<'a> {
             suite_operations,
             omit_assertions,
             names: HashMap::new(),
-            namespaces: HashMap::new(),
+            namespaces: Vec::new(),
             comprehension: None,
             generator_expression: false,
             locals: Vec::new(),
@@ -3662,7 +3662,7 @@ impl<'a> SourceScope<'a> {
             self.locals.truncate(len);
             self.cursors.retain(|slot, _| *slot < len);
             self.names.retain(|_, slot| *slot < len);
-            self.namespaces.retain(|slot, _| *slot < len);
+            self.namespaces.retain(|(slot, _)| *slot < len);
         }
     }
 
@@ -4007,17 +4007,21 @@ impl SourceScope<'_> {
     }
 
     fn local_read(&self, name: &str) -> Option<Expr> {
-        let names = self
-            .comprehension
-            .as_ref()
-            .map_or(&self.names, |scope| &scope.targets);
-        names
-            .get(name)
-            .map(|&slot| Expr::local(slot, Type::PythonObject))
+        let slot = if self.comprehension.is_some() {
+            self.comprehension_target(name)?
+        } else {
+            *self.names.get(name)?
+        };
+        Some(Expr::local(slot, Type::PythonObject))
     }
 
     fn comprehension_target(&self, name: &str) -> Option<usize> {
-        self.comprehension.as_ref()?.targets.get(name).copied()
+        let scope = self.comprehension.as_ref()?;
+        let bindings = &self.namespaces[scope.targets.clone()];
+        let index = bindings
+            .binary_search_by(|(_, binding)| binding.name.as_str().cmp(name))
+            .ok()?;
+        Some(bindings[index].0)
     }
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
