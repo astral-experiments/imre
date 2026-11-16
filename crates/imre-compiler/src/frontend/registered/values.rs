@@ -808,7 +808,9 @@ impl Checker<'_> {
         fixed_result: Type,
         checked: Option<Vec<Expr>>,
     ) -> Result<Expr, String> {
-        let check_only = self.module_scope && self.inference.is_none() && self.registered.is_none();
+        let check_only = self.inference.is_none()
+            && self.registered.is_none()
+            && (self.module_scope || self.fixed_sites.is_none());
         let arguments = match checked {
             Some(arguments) => arguments,
             None if check_only => {
@@ -823,8 +825,8 @@ impl Checker<'_> {
             if !self.missing_operation(&failure) {
                 return Err(failure);
             }
-            // The module's Python frame will bind and invoke the method. Only the
-            // checked result type and possible call effects survive in this region.
+            // The Python frame will bind and invoke the method. Only the checked
+            // result type and possible call effects survive in this region.
             if check_only {
                 return Ok(super::operation(
                     Builtin::UnrepresentedCall,
