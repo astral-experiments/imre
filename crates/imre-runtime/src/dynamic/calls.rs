@@ -2977,12 +2977,6 @@ impl Context {
                 ..
             } if matches!(self.heap.get(class), Value::Class { .. }) => class,
             Value::Module { scope, .. } => {
-                // Exact ModuleType has no data descriptors for ordinary names.
-                if !name.starts_with("__")
-                    && let Some(field) = self.scope_name(scope, name)
-                {
-                    return Ok(field);
-                }
                 return self.module_get_attribute(obj, scope, name, original, report_missing);
             }
             Value::Super { .. } => return self.super_getattribute(obj, name),
@@ -6162,10 +6156,7 @@ impl Context {
                 return Ok(self.builtin("str.__new__"));
             }
             Value::Module {
-                name: ref module,
-                scope,
-                constructor,
-                ..
+                scope, constructor, ..
             } => {
                 if let Some(class) = constructor
                     && matches!(self.heap.get(class), Value::Class { .. })
@@ -6176,7 +6167,15 @@ impl Context {
                 if name == "__dict__" {
                     return self.module_globals(scope);
                 }
-                if stdlib::has_lazy_attributes(module) {
+                if !name.starts_with("__")
+                    && attr.nonexact_key(self).is_none()
+                    && let Some(field) = self.lookup_scope_name(scope, name)?
+                {
+                    return Ok(field);
+                }
+                if let Value::Module { name: module, .. } = self.heap.get(obj)
+                    && stdlib::has_lazy_attributes(module)
+                {
                     if let Some(value) = self.scope_name(scope, name) {
                         return Ok(value);
                     }

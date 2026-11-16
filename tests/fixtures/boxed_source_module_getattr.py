@@ -55,6 +55,10 @@ def current():
     class Name(str):
         pass
 
+    module.__dict__[Name("stored_key")] = failure
+    assert module.stored_key is failure
+    assert object.__getattribute__(module, "stored_key") is failure
+
     name = Name("fresh")
     getattr(module, name)
     assert calls[-1] is name
