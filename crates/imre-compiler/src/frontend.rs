@@ -8610,7 +8610,16 @@ impl<'a> Checker<'a> {
                 None
             };
             let matcher = if let Some(kinds) = categories {
-                ir::ExceptionMatcher::Categories(kinds)
+                if self.fixed_sites.is_some()
+                    && handler.name.is_none()
+                    && let [kind] = kinds.as_slice()
+                    && let Some(name) = handler.type_.as_deref().and_then(ast::Expr::as_name_expr)
+                    && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
+                {
+                    ir::ExceptionMatcher::WrittenCategory(*kind, name.range(), name.id.clone())
+                } else {
+                    ir::ExceptionMatcher::Categories(kinds)
+                }
             } else {
                 registered::exception_matcher(handler, try_.is_star, |class, _| {
                     if self.registered.is_some() {

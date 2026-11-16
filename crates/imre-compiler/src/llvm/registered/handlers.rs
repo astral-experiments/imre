@@ -1,10 +1,9 @@
 //! Exception handlers entered through a registered Python frame.
 
 use super::{Frame, RegisteredFrame, context::Region};
-use crate::ir::{ExceptHandler, ExceptionMatcher, Expr, Statement};
+use crate::ir::{ExceptHandler, ExceptionMatcher, Statement};
 use crate::llvm::operations::CheckedBody;
 use crate::llvm::{Completion, finally::Finalbody};
-use ruff_text_size::TextRange;
 
 impl Finalbody<String> {
     /// The actual exception on the failing predecessor, or None on an ordinary transfer.
@@ -223,10 +222,7 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         let mut active = exc.to_owned();
         for handler in handlers {
             self.live.extend([remainder.clone(), active.clone()]);
-            let ExceptionMatcher::Subgroup(site, class) = &handler.matcher else {
-                unreachable!("except* requires a subgroup matcher")
-            };
-            let matcher = self.handler_class(*site, class);
+            let matcher = self.handler_class(&handler.matcher);
             let name = self.handler_name(handler);
             let pair = self.op("except_star_split", &[&remainder, &matcher]);
             let zero = self.code.integer(0);
@@ -281,9 +277,18 @@ impl<'f, 'p> Frame<'f, '_, 'p> {
         self.raise(&merged, None, true);
     }
 
-    pub(in crate::llvm) fn handler_class(&mut self, site: TextRange, class: &Expr) -> String {
-        self.checkpoint(site);
-        self.evaluate_handle(class)
+    pub(in crate::llvm) fn handler_class(&mut self, matcher: &ExceptionMatcher) -> String {
+        match matcher {
+            ExceptionMatcher::WrittenCategory(_, site, name) => {
+                self.checkpoint(*site);
+                self.at_expression(*site, site.start(), |frame| frame.lookup(name))
+            }
+            ExceptionMatcher::Object(site, class) | ExceptionMatcher::Subgroup(site, class) => {
+                self.checkpoint(*site);
+                self.evaluate_handle(class)
+            }
+            _ => unreachable!("expected a Python exception class"),
+        }
     }
 
     fn handler_name(&self, handler: &ExceptHandler) -> Option<&'f str> {

@@ -226,9 +226,14 @@ impl CheckedBody<'_, '_, '_, '_> {
                     }
                     matched
                 }
-                ExceptionMatcher::Object(site, class) => {
+                ExceptionMatcher::WrittenCategory(kind, ..)
+                    if matches!(caught, Caught::Native(_)) =>
+                {
+                    self.fixed().exception_matches(exception, *kind)
+                }
+                ExceptionMatcher::WrittenCategory(..) | ExceptionMatcher::Object(..) => {
                     let frame = self.python();
-                    let class = frame.handler_class(*site, class);
+                    let class = frame.handler_class(&handler.matcher);
                     let matched = frame.op("matches", &[exception, &class]);
                     frame.value(&format!("icmp eq i64 {matched}, 2"))
                 }

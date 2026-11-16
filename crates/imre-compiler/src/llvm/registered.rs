@@ -138,7 +138,8 @@ pub(crate) fn frame_inputs(
                                     ir::ExceptionMatcher::Categories(kinds) if kinds.is_empty() => {
                                     }
                                     ir::ExceptionMatcher::Categories(_) => return false,
-                                    ir::ExceptionMatcher::Object(..)
+                                    ir::ExceptionMatcher::WrittenCategory(..)
+                                    | ir::ExceptionMatcher::Object(..)
                                     | ir::ExceptionMatcher::Subgroup(..) => {
                                         uses_python_protocol = true;
                                     }

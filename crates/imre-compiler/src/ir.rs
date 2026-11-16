@@ -3798,6 +3798,8 @@ pub(crate) enum ExceptionMatcher {
     Any,
     /// An empty tuple matches none of the fixed builtin categories.
     Categories(Vec<u32>),
+    /// A fixed category whose written class can be looked up by the selected Python frame.
+    WrittenCategory(u32, ruff_text_size::TextRange, ruff_python_ast::name::Name),
     /// Evaluate the Python class only when a pending exception reaches this handler.
     Object(ruff_text_size::TextRange, Box<Expr>),
     /// Split and detach a subgroup while leaving unmatched exceptions for the next arm.
