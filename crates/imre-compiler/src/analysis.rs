@@ -3351,7 +3351,7 @@ impl Session {
         module: usize,
         path: &Path,
         declarations: DeclaredSignatures<'_>,
-        errors: &mut Vec<String>,
+        errors: &mut Vec<(TextSize, String)>,
     ) {
         use ty_python_semantic::types::ide_support::unreachable_ranges;
         let db = &self.db;
@@ -3401,7 +3401,7 @@ impl Session {
                     && let Some(error) =
                         Self::scalar_contract_error(&model, expected, value, actual, || false)
                 {
-                    errors.push(error.with_path(path).to_string());
+                    errors.push((value.start(), error.with_path(path).to_string()));
                 }
             }
             Some(())
@@ -3550,14 +3550,19 @@ impl Session {
                     continue;
                 }
             }
+            let mut dormant = Vec::new();
             if !declarations.parameters(&self.db).is_empty() {
-                self.dormant_call_errors(index, path, declarations, &mut errors);
+                self.dormant_call_errors(index, path, declarations, &mut dormant);
+                // Parameter order can differ from the order of the written arguments.
+                dormant.sort_by_key(|(start, _)| *start);
             }
+            let mut dormant = dormant.into_iter().peekable();
             // The default body check covers ty's declaration rules on the same bindings.
             if checked_bodies
                 .and_then(|bodies| bodies.get(&index))
                 .is_some_and(Vec::is_empty)
             {
+                errors.extend(dormant.map(|(_, message)| message));
                 continue;
             }
             let checked = CheckedFile::new(
@@ -3572,10 +3577,16 @@ impl Session {
                 result_scopes.get(&file).map_or(&[][..], Vec::as_slice),
             );
             for error in file_errors(&self.db, checked) {
+                while let Some((_, message)) =
+                    dormant.next_if(|(start, _)| error.range.is_none_or(|r| *start <= r.start()))
+                {
+                    errors.push(message);
+                }
                 let original =
                     native.and_then(|report| self.original_operand(error, modules, index, report));
                 errors.push(original.map_or_else(|| error.rendered.clone(), ToString::to_string));
             }
+            errors.extend(dormant.map(|(_, message)| message));
         }
         if !errors.is_empty() {
             return Err(errors.join("\n"));
