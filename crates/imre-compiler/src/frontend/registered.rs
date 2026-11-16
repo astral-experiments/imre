@@ -665,6 +665,7 @@ pub(super) fn prepare_checked_definition(
         checker.python_result_tail = definition.body.last().map(Ranged::start);
     }
     checker.checked_call_contracts = true;
+    checker.boxed_calls = original.boxed_calls.as_ref().map(|_| HashSet::new());
     checker.fixed_checks_tail = matches!(result, ReturnCheck::AfterFixed(_));
     checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;
@@ -4205,9 +4206,9 @@ impl SourceScope<'_> {
                 expr,
                 self.source,
                 None,
-                |method, _, value| {
+                |method, _, (ty, _)| {
                     class
-                        || value.ty == Type::Str
+                        || ty == Type::Str
                             && method
                                 .and_then(ast::Expr::as_attribute_expr)
                                 .is_some_and(|field| {
@@ -4215,7 +4216,7 @@ impl SourceScope<'_> {
                                 })
                 },
                 |_| true,
-                |child| {
+                |child, _| {
                     match expr {
                         ast::Expr::Generator(_) => {
                             self.creating_iterable(|scope| scope.ordinary_operand(child))

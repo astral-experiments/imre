@@ -1829,6 +1829,13 @@ fn lower_graph(
                 {
                     let mut checker = checker_for(*module_id);
                     checker.nonreturning_functions = &completed_calls;
+                    checker.boxed_calls = (recover_completed.get()
+                        && !graph.has_registered_function(*module_id, definition.start())
+                        && pending_capture
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|pending| !pending.contains_key(&signature.id)))
+                    .then(HashSet::new);
                     if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
                         &checker,
                         definition,
@@ -1839,7 +1846,7 @@ fn lower_graph(
                     ) && placement.retain_for_launch(
                         graph,
                         &inference.source_checks,
-                        checked.calls.is_empty(),
+                        !checked.needs_fixed_callee,
                     ) && let Some(prior) = pending_capture.borrow_mut().as_mut()
                     {
                         // Earlier native callees can supply their checked operands to the
@@ -2473,6 +2480,7 @@ fn registered_entry(
 
 #[derive(Clone)]
 struct LoweredBody {
+    needs_fixed_callee: bool,
     python_call_result: bool,
     cannot_return: bool,
     frame_arguments: FrameArguments,
@@ -4023,7 +4031,16 @@ struct CaughtException {
     fields: processes::CapturedFields,
 }
 
+/// The immediate consumer of a registered call. Recursive operands start with their own use.
+enum ResultUse<'a> {
+    Fixed,
+    Python,
+    Store(&'a str),
+}
+
 struct Checker<'a> {
+    // During capture, keep boxed-only dependencies out of the fixed-layout requirements.
+    boxed_calls: Option<HashSet<usize>>,
     frame: LexicalFrame,
     unhighlighted_call: Option<TextRange>,
     wrapper_link: std::cell::Cell<bool>,
@@ -4141,14 +4158,19 @@ struct Checker<'a> {
 impl<'a> Checker<'a> {
     /// Move the function and the dependencies established while checking its operations together.
     fn completed_body(
-        self,
+        mut self,
         params: Vec<usize>,
         body: Vec<Statement>,
         source: Option<FixedBodySource>,
         cannot_return: bool,
     ) -> CompletedBody {
+        let needs_fixed_callee = !self.calls.is_empty();
+        if let Some(boxed) = self.boxed_calls {
+            self.calls.extend(boxed);
+        }
         (
             LoweredBody {
+                needs_fixed_callee,
                 python_call_result: self.python_result_tail.is_some(),
                 cannot_return,
                 frame_arguments: self.frame_arguments,
@@ -4186,6 +4208,7 @@ impl<'a> Checker<'a> {
             unevaluated_views: Vec::new(),
             python_method_frame: false,
             checked_call_contracts: false,
+            boxed_calls: None,
             fixed_checks_tail: false,
             python_result_tail: None,
             settled_attributes: None,
@@ -5145,6 +5168,25 @@ impl<'a> Checker<'a> {
         coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
         declaration: Option<TypeDeclaration>,
     ) -> Result<Expr, String> {
+        self.expr_in_context_for(
+            expression,
+            expected,
+            alternative,
+            coerce,
+            declaration,
+            ResultUse::Fixed,
+        )
+    }
+
+    fn expr_in_context_for(
+        &mut self,
+        expression: &ast::Expr,
+        expected: Type,
+        alternative: impl Fn(&Self, Type) -> bool,
+        coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+        declaration: Option<TypeDeclaration>,
+        result: ResultUse<'_>,
+    ) -> Result<Expr, String> {
         let coerce = |checker: &Self, value, ty, site: &ast::Expr| {
             coerce(checker, value, ty, site).map_err(|e| e.expected_from(declaration, site.range()))
         };
@@ -5163,7 +5205,7 @@ impl<'a> Checker<'a> {
             let value = if concrete_display {
                 self.fixed_expr(expression)?
             } else {
-                self.expr(expression)?
+                self.expr_for(expression, result)?
             };
             return if alternative(self, value.ty) {
                 Ok(value)
@@ -9002,6 +9044,13 @@ impl<'a> Checker<'a> {
             && self.loop_breaks.is_empty()
     }
 
+    fn stored_name(&self, name: &str) -> Option<usize> {
+        self.names
+            .get(name)
+            .copied()
+            .filter(|slot| !self.unstored_targets.contains(slot))
+    }
+
     fn assign(
         &mut self,
         target: &ast::Expr,
@@ -9015,11 +9064,7 @@ impl<'a> Checker<'a> {
                 "local assignment requires a name",
             ));
         };
-        let existing = self
-            .names
-            .get(name.id.as_str())
-            .copied()
-            .filter(|slot| !self.unstored_targets.contains(slot));
+        let existing = self.stored_name(name.id.as_str());
         let value = if let Some(slot) = existing {
             // A pulled object replaces the value in the same unannotated Python
             // binding. An empty loop leaves its previous value there.
@@ -9416,12 +9461,16 @@ impl<'a> Checker<'a> {
     }
 
     fn expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        self.expr_for(expression, ResultUse::Fixed)
+    }
+
+    fn expr_for(&mut self, expression: &ast::Expr, result: ResultUse<'_>) -> Result<Expr, String> {
         // Resolve a closed callee before evaluating arguments that can replace it.
         let python_call = self.tracks_called_bindings()
             && expression
                 .as_call_expr()
                 .is_some_and(|call| !self.closed_passive_call(call));
-        let checked = self.typed_expr(expression);
+        let checked = self.typed_expr_for(expression, result);
         if python_call {
             self.invalidate_called_bindings(expression, &checked);
         }
@@ -9564,8 +9613,16 @@ impl<'a> Checker<'a> {
     }
 
     fn typed_expr(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+        self.typed_expr_for(expression, ResultUse::Fixed)
+    }
+
+    fn typed_expr_for(
+        &mut self,
+        expression: &ast::Expr,
+        result: ResultUse<'_>,
+    ) -> Result<Expr, String> {
         self.with_expression_site(expression, |checker| {
-            match checker.lower_expression(expression) {
+            match checker.lower_expression(expression, result) {
                 Err(failure) if checker.missing_operation(&failure) => Ok(Expr::unrepresented()),
                 result => result,
             }
@@ -9654,7 +9711,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn lower_expression(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+    fn lower_expression(
+        &mut self,
+        expression: &ast::Expr,
+        result: ResultUse<'_>,
+    ) -> Result<Expr, String> {
         if let Some(value) = self.live_module_binding(expression) {
             return Ok(value);
         }
@@ -9672,7 +9733,7 @@ impl<'a> Checker<'a> {
             });
         }
         if let Some(literals) = self.registered {
-            if let Some(value) = self.registered_operand(expression, literals)? {
+            if let Some(value) = self.registered_operand(expression, literals, result)? {
                 return Ok(value);
             }
             // The public registered operand selector owns the receiver and call proof.
