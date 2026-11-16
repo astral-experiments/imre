@@ -7355,9 +7355,6 @@ impl Emitter<'_, '_> {
                 };
                 self.call(name, returns, &[&args[0].value, &args[1].value])
             }
-            Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
-            Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
-            Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
             Builtin::FloatFmod => {
                 // Conversion can raise. Both argument expressions have already run.
                 let [left, right] = [0, 1].map(|i| self.promote_int_to_float(&args[i].value));
@@ -7382,7 +7379,6 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::FloatUnary(symbol) => self.call(symbol, Type::Float, &[&args[0].value]),
-            Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
             Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
             Builtin::FloatIsInteger => {
                 let value = &args[0].value.operand;
