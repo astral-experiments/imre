@@ -239,6 +239,9 @@ pub(crate) fn frame_inputs(
             protocol_reads += protocol_parameter(receiver);
             return true;
         }
+        if matches!(attribute, Some(crate::frontend::FixedAttribute::ModuleName(_))) {
+            return matches!(&expr.kind, ExprKind::Builtin(Builtin::GlobalGet(_), args) if args.is_empty());
+        }
         if attribute.is_some() {
             return false;
         }
@@ -355,7 +358,8 @@ pub(crate) fn frame_inputs(
                     false
                 }
             }
-            ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops) => {
+            ExprKind::Compare(values, ops) if ir::Compare::uses_python_protocol(expr.ty, ops)
+                || source.is_some() && ir::Compare::integer_pair(values) => {
                 let reads = values.iter().map(&protocol_parameter).sum::<usize>();
                 uses_scalar_protocol |= reads != 0;
                 protocol_reads += reads;
@@ -414,7 +418,15 @@ pub(crate) fn frame_inputs(
                     operand.ty == Type::PythonObject
                 } else {
                     matches!(op, UnaryOp::Not | UnaryOp::Invert | UnaryOp::UAdd)
+                        || source.is_some() && expr.tagged_integer_literal().is_some()
                 }
+            }
+            ExprKind::Builtin(Builtin::Slice, args) if source.is_some() => {
+                let [receiver, lower, upper, step] = args.as_slice() else { return false };
+                for value in [receiver, lower, upper] {
+                    read_scalar_protocol(match &value.kind { ExprKind::Present(inner) => inner, _ => value });
+                }
+                ir::omitted(step)
             }
             ExprKind::Builtin(Builtin::RegisteredSubscript(..) | Builtin::ListGet(_), operands) => {
                 operands.iter().for_each(&mut read_scalar_protocol);
@@ -1507,13 +1519,21 @@ impl<'f> Frame<'f, '_, '_> {
                 return CheckedValue::handle("0".into());
             }
             (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
-            (Builtin::Slice, [receiver]) => {
+            (Builtin::Slice, [receiver, rest @ ..]) => {
                 let end = self
                     .operand_range(receiver)
                     .expect("placed slice receiver")
                     .end();
                 let op = Builtin::RegisteredSubscript(self.code.current_range, end);
                 let base = self.evaluate_handle(receiver);
+                if let [lower, upper, step] = rest {
+                    let start = self.evaluate_handle(lower);
+                    let stop = self.evaluate_handle(upper);
+                    debug_assert!(ir::omitted(step));
+                    self.evaluate_handle(step);
+                    return self.read_slice(&op, &base, &start, &stop, None);
+                }
+                debug_assert!(rest.is_empty());
                 let key = ir::Constant::slice([const { ir::Constant::None }; 3]);
                 return self.read_slice(&op, &base, "0", "0", Some(key));
             }

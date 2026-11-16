@@ -878,6 +878,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn checked_search_branch_keeps_its_two_slice_receivers_in_a_python_frame() {
+        let text = concat!(
+            "def section(text: str, marker: str) -> str:\n",
+            "    at = text.find(marker)\n",
+            "    if at == -1 or at == 0:\n",
+            "        return text[:at]\n",
+            "    return text[at:]\n",
+            "def startup(source: str) -> None: exec(source)\n",
+            "print(section('prefix', 'fix'))\n",
+        );
+        for named in [false, true] {
+            let mut graph = SourceGraph::single(text).unwrap();
+            graph.registered_startup = named;
+            crate::checked_lower(&mut graph).unwrap();
+            let (functions, _) = graph.take_registered_functions();
+            let body = &functions[&graph.entry][&TextSize::default()];
+            let written: Vec<_> = body.fixed_sites.iter().map(|site| &text[*site]).collect();
+            for operation in [
+                "text.find(marker)",
+                "at == -1 or at == 0",
+                "text[:at]",
+                "text[at:]",
+            ] {
+                assert!(
+                    written.contains(&operation),
+                    "missing {operation} in {written:?}"
+                );
+            }
+            assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
+        }
+    }
+
     fn checked_exec_operand(body: &RegisteredFunction) -> (&ir::RegisteredCall, &Expr) {
         let [
             Statement::Expr(Expr {

@@ -365,6 +365,14 @@ impl CheckedBody<'_, '_, '_, '_> {
         }
         let depth = match &self.0 {
             Entry::Native(_) => Self::logical_depth(expr),
+            Entry::Registered(frame)
+                if matches!(expr.kind, ExprKind::Boolean(..))
+                    && frame
+                        .next_fixed_site(crate::ir::Node::Expression(expr))
+                        .is_some() =>
+            {
+                Depth::Root
+            }
             Entry::Registered(_) => Depth::All,
         };
         Logical::branch(self, steps(expr, Context::Condition, depth), yes, no);

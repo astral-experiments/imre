@@ -55,7 +55,7 @@ impl FixedBodySource {
                     return false;
                 }
                 python_arguments = true;
-            } else if !expected.matches_in(&node, condition, |expr| {
+            } else if !expected.matches_in(&node, condition, parent, |expr| {
                 let attr = self.attributes.get(&range)?;
                 let next = sites.as_slice().first().map(|site| site.0);
                 let (_, args) = attr.call_operands(range, next, expr)?;
@@ -188,6 +188,7 @@ pub(super) enum FixedNode {
     Positive(Type),
     Binary(Binary, Type),
     Comparison(ast::CmpOp),
+    Logical(bool, usize),
     Copy(ir::CopyOperation, usize, Type),
     Text(ir::TextOperation, usize, Type),
     Path(ir::PathOperation, usize, Type),
@@ -206,13 +207,14 @@ impl FixedNode {
 
     /// Compare owned payloads against the final instruction without copying them.
     fn matches(&self, node: &ir::Node<'_>) -> bool {
-        self.matches_in(node, None, Self::positional_invoke)
+        self.matches_in(node, None, None, Self::positional_invoke)
     }
 
     fn matches_in(
         &self,
         node: &ir::Node<'_>,
         condition: Option<&Expr>,
+        parent: Option<&Expr>,
         positional: impl FnOnce(&Expr) -> Option<Self>,
     ) -> bool {
         if let ir::Node::Expression(expr) = node {
@@ -225,9 +227,18 @@ impl FixedNode {
                 }
                 // The branch writer tests a rich comparison on the Python frame.
                 // A fixed bool used as a value still needs its own layout.
+                ExprKind::Boolean(..)
+                    if !condition.is_some_and(|test| std::ptr::eq(test, *expr)) =>
+                {
+                    return false;
+                }
                 ExprKind::Compare(..)
                     if expr.ty != Type::PythonObject
-                        && !condition.is_some_and(|test| std::ptr::eq(test, *expr)) =>
+                        && !condition.is_some_and(|test| {
+                            std::ptr::eq(test, *expr)
+                                || matches!(test.kind, ExprKind::Boolean(..))
+                                    && parent.is_some_and(|owner| std::ptr::eq(test, owner))
+                        }) =>
                 {
                     return false;
                 }
@@ -291,6 +302,9 @@ impl FixedNode {
                     Self::indexed(&expr.kind, entries.len(), expr.ty)
                 }
                 ExprKind::Int(ref text) => Self::Integer(text.parse().ok()?),
+                ExprKind::Unary(ast::UnaryOp::USub, _) => {
+                    Self::Integer(expr.tagged_integer_literal()?)
+                }
                 ExprKind::Exception { kind, ref message } => Self::Exception {
                     kind,
                     message: message.is_some(),
@@ -349,6 +363,7 @@ impl FixedNode {
                 }
                 ExprKind::Unary(ast::UnaryOp::UAdd, _) => Self::Positive(expr.ty),
                 ExprKind::Binary(op, _, _) => Self::Binary(op, expr.ty),
+                ExprKind::Boolean(and, ref values) => Self::Logical(and, values.len()),
                 ExprKind::Compare(ref values, ref ops)
                     if let [op] = ops.as_slice()
                         && ir::Compare::from_operator(*op).is_some()
