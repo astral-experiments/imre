@@ -12287,14 +12287,6 @@ impl<'a> Checker<'a> {
                             ),
                         });
                     }
-                    let field = if receiver.ty == Type::TimeoutExpired {
-                        self.timeout_error_attribute(&receiver, attribute)?
-                    } else {
-                        self.process_error_attribute(&receiver, attribute)
-                    };
-                    if let Some(value) = field {
-                        return Ok(value);
-                    }
                     let (ty, builtin) = match attribute.attr.as_str() {
                         "characters_written" => (
                             Type::Int,
@@ -12342,13 +12334,14 @@ impl<'a> Checker<'a> {
                             Builtin::ExceptionCause,
                         ),
                         "__suppress_context__" => (Type::Bool, Builtin::ExceptionSuppressContext),
-                        _ => {
-                            return Err(error(
-                                self.source,
-                                attribute,
-                                "unsupported exception attribute",
-                            ));
+                        _ => if receiver.ty == Type::TimeoutExpired {
+                            self.timeout_error_field(attribute)?
+                        } else {
+                            self.process_error_field(&receiver, attribute)
                         }
+                        .ok_or_else(|| {
+                            error(self.source, attribute, "unsupported exception attribute")
+                        })?,
                     };
                     return Ok(Expr {
                         ty,
