@@ -2,6 +2,28 @@ use crate::dynamic::emit::{ModuleOrigin, Output, PreparedBody, QualnameScope};
 use std::path::Path;
 
 #[test]
+fn equal_annotation_strings_bind_the_same_compiled_expression_at_each_site() {
+    let source = "from __future__ import annotations\ndef first(x: list[int]) -> list[int]: pass\ndef second(x: dict[int, str]): pass\n";
+    let module = PreparedBody::module(
+        "annotations",
+        Path::new("annotations.py"),
+        source,
+        0,
+        ModuleOrigin::Program(None),
+    )
+    .unwrap();
+    let (_, ir) = module.standalone().unwrap();
+    let binds: Vec<_> = ir
+        .lines()
+        .filter(|line| line.contains("call void @imre_dyn_bind_expression("))
+        .map(|line| line.rsplit_once(", ptr ").unwrap().1)
+        .collect();
+    assert_eq!(binds.len(), 3);
+    assert_eq!(binds[0], binds[1]);
+    assert_ne!(binds[0], binds[2]);
+}
+
+#[test]
 fn checked_module_places_class_generator_and_following_lambda() {
     use crate::dynamic::emit::SourcePositions;
     use crate::dynamic::emit::{RegisteredBody, SourceMap};

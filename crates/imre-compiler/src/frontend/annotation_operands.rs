@@ -1,8 +1,10 @@
 //! Prepare the operands evaluated by function, class, and module annotation providers.
 
+use indexmap::IndexMap;
 use ruff_python_ast as ast;
 use ruff_python_parser::Parsed;
 use ruff_text_size::{Ranged, TextRange};
+#[cfg(test)]
 use std::collections::HashMap;
 
 use super::registered::values::Region;
@@ -65,14 +67,14 @@ pub(super) fn unpack_annotation(value: Expr) -> Expr {
     }
 }
 
-/// Prepare an annotation at its declaration. Only a linked string child needs a site identity.
+/// Prepare an annotation at its declaration. Equal spellings share one decoded child in this module.
 pub(super) fn annotation_operand<R>(
     expr: &ast::Expr,
     module: bool,
     source: RegisteredSource<'_>,
     string_annotations: bool,
     bundled: bool,
-    children: &mut HashMap<String, AnnotationBody<R>>,
+    children: &mut IndexMap<String, AnnotationBody<R>>,
     prepare_child: impl FnOnce(&str, &Parsed<ast::ModExpression>) -> Option<AnnotationBody<R>>,
 ) -> Option<Expr> {
     let text = if string_annotations {
@@ -93,11 +95,12 @@ pub(super) fn annotation_operand<R>(
             checked_annotation_value(expr, |input| Region::Suite.operand(input, source))
         };
     };
+    let bind = |index| ExprKind::Builtin(Builtin::BindAnnotationExpression(index), Vec::new());
     // A postponed name already has its spelling and needs no executable child.
-    let linked = if bundled || (string_annotations && expr.is_name_expr()) {
-        false
-    } else if children.contains_key(&text) {
-        true
+    let kind = if bundled || (string_annotations && expr.is_name_expr()) {
+        ExprKind::Str(text)
+    } else if let Some(index) = children.get_index_of(&text) {
+        bind(index)
     } else {
         let expanded;
         let expression = if imre_ast::forward_refs::is_starred(&text) {
@@ -112,23 +115,10 @@ pub(super) fn annotation_operand<R>(
                 let parsed = annotation_expression(&source)?;
                 prepare_child(&source, &parsed)
             });
-        if let Some(child) = child {
-            children.insert(text.clone(), child);
-            true
-        } else {
-            false
+        match child {
+            Some(child) => bind(children.insert_full(text, child).0),
+            None => ExprKind::Str(text),
         }
-    };
-    let kind = if linked {
-        ExprKind::Builtin(
-            Builtin::BindAnnotationExpression {
-                site: expr.start(),
-                spelling: text,
-            },
-            Vec::new(),
-        )
-    } else {
-        ExprKind::Str(text)
     };
     Some(Expr {
         ty: Type::Str,
@@ -165,7 +155,7 @@ mod tests {
 
     struct ObservedOperands {
         values: HashMap<TextSize, Expr>,
-        children: HashMap<String, AnnotationBody<()>>,
+        children: IndexMap<String, AnnotationBody<()>>,
     }
 
     fn observe(
@@ -178,7 +168,7 @@ mod tests {
         names.string_annotations = postponed;
         let mut observed = ObservedOperands {
             values: HashMap::new(),
-            children: HashMap::new(),
+            children: IndexMap::new(),
         };
         let (mut scopes, children) =
             super::super::function_scope::ScopeFacts::prepare(stmts, &names, |_, _| {}, |_| {});
@@ -235,7 +225,7 @@ mod tests {
         for (start, _) in text.match_indices("'list[int]'") {
             let start = TextSize::try_from(start).unwrap();
             assert!(matches!(&sites.values[&start].kind,
-                ExprKind::Builtin(Builtin::BindAnnotationExpression { site, spelling }, _) if *site == start && spelling == "list[int]"));
+                ExprKind::Builtin(Builtin::BindAnnotationExpression(index), _) if sites.children.get_index(*index).unwrap().0 == "list[int]"));
         }
         let site = |token| TextSize::try_from(text.find(token).unwrap()).unwrap();
         assert!(sites.children.contains_key("(lambda: 1)()"));
@@ -271,7 +261,7 @@ def dormant(): return f"\ud801{1}", t"{x}"
         assert!(sites.children.contains_key(r"'\ud800'"));
         assert!(matches!(
             &sites.values[&site].kind,
-            ExprKind::Builtin(Builtin::BindAnnotationExpression { spelling, .. }, _) if spelling == "call(x)"
+            ExprKind::Builtin(Builtin::BindAnnotationExpression(index), _) if sites.children.get_index(*index).unwrap().0 == "call(x)"
         ));
     }
 
@@ -349,7 +339,7 @@ after: K[L]
                     assert!(matches!(value, ExprKind::Str(text) if text == spelling));
                 } else {
                     assert!(
-                        matches!(value, ExprKind::Builtin(Builtin::BindAnnotationExpression { site, spelling: original }, _) if *site == location && original == spelling)
+                        matches!(value, ExprKind::Builtin(Builtin::BindAnnotationExpression(index), _) if sites.children.get_index(*index).unwrap().0 == spelling)
                     );
                 }
             }
