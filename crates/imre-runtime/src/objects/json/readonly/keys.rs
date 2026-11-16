@@ -73,7 +73,7 @@ impl ObjectFields {
             return Ok(owner.clone());
         }
         owners.try_reserve(1).map_err(|_| Error::allocation())?;
-        let owner = StrOwner::new(Str::try_new(key.as_str()).map_err(|_| Error::allocation())?);
+        let owner = crate::objects::text::try_owned_string(key.as_str())?;
         owners.insert(owner.clone());
         Ok(owner)
     }
