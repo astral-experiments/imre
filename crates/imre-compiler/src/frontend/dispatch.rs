@@ -108,15 +108,18 @@ impl Checker<'_> {
             };
             alternatives.push((class, invoke(self, class, view)?));
         }
-        // An override can return one member of another implementation's declared
-        // union. Find that layout before folding so class declaration order does
-        // not decide whether, for example, None and a record can coexist.
-        let union_result = alternatives.iter().map(|(_, expr)| expr.ty).find(|&ty| {
-            matches!(ty, Type::Optional(_) | Type::Union(_))
-                && alternatives
-                    .iter()
-                    .all(|(_, expr)| self.types.join(expr.ty, ty) == Some(ty))
-        });
+        // Start with a result layout supplied by a concrete override. A sibling can
+        // also return None without changing any member of that union.
+        let results = || alternatives.iter().map(|(_, expr)| expr.ty);
+        let union_result = results()
+            .filter_map(|ty| match ty {
+                Type::Union(_) if results().any(|other| other == Type::None) => {
+                    Some(self.types.optional(ty))
+                }
+                Type::Optional(_) | Type::Union(_) => Some(ty),
+                _ => None,
+            })
+            .find(|&ty| results().all(|other| self.types.join(other, ty) == Some(ty)));
         let union_result = union_result.or_else(|| {
             // A checked Python call contributes its result contract without a fixed slot.
             // Concrete overrides must still agree with each other on their result layout.
