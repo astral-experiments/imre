@@ -2438,7 +2438,9 @@ impl Context {
         if let Some(&class) = self.builtins.get(&format!("ast.{root}"))
             && self.python_instance_check(source, class)?
         {
-            return Err(unsupported("compilation from a live Python AST"));
+            return Err(unsupported(
+                "compilation from a live Python AST is unsupported. Generate the transformed module before building and import it, or disable runtime AST rewriting.",
+            ));
         }
         Err(Error::new(
             "TypeError",
