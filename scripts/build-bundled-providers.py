@@ -9,11 +9,11 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
-def build(compiler, levels):
+def build(compiler, levels, clang=None):
     # The Linux release runners execute the compiler and Clang on the target architecture.
     compiler = compiler.absolute()
     toolchain = compiler.parent / "imre-toolchain"
-    clang = toolchain / "bin" / "clang"
+    clang = clang or toolchain / "bin" / "clang"
     archiver = shutil.which("ar") or shutil.which("llvm-ar")
     if not archiver:
         raise FileNotFoundError("building bundled providers needs GNU ar or llvm-ar")
@@ -54,5 +54,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("compiler", type=Path, help="native imre executable beside imre-toolchain/")
     parser.add_argument("--opt-level", choices=("0", "3"), help="build only this archive (default: both)")
+    parser.add_argument("--clang", type=Path, help="use this Clang instead of the bundled driver")
     args = parser.parse_args()
-    build(args.compiler, ["O" + args.opt_level] if args.opt_level else ["O0", "O3"])
+    build(args.compiler, ["O" + args.opt_level] if args.opt_level else ["O0", "O3"], args.clang)
