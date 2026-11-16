@@ -1508,9 +1508,6 @@ fn lower_graph(
         )
     });
     let mut early_entry = None;
-    // After an initializer requests recovery, a checked procedure can supply both
-    // its source contracts and its Python frame, just as it does on a named entry.
-    let mut place_procedures = recover_completed.get();
     // The ordinary checker supplies the unfinished physical definitions below.
     // Capture the other definitions from inference's settled results now.
     let place_live = |slot: usize| {
@@ -1752,7 +1749,7 @@ fn lower_graph(
                                     definition.range(),
                                 ) == Some(true)))));
         if procedure
-            && !place_procedures
+            && !recover_completed.get()
             && defer_capture
             && !prior_report
             && unavailable.is_none()
@@ -1762,13 +1759,12 @@ fn lower_graph(
             let entry = lower_entry(&completed_calls, false);
             if entry.as_ref().is_err_and(Failure::is_object) {
                 recover_completed.set(true);
-                place_procedures = true;
             }
             early_entry = Some(entry);
         }
         let result = if let Some(body) = inferred {
             Ok(body)
-        } else if place_procedures && procedure
+        } else if recover_completed.get() && procedure
             || named_scalar
                 && matches!(source, Cow::Borrowed(def) if signature.takes_positional_tuple(def, &graph.session))
         {
@@ -1789,7 +1785,7 @@ fn lower_graph(
                 && unavailable.is_none()
                 && (named_scalar || types.element(signature.returns).is_some())
                 || named
-                    && place_procedures
+                    && recover_completed.get()
                     && unavailable.is_some()
                     && signature.params.is_empty()
                     && definition.returns.is_some()

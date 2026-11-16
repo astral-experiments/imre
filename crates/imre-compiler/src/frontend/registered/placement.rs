@@ -1281,6 +1281,44 @@ mod tests {
     }
 
     #[test]
+    fn file_recovery_checks_a_later_procedure_in_its_selected_frame_once() {
+        let text = concat!(
+            "from pathlib import Path\n",
+            "def first(directory: Path) -> Path:\n    return sorted(directory.glob('*.py'))[0]\n",
+            "def inventory(directory: Path, expected: set[str]) -> None:\n",
+            "    names = {row.name for row in directory.iterdir()}\n",
+            "    if names != expected:\n        raise ValueError(names)\n",
+            "inventory(Path('.'), set())\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowerings) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        let start = TextSize::try_from(text.find("def inventory").unwrap()).unwrap();
+        let frames = graph.registered_functions();
+        let body = &frames[&graph.entry][&start].function.body;
+        let mut reads = 0;
+        ir::walk_expressions(body, &mut |value| {
+            if let ExprKind::Builtin(Builtin::RegisteredAttribute { name, range, .. }, args) =
+                &value.kind
+                && name == "name"
+                && &text[*range] == "row.name"
+            {
+                assert_eq!(args[0].ty, Type::PythonObject);
+                reads += 1;
+            }
+        });
+        assert_eq!(reads, 1);
+        assert_eq!(
+            lowerings.iter().filter(|name| *name == "inventory").count(),
+            1,
+            "{lowerings:?}"
+        );
+    }
+
+    #[test]
     fn earlier_provider_body_keeps_the_checked_scalar_sibling() {
         let text = concat!(
             "import traceback\n",
