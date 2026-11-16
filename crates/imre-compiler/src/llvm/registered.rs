@@ -888,13 +888,19 @@ impl<'f> Frame<'f, '_, '_> {
         container: &Expr,
         negate: bool,
     ) -> Option<String> {
-        let (ExprKind::List(items) | ExprKind::Tuple(items)) = &container.without_location().kind
-        else {
+        // A placed container owns its source site; a location wrapper keeps its ordinary writer.
+        let container = if self.fixed_sites.is_some() {
+            container
+        } else {
+            container.without_location()
+        };
+        let (ExprKind::List(items) | ExprKind::Tuple(items)) = &container.kind else {
             return None;
         };
         if items.len() > 8 || !items.iter().all(ir::Constant::is_constant) {
             return None;
         }
+        self.next_fixed_site(ir::Node::Expression(container));
         let (array, count) = self.evaluate_handle_array(items);
         let negate = u32::from(negate);
         Some(self.checked(&format!("call i64 @imre_dyn_contains_literal_tuple(ptr %ctx, i64 {needle}, ptr {array}, i64 {count}, i32 {negate})")))

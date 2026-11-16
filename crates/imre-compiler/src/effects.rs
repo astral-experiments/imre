@@ -26,7 +26,7 @@ impl ExceptionEffects {
 
 #[derive(Clone, Copy)]
 struct Context<'a> {
-    calls: &'a Targets,
+    calls: Option<&'a Targets>,
     types: &'a crate::types::Types,
 }
 
@@ -34,7 +34,7 @@ struct Context<'a> {
 /// Recursive cycles stay fallible. Each function can change to infallible at most once.
 pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     let targets = Context {
-        calls: targets,
+        calls: Some(targets),
         types: &module.types,
     };
     let mut functions = vec![true; module.functions.len()];
@@ -57,14 +57,7 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
 
 /// Check a fragment during lowering, when no callee is yet proven infallible.
 pub(crate) fn may_raise_locally(body: &[Statement], types: &crate::types::Types) -> bool {
-    block(
-        body,
-        &[],
-        Context {
-            calls: &Targets::default(),
-            types,
-        },
-    )
+    block(body, &[], Context { calls: None, types })
 }
 
 /// Any potentially failing path is enough; unreachable branches and caught
@@ -131,6 +124,21 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::None
         | ExprKind::Local(_) => false,
         ExprKind::Unary(..) if value.uses_python_unary_protocol() => true,
+        // Only the finalized native entry has established exact scalar equality. Its
+        // writer can test a display without allocating the tuple. Checking a fragment
+        // before placement must still allow the Python containment and truth hooks.
+        ExprKind::Compare(values, ops)
+            if targets.calls.is_some()
+                && let Some((needle, tuple, _)) =
+                    crate::ir::Compare::tuple_membership(values, ops) =>
+        {
+            let raises = |value: &Expr| expression(value, functions, targets);
+            raises(needle)
+                || match &tuple.kind {
+                    ExprKind::Tuple(items) => items.iter().any(raises),
+                    _ => raises(tuple),
+                }
+        }
         ExprKind::Compare(_, ops) if crate::ir::Compare::uses_python_protocol(value.ty, ops) => {
             true
         }
@@ -217,7 +225,9 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
             .as_ref()
             .is_some_and(|receiver| expression(receiver, functions, targets)),
         ExprKind::Invoke { callable, args } => {
-            let candidates = targets.calls.get(callable.ty);
+            let candidates = targets
+                .calls
+                .map_or(&[][..], |calls| calls.get(callable.ty));
             candidates.is_empty()
                 || candidates
                     .iter()
@@ -312,7 +322,7 @@ mod tests {
     #[test]
     fn unknown_callbacks_keep_escaping_error_checks() {
         let context = Context {
-            calls: &Targets::default(),
+            calls: None,
             types: &Default::default(),
         };
         let callback = Expr::local(0, Type::Callable(0));
@@ -370,7 +380,7 @@ mod tests {
         };
         let targets = Targets::analyze(&module);
         let context = Context {
-            calls: &targets,
+            calls: Some(&targets),
             types: &module.types,
         };
         assert_eq!(
@@ -507,7 +517,7 @@ def integers(values: list[int]) -> int:
     #[test]
     fn scopes_handlers_finally_and_iterator_steps_remain_fallible() {
         let context = Context {
-            calls: &Targets::default(),
+            calls: None,
             types: &Default::default(),
         };
         let raises = vec![Statement::Raise(None)];
@@ -559,7 +569,7 @@ def integers(values: list[int]) -> int:
     #[test]
     fn native_loops_and_default_arguments_keep_their_errors() {
         let context = Context {
-            calls: &Targets::default(),
+            calls: None,
             types: &Default::default(),
         };
         let range = |args| Statement::For {

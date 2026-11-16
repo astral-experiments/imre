@@ -1,6 +1,8 @@
 //! Source-ordered comparison links, with an early exit for each false middle result.
 use super::super::{Compare, Expr, Type, Value, read_only_field_operand};
 use super::{CheckedBody, CheckedValue, Entry, ValueJoin};
+use crate::ir::ExprKind;
+use crate::llvm::Emitter;
 use crate::llvm::registered::{permanent, permanent_handle};
 use ruff_python_ast::CmpOp;
 
@@ -16,6 +18,60 @@ impl CheckedValue {
             operand: bit,
             small_integer: false,
         })
+    }
+}
+
+impl Emitter<'_, '_> {
+    /// A display evaluates every field before the first comparison. A stored tuple
+    /// keeps its immutable fields alive until the search releases the tuple.
+    pub(in crate::llvm) fn tuple_membership(
+        &mut self,
+        needle: &Value,
+        tuple: &Expr,
+        found: bool,
+    ) -> Value {
+        let fields = self
+            .module
+            .types
+            .fields(tuple.ty)
+            .expect("checked fixed tuple");
+        let mut items = Vec::new();
+        let stored = if let ExprKind::Tuple(values) = &tuple.kind {
+            items.extend(values.iter().map(|item| self.operand(item)));
+            None
+        } else {
+            Some(self.operand(tuple))
+        };
+        let done = self.body.name("tuple_contains");
+        let mut result = ValueJoin::default();
+        for (index, ty) in fields.into_iter().enumerate() {
+            let field;
+            let item = if let Some(tuple) = &stored {
+                let ptr = self.field_pointer(&tuple.value, index);
+                field = self.field_value(&ptr, ty);
+                &field
+            } else {
+                &items[index].value
+            };
+            let equal = self.compare(Compare::Equal, item, needle);
+            let next = self.body.name("tuple_next");
+            result.incoming(&mut self.body, CheckedValue::condition(found.to_string()));
+            self.body.branch(&equal.operand, &done, &next);
+            self.body.start(&next);
+        }
+        result.jump(
+            &mut self.body,
+            &done,
+            CheckedValue::condition((!found).to_string()),
+        );
+        self.body.start(&done);
+        let result = result
+            .finish(&mut self.body)
+            .expect("tuple search reaches its result");
+        for item in items.iter().rev().chain(stored.iter()) {
+            self.release_operand(item);
+        }
+        result.into_native().value
     }
 }
 
@@ -61,6 +117,13 @@ impl<'f, 'a, 'p, 'm> CheckedBody<'f, 'a, 'p, 'm> {
         };
         debug_assert_eq!(values.len(), ops.len() + 1);
         let mut left = operand(self, &values[0]);
+        if let CheckedValue::Native(needle, None) = &left
+            && let Some((_, tuple, found)) = Compare::tuple_membership(values, ops)
+        {
+            let result = self.fixed().tuple_membership(&needle.value, tuple, found);
+            self.release_comparison(&left);
+            return CheckedValue::owned(result);
+        }
         for (index, (&op, expr)) in ops.iter().zip(&values[1..]).enumerate() {
             if ops.len() == 1
                 && matches!(op, CmpOp::In | CmpOp::NotIn)

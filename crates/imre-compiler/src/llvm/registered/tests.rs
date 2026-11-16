@@ -91,6 +91,44 @@ fn a_typed_parameter_keeps_its_python_slice_receiver() {
 }
 
 #[test]
+fn tuple_membership_keeps_its_written_operands_in_the_python_frame() {
+    let source = concat!(
+        "def selected(name: str) -> bool:\n",
+        "    return name in ('Write', 'Edit')\n",
+        "print(selected('Edit'))\n",
+    );
+    let mut graph = SourceGraph::single(source).unwrap();
+    graph.registered_startup = true;
+    crate::checked_lower(&mut graph).unwrap();
+    let frames = graph.registered_functions();
+    let function = &frames[&graph.entry][&TextSize::default()];
+    let sites: Vec<_> = function
+        .fixed_sites
+        .iter()
+        .map(|range| &source[*range])
+        .collect();
+    assert!(
+        sites.windows(5).any(|sites| sites
+            == [
+                "name in ('Write', 'Edit')",
+                "name",
+                "('Write', 'Edit')",
+                "'Write'",
+                "'Edit'",
+            ]),
+        "{sites:?}"
+    );
+    let output = emit_registered_body(source, function);
+    assert_eq!(
+        output
+            .functions
+            .matches("call i64 @imre_dyn_contains_literal_tuple(")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn a_negated_branch_keeps_the_operand_and_next_expression_positions() {
     let source = concat!(
         "def quotient(word: str, left: int, right: int) -> int:\n",
