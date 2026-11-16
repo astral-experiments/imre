@@ -91,6 +91,23 @@ impl Entries {
             .transpose()
     }
 
+    /// Store after key lookup, preserving the resident key and returning any displaced edge.
+    pub(super) fn store(
+        &mut self,
+        index: Option<usize>,
+        key: Id,
+        value: Id,
+        hash: i64,
+    ) -> Result<(Id, Option<Id>)> {
+        if let Some(index) = index {
+            let (resident, slot) = &mut self.values[index];
+            let previous = std::mem::replace(slot, value);
+            return Ok((*resident, (previous != value).then_some(previous)));
+        }
+        self.push((key, value), hash)?;
+        Ok((key, None))
+    }
+
     pub(super) fn push(&mut self, value: (Id, Id), hash: i64) -> Result<()> {
         if let Some(order) = &mut self.order {
             order
