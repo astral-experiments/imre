@@ -403,10 +403,14 @@ impl<'session> OperandTypes<'session> {
         let model = SemanticModel::new(&session.db, file);
         let value = session.inferred_operand_type(owner, original)?;
         let expected = parameter.inferred_type(&model)?;
-        if value.is_unknown() {
+        use ty_python_semantic::types::{DynamicType, Type as Ty};
+        if Self::accepts_type(&model, value, expected) {
+            Some(ArgumentContract::Checked)
+        } else if value.is_unknown() || matches!(value, Ty::Dynamic(DynamicType::Any)) {
+            // A live Python call can consume the original value without a fixed result layout.
             Some(ArgumentContract::Dynamic)
         } else {
-            Self::accepts_type(&model, value, expected).then_some(ArgumentContract::Checked)
+            None
         }
     }
 

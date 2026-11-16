@@ -1737,7 +1737,7 @@ fn lower_graph(
             && signature
                 .params
                 .iter()
-                .all(|p| p.default.is_none() && !p.sign_only)
+                .all(|p| !p.sign_only && (p.default.is_none() || live_return))
             && ((named_scalar
                 && unavailable.is_none()
                 // The indexed comprehension and its caller must use only these bindings.
