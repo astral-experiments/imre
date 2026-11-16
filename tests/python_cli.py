@@ -5276,6 +5276,7 @@ for name in ("md4", "ripemd160"):
             "boxed_logging_manager.py",
             "boxed_logging_formatter.py",
             "boxed_logging_file.py",
+            "boxed_logging_file_stream.py",
             "boxed_logging_adapter.py",
             "boxed_logging_filter.py",
             "boxed_logging_file_error.py",
