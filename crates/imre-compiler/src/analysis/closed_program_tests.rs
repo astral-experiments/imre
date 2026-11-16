@@ -2047,6 +2047,36 @@ def get() -> 'Item':
 }
 
 #[test]
+fn a_guarded_module_checks_arguments_after_its_callees_settle() {
+    let project = tempdir().unwrap();
+    let root = project.path();
+    let pkg = root.join("pkg");
+    fs::create_dir(&pkg).unwrap();
+    fs::write(pkg.join("model.py"), "class Item: pass\n").unwrap();
+    fs::write(
+        pkg.join("__init__.py"),
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .model import Item\ndef get() -> 'Item':\n    from .model import Item\n    return Item()\n",
+    )
+    .unwrap();
+    let entry = root.join("main.py");
+    let source = concat!(
+        "import pkg\n",
+        "def takes(a: int, b: int) -> None: pass\n",
+        "def stop() -> int: raise ValueError()\n",
+        "def indirect() -> int: return stop()\n",
+        "try:\n    takes(ARGS)\nexcept ValueError:\n    pass\n",
+    );
+    fs::write(&entry, source.replace("ARGS", "indirect(), True")).unwrap();
+    crate::check_file(&entry, Some(root)).unwrap();
+    fs::write(&entry, source.replace("ARGS", "True, indirect()")).unwrap();
+    let error = crate::check_file(&entry, Some(root)).unwrap_err();
+    assert!(
+        error.contains("main.py:6:11: Imre: expected int, got bool"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_guarded_builtin_alias_uses_the_selected_stub() {
     let project = tempdir().unwrap();
     let root = project.path();
