@@ -3,7 +3,6 @@
 //! admitted; a resize, aliasing call or rebinding loses the proof.
 
 use super::*;
-use ruff_python_ast::CmpOp;
 use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy)]
@@ -20,80 +19,6 @@ pub(super) struct Call {
 }
 
 impl Checker<'_> {
-    /// Evaluate the needle and the complete tuple before its first comparison.
-    /// Exact scalar equality has no callbacks or identity-only cases such as NaN.
-    pub(super) fn tuple_contains(
-        &mut self,
-        key: Expr,
-        tuple: Expr,
-        fields: &[Type],
-        comparison: &ast::ExprCompare,
-    ) -> Result<Expr, String> {
-        let scalar = match key.ty {
-            Type::StrLiteral(_) => Type::Str,
-            ty => ty,
-        };
-        if !fields.is_empty()
-            && (!matches!(scalar, Type::Str | Type::Int | Type::Bool | Type::Bytes)
-                || fields.iter().any(|&field| field != scalar))
-        {
-            self.require_registered_operation(comparison)?;
-            return Ok(registered::values::comparison(
-                comparison,
-                vec![key, tuple],
-                None,
-            ));
-        }
-        let key = if key.ty == scalar || fields.is_empty() {
-            key
-        } else {
-            literals::view(key, scalar)
-        };
-        let key_slot = self.hidden(key.ty);
-        let tuple_slot = self.hidden(tuple.ty);
-        let terms = fields
-            .iter()
-            .enumerate()
-            .map(|(index, &ty)| Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Compare(
-                    vec![
-                        Expr {
-                            ty,
-                            kind: ExprKind::Field(Box::new(self.local(tuple_slot)), index),
-                        },
-                        self.local(key_slot),
-                    ],
-                    vec![CmpOp::Eq],
-                ),
-            })
-            .collect::<Vec<_>>();
-        let contains = Expr {
-            ty: Type::Bool,
-            kind: if terms.is_empty() {
-                ExprKind::Bool(false)
-            } else {
-                ExprKind::Boolean(false, terms)
-            },
-        };
-        let value = if comparison.ops[0] == ast::CmpOp::NotIn {
-            Expr::not(contains)
-        } else {
-            contains
-        };
-        Ok(Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Scope {
-                body: vec![
-                    Statement::Assign(key_slot, key),
-                    Statement::Assign(tuple_slot, tuple),
-                ],
-                value: Box::new(value),
-                clear: vec![key_slot, tuple_slot],
-            },
-        })
-    }
-
     pub(super) fn list_length_guard(&self, statement: &ast::Stmt) -> Option<Guard> {
         let ast::Stmt::If(branch) = statement else {
             return None;

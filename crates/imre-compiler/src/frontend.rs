@@ -10841,7 +10841,19 @@ impl<'a> Checker<'a> {
                         return self.bytes_membership(key, receiver, compare.ops[0], expression);
                     }
                     if let Some(fields) = self.types.fields(receiver.ty) {
-                        return self.tuple_contains(key, receiver, &fields, compare);
+                        let scalar = match key.ty {
+                            Type::StrLiteral(_) => Type::Str,
+                            ty => ty,
+                        };
+                        if !fields.is_empty()
+                            && (!matches!(scalar, Type::Str | Type::Int | Type::Bool | Type::Bytes)
+                                || fields.iter().any(|&field| field != scalar))
+                        {
+                            self.require_registered_operation(compare)?;
+                        }
+                        let value =
+                            registered::values::comparison(compare, vec![key, receiver], None);
+                        return Ok(self.expression_at(compare.range(), value));
                     }
                     if self.types.var_tuple_element(receiver.ty) == Some(Type::Str)
                         && matches!(key.ty, Type::Int | Type::None | Type::Bool | Type::Float)

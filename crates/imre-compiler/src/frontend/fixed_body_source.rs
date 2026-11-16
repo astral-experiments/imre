@@ -242,8 +242,9 @@ impl FixedNode {
                 {
                     return false;
                 }
-                ExprKind::Compare(..)
+                ExprKind::Compare(values, ops)
                     if expr.ty != Type::PythonObject
+                        && ir::Compare::tuple_membership(values, ops).is_none()
                         && !condition.is_some_and(|test| {
                             std::ptr::eq(test, *expr)
                                 || matches!(test.kind, ExprKind::Boolean(..))
@@ -390,8 +391,9 @@ impl FixedNode {
                 ExprKind::Boolean(and, ref values) => Self::Logical(and, values.len()),
                 ExprKind::Compare(ref values, ref ops)
                     if let [op] = ops.as_slice()
-                        && ir::Compare::from_operator(*op).is_some()
-                        && ir::Compare::integer_pair(values) =>
+                        && (ir::Compare::tuple_membership(values, ops).is_some()
+                            || ir::Compare::from_operator(*op).is_some()
+                                && ir::Compare::integer_pair(values)) =>
                 {
                     Self::Comparison(*op)
                 }

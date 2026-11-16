@@ -1420,6 +1420,17 @@ pub(crate) enum Compare {
 }
 
 impl Compare {
+    /// Return the written operands of a single fixed-width tuple test.
+    pub(crate) fn tuple_membership<'a>(
+        values: &'a [Expr],
+        ops: &[CmpOp],
+    ) -> Option<(&'a Expr, &'a Expr, bool)> {
+        let ([needle, tuple], [op @ (CmpOp::In | CmpOp::NotIn)]) = (values, ops) else {
+            return None;
+        };
+        matches!(tuple.ty, Type::Tuple(_)).then_some((needle, tuple, *op == CmpOp::In))
+    }
+
     pub(crate) fn integer_pair(values: &[Expr]) -> bool {
         matches!(values, [a, b]
             if a.checked_operand_type() == Type::Int && b.checked_operand_type() == Type::Int)
