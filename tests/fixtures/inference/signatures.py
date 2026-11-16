@@ -52,6 +52,14 @@ def exact_result(value) -> int:
     return value
 
 
+def absent_first(value) -> bool:
+    return value is None
+
+
+def present_first(value) -> bool:
+    return value is None
+
+
 print(entry(6))
 print(entry(-3))
 print(exact_result(7))
@@ -74,3 +82,5 @@ print(number)
 print(text)
 for value in numbers(20):
     print(value)
+print(absent_first(None), absent_first(7))
+print(present_first(value=7), present_first(value=None))

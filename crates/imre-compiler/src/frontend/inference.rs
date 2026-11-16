@@ -2201,6 +2201,20 @@ impl Checker<'_> {
                         );
                         return checker.coerce(value, expected, node);
                     }
+                    let types = checker.types;
+                    let inferred = inference.pending.borrow()[signature.id].inferred_params[index];
+                    // Absence and a present value share the same optional ABI in either call order.
+                    let nullable = |prior, actual| {
+                        if inferred
+                            && (prior == Type::None || actual == Type::None)
+                            && prior != Type::PythonObject
+                            && actual != Type::PythonObject
+                        {
+                            types.join(prior, actual).filter(|&layout| layout != prior)
+                        } else {
+                            None
+                        }
+                    };
                     // Normalized inline keywords carry the value range; source names have their own.
                     if closed_calls::keyword_field(node)
                         || call.arguments.keywords.iter().any(|kw| {
@@ -2217,11 +2231,13 @@ impl Checker<'_> {
                             ty,
                             supplied.ty,
                         );
-                        if supplied.ty == Type::None
-                            && ty != Type::None
-                            && checker.types.payload(ty).is_none()
-                        {
-                            let expected = checker.types.optional(ty);
+                        let optional = nullable(ty, supplied.ty).or_else(|| {
+                            (supplied.ty == Type::None
+                                && ty != Type::None
+                                && types.payload(ty).is_none())
+                            .then(|| types.optional(ty))
+                        });
+                        if let Some(expected) = optional {
                             inference.widen_parameter(signature.id, index, expected);
                             return checker.coerce(supplied, expected, node);
                         }
@@ -2233,8 +2249,7 @@ impl Checker<'_> {
                     }
                     // An inferred argument can supply the optional layout for a prior
                     // None or its payload, or the union of two supported text layouts.
-                    let types = checker.types;
-                    if inference.pending.borrow()[signature.id].inferred_params[index]
+                    if inferred
                         && (matches!(ty, Type::None | Type::Str | Type::Bytes)
                             || types.element(ty) == Some(Type::Str))
                     {
@@ -2242,6 +2257,9 @@ impl Checker<'_> {
                         let wider = |other| {
                             if ty == other {
                                 return None;
+                            }
+                            if let Some(layout) = nullable(ty, other) {
+                                return Some(layout);
                             }
                             if types
                                 .payload(other)
@@ -2324,6 +2342,10 @@ impl Checker<'_> {
                                     expected,
                                     value.ty,
                                 );
+                                if let Some(layout) = nullable(expected, value.ty) {
+                                    inference.widen_parameter(signature.id, index, layout);
+                                    return direct_value(checker, value, layout, site);
+                                }
                                 // The bound operand supplies storage evidence for this parameter.
                                 if value.ty == Type::PythonObject
                                     && expected != Type::PythonObject

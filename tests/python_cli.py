@@ -80,6 +80,29 @@ def check_imported_call_arguments(imre, root, run):
     assert (fixed.returncode, fixed.stdout, fixed.stderr) == (0, b"87\n", b""), fixed
 
 
+def check_named_handler_filters(root, compare_module):
+    for result, annotation in (("replacement", "logging.LogRecord"), ("False", "bool")):
+        handler = (
+            "import logging\n"
+            "replacement = logging.LogRecord('root', 20, 'sink.py', 7, 'replacement', (), None)\n"
+            "class Sink(logging.Handler):\n"
+            f"    def filter(self, record: logging.LogRecord | None) -> {annotation}:\n"
+            "        print('filter saw None', record is None)\n"
+            f"        return {result}\n"
+            "    def emit(self, record: logging.LogRecord) -> None:\n"
+            "        print('emitted replacement', record is replacement)\n"
+        )
+        for receiver, call in (
+            ("direct", f"print('returned', Sink().handle(None) is {result})\n"),
+            ("typed", "def run(handler: logging.Handler) -> None:\n"
+                      f"    print('returned', handler.handle(None) is {result})\n"
+                      "run(Sink())\n"),
+        ):
+            entry = root / f"handler_{receiver}_{result}.py"
+            entry.write_text(handler + call)
+            compare_module(entry)
+
+
 def check_registered_entry_operand(imre, root, run):
     entry = root / "checked_operand.py"
     guard = (
@@ -2671,6 +2694,8 @@ def main():
 
         def compare_module(source):
             compare("-B", "-m", source.stem, extra={"PYTHONPATH": str(source.parent)})
+
+        check_named_handler_filters(root, compare_module)
 
         late_future = root / "late_future.py"
         for prefix, line in (("import __future__\n", 2),
