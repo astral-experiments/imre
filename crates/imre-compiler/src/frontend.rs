@@ -4130,6 +4130,9 @@ struct Checker<'a> {
     checked_call_contracts: bool,
     /// The explicit return operand contract of a function whose execution uses a Python result.
     registered_result_contract: Option<Type>,
+    /// A live invocation can have a nonreturning declared target. Only an eager
+    /// parent uses this fact when checking its next operand.
+    last_nonreturning_frame_call: Option<TextRange>,
     /// An enclosing fixed checker will validate the final source statement before using this frame.
     fixed_checks_tail: bool,
     /// A result trial can finish its last statement even when the native result
@@ -4293,6 +4296,7 @@ impl<'a> Checker<'a> {
             python_method_frame: false,
             checked_call_contracts: false,
             registered_result_contract: None,
+            last_nonreturning_frame_call: None,
             boxed_calls: None,
             fixed_checks_tail: false,
             python_result_tail: None,

@@ -208,6 +208,49 @@ print(earlier(), take(text()))
 }
 
 #[test]
+fn eager_arguments_in_a_live_frame_stop_at_a_nonreturning_call() {
+    let directory = tempfile::tempdir().unwrap();
+    let entry = directory.path().join("main.py");
+    let source = r#"import urllib.request
+request = urllib.request.Request("data:,ok")
+
+def fail() -> int:
+    raise ValueError("stop")
+
+def take(left: int, right: int = 0) -> int:
+    return left + right
+
+def url_from(request) -> str:
+    return request.full_url
+
+def available(url: str) -> bool:
+    with urllib.request.urlopen(url):
+        CALL
+        return True
+
+print(available(url_from(request)))
+"#;
+    for (call, error_column) in [
+        ("take(fail(), True)", None),
+        ("print(fail(), take(True))", None),
+        ("take(True, fail())", Some(14)),
+        ("print(take(True), fail())", Some(20)),
+    ] {
+        std::fs::write(&entry, source.replace("CALL", call)).unwrap();
+        let result = check_file(&entry, None);
+        if let Some(column) = error_column {
+            let error = result.unwrap_err();
+            let expected = format!(
+                "main.py:15:{column}: Imre: expected int, got bool; annotations are enforced contracts"
+            );
+            assert!(error.ends_with(&expected), "{error}");
+        } else {
+            result.unwrap();
+        }
+    }
+}
+
+#[test]
 fn stopped_layout_belongs_to_the_original_call_and_arguments() {
     use crate::ir::Type;
 

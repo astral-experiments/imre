@@ -2035,6 +2035,14 @@ impl Inference {
     }
 }
 
+/// Which implementation needs to know that this source function can be called.
+pub(super) enum CallEdge {
+    Fixed,
+    Boxed,
+    /// The Python frame resolves its callable at execution.
+    Live,
+}
+
 impl Checker<'_> {
     /// A method's round-start layout remains usable while its return is being inferred.
     pub(super) fn published_return(&self, signature: &Signature) -> Type {
@@ -2116,7 +2124,7 @@ impl Checker<'_> {
             ControlFlow::Continue(args) => args,
             ControlFlow::Break(stop) => return Ok(scope.finish(stop)),
         };
-        let ty = self.enter_source_call(call, signature, false)?;
+        let ty = self.enter_source_call(call, signature, CallEdge::Fixed)?;
         // A successfully bound source call can enter the definition's registered body.
         self.globals
             .missing_bindings
@@ -2137,7 +2145,10 @@ impl Checker<'_> {
             .source_arguments(call, signature, receiver, skip, scope, false)?
             .continue_value()
             .expect("this caller owns the loaded receiver");
-        Ok((self.enter_source_call(call, signature, false)?, args))
+        Ok((
+            self.enter_source_call(call, signature, CallEdge::Fixed)?,
+            args,
+        ))
     }
 
     /// The caller needs the return layout only after evaluating its arguments.
@@ -2145,7 +2156,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         signature: &Signature,
-        boxed: bool,
+        edge: CallEdge,
     ) -> Result<Type, String> {
         let returned = match self.inference {
             Some(inference) => {
@@ -2156,13 +2167,17 @@ impl Checker<'_> {
         if returned.is_ok() {
             self.apply_caller_frame_stores(signature, call);
         }
-        if returned.is_ok()
-            && boxed
-            && let Some(calls) = &mut self.boxed_calls
-        {
-            calls.insert(signature.id);
-        } else {
-            self.calls.insert(signature.id);
+        match edge {
+            CallEdge::Live => {}
+            CallEdge::Boxed
+                if returned.is_ok()
+                    && let Some(calls) = &mut self.boxed_calls =>
+            {
+                calls.insert(signature.id);
+            }
+            _ => {
+                self.calls.insert(signature.id);
+            }
         }
         returned
     }
