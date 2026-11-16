@@ -2311,3 +2311,48 @@ type Items = list[Item]
     .unwrap();
     crate::check_file(&main, None).unwrap();
 }
+
+#[test]
+fn a_live_any_argument_does_not_prove_a_scalar_layout() {
+    use super::ArgumentContract;
+    use crate::modules::{DefinitionId, SourceGraph};
+    use ruff_python_ast::Stmt;
+    use ruff_text_size::Ranged;
+
+    let project = tempdir().unwrap();
+    let path = project.path().join("app.py");
+    fs::write(
+        &path,
+        "from typing import Any\ndef take(label: str) -> None: pass\ndef run(value: Any):\n    take(value)\n    take('label')\n    take(1)\n",
+    )
+    .unwrap();
+    let graph = SourceGraph::load(&path, None, &[]).unwrap();
+    let types = graph.session.operand_types(graph.entry);
+    let parsed = types.parsed();
+    let [_, Stmt::FunctionDef(take), Stmt::FunctionDef(run)] = parsed.suite().as_slice() else {
+        panic!("expected take and run")
+    };
+    let target = DefinitionId {
+        module: graph.entry,
+        statement: 1,
+    };
+    let annotation = take.parameters.args[0].annotation().unwrap().range();
+    let contract = |statement: &Stmt| {
+        let call = statement
+            .as_expr_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap();
+        types.argument_contract(&call.arguments.args[0], target, 0, annotation)
+    };
+    assert!(matches!(
+        contract(&run.body[0]),
+        Some(ArgumentContract::Dynamic)
+    ));
+    assert!(matches!(
+        contract(&run.body[1]),
+        Some(ArgumentContract::Checked)
+    ));
+    assert!(contract(&run.body[2]).is_none());
+}
