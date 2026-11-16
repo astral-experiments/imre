@@ -37,13 +37,17 @@ impl Checker<'_> {
                 let mut values = Vec::new();
                 let mut exits = assignments::BooleanExits::default();
                 for (index, value) in boolean.values.iter().enumerate() {
-                    values.push(cx.condition(value)?);
+                    let condition = cx.condition(value)?;
                     if index + 1 < boolean.values.len() {
-                        exits.short_circuit(cx, value, !and);
-                        cx.apply_facts(value, and);
+                        let known = match condition.without_location().kind {
+                            ExprKind::Bool(truth) => Some(truth),
+                            _ => None,
+                        };
+                        exits.operand(cx, value, and, known);
                     }
+                    values.push(condition);
                 }
-                exits.finish(cx, true);
+                exits.finish(cx);
                 if and && let Some(test) = guarded_string_boundary(&values) {
                     return Ok(test);
                 }
@@ -236,7 +240,6 @@ impl Checker<'_> {
             .expect("boolean operands are nonempty");
         let mut operands = Vec::with_capacity(prefix.len());
         let mut exits = assignments::BooleanExits::default();
-        let mut reachable = true;
         for first in prefix {
             let left = self.boolean_operand(first, expected)?;
             let known = match left.kind {
@@ -249,17 +252,13 @@ impl Checker<'_> {
             } else {
                 self.types.truth_branch(left.ty, !and)
             };
-            if reachable && known != Some(and) {
-                exits.short_circuit(self, first, !and);
-                reachable = known != Some(!and);
-            }
-            self.apply_facts(first, and);
+            exits.operand(self, first, and, known);
             expected = expected
                 .or_else(|| (selected != Type::None && known != Some(and)).then_some(selected));
             operands.push((first, left, known, selected));
         }
         let mut right = self.boolean_operand(last, expected)?;
-        exits.finish(self, reachable);
+        exits.finish(self);
 
         // Exact strings and booleans have immutable, non-raising truth. The
         // decorator observes the same flag after its reason is evaluated.

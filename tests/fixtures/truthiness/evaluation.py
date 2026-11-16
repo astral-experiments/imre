@@ -17,6 +17,9 @@ def exercise(value: int) -> None:
     print(integer(log, 4, value) or integer(log, 5, 0) or integer(log, 6, 9))
     for mark in log:
         print(mark)
+    if True and (always := value):
+        print(always)
+    print(always)
     saved = 4
     print(value and (saved := 8))
     print(saved)
