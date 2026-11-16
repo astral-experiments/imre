@@ -99,22 +99,3 @@ class Handler(Filterer):
         # Add the handler to the global _handlerList (for cleanup on shutdown)
         _addHandlerRef(self)
         self.createLock()
-
-    def handle(self, record):
-        """
-        Conditionally emit the specified logging record.
-
-        Emission depends on filters which may have been added to the handler.
-        Wrap the actual emission of the record with acquisition/release of
-        the I/O thread lock.
-
-        Returns an instance of the log record that was emitted
-        if it passed all filters, otherwise a false value is returned.
-        """
-        rv = self.filter(record)
-        if isinstance(rv, LogRecord):
-            record = rv
-        if rv:
-            with self.lock:
-                self.emit(record)
-        return rv
