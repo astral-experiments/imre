@@ -690,7 +690,51 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::JoinBufferFinish, vec![self.expr(source)?]),
             });
         }
+        if let ast::Expr::Generator(generator) = source
+            && let Some(method) = call.func.as_attribute_expr()
+            && let Some(sites) = &mut self.fixed_sites
+            && sites.site_at(call.range()).is_some()
+        {
+            let parent = sites.enter(generator.range());
+            let parts = self.join_generator_parts(generator, call);
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.leave(parent);
+            }
+            let joined = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::StringJoin, vec![receiver, parts?]),
+            };
+            return Ok(self.bound_builtin_result(call, method, joined));
+        }
         self.join_parts(receiver, source, call, JoinStyle::Plain)
+    }
+
+    fn join_generator_parts(
+        &mut self,
+        generator: &ast::ExprGenerator,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let mut constructor = None;
+        let input =
+            self.generator_input(generator, Some(Type::Str), None, Some(&mut constructor))?;
+        let parts = self.collect_list(Iteration::Prepared(input), false, Some(Type::Str), call)?;
+        let Some((slot, outer)) = constructor else {
+            return Ok(parts);
+        };
+        let (acquire, _) = registered::values::generator_outer(generator);
+        let op = Builtin::GeneratorInput {
+            range: generator.range(),
+            acquire,
+            slots: slot..self.locals.len(),
+        };
+        let input = Expr {
+            ty: parts.ty,
+            kind: ExprKind::Builtin(op, vec![outer, parts]),
+        };
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.generator_input(generator.range(), &input);
+        }
+        Ok(input)
     }
 
     /// Quote or convert each yielded item before asking for the next one.

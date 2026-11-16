@@ -1723,7 +1723,7 @@ pub(crate) enum NamespaceAnnotation {
 }
 
 /// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IteratorOp {
     Loop(ruff_text_size::TextRange),
     Async(ruff_text_size::TextRange),
@@ -2326,6 +2326,12 @@ pub(crate) enum Builtin {
     SortDetach,
     SortRestore,
     StringJoin,
+    /// The physical child consumes the written outer. A native consumer collects its items.
+    GeneratorInput {
+        range: ruff_text_size::TextRange,
+        acquire: IteratorOp,
+        slots: std::ops::Range<usize>,
+    },
     JoinBufferNew,
     JoinBufferAppend,
     JoinBufferFinish,
@@ -2920,6 +2926,26 @@ pub(crate) enum Builtin {
 }
 
 impl Builtin {
+    /// The defining frame passes the written iterable to this physical generator entry.
+    pub(crate) fn generator_site<'a>(
+        &self,
+        operands: &'a [Expr],
+    ) -> Option<(ruff_text_size::TextRange, bool, IteratorOp, &'a [Expr])> {
+        match self {
+            Self::RegisteredGenerator(range, scoped, acquire) => {
+                Some((*range, *scoped, *acquire, operands))
+            }
+            Self::GeneratorInput { range, acquire, .. } => {
+                let written = match operands {
+                    [outer, _native] => std::slice::from_ref(outer),
+                    _ => &[],
+                };
+                Some((*range, false, *acquire, written))
+            }
+            _ => None,
+        }
+    }
+
     /// Omitted native defaults have no operand site in a Python call.
     fn written_operands(&self, operands: &[Expr]) -> Option<usize> {
         match self {
@@ -4299,12 +4325,18 @@ impl Node<'_> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NodeOperands {
+    Native,
+    Source,
+}
+
 /// Visits every IR node together with its immediate containing expression, when present.
 pub(crate) fn walk_nodes<'a>(
     body: &'a [Statement],
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
 ) {
-    all_nodes(body, &mut |node, parent| {
+    all_nodes(body, NodeOperands::Native, &mut |node, parent| {
         visit(node, parent);
         true
     });
@@ -4313,6 +4345,7 @@ pub(crate) fn walk_nodes<'a>(
 /// Visit a suite until its caller rejects an operation.
 pub(crate) fn all_nodes<'a>(
     body: &'a [Statement],
+    operands: NodeOperands,
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
 ) -> bool {
     for statement in body {
@@ -4322,8 +4355,8 @@ pub(crate) fn all_nodes<'a>(
         let mut complete = true;
         statement_children!(
             statement,
-            |value| { complete = complete && all_operand_nodes(value, None, visit) },
-            |suite| { complete = complete && all_nodes(suite, visit) }
+            |value| { complete = complete && all_operand_nodes(value, None, operands, visit) },
+            |suite| { complete = complete && all_nodes(suite, operands, visit) }
         );
         if !complete {
             return false;
@@ -4336,17 +4369,27 @@ pub(crate) fn all_nodes<'a>(
 pub(crate) fn all_operand_nodes<'a>(
     expression: &'a Expr,
     parent: Option<&'a Expr>,
+    operands: NodeOperands,
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
 ) -> bool {
     if !visit(Node::Expression(expression), parent) {
         return false;
     }
     if let ExprKind::Scope { body, value, .. } = &expression.kind {
-        all_nodes(body, visit) && all_operand_nodes(value, Some(expression), visit)
+        all_nodes(body, operands, visit)
+            && all_operand_nodes(value, Some(expression), operands, visit)
+    } else if operands == NodeOperands::Source
+        && let ExprKind::Builtin(op, args) = &expression.kind
+        && let Some((_, scoped, _, written)) = op.generator_site(args)
+    {
+        generator_operands(scoped, written).is_ok()
+            && written
+                .iter()
+                .all(|child| all_operand_nodes(child, Some(expression), operands, visit))
     } else {
         let mut complete = true;
         children(expression, |child| {
-            complete = complete && all_operand_nodes(child, Some(expression), visit);
+            complete = complete && all_operand_nodes(child, Some(expression), operands, visit);
         });
         complete
     }
@@ -4363,7 +4406,7 @@ pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(
 
 /// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
 pub(crate) fn contains_loop(body: &[Statement]) -> bool {
-    let loop_free = all_nodes(body, &mut |node, _| {
+    let loop_free = all_nodes(body, NodeOperands::Native, &mut |node, _| {
         !matches!(
             node,
             Node::Statement(
@@ -4379,7 +4422,7 @@ pub(crate) fn walk_operand_nodes<'a>(
     value: &'a Expr,
     visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
 ) {
-    all_operand_nodes(value, None, &mut |node, parent| {
+    all_operand_nodes(value, None, NodeOperands::Native, &mut |node, parent| {
         visit(node, parent);
         true
     });
@@ -4660,6 +4703,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                     for &slot in clear {
                         visit(slot, None);
                     }
+                }
+                ExprKind::Builtin(Builtin::GeneratorInput { slots, .. }, inputs) => {
+                    visit(slots.start, inputs.first());
+                    visit(slots.start, None);
                 }
                 ExprKind::Bind(slot, _) => visit(*slot, None),
                 ExprKind::BooleanValue(_, left, _, Some(predicate)) => {

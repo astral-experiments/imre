@@ -29,7 +29,9 @@ fn visit_expression_site(
                 Builtin::RegisteredDefinition(site) => RequiredSite::definition(site, operands),
                 Builtin::RegisteredClassNamespace(site, _) => RequiredSite::ClassNamespace(*site),
                 Builtin::RegisteredLambda(site, _) => RequiredSite::Lambda(*site),
-                Builtin::RegisteredGenerator(site, ..) => RequiredSite::Generator(*site),
+                _ if let Some((site, _, _, _)) = op.generator_site(operands) => {
+                    RequiredSite::Generator(site)
+                }
                 Builtin::RegisteredTypeAlias(site) => RequiredSite::Alias(*site),
                 _ => return,
             });
@@ -67,8 +69,11 @@ impl RequiredSite {
         visit: &mut Option<impl FnMut(RequiredSite)>,
     ) {
         let Some(visit) = visit else { return };
-        ir::walk_operand_expressions(value, &mut |expr| {
-            visit_expression_site(expr, literals, visit)
+        ir::all_operand_nodes(value, None, ir::NodeOperands::Source, &mut |node, _| {
+            if let ir::Node::Expression(expr) = node {
+                visit_expression_site(expr, literals, visit);
+            }
+            true
         });
     }
 

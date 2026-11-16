@@ -867,6 +867,43 @@ mod tests {
     }
 
     #[test]
+    fn joined_generator_keeps_its_child_and_the_following_local() {
+        let text = concat!(
+            "import argparse\n",
+            "def joined(name: str) -> str:\n",
+            "    result = ''.join(word.title() for word in name.split('-'))\n",
+            "    later = 'tail'\n    return result + later\n",
+            "parser = argparse.ArgumentParser()\nparser.add_argument('name')\n",
+            "print(joined(parser.parse_args().name))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "joined").count(), 1);
+        let start = TextSize::try_from(text.find("def joined").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&start];
+        let FrameInputs::Protocol { sites } = &frame.inputs else {
+            panic!("expected a live generator argument");
+        };
+        assert!(
+            sites
+                .iter()
+                .any(|site| matches!(site, FrameSite::Generator(range)
+            if &text[*range] == "word.title() for word in name.split('-')"))
+        );
+        assert!(
+            frame
+                .local_names
+                .values()
+                .any(|local| local.name == "later")
+        );
+    }
+
+    #[test]
     fn named_entry_places_the_checked_arithmetic_body() {
         let text = "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\nprint(scale(3))\n";
         let dir = tempfile::tempdir().unwrap();

@@ -273,10 +273,8 @@ impl Checker<'_> {
         } else if let ast::Expr::Generator(generator) = source
             && self.zip_sum_rhs == Some(call.range())
         {
-            (
-                Iteration::Prepared(self.generator_input(generator, None, Some(&mut zip_sum))?),
-                false,
-            )
+            let input = self.generator_input(generator, None, Some(&mut zip_sum), None)?;
+            (Iteration::Prepared(input), false)
         } else {
             self.consumer_input(source, (!generator).then_some(Type::Int))?
         };

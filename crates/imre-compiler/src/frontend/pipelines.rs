@@ -975,7 +975,7 @@ impl<'s> Checker<'s> {
         }
         if let ast::Expr::Generator(generator) = expression {
             return Ok(Some(Iteration::Prepared(
-                self.generator_input(generator, element, None)?,
+                self.generator_input(generator, element, None, None)?,
             )));
         }
         let ast::Expr::Call(call) = expression else {
@@ -2487,6 +2487,7 @@ impl<'s> Checker<'s> {
         generator: &ast::ExprGenerator,
         element: Option<Type>,
         zip_sum: Option<&mut Option<zip_sums::Sum>>,
+        constructor: Option<&mut Option<(usize, Expr)>>,
     ) -> Result<Prepared, String> {
         let plan = Plan::generator(generator);
         // A synchronous consumer cannot resume an asynchronous generator.
@@ -2500,7 +2501,16 @@ impl<'s> Checker<'s> {
         let lists = zip_sum
             .as_ref()
             .and_then(|_| zip_sums::lists(self, generator));
-        let first = self.expansion_input(plan.outer, None)?;
+        let mut first = self.expansion_input(plan.outer, None)?;
+        if let Some(constructor) = constructor
+            && let Iteration::Container {
+                iterable,
+                items: false,
+            } = &mut first
+        {
+            let slot = self.hidden(iterable.ty);
+            *constructor = Some((slot, std::mem::replace(iterable, self.local(slot))));
+        }
         let mut first = self.prepare_iteration(first, generator, false)?;
         let first_private = self.locals.len();
         let scope = self.enter_comprehension(plan.collect_target_names::<Vec<_>>());

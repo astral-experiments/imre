@@ -84,10 +84,11 @@ impl<'a> RegisteredRegion<'a> {
 
     #[cfg(test)]
     pub(crate) fn walk(self, visit: &mut impl FnMut(ir::Node<'a>, Option<&'a Expr>)) {
-        match self.root {
-            RegionRoot::Suite(frame) => ir::walk_nodes(&frame.function.body, visit),
-            RegionRoot::Operand(value) => ir::walk_operand_nodes(value, visit),
-        }
+        self.frame_layout(|node, parent, _| {
+            visit(node, parent);
+            true
+        })
+        .expect("complete registered source");
     }
 
     #[cfg(test)]
@@ -130,13 +131,15 @@ impl<'a> RegisteredRegion<'a> {
         };
         let mut unplaced = |node, parent| visit(node, parent, &[]);
         let complete = match self.root {
-            RegionRoot::Operand(value) => ir::all_operand_nodes(value, None, &mut unplaced),
+            RegionRoot::Operand(value) => {
+                ir::all_operand_nodes(value, None, ir::NodeOperands::Source, &mut unplaced)
+            }
             RegionRoot::Suite(frame) => {
                 // Explicit declaration bindings precede the placed suffix and own no fixed sites.
                 let (prefix, tail) = frame.function.body.split_at_checked(frame.placed_from)?;
                 let mut sites = frame.fixed_sites.iter();
-                ir::all_nodes(prefix, &mut unplaced)
-                    && ir::all_nodes(tail, &mut |node, parent| {
+                ir::all_nodes(prefix, ir::NodeOperands::Source, &mut unplaced)
+                    && ir::all_nodes(tail, ir::NodeOperands::Source, &mut |node, parent| {
                         if frame.fixed_sites.is_empty() || !node.has_fixed_site_in(parent) {
                             return visit(node, parent, &[]);
                         }

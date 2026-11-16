@@ -177,8 +177,8 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                         "registered spread needs one operand in a Python collection",
                     )
                 }
-                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped, _), args) => {
-                    ir::generator_operands(*scoped, args)
+                ExprKind::Builtin(op, args) if let Some((_, scoped, _, written)) = op.generator_site(args) => {
+                    ir::generator_operands(scoped, written)
                         .map(|_| ())
                         .map_err(str::to_owned)
                 }
@@ -771,6 +771,19 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
+                    Builtin::GeneratorInput { slots, .. } => {
+                        let [outer, parts] = args.as_slice() else {
+                            return Err(
+                                "generator input needs its outer and native collection".into()
+                            );
+                        };
+                        require(
+                            slots.start < slots.end && slots.end <= self.function.locals.len(),
+                            "invalid generator slots",
+                        )?;
+                        same(self.local(slots.start)?, outer.ty)?;
+                        same(value.ty, parts.ty)?;
+                    }
                     Builtin::StaticFunction(function) => {
                         let [entry] = args.as_slice() else {
                             return Err("static function needs one callable".into());
