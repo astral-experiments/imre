@@ -215,7 +215,7 @@ impl Checker<'_> {
                 continue;
             }
             if let Type::Class(id) = ty {
-                for layout in self.classes.concrete_layouts(id) {
+                for layout in self.classes.declarations.concrete_layouts(id) {
                     if self.types.is_value_struct(Type::Class(layout)) {
                         return None;
                     }

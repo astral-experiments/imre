@@ -157,7 +157,7 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let mut scope = calls::ArgumentScope::default();
         let proxy = scope.hold(self, proxy);
-        let layouts = self.classes.concrete_layouts(class);
+        let layouts: Vec<_> = self.classes.declarations.concrete_layouts(class).collect();
         let Some(signature) = layouts
             .iter()
             .find_map(|&id| self.classes.methods[id].get("__call__"))

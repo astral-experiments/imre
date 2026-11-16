@@ -938,9 +938,10 @@ impl Checker<'_> {
         args[1] = if other.ty.is_path() {
             other
         } else {
+            let declarations = self.classes.declarations;
             if let Type::Class(id) = other.ty
-                && self.classes.concrete_layouts(id).into_iter().any(|layout| {
-                    let class = &self.classes.declarations.definitions[layout];
+                && declarations.concrete_layouts(id).any(|layout| {
+                    let class = &declarations.definitions[layout];
                     self.classes.methods[layout].contains_key("__getattr__")
                         || self.classes.methods[layout].contains_key("__getattribute__")
                         || class
@@ -949,7 +950,7 @@ impl Checker<'_> {
                             .any(|field| field.name == "with_segments")
                         || std::iter::once(&layout).chain(&class.bases).any(|&base| {
                             inspect::class_has_name(
-                                &self.classes.declarations.definitions[base],
+                                &declarations.definitions[base],
                                 "with_segments",
                             )
                         })

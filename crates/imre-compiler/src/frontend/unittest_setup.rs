@@ -345,7 +345,7 @@ impl Checker<'_> {
             }))
         };
         let mut missing = absent(self, class)?;
-        for child in self.classes.concrete_layouts(class) {
+        for child in self.classes.declarations.concrete_layouts(class) {
             if child != class {
                 missing = Statement::If(
                     Expr {
