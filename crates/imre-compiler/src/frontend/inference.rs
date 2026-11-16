@@ -1514,11 +1514,16 @@ impl Inference {
                     }
                     // A completed return check can still require Python operations. Only the
                     // registered frame may own that body, after its ordinary source check.
-                    if checked_return
-                        && diagnostic.is_representation()
-                        && graph.modules[*module].is_program_source()
+                    if diagnostic.is_representation() && graph.modules[*module].is_program_source()
                     {
-                        staged_returns.push(signature.id);
+                        if checked_return {
+                            staged_returns.push(signature.id);
+                        } else if implicit_none && revision == body_revision + 1 {
+                            // The body reached its end and only its return changed. Widening
+                            // or a stalled diagnostic pass will revisit the original calls.
+                            self.pending.borrow_mut()[signature.id].discovery =
+                                ReturnDiscovery::Checked;
+                        }
                     }
                     // An invalid operand does not give a procedure a different return type.
                     // Let the ordinary binder report the same body as an explicit -> None.
@@ -2524,6 +2529,28 @@ print(Reader().read())
         assert_eq!(diagnostic.kind, Kind::ExactType);
         assert!(diagnostic.to_string().contains(":3:19:"), "{diagnostic}");
     }
+    #[test]
+    fn a_procedure_waits_for_its_call_before_binding_the_next_argument() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        let source = concat!(
+            "import os\n\n",
+            "def first():\n    blocked()\n    choose(later_int())\n\n",
+            "def rival():\n    choose(later_str())\n\n",
+            "def choose(value) -> None:\n    print(value)\n\n",
+            "def later_int():\n    return 7\n\n",
+            "def later_str():\n    return \"later\"\n\n",
+            "def blocked():\n    os.path.abspath(1)\n\n",
+            "first()\nrival()\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains(":5:12: Imre: expected str, got int"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn a_discarded_pending_call_does_not_hide_a_checked_operand() {
         let mut graph = SourceGraph::single(concat!(
