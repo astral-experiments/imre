@@ -5882,7 +5882,12 @@ impl<'a> Checker<'a> {
             if site.is_name_expr() {
                 registered::values::refine_operand(types, site, &mut value);
             }
-            if value.checked_operand_type() == expected {
+            if value.checked_operand_type() == expected
+                || (self.checking_declared_operand
+                    && self.registered_result_contract.is_some()
+                    && value.checked_operand_type() == Type::PythonObject
+                    && types.dynamic_operand(site))
+            {
                 return Ok(value);
             }
             if let Type::Class(id) = expected
