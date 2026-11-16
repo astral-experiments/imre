@@ -1226,35 +1226,23 @@ impl Checker<'_> {
                 source.imported_callable(name, call, self.graph.session.operand_types(self.module))
             {
                 let mut values = args.values;
-                if !self.placement_only {
-                    let defaults = values.split_off(call.arguments.len());
-                    let ir::CallSite::Written(range, end) = args.site else {
-                        unreachable!()
-                    };
-                    let origin = self.fixed_origin(range, Some((end, b'(')));
-                    let site = ir::ProcessSite::Written(Box::new(ir::NativeArguments {
-                        origin,
-                        range,
-                        defaults,
-                        order: args.order,
-                    }));
-                    let value = Expr {
-                        ty,
-                        kind: ExprKind::Builtin(Builtin::Process(op, site), values),
-                    };
-                    let sites = self.fixed_sites.as_mut().unwrap();
-                    sites.written_call(call, &value, None, || Some(target));
-                    return Ok(value);
-                }
-                values.truncate(call.arguments.len());
-                let mut value = registered::values::bound_call(
-                    call,
-                    registered::values::callable_target(call),
-                    target,
-                    values,
-                );
-                value.ty = ty;
-                sites.invoked(call, &value);
+                let defaults = values.split_off(call.arguments.len());
+                let ir::CallSite::Written(range, end) = args.site else {
+                    unreachable!()
+                };
+                let origin = self.fixed_origin(range, Some((end, b'(')));
+                let site = ir::ProcessSite::Written(Box::new(ir::NativeArguments {
+                    origin,
+                    range,
+                    defaults,
+                    order: args.order,
+                }));
+                let value = Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::Process(op, site), values),
+                };
+                let sites = self.fixed_sites.as_mut().unwrap();
+                sites.written_call(call, &value, None, || Some(target));
                 return Ok(value);
             }
         }
