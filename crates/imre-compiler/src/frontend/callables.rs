@@ -154,13 +154,14 @@ pub(super) fn validate_targets(
 }
 
 impl Signature {
-    fn callable_type(&self, types: &Types, skip: usize) -> Type {
-        types.callable(
+    fn callable_type(&self, checker: &Checker<'_>, skip: usize) -> Type {
+        let returns = checker.published_return(self);
+        checker.types.callable(
             self.params[skip..].iter().map(|p| p.ty).collect(),
             if self.asynchronous {
-                types.coroutine(self.returns)
+                checker.types.coroutine(returns)
             } else {
-                self.returns
+                returns
             },
         )
     }
@@ -363,7 +364,7 @@ impl<'a> Checker<'a> {
         } else {
             Cow::Borrowed(signature)
         };
-        let ty = signature.callable_type(self.types, skip);
+        let ty = signature.callable_type(self, skip);
         let unbound = receiver.is_none();
         let ty = if let Some(method) = method_site {
             // Inherited reads share a source binder even when they select different
@@ -449,7 +450,7 @@ impl<'a> Checker<'a> {
                     node,
                 ));
             }
-            (original.id, original.callable_type(self.types, 0))
+            (original.id, original.callable_type(self, 0))
         } else {
             (signature.id, ty)
         };

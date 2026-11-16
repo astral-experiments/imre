@@ -177,7 +177,7 @@ impl Checker<'_> {
         };
         self.calls.insert(signature.id);
         Ok(Expr {
-            ty: signature.returns,
+            ty: self.published_return(signature),
             kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
         })
     }
