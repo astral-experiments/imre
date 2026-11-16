@@ -181,6 +181,25 @@ impl<'a> Checker<'a> {
         Some((&self.classes.methods[class][method.name.as_str()], receiver))
     }
 
+    /// A native adapter carries the original call edge and coerces its return
+    /// in the caller's layout, without adding a Python source frame.
+    pub(super) fn call_result_adapter(
+        &self,
+        params: Vec<Type>,
+        target: usize,
+        returns: Type,
+        at: &impl Ranged,
+        call: impl FnOnce(ir::CallArgs) -> Expr,
+    ) -> Result<usize, String> {
+        let args = params
+            .iter()
+            .enumerate()
+            .map(|(slot, &ty)| Expr::local(slot, ty))
+            .collect();
+        let result = self.coerce(call(ir::CallArgs::positional(args)), returns, at)?;
+        Ok(self.returning_adapter(params, returns, result, HashSet::from([target])))
+    }
+
     /// Give a native method a positional signature and capture its receiver when present.
     pub(super) fn builtin_callable(
         &mut self,
@@ -200,6 +219,29 @@ impl<'a> Checker<'a> {
         if matches!(builtin, Builtin::SetContains) {
             arguments.swap(0, 1);
         }
+        let result = Expr {
+            ty: returns,
+            kind: ExprKind::Builtin(builtin, arguments),
+        };
+        let id = self.returning_adapter(locals, returns, result, HashSet::new());
+        Expr {
+            ty: self.types.callable(parameters, returns),
+            kind: ExprKind::Callable {
+                function: id,
+                receiver: receiver.map(Box::new),
+            },
+        }
+    }
+
+    /// Adapters use the selected function's receiver and the ordinary positional
+    /// call ABI without adding a Python source frame.
+    fn returning_adapter(
+        &self,
+        locals: Vec<Type>,
+        returns: Type,
+        result: Expr,
+        calls: HashSet<usize>,
+    ) -> usize {
         let id = self.helpers.reserve();
         self.helpers.finish(
             id,
@@ -209,23 +251,14 @@ impl<'a> Checker<'a> {
                     params: (0..locals.len()).collect(),
                     returns,
                     locals,
-                    body: vec![Statement::Return(Expr {
-                        ty: returns,
-                        kind: ExprKind::Builtin(builtin, arguments),
-                    })],
+                    body: vec![Statement::Return(result)],
                 },
-                calls: HashSet::new(),
+                calls,
                 class_reads: HashSet::new(),
                 source_frame: false,
             },
         );
-        Expr {
-            ty: self.types.callable(parameters, returns),
-            kind: ExprKind::Callable {
-                function: id,
-                receiver: receiver.map(Box::new),
-            },
-        }
+        id
     }
 
     /// Expose str.join or a bound string's join as an exact native callback.
@@ -244,28 +277,11 @@ impl<'a> Checker<'a> {
         } else {
             Expr::local(0, Type::Str)
         };
-        let id = self.helpers.reserve();
-        self.helpers.finish(
-            id,
-            comprehensions::Helper {
-                module: self.module,
-                calls: HashSet::new(),
-                class_reads: HashSet::new(),
-                source_frame: false,
-                function: ir::Function {
-                    params: vec![0, 1],
-                    locals: vec![first, list],
-                    returns: Type::Str,
-                    body: vec![Statement::Return(Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(
-                            Builtin::StringJoin,
-                            vec![separator, Expr::local(1, list)],
-                        ),
-                    })],
-                },
-            },
-        );
+        let result = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::StringJoin, vec![separator, Expr::local(1, list)]),
+        };
+        let id = self.returning_adapter(vec![first, list], Type::Str, result, HashSet::new());
         Expr {
             ty: self.types.callable(
                 if context.is_some() {

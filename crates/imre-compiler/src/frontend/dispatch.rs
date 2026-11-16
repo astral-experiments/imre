@@ -89,6 +89,68 @@ impl ClassInfo<'_> {
 }
 
 impl Checker<'_> {
+    /// Coerce the result at the selected native target. Retyping its function
+    /// pointer alone would leave the callee returning the old machine layout.
+    fn adapt_bound_method_results(
+        &self,
+        alternatives: &mut [(usize, Expr)],
+        at: &impl Ranged,
+    ) -> Result<(), String> {
+        let Some(abi) = alternatives
+            .first()
+            .and_then(|(_, v)| self.types.method_signature(v.ty))
+        else {
+            return Ok(());
+        };
+        if alternatives
+            .iter()
+            .all(|(_, v)| self.types.common_method_signature(v.ty, abi) == Some(abi))
+        {
+            return Ok(());
+        }
+        let (inputs, _) = self.types.signature(abi).unwrap();
+        let mut methods = Vec::new();
+        for (class, value) in alternatives {
+            let ExprKind::Callable {
+                function,
+                receiver: Some(receiver),
+            } = &mut value.kind
+            else {
+                return Ok(());
+            };
+            if receiver.ty != Type::Class(*class)
+                || self.types.source_method_site(value.ty).is_none()
+                || self.classes.cached.contains_key(function)
+            {
+                return Ok(());
+            }
+            let (params, returns) = self.types.signature(value.ty).unwrap();
+            if params != inputs {
+                return Ok(());
+            }
+            methods.push((function, &mut value.ty, receiver.ty, returns));
+        }
+        let returns: Vec<_> = methods.iter().map(|method| method.3).collect();
+        let Some(result @ (Type::Union(_) | Type::Optional(_))) = self.types.union(&returns) else {
+            return Ok(());
+        };
+        for (function, ty, receiver, returns) in methods {
+            if returns == result {
+                continue;
+            }
+            let target = *function;
+            let params = std::iter::once(receiver)
+                .chain(inputs.iter().copied())
+                .collect();
+            *function = self.call_result_adapter(params, target, result, at, |args| Expr {
+                ty: returns,
+                kind: ExprKind::Call(target, args),
+            })?;
+            *ty = self.types.callable(inputs.clone(), result);
+        }
+        Ok(())
+    }
+
     /// Evaluates the receiver once. Only the selected branch evaluates arguments
     /// or default factories. The record header already carries its concrete layout.
     pub(super) fn dispatch_record(
@@ -108,6 +170,7 @@ impl Checker<'_> {
             };
             alternatives.push((class, invoke(self, class, view)?));
         }
+        self.adapt_bound_method_results(&mut alternatives, at)?;
         // Start with a result layout supplied by a concrete override. A sibling can
         // also return None without changing any member of that union.
         let results = || alternatives.iter().map(|(_, expr)| expr.ty);

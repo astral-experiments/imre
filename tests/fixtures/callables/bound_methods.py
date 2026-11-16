@@ -70,3 +70,22 @@ def main() -> None:
 
 
 main()
+
+
+class Reader:
+    def read(self, value: str) -> str | bytes:
+        return value
+
+
+class BytesReader(Reader):
+    def read(self, value: str) -> bytes:
+        return value.encode()
+
+
+def saved_read(reader: Reader) -> str | bytes:
+    method = reader.read
+    reader = Reader()
+    return method("saved")
+
+
+print(saved_read(Reader()), saved_read(BytesReader()))
