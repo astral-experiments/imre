@@ -18,6 +18,56 @@ assert child._mock_parent is parent
 assert child._mock_children is children and children["send"] is child.send
 assert parent.mock_calls == [call(1), call.send(2)]
 
+root = Mock()
+first = root.first
+root.second("pending")
+reset_error = ValueError("stop resetting")
+
+def refuse_reset(visited, *, return_value, side_effect):
+    assert visited == [id(root)]
+    assert return_value and side_effect
+    assert root.mock_calls == []
+    raise reset_error
+
+first.reset_mock = refuse_reset
+with TestCase().assertRaises(ValueError) as caught:
+    root.reset_mock(return_value=True, side_effect=True)
+assert caught.exception is reset_error
+root.second.assert_called_once_with("pending")
+
+reset_fields = ("called", "call_args", "call_count", "mock_calls", "call_args_list", "method_calls")
+reset_writes = []
+
+
+class ObservedMock(Mock):
+    def __setattr__(self, name, value):
+        if name in reset_fields:
+            reset_writes.append((name, value))
+        super().__setattr__(name, value)
+
+
+observed = ObservedMock(return_value=None)
+observed("before")
+old_calls = observed.mock_calls
+reset_writes.clear()
+observed.reset_mock()
+assert tuple(name for name, value in reset_writes) == reset_fields
+for name, value in reset_writes:
+    assert getattr(observed, name) is value
+assert old_calls == [call("before")] and observed.mock_calls == []
+
+
+class StopReset:
+    def __bool__(self):
+        assert not observed.called and observed.return_value is not None
+        raise reset_error
+
+
+observed("again")
+with TestCase().assertRaises(ValueError) as caught:
+    observed.reset_mock(return_value=True, side_effect=StopReset())
+assert caught.exception is reset_error
+
 client = Mock()
 client.fetch(1).read(size=2)
 client.fetch(3)
