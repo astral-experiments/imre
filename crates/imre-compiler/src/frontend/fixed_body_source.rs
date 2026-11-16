@@ -88,7 +88,10 @@ impl FixedBodySource {
 pub(crate) enum FixedAttribute {
     /// The statement owns this whole call's traceback display.
     UnhighlightedCall(TextRange),
-    CallValue(Box<registered::values::CheckedCall>),
+    CallValue {
+        checked: Box<registered::values::CheckedCall>,
+        placed: bool,
+    },
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
     Load(ast::Identifier),
@@ -97,6 +100,17 @@ pub(crate) enum FixedAttribute {
 }
 
 impl FixedAttribute {
+    pub(crate) fn call_binding(&self) -> Option<(Option<&Expr>, &ir::RegisteredCall)> {
+        match self {
+            Self::Call(target, site) => Some((target.as_deref(), site)),
+            Self::CallValue {
+                checked,
+                placed: true,
+            } => Some((None, checked.call.python_call()?)),
+            _ => None,
+        }
+    }
+
     /// Borrow the written target and arguments from the checked operation in evaluation order.
     pub(crate) fn call_operands<'a>(
         &'a self,
@@ -104,9 +118,7 @@ impl FixedAttribute {
         next: Option<TextRange>,
         expr: &'a Expr,
     ) -> Option<(&'a Expr, &'a [Expr])> {
-        let Self::Call(target, call) = self else {
-            return None;
-        };
+        let (target, call) = self.call_binding()?;
         if matches!(expr.kind, ExprKind::Invoke { .. }) {
             let callee = next?;
             if target.is_some()
@@ -122,7 +134,7 @@ impl FixedAttribute {
             }
             return expr.fixed_positional_invoke_operands();
         }
-        match target.as_deref() {
+        match target {
             Some(target) => Some((
                 target,
                 expr.named_call_arguments()
@@ -698,10 +710,11 @@ impl SourceSites {
             .is_some_and(|(range, _)| *range == call.func.range());
         if !local
             && !(checked_callee
-                && matches!(
-                    self.attributes.get(&call.func.range()),
-                    Some(FixedAttribute::Call(..))
-                ))
+                && self
+                    .attributes
+                    .get(&call.func.range())
+                    .and_then(FixedAttribute::call_binding)
+                    .is_some())
         {
             return;
         }
@@ -740,36 +753,56 @@ impl SourceSites {
         field: &ast::ExprAttribute,
         value: &Expr,
     ) -> bool {
-        if let Some(site) = self.site_at(call.range())
-            && let Some(operands) = value.named_call_arguments()
-            && operands.len() == 1 + call.arguments.len()
-            && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
-        {
+        let Some(operands) = value.named_call_arguments() else {
+            return false;
+        };
+        if operands.len() != 1 + call.arguments.len() {
+            return false;
+        }
+        let Some(node) = FixedNode::checked(&ir::Node::Expression(value)) else {
+            return false;
+        };
+        let range = call.range();
+        if let Some(site) = self.site_at(range) {
             let invoke = ir::RegisteredCall::new(
-                call.range(),
+                range,
                 registered::values::method_target(field),
                 registered::values::fixed_argument_layout(&call.arguments),
             );
             self.attributes
-                .insert(site.range, FixedAttribute::Call(None, invoke));
+                .insert(range, FixedAttribute::Call(None, invoke));
             self.commit(site, node);
-            true
+        } else if self.inside_site(range)
+            && let Some(index) = self.first_operand(field.value.range(), &operands[0])
+            && let Some(FixedAttribute::CallValue { checked, placed }) =
+                self.attributes.get_mut(&range)
+            && matches!(operands[0].kind, ExprKind::Local(slot) if slot == checked.slot && operands[0].ty == checked.ty)
+        {
+            // The binder saved this parameter method at the same physical call, before adding defaults.
+            *placed = true;
+            self.sites.insert(index, (range, Some(node)));
+            self.next_index += 1;
         } else {
-            false
+            return false;
         }
+        true
     }
 
-    /// Keep the truth operation around the checked value that the source condition produced.
-    pub(super) fn branch_test(&mut self, source: &ast::Expr, test: &Expr) {
-        if let ExprKind::Builtin(Builtin::Bool, args) = &test.kind
+    fn first_operand(&self, range: TextRange, value: &Expr) -> Option<usize> {
+        let index = self.current?.index + 1;
+        let (written, original) = self.sites.get(index)?;
+        (*written == range && original.as_ref()?.matches(&ir::Node::Expression(value)))
+            .then_some(index)
+    }
+
+    /// Keep an implicit unary operation at the site that owns it, around the written operand.
+    pub(super) fn wrapped_operand(&mut self, source: &ast::Expr, range: TextRange, test: &Expr) {
+        if let ExprKind::Builtin(Builtin::Bool | Builtin::FormatConversion(_), args) = &test.kind
             && let [value] = args.as_slice()
-            && let Some(site) = self.current
-            && let Some((range, Some(original))) = self.sites.get(site.index + 1)
-            && *range == source.range()
-            && original.matches(&ir::Node::Expression(value))
+            && let Some(index) = self.first_operand(source.range(), value)
         {
             let node = FixedNode::checked(&ir::Node::Expression(test));
-            self.sites.insert(site.index + 1, (source.range(), node));
+            self.sites.insert(index, (range, node));
             self.next_index += 1;
         }
     }

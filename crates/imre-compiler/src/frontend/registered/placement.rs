@@ -911,6 +911,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn placed_reader_keeps_the_checked_calls_and_failure_branch() {
+        let text = concat!(
+            "from pathlib import Path\n",
+            "def read(path: Path) -> str:\n",
+            "    line = path.read_text(encoding='utf-8').strip()\n",
+            "    if not line: raise ValueError(f'empty {path}')\n",
+            "    item = line.split()[0]\n",
+            "    if len(item) != 2: raise ValueError(f'bad {item!r}')\n",
+            "    return item\n",
+            "def startup(source: str) -> None: exec(source)\n",
+            "print(read(Path('input')))\n",
+        );
+        let mut graph = SourceGraph::single(text).unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let (functions, _) = graph.take_registered_functions();
+        let start = TextSize::try_from(text.find("def read").unwrap()).unwrap();
+        let body = &functions[&graph.entry][&start];
+        assert_eq!(body.function.body.len(), 5);
+        assert!(matches!(body.inputs, FrameInputs::Protocol { .. }));
+        assert!(
+            body.fixed_attributes
+                .as_deref()
+                .unwrap()
+                .iter()
+                .any(|(range, attribute)| {
+                    &text[*range] == "path.read_text(encoding='utf-8')"
+                        && matches!(attribute, FixedAttribute::CallValue { placed: true, .. })
+                })
+        );
+        for operation in [
+            "path.read_text(encoding='utf-8')",
+            "not line",
+            "line.split()[0]",
+            "{item!r}",
+        ] {
+            assert!(
+                body.fixed_sites
+                    .iter()
+                    .any(|site| &text[*site] == operation),
+                "{operation}"
+            );
+        }
+    }
+
     fn checked_exec_operand(body: &RegisteredFunction) -> (&ir::RegisteredCall, &Expr) {
         let [
             Statement::Expr(Expr {

@@ -72,7 +72,8 @@ impl<'a> RegisteredRegion<'a> {
     #[cfg(any(debug_assertions, test, feature = "verify-ir"))]
     pub(crate) fn is_registered_invoke(self, sites: &[TextRange], value: &Expr) -> bool {
         if let (RegionRoot::Suite(frame), [range, tail @ ..]) = (self.root, sites)
-            && let Some(attr @ FixedAttribute::Call(..)) = frame.fixed_attribute(*range)
+            && let Some(attr) = frame.fixed_attribute(*range)
+            && attr.call_binding().is_some()
         {
             return attr
                 .call_operands(*range, tail.first().copied(), value)

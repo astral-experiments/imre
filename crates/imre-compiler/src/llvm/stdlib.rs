@@ -92,6 +92,9 @@ impl Emitter<'_, '_> {
             Builtin::FormatField(_) => {
                 let value = &args[0].value;
                 if args.len() == 1 {
+                    if value.ty.is_path() {
+                        return self.path_builtin(ir::PathOperation::Text, args, Type::Str);
+                    }
                     assert_eq!(
                         value.ty,
                         Type::Str,

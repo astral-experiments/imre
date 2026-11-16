@@ -959,15 +959,15 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         {
             let attribute = frame.fixed_attribute(range);
             use crate::frontend::FixedAttribute;
+            let call = attribute.and_then(FixedAttribute::call_binding);
             let position = match attribute {
                 Some(FixedAttribute::Load(name)) => name.range.start(),
-                Some(FixedAttribute::Call(_, site)) => {
-                    site.method_name_start().unwrap_or(range.start())
-                }
-                _ => range.start(),
+                _ => call
+                    .and_then(|(_, site)| site.method_name_start())
+                    .unwrap_or(range.start()),
             };
             return frame.at_expression(range, position, |frame| {
-                if let Some(attr @ FixedAttribute::Call(target, site)) = attribute {
+                if let Some((attr, (target, site))) = attribute.zip(call) {
                     let (callee, args) = attr
                         .call_operands(range, frame.operand_range(expr), expr)
                         .expect("placed call operands");

@@ -913,7 +913,10 @@ impl Checker<'_> {
                 && let Some(method) =
                     registered::values::CheckedCall::method(call, &mut values[0], written)
             {
-                site.insert(FixedAttribute::CallValue(Box::new(method)));
+                site.insert(FixedAttribute::CallValue {
+                    checked: Box::new(method),
+                    placed: false,
+                });
             }
             return self.complete_call_arguments(call, params, values, order, default_owner);
         }

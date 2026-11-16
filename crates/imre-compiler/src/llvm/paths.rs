@@ -368,11 +368,16 @@ impl Emitter<'_, '_> {
                     PathOperation::Replace => "imre_path_replace",
                     _ => unreachable!("special path ABIs were handled above"),
                 };
-                self.call(
-                    name,
-                    returns,
-                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
-                )
+                let absent;
+                let mut values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
+                if operation == PathOperation::ReadText && matches!(values.len(), 2 | 3) {
+                    absent = Value {
+                        ty: values[1].ty,
+                        ..none()
+                    };
+                    values.resize(4, &absent);
+                }
+                self.call(name, returns, &values)
             }
         }
     }
