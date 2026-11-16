@@ -149,11 +149,10 @@ impl Checker<'_> {
                 pair_locals = None;
             }
 
-            let mut failure = entering.clone();
+            let mut failure = entering;
             if let Some(ty) = pattern.failure {
                 self.match_fact(subject, original, ty);
-                failure = Flow::read(self);
-                entering.restore(self);
+                failure.switch_arm(self);
             }
             self.match_fact(subject, original, pattern.value.ty);
             let mut matched = Vec::new();
@@ -176,24 +175,23 @@ impl Checker<'_> {
             {
                 self.narrow_command(attribute, text.value.to_str());
             }
-            let guard = case
-                .guard
-                .as_deref()
-                .map(|guard| self.condition(guard))
-                .transpose()?;
-            if let (Some(slot), Some(guard)) = (original, case.guard.as_deref()) {
-                let name = self
-                    .names
-                    .iter()
-                    .find_map(|(name, &local)| (local == slot).then_some(name.as_str()));
-                if name.is_some_and(|name| expression_rebinds(guard, name)) {
-                    original = None;
+            let guard = if let Some(guard) = case.guard.as_deref() {
+                let test = self.condition(guard)?;
+                if let Some(slot) = original {
+                    let name = self
+                        .names
+                        .iter()
+                        .find_map(|(name, &local)| (local == slot).then_some(name.as_str()));
+                    if name.is_some_and(|name| expression_rebinds(guard, name)) {
+                        original = None;
+                    }
                 }
-            }
-            let after_guard = Flow::read(self);
-            if let Some(guard) = case.guard.as_deref() {
+                let after_guard = Flow::read(self);
                 self.apply_facts(guard, true);
-            }
+                Some((guard, test, after_guard))
+            } else {
+                None
+            };
             let (case_body, falls) = if remaining_pairs == Some(0)
                 && let Some(names) = pair_locals
                 && let Some(call) = self.bool_pair_assertion(case, names)
@@ -212,10 +210,10 @@ impl Checker<'_> {
             }
             let mut chosen = vec![Statement::Assign(selected, Expr::boolean(true))];
             chosen.extend(case_body);
-            if let Some(guard) = guard {
-                matched.push(Statement::If(guard, chosen, Vec::new()));
+            if let Some((guard, test, after_guard)) = guard {
+                matched.push(Statement::If(test, chosen, Vec::new()));
                 after_guard.restore(self);
-                self.apply_facts(case.guard.as_deref().unwrap(), false);
+                self.apply_facts(guard, false);
                 let mut next = Flow::read(self);
                 if !case.pattern.is_irrefutable() {
                     next.intersect(&failure);
