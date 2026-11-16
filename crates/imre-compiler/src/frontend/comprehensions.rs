@@ -1183,9 +1183,15 @@ async def invalid(values: list[int]) -> int:
             source.to_owned(),
             source.replace(" if r.tag is not None", ""),
         ] {
+            let (result, lowered) =
+                super::super::caller_cache::observe_lowerings(|| check(&program));
             assert_eq!(
-                check(&program).unwrap_err(),
+                result.unwrap_err(),
                 "callable values cannot be stored in containers or tuples"
+            );
+            assert!(
+                !lowered.iter().any(|name| name == "__init__"),
+                "{lowered:?}"
             );
         }
     }

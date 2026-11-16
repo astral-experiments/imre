@@ -1673,8 +1673,14 @@ fn lower_graph(
                             )
                         }) =>
                 {
-                    // Keep the instructions in the ordinary fixed method's layout.
-                    body.source = None;
+                    // A later Python placement can bind this same store to a live receiver.
+                    if !body
+                        .source
+                        .as_ref()
+                        .is_some_and(FixedBodySource::has_method_store)
+                    {
+                        body.source = None;
+                    }
                 }
                 PreparedBody::Attributes(_) if named && physical_function => {}
                 _ => return None,

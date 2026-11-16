@@ -1023,7 +1023,7 @@ impl Checker<'_> {
         Some((field, self.classes.fields[class][field]))
     }
 
-    /// Resolve the fixed receiver's checked field loads through the current class layout.
+    /// Resolve the fixed receiver's checked field accesses through the current class layout.
     pub(super) fn checked_receiver_fields(
         &self,
         class: usize,
@@ -1035,15 +1035,28 @@ impl Checker<'_> {
         };
         let declarations = &self.classes.declarations.definitions[class].fields;
         ir::walk_nodes(&function.body, &mut |node, _| {
-            if let ir::Node::Expression(Expr {
-                ty,
-                kind: ExprKind::Field(base, slot),
-            }) = node
-                && matches!(base.kind, ExprKind::Local(local) if local == receiver)
+            let (base, slot, ty) = match node {
+                ir::Node::Expression(Expr {
+                    ty,
+                    kind: ExprKind::Field(base, slot),
+                }) => (base.as_ref(), *slot, *ty),
+                ir::Node::Statement(Statement::SetField(
+                    base,
+                    ir::StoreField::Written(field, name),
+                    value,
+                )) if declarations
+                    .get(field.slot)
+                    .is_some_and(|decl| decl.name == name.as_str()) =>
+                {
+                    (base, field.slot, value.ty)
+                }
+                _ => return,
+            };
+            if matches!(base.kind, ExprKind::Local(local) if local == receiver)
                 && base.ty == Type::Class(class)
-                && self.classes.fields[class].get(*slot) == Some(ty)
+                && self.classes.fields[class].get(slot) == Some(&ty)
             {
-                fields.insert(declarations[*slot].name.as_str());
+                fields.insert(declarations[slot].name.as_str());
             }
         });
         fields
