@@ -146,7 +146,7 @@ pub(crate) fn operand_diagnostic(
     SourceFile::new(path, source).diagnostic_at(range, reason)
 }
 
-fn validate_syntax(
+pub(crate) fn validate_syntax(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
@@ -178,26 +178,23 @@ pub(crate) fn validate_file(
     source: &str,
     parsed: &Parsed<ast::ModModule>,
     keep_docstrings: bool,
+    bindings: Option<&mut BTreeSet<String>>,
 ) -> Result<(), String> {
-    validate_syntax(path, source, parsed, None, None)?;
+    validate_syntax(path, source, parsed, None, bindings)?;
     super::validate_docstring_literals(source, parsed, keep_docstrings, None)
         .map_err(|error| format!("{}:{error}", path.display()))
 }
 
 type LiteralReplacements = HashMap<TextRange, Vec<u32>>;
 
-/// Check syntax, recover literal escapes and determine whether this parse contains templates.
-pub(crate) fn validate<'a>(
+/// Recover literal escapes and determine whether this parse contains templates.
+pub(crate) fn literal_values<'a>(
     path: &Path,
     source: &str,
     parsed: &Parsed<ast::ModModule>,
     checked: Option<&'a crate::modules::SourceModule>,
-    checked_literal: Option<&Parsed<ast::ModModule>>,
     keep_docstrings: bool,
-    bindings: Option<&mut BTreeSet<String>>,
 ) -> Result<(Cow<'a, LiteralReplacements>, bool), String> {
-    let checked_scope = checked_literal.or_else(|| checked.map(|module| &*module.parsed));
-    validate_syntax(path, source, parsed, checked_scope, bindings)?;
     let (replacements, has_templates) = if let Some(module) = checked
         && let Some(values) = module.cached_registered_values()
     {
@@ -251,15 +248,7 @@ mod tests {
         let graph = SourceGraph::single("def f():\r\n    '\\ud800'\r\n").unwrap();
         let module = &graph.modules[graph.entry];
         let validate = |checked, keep| {
-            validate(
-                &module.path,
-                &module.source,
-                &module.parsed,
-                checked,
-                None,
-                keep,
-                None,
-            )
+            literal_values(&module.path, &module.source, &module.parsed, checked, keep)
         };
         let (independent, has_templates) = validate(None, false).unwrap();
         assert!(!has_templates);
@@ -277,14 +266,12 @@ mod tests {
         assert_eq!(validate(Some(module), true).unwrap_err(), error);
         let text = format!("{}t'{{name}}'\n", module.source);
         let layout = ParsedModule::parse(&module.path, text.into()).unwrap();
-        let borrowed = super::validate(
+        let borrowed = literal_values(
             &module.path,
             &layout.text,
             &layout.parsed,
             Some(module),
-            None,
             false,
-            None,
         )
         .unwrap();
         assert!(matches!(borrowed, (Cow::Borrowed(borrowed), true) if std::ptr::eq(borrowed, map)));
@@ -296,16 +283,8 @@ mod tests {
         let checked = ParsedModule::parse(path, "pass\n".into()).unwrap();
         let text = "def bad():\n    from math import *\n";
         let child = ParsedModule::parse(path, text.into()).unwrap();
-        let error = validate(
-            path,
-            text,
-            &child.parsed,
-            None,
-            Some(&checked.parsed),
-            false,
-            None,
-        )
-        .unwrap_err();
+        let error =
+            validate_syntax(path, text, &child.parsed, Some(&checked.parsed), None).unwrap_err();
         assert_eq!(
             error,
             "<string>:2:22: Imre: SyntaxError: import * only allowed at module level"

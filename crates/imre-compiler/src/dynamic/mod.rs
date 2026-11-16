@@ -12,7 +12,7 @@ mod provider_archive;
 pub(crate) mod provider_pack;
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use indexmap::IndexSet;
@@ -709,10 +709,17 @@ fn scan_imports(
         ImportSource::Module(module) => module,
         ImportSource::Invalid(error) => return Ok((Imports::invalid(error), None)),
     };
-    if let Some((path, keep_docstrings)) = file_alternative {
-        module_source::validate_file(path, &module.text, &module.parsed, keep_docstrings)?;
-    }
     let original = std::ptr::eq(module.text.as_ref(), source);
+    let mut bindings = BTreeSet::new();
+    if let Some((path, keep_docstrings)) = file_alternative {
+        module_source::validate_file(
+            path,
+            &module.text,
+            &module.parsed,
+            keep_docstrings,
+            original.then_some(&mut bindings),
+        )?;
+    }
     let (mut body, parsed) = if original && file_alternative.is_some() {
         let parser = module.parsed.into_owned();
         (
@@ -734,7 +741,11 @@ fn scan_imports(
         && imports.invalid_executable.is_none())
     .then(|| {
         let names = std::mem::take(&mut imports.private_names);
-        let lowered = LoweredRoot::from_body(body, names);
+        let lowered = if parsed.is_some() && !names.rewritten {
+            LoweredRoot::Validated(names, bindings)
+        } else {
+            LoweredRoot::from_body(body, names)
+        };
         ScannedModule { parsed, lowered }
     });
     Ok((imports, scanned))
@@ -744,6 +755,8 @@ pub(super) enum LoweredRoot {
     Complete(ast::Suite, imre_ast::Names),
     /// The registered parser input already has the names found at discovery.
     Unchanged(imre_ast::Names),
+    /// This optional file passed syntax and name validation on the retained parse.
+    Validated(imre_ast::Names, BTreeSet<String>),
 }
 
 impl LoweredRoot {
