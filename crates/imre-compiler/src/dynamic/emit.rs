@@ -62,17 +62,19 @@ impl RegisteredBodies<'_> {
         unit: usize,
         bundled: bool,
     ) -> Option<ModuleOrigin<'_, '_>> {
+        let checked = self.checked_units.get(&unit);
         if bundled {
-            let bodies = self
-                .checked_units
-                .get(&unit)
+            let bodies = checked
                 .and_then(|unit| unit.module)
                 .and_then(|module| self.functions.get(&module));
             Some(ModuleOrigin::Bundled(bodies))
         } else {
-            self.python_providers
-                .contains(&unit)
-                .then_some(ModuleOrigin::Provider)
+            self.python_providers.contains(&unit).then(|| {
+                let bodies = checked
+                    .and_then(|unit| unit.source)
+                    .and_then(|file| self.functions.get(&file.id()));
+                ModuleOrigin::Provider(bodies)
+            })
         }
     }
 }
@@ -85,14 +87,14 @@ pub(super) enum ModuleOrigin<'a, 'syntax> {
         python_annotations: bool,
     },
     Interactive(u32, &'syntax mut HashSet<TextRange>),
-    Provider,
+    Provider(Option<&'a super::CheckedFunctions>),
     Bundled(Option<&'a super::CheckedFunctions>),
 }
 
 impl ModuleOrigin<'_, '_> {
     pub(super) fn python_annotations(&self, name: &str) -> bool {
         match self {
-            Self::Provider => true,
+            Self::Provider(_) => true,
             Self::ExecLiteral {
                 python_annotations, ..
             } => *python_annotations,
@@ -465,8 +467,11 @@ impl<'a> PreparedBody<'a> {
             | ModuleOrigin::Interactive(inherited_flags, _) => inherited_flags,
             _ => 0,
         };
+        let python_provider = matches!(origin, ModuleOrigin::Provider(_));
         let checked_bodies = match origin {
-            ModuleOrigin::Program(bodies) | ModuleOrigin::Bundled(bodies) => bodies,
+            ModuleOrigin::Program(bodies)
+            | ModuleOrigin::Provider(bodies)
+            | ModuleOrigin::Bundled(bodies) => bodies,
             _ => None,
         };
         let syntax = parsed.syntax();
@@ -627,7 +632,12 @@ impl<'a> PreparedBody<'a> {
             prepare.prepare_function(
                 header,
                 site,
-                checked_bodies.and_then(|bodies| bodies.get(&start)),
+                checked_bodies
+                    .and_then(|bodies| bodies.get(&start))
+                    .filter(|body| {
+                        !python_provider
+                            || matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
+                    }),
             );
         }
         let initializer = if interactive {
@@ -2296,7 +2306,7 @@ mod tests {
             Path::new("case.py"),
             text,
             0,
-            ModuleOrigin::Provider,
+            ModuleOrigin::Provider(None),
         )
         .unwrap();
         inject_residual_child_module(&mut module);
@@ -4774,7 +4784,7 @@ mod tests {
             Path::new("boxed_source_coroutine.py"),
             source,
             0,
-            ModuleOrigin::Provider,
+            ModuleOrigin::Provider(None),
         )
         .unwrap();
         let start = TextSize::try_from(source.find("async def choose(").unwrap()).unwrap();
@@ -5998,10 +6008,59 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
     }
 
     #[test]
+    fn an_installed_source_lends_only_its_python_bound_body() {
+        let project = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let entry = project.path().join("command.py");
+        let path = installed.path().join("provider.py");
+        let source = "def run(): print('ready')\n";
+        std::fs::write(&path, source).unwrap();
+        std::fs::write(
+            &entry,
+            "import sys\nfrom provider import run\nif __name__ == '__main__':\n    sys.argv[0] = sys.argv[0].removesuffix('.exe')\n    sys.exit(run())\n",
+        )
+        .unwrap();
+        let mut graph = crate::modules::SourceGraph::load(
+            &entry,
+            Some(project.path()),
+            &[installed.path().to_owned()],
+        )
+        .unwrap();
+        crate::checked_lower(&mut graph).unwrap();
+        let module = graph.python_file("provider").unwrap();
+        assert!(!graph.modules[module].is_program_source());
+        let (functions, _) = graph.take_registered_functions();
+        let mut registered = RegisteredBodies {
+            functions,
+            ..Default::default()
+        };
+        let unit = 0;
+        registered.python_providers.insert(unit);
+        registered.checked_units.entry(unit).or_default().source =
+            module_source::CheckedFile::select(&graph, module);
+        let start = TextSize::default();
+        for python_binding in [true, false] {
+            if !python_binding {
+                registered
+                    .functions
+                    .get_mut(&module)
+                    .unwrap()
+                    .get_mut(&start)
+                    .unwrap()
+                    .inputs = crate::frontend::FrameInputs::default();
+            }
+            let origin = registered.provider_origin(unit, false).unwrap();
+            let prepared = PreparedBody::module("provider", &path, source, 0, origin).unwrap();
+            let body = &prepared.source.scopes.functions[&start].body;
+            assert_eq!(matches!(body, Some(NamedBody::Borrowed(_))), python_binding);
+        }
+    }
+
+    #[test]
     fn provider_annotations_keep_the_evaluator_without_checked_references() {
         let text = "def read(x: api.Value) -> int: return x.value\n";
         for (origin, references) in [
-            (ModuleOrigin::Provider, 0),
+            (ModuleOrigin::Provider(None), 0),
             (ModuleOrigin::Program(None), 2),
         ] {
             let module =
@@ -6032,7 +6091,7 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             Path::new("closing.py"),
             source,
             0,
-            ModuleOrigin::Provider,
+            ModuleOrigin::Provider(None),
         )
         .unwrap();
         let original = prepared.standalone().unwrap();

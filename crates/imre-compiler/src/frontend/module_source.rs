@@ -42,6 +42,10 @@ impl CheckedFile {
             .then_some(Self(id))
     }
 
+    pub(crate) fn id(self) -> crate::modules::ModuleId {
+        self.0
+    }
+
     pub(crate) fn module(
         self,
         modules: &[crate::modules::SourceModule],

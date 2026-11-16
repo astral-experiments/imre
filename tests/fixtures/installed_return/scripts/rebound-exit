@@ -1,0 +1,11 @@
+import sys
+from provider import hello
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    hello.__globals__['stop'] = lambda: 7
+    annotations = hello.__annotations__
+    result = hello()
+    if result is None:
+        annotations['observed_none'] = True
+    print(result, sorted(annotations))
+    sys.exit(0)

@@ -921,7 +921,12 @@ impl FixedFunctions {
         self.place(
             graph,
             owners,
-            |module| (module != graph.entry || entry) && graph.modules[module].is_program_source(),
+            |module| {
+                let source = &graph.modules[module];
+                (module != graph.entry || entry)
+                    && (source.is_program_source()
+                        || graph.python_file(&source.name) == Some(module))
+            },
             |module, definition, frame| {
                 // The file's selected source contracts run before these provisional frames
                 // are taken and their Python arguments are bound.

@@ -225,7 +225,7 @@ fn suspended_alias_diagnostic_follows_the_emitted_binding() {
             Path::new("stream.py"),
             &source,
             0,
-            ModuleOrigin::Provider,
+            ModuleOrigin::Provider(None),
         )
         .unwrap();
         let alias = module.source.type_aliases.values_mut().next().unwrap();
@@ -279,7 +279,7 @@ invalid: 'Child['
         Path::new("example.py"),
         source,
         0,
-        ModuleOrigin::Provider,
+        ModuleOrigin::Provider(None),
     )
     .unwrap();
     let child = |spelling: &str| &body.source.annotation_children[spelling];
