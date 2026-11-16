@@ -5704,6 +5704,38 @@ else:
     }
 
     #[test]
+    fn a_scalar_parameter_can_be_forwarded_through_an_object_local() {
+        use crate::llvm::registered::frame_inputs;
+
+        for destination in [Type::PythonObject, Type::Str] {
+            let result = Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::List(vec![Expr::local(1, destination)]),
+            };
+            let mut frame = RegisteredFunction::expression(TextRange::default(), result);
+            frame.function.params = vec![0];
+            frame.function.locals = vec![Type::Str, destination];
+            for (slot, name) in ["parameter", "alias"].into_iter().enumerate() {
+                frame.local_names.insert(
+                    slot,
+                    LocalBinding {
+                        name: name.to_owned(),
+                        namespace: None,
+                    },
+                );
+            }
+            frame
+                .function
+                .body
+                .insert(0, Statement::Assign(1, Expr::local(0, Type::Str)));
+            assert_eq!(
+                frame_inputs(&frame, FrameArguments::Python).is_some(),
+                destination == Type::PythonObject
+            );
+        }
+    }
+
+    #[test]
     fn a_stub_layout_does_not_discard_the_checked_python_call() {
         let text =
             "from textwrap import dedent\nif __name__ == '__main__':\n    print(dedent(0))\n";

@@ -87,7 +87,13 @@ pub(crate) fn frame_inputs(
         let expr = match node {
             ir::Node::Statement(stmt) => {
                 return match stmt {
-                    Statement::Assign(slot, _) => uses_slot(slot, false),
+                    Statement::Assign(slot, value) => {
+                        // An object local stores the original handle supplied by the caller.
+                        if checked.function.locals.get(*slot) == Some(&Type::PythonObject) {
+                            protocol_reads += protocol_parameter(value);
+                        }
+                        uses_slot(slot, false)
+                    }
                     Statement::SetField(_, ir::StoreField::Written(_, _), _)
                     | Statement::AugmentField(_, ir::StoreField::Written(_, _), _, _)
                         if source.is_some() =>
