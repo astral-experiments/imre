@@ -323,17 +323,7 @@ impl Checker<'_> {
         }
         values
             .into_iter()
-            .map(|value| {
-                let cast = match value.ty {
-                    Type::Int => return value,
-                    Type::Bool => Builtin::Int(None),
-                    _ => Builtin::UnionProject,
-                };
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(cast, vec![value]),
-                }
-            })
+            .map(|value| self.integer_value(value))
             .collect()
     }
 

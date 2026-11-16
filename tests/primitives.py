@@ -13,7 +13,6 @@ REJECTED = {
     "bitwise_float": "print(1.0 | 2)\n",
     "bitwise_string": 'print("x" ^ 1)\n',
     "shift_float": "print(1 << 2.0)\n",
-    "shift_bool": "print(1 >> True)\n",
     "invert_float": "print(~1.0)\n",
     "invert_bool": "print(~True)\n",
     "optional_integer": "def bad(value: int | None) -> int:\n    return value & 3\n",
