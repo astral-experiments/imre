@@ -51,28 +51,36 @@ impl Flow {
 
 /// Intersect the exits that short-circuit before the next operand is evaluated.
 #[derive(Default)]
-pub(super) struct BooleanExits(Option<Flow>);
+pub(super) struct BooleanExits {
+    exit: Option<Flow>,
+    stopped: bool,
+}
 
 impl BooleanExits {
-    pub(super) fn short_circuit(
+    pub(super) fn operand(
         &mut self,
         checker: &mut Checker<'_>,
         operand: &ast::Expr,
-        truth: bool,
+        and: bool,
+        known: Option<bool>,
     ) {
-        let mut branch = Flow::read(checker);
-        checker.apply_facts(operand, truth);
-        branch.switch_arm(checker);
-        if let Some(exit) = &mut self.0 {
-            exit.intersect(&branch);
-        } else {
-            self.0 = Some(branch);
+        if !self.stopped && known != Some(and) {
+            let mut branch = Flow::read(checker);
+            checker.apply_facts(operand, !and);
+            branch.switch_arm(checker);
+            if let Some(exit) = &mut self.exit {
+                exit.intersect(&branch);
+            } else {
+                self.exit = Some(branch);
+            }
+            self.stopped = known == Some(!and);
         }
+        checker.apply_facts(operand, and);
     }
 
-    pub(super) fn finish(self, checker: &mut Checker<'_>, reachable: bool) {
-        if let Some(exit) = self.0 {
-            if reachable {
+    pub(super) fn finish(self, checker: &mut Checker<'_>) {
+        if let Some(exit) = self.exit {
+            if !self.stopped {
                 exit.join(checker);
             } else {
                 exit.restore(checker);
