@@ -3128,25 +3128,14 @@ impl Context {
         self.call(exit, vec![class, exception, traceback], Vec::new())
     }
 
-    /// Resolve an ordinary string method before evaluating positional arguments.
-    /// Keep an exact string receiver alive if an argument rebinds its last owner.
-    pub(super) fn string_method_target(&mut self, receiver: Id, symbol: &str) -> Result<(Id, Id)> {
-        if matches!(
-            self.heap.get(receiver),
-            Value::Str(_) | Value::SurrogateStr(_)
-        ) {
-            return self.retain_builtin_method_receiver(receiver, symbol);
-        }
-        let name = symbol.strip_prefix("str.").expect("compiled string method");
-        self.builtin_method_target(receiver, name)
-    }
-
-    /// Keep exact container and regular-expression receivers without allocating a bound method.
+    /// Keep exact builtin receivers alive while evaluating the written method arguments.
     pub(super) fn builtin_method_target(&mut self, receiver: Id, name: &str) -> Result<(Id, Id)> {
         let value = self.heap.get(receiver);
         if matches!(
             value,
-            Value::Array(_)
+            Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Array(_)
                 | Value::List(_)
                 | Value::Set { .. }
                 | Value::Tuple(_)
@@ -6472,7 +6461,7 @@ impl Context {
                     return self.bind_attribute(member, obj, class);
                 }
             }
-            let fun = self.alloc(Value::Native(method));
+            let fun = self.alloc(Value::Native(method.into_owned()));
             return Ok(self.alloc(Value::Method {
                 callable: fun,
                 receiver: obj,

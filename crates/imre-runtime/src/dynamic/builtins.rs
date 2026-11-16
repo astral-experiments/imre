@@ -978,7 +978,7 @@ pub(super) fn format_owner(class: &str) -> &'static str {
     }
 }
 
-pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
+pub(super) fn method_name(value: &Value, attr: &str) -> Option<std::borrow::Cow<'static, str>> {
     let owner = match value {
         Value::Scandir(_) if super::stdlib::os::scandir::ITER_METHODS.contains(&attr) => {
             super::stdlib::os::scandir::ITER
@@ -1006,7 +1006,9 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         {
             "float"
         }
-        Value::Str(_) | Value::SurrogateStr(_) if STR_METHODS.contains(&attr) => "str",
+        Value::Str(_) | Value::SurrogateStr(_) => {
+            return imre_ast::strings::str_method_symbol(attr).map(std::borrow::Cow::Borrowed);
+        }
         Value::Range(_) if super::range::METHODS.contains(&attr) => "range",
         Value::SetIterator(_) if SET_ITERATOR_METHODS.contains(&attr) => "set_iterator",
         Value::DictIterator(iter) if DictIterator::methods(iter.class_name()).contains(&attr) => {
@@ -1212,7 +1214,7 @@ pub(super) fn method_name(value: &Value, attr: &str) -> Option<String> {
         }
         _ => return None,
     };
-    Some(format!("{owner}.{attr}"))
+    Some(format!("{owner}.{attr}").into())
 }
 
 fn type_error(message: impl Into<String>) -> Error {

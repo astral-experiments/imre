@@ -2086,12 +2086,6 @@ impl RegisteredFrame<'_, '_> {
             Some(format!(
                 "call i64 @imre_dyn_dict_get_target(ptr %ctx, i64 {receiver}, ptr %live)"
             ))
-        } else if direct && !name.starts_with('_') && imre_ast::strings::STR_METHODS.contains(&name)
-        {
-            let symbol = self.output.data(format!("str.{name}").as_bytes());
-            Some(format!(
-                "call i64 @imre_dyn_string_method_target(ptr %ctx, i64 {receiver}, ptr {symbol}, ptr %live)"
-            ))
         } else if direct && !name.starts_with("__") {
             let symbol = self.output.data(name.as_bytes());
             Some(format!(
