@@ -1287,7 +1287,7 @@ impl Checker<'_> {
             ));
         }
         let name = attribute.attr.as_str();
-        let Some(signature) = self.classes.methods[class].get(name).cloned() else {
+        let Some(signature) = self.classes.methods[class].get(name) else {
             if receiver.is_none()
                 && let Some(binding) = attribute.value.as_name_expr()
                 && self.has_static_namespace_root(&attribute.value)
@@ -1311,10 +1311,11 @@ impl Checker<'_> {
                 let receiver = receiver.ok_or_else(|| {
                     error(self.source, attribute, "a property requires an instance")
                 })?;
-                let mut signature = signature;
-                if let Some(inference) = self.inference {
-                    inference.callable_signature(&mut signature, 1, None, self, attribute)?;
-                }
+                let signature = if let Some(inference) = self.inference {
+                    inference.callable_signature(signature, 1, None, self, attribute)?
+                } else {
+                    Cow::Borrowed(signature)
+                };
                 self.calls.insert(signature.id);
                 if let Some(&(ready, value)) = self
                     .classes
@@ -1328,11 +1329,11 @@ impl Checker<'_> {
                     kind: ExprKind::Call(signature.id, ir::CallArgs::positional(vec![receiver])),
                 })
             }
-            MethodKind::Instance => self.callable_value(&signature, receiver, expected, attribute),
+            MethodKind::Instance => self.callable_value(signature, receiver, expected, attribute),
             MethodKind::PropertySetter => unreachable!("setters are resolved only on assignment"),
             kind @ (MethodKind::Class | MethodKind::Static) => {
                 let owner = (kind == MethodKind::Class).then(|| self.record_class_object(class));
-                let value = self.callable_value(&signature, owner, expected, attribute)?;
+                let value = self.callable_value(signature, owner, expected, attribute)?;
                 Ok(self.evaluated_receiver(receiver, value))
             }
         }
