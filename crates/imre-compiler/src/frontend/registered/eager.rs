@@ -3,13 +3,13 @@
 use super::*;
 use crate::frontend::comprehensions::{
     ClauseLowering, Collector, EagerDisplay, acquire_in_namespace, async_pull, filter_suite,
-    namespace_targets, scoped_result,
+    scoped_result,
 };
 use imre_ast::comprehension::{Output, Plan};
 
 pub(super) struct Namespace {
     pub(super) slot: usize,
-    pub(super) targets: HashMap<String, usize>,
+    pub(super) targets: std::ops::Range<usize>,
 }
 
 impl SourceScope<'_> {
@@ -33,21 +33,22 @@ impl SourceScope<'_> {
         let first = &plan.clauses[0];
         let mut input = self.creating_iterable(|scope| scope.input(first)).ok()?;
         let namespace = self.hidden(Type::PythonObject);
-        let names = namespace_targets(&plan);
-        let mut targets = HashMap::new();
-        for name in &names {
-            let slot = self.hidden(Type::PythonObject);
-            self.namespaces.insert(
-                slot,
-                LocalBinding {
-                    name: name.clone(),
-                    namespace: Some(namespace),
-                },
-            );
-            targets.insert(name.clone(), slot);
-        }
         let parent = self.comprehension.as_ref().map(|scope| scope.slot);
-        let mut prefix = acquire_in_namespace(&mut input, namespace, parent, names);
+        let (mut prefix, targets) =
+            acquire_in_namespace(&plan, &mut input, namespace, parent, |names| {
+                let first = self.namespaces.len();
+                for name in names {
+                    let slot = self.hidden(Type::PythonObject);
+                    self.namespaces.push((
+                        slot,
+                        LocalBinding {
+                            name: name.clone(),
+                            namespace: Some(namespace),
+                        },
+                    ));
+                }
+                first..self.namespaces.len()
+            });
         let result = self.hidden(Type::PythonObject);
         let outer = self.comprehension.replace(Namespace {
             slot: namespace,

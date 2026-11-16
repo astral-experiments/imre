@@ -93,21 +93,19 @@ impl Helpers {
     }
 }
 
-/// Frame slots and the Python namespace use the same ordered declaration for each target.
-pub(super) fn namespace_targets(plan: &Plan<'_>) -> Vec<String> {
-    let mut names = plan.collect_target_names::<Vec<_>>();
-    names.sort_unstable();
-    names.dedup();
-    names
-}
-
-/// The creating frame acquires the outer iterator before the target names shadow it.
-pub(super) fn acquire_in_namespace(
+/// Declare the same targets in the lexical frame and its Python namespace.
+/// The creating frame acquires the outer iterator before the names shadow it.
+pub(super) fn acquire_in_namespace<T>(
+    plan: &Plan<'_>,
     input: &mut pipelines::Prepared,
     namespace: usize,
     parent: Option<usize>,
-    names: Vec<String>,
-) -> Vec<Statement> {
+    declare: impl FnOnce(&[String]) -> T,
+) -> (Vec<Statement>, T) {
+    let mut names = plan.collect_target_names::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    let scope = declare(&names);
     let mut body = std::mem::take(&mut input.evaluate);
     body.append(&mut input.acquire);
     body.push(Statement::Assign(
@@ -123,7 +121,7 @@ pub(super) fn acquire_in_namespace(
             ),
         },
     ));
-    body
+    (body, scope)
 }
 
 /// The result escapes the display. Private slots unwind together, except for
@@ -630,17 +628,20 @@ impl Checker<'_> {
         let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
         // Acquire the outer iterator before declaring the comprehension's shadowing names.
         let enclosing = self.namespace;
-        let (mut prefix, targets) = if self.registered.is_some() {
+        let (mut prefix, scope) = if self.registered.is_some() {
             let Iteration::Prepared(cursor) = &mut input else {
                 unreachable!("Python iterables have an explicit acquisition")
             };
             let slot = self.hidden(Type::PythonObject);
-            let targets = namespace_targets(display);
-            let prefix = acquire_in_namespace(cursor, slot, enclosing, targets.clone());
             self.namespace = Some(slot);
-            (prefix, targets)
+            acquire_in_namespace(display, cursor, slot, enclosing, |names| {
+                self.enter_comprehension(names.iter().cloned())
+            })
         } else {
-            (Vec::new(), display.collect_target_names())
+            (
+                Vec::new(),
+                self.enter_comprehension(display.collect_target_names::<Vec<_>>()),
+            )
         };
         let gather_input = if matches!(collector, Collector::Display(_))
             && matches!(display.output, Output::List(_))
@@ -655,12 +656,11 @@ impl Checker<'_> {
         } else {
             None
         };
-        let scope = self.enter_comprehension(targets);
         let result = self.hidden(Type::None);
         self.before_pull(display, 0);
         let mut mapping = None;
-        let emit = (self.inference.is_none() || self.registered.is_some())
-            && !self.discarded_function_body();
+        let discarded = self.discarded_function_body();
+        let emit = (self.inference.is_none() || self.registered.is_some()) && !discarded;
         let checked = self.comprehension_body(
             display,
             input,
@@ -738,9 +738,14 @@ impl Checker<'_> {
         for slot in exports.values() {
             self.narrowed.remove_mut(slot);
         }
+        let value = self.local(result);
+        if discarded && prefix.is_empty() {
+            // Validation kept the result type, but there are no operations to unwind.
+            return Ok(value);
+        }
         Ok(scoped_result(
             prefix,
-            self.local(result),
+            value,
             first_private..self.locals.len(),
             exports.into_values(),
         ))
@@ -770,7 +775,10 @@ impl Checker<'_> {
         .then(|| mapping.clone())
     }
 
-    pub(super) fn enter_comprehension(&mut self, targets: Vec<String>) -> ComprehensionScope {
+    pub(super) fn enter_comprehension(
+        &mut self,
+        targets: impl IntoIterator<Item = String>,
+    ) -> ComprehensionScope {
         let mut scope = ComprehensionScope {
             state: self.local_state(),
             names: self.names.clone(),

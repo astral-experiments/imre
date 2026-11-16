@@ -2443,7 +2443,7 @@ impl<'s> Checker<'s> {
         let first = self.expansion_input(plan.outer, None)?;
         let mut first = self.prepare_iteration(first, generator, false)?;
         let first_private = self.locals.len();
-        let scope = self.enter_comprehension(plan.collect_target_names());
+        let scope = self.enter_comprehension(plan.collect_target_names::<Vec<_>>());
         // Suspended generators can observe later enclosing writes. Facts about
         // those mutable slots must be proved again inside the lazy body.
         self.narrowed = assignments::Narrowed::new();
