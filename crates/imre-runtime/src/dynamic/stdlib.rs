@@ -900,7 +900,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         | ("_imre_base32", "encode" | "decode")
         | ("_imre_base85", "encode")
         | ("_imre_csv", "read_row")
-        | ("_imre_tokenize", "scan")
         | (
             "_imre_json",
             "scan_once"

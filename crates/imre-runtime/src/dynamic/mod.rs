@@ -5630,6 +5630,9 @@ impl Context {
                     .entry("typing._SpecialGenericAlias".into())
                     .or_insert(class);
             }
+        } else if name == "_imre_tokenize" {
+            let scan = self.alloc(Value::Native("_imre_tokenize.scan".into()));
+            self.bind(scope, "scan", scan);
         }
         Ok(())
     }
