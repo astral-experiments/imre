@@ -598,8 +598,8 @@ mod tests {
             .into_iter()
             .map(|u| (u.name, u.llvm_ir))
             .collect::<std::collections::HashMap<_, _>>();
-        assert!(units["leaf"].contains("define hidden ptr @callable_m"));
-        assert!(units["main"].contains("declare hidden ptr @callable_m"));
+        assert!(units["leaf"].contains("define internal ptr @callable_m"));
+        assert!(!units["main"].contains("@callable_m"));
         assert!(
             units["leaf"].contains("@layout_callable = external hidden constant { i64, ptr, ptr }")
         );

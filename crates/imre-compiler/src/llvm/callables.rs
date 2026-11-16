@@ -413,19 +413,33 @@ impl Emitter<'_, '_> {
             .iter()
             .map(|&index| &values[index].value)
             .collect();
-        let result = match (&target, &args.site) {
-            (NativeCallTarget::Function(id), _)
-            | (NativeCallTarget::Callable(_), ir::CallSite::SavedFunction(_, id)) => self
-                .user_call(
-                    *id,
-                    returns,
-                    &inputs,
-                    args.exhaustive_enum_match,
-                    args.site.fixed(),
-                ),
-            (NativeCallTarget::Callable(callable), _) => {
-                let targets = self.callable_targets.get(callable.value.ty).to_vec();
-                let entry = if let [target] = targets.as_slice() {
+        let targets = match &target {
+            NativeCallTarget::Callable(callable) => self.callable_targets.get(callable.value.ty),
+            NativeCallTarget::Function(_) => &[],
+        };
+        // Only a synchronous plain adapter forwards exactly the written arguments.
+        let plain = match targets {
+            [target] if !target.bound && !matches!(returns, Type::Coroutine(_)) => {
+                Some(&target.function)
+            }
+            _ => None,
+        };
+        let result = match (&target, &args.site, plain) {
+            (NativeCallTarget::Function(id), _, _)
+            | (_, ir::CallSite::SavedFunction(_, id), _)
+            | (_, _, Some(id)) => self.user_call(
+                *id,
+                returns,
+                &inputs,
+                args.exhaustive_enum_match,
+                args.site.fixed(),
+            ),
+            (NativeCallTarget::Callable(callable), _, None) => {
+                let may_raise = targets.is_empty()
+                    || targets
+                        .iter()
+                        .any(|target| self.effects.may_raise(target.function));
+                let entry = if let [target] = targets {
                     format!(
                         "@{}",
                         self.callable_entry(target.function, target.bound, callable.value.ty)
@@ -435,10 +449,6 @@ impl Emitter<'_, '_> {
                 };
                 let context = self.callable_context_slot(&callable.value);
                 let context = self.instruction(format!("load ptr, ptr {context}"));
-                let may_raise = targets.is_empty()
-                    || targets
-                        .iter()
-                        .any(|target| self.effects.may_raise(target.function));
                 self.call_with_effect(
                     &entry,
                     Some(&context),
@@ -487,7 +497,8 @@ print(apply(increment, 4))
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(body.contains("call i64 @callable_0_plain("), "{body}");
+        assert!(body.contains("call i64 @fn_0("), "{body}");
+        assert!(!body.contains("getelementptr %callable"), "{body}");
         assert!(!body.contains("call i32 @imre_error_pending("), "{body}");
         assert!(!body.contains("call void @imre_record_retain("), "{body}");
     }
