@@ -5874,6 +5874,44 @@ else:
     }
 
     #[test]
+    fn a_checked_python_frame_reads_its_conditionally_assigned_local() {
+        let graph = checked_named_source(
+            "def read(enabled: bool) -> int:
+    try:
+        if enabled:
+            value: int = 7
+    except ValueError:
+        pass
+    return value
+print(read(True))
+",
+        );
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&TextSize::default()];
+        let (&slot, _) = frame
+            .local_names
+            .iter()
+            .find(|(_, binding)| binding.name == "value")
+            .unwrap();
+        assert_eq!(frame.function.locals[slot], Type::Int);
+        let mut stored = false;
+        let mut read = false;
+        frame.region().walk(&mut |node, _| match node {
+            ir::Node::Statement(Statement::Assign(target, value)) if *target == slot => {
+                stored |= matches!(&value.without_location().kind, ExprKind::Int(n) if n == "7");
+            }
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Local(source),
+                ..
+            }) if *source == slot => {
+                read = true;
+            }
+            _ => {}
+        });
+        assert!(stored && read);
+    }
+
+    #[test]
     fn an_unread_scalar_parameter_allows_a_python_frame_to_fall_through() {
         let body = ir::Function {
             params: vec![0],
