@@ -355,18 +355,7 @@ class _BoxedDictionaryPatch(_DictionaryPatch, ContextDecorator):
         return mapping
 
     def _change(self, values, clear):
-        mapping = self.in_dict
-        if clear:
-            try:
-                mapping.clear()
-            except AttributeError:
-                for key in list(mapping):
-                    del mapping[key]
-        try:
-            mapping.update(values)
-        except AttributeError:
-            for key in values:
-                mapping[key] = values[key]
+        _change_mapping(self.in_dict, values, clear)
 
     __enter__ = _enter
 
