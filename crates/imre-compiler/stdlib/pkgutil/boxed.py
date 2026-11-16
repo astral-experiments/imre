@@ -11,7 +11,6 @@ from typing import NamedTuple
 from _imre_importlib import module_suffixes as _target_suffixes
 from _imre_pkgutil import (
     filenames as _filenames,
-    find_module as _find_module,
     find_spec as _find_spec,
     isdir as _isdir,
 )
@@ -175,7 +174,7 @@ def get_data(package, resource):
     loader = spec.loader
     if loader is None or not hasattr(loader, 'get_data'):
         return None
-    module = _find_module(package)
+    module = sys.modules.get(package) or importlib._bootstrap._load(spec)
     if module is None or not hasattr(module, '__file__'):
         return None
     parts = resource.split('/')

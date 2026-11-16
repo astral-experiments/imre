@@ -4307,6 +4307,17 @@ def report(text):
         resource_package.mkdir()
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
+        compare(
+            "-IB", "-c",
+            f"import sys\nsys.path = [{str(installed)!r}] + sys.path\n"
+            "import pkgutil\n"
+            "class Finder:\n"
+            "    def find_spec(self, fullname, path, target=None):\n"
+            "        if fullname == 'pkgutil_resource': print('find resource package')\n"
+            "sys.meta_path.insert(0, Finder())\n"
+            "print(pkgutil.get_data('pkgutil_resource', 'payload.bin'))\n"
+            "import pkgutil_resource",
+        )
         fixtures = Path(__file__).with_name("fixtures")
         (root / "sign_parameters.py").write_bytes(
             (fixtures / "floats" / "sign_parameters.py").read_bytes()

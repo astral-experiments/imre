@@ -889,7 +889,7 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("functools", "_PlaceholderType") => ctx.builtin("functools._PlaceholderType"),
         ("sys", name) if SYS_LAZY_FUNCTIONS.contains(&name) => ctx.builtin(&format!("sys.{name}")),
         ("sysconfig", "_getuserbase" | "get_path_names" | "get_platform")
-        | ("_imre_pkgutil", "filenames" | "isdir" | "find_module" | "find_spec")
+        | ("_imre_pkgutil", "filenames" | "isdir" | "find_spec")
         | ("_imre_base32", "encode" | "decode")
         | ("_imre_base85", "encode")
         | ("_imre_csv", "read_row")
