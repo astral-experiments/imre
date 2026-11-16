@@ -45,6 +45,7 @@ pub(super) struct CheckedUnit {
 pub(super) struct RegisteredBodies<'a> {
     pub(super) checked_units: HashMap<usize, CheckedUnit>,
     pub(super) functions: HashMap<crate::modules::ModuleId, super::CheckedFunctions>,
+    pub(super) call_operands: HashMap<crate::modules::ModuleId, super::FunctionCallOperands>,
     pub(super) modules: &'a [crate::modules::SourceModule],
     pub(super) bundled_doctest_prompts: HashMap<String, Vec<Prompt>>,
     // Decoded installed files retain the fingerprint of their original loader bytes.
@@ -386,10 +387,11 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         literal_sites: LiteralSites,
-        (operand_types, checked_source, checked_entry): (
+        (operand_types, checked_source, checked_entry, call_operands): (
             Option<crate::analysis::OperandTypes<'_>>,
             Option<&'a crate::modules::SourceModule>,
             Option<Box<crate::frontend::RegisteredFunction>>,
+            Option<&'a super::FunctionCallOperands>,
         ),
     ) -> Result<Self, String> {
         let body = Self::prepare(
@@ -399,7 +401,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             origin,
             literal_sites,
-            (operand_types, checked_source, checked_entry),
+            (operand_types, checked_source, checked_entry, call_operands),
         )?;
         if let Some(refusal) = body.initializer.refusal {
             use crate::frontend::PreparedRefusal;
@@ -431,10 +433,11 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
-        (operand_types, checked_source, checked_entry): (
+        (operand_types, checked_source, checked_entry, call_operands): (
             Option<crate::analysis::OperandTypes<'_>>,
             Option<&'a crate::modules::SourceModule>,
             Option<Box<crate::frontend::RegisteredFunction>>,
+            Option<&'a super::FunctionCallOperands>,
         ),
     ) -> Result<Self, String> {
         let ParsedModule { text, parsed } = module;
@@ -461,6 +464,7 @@ impl<'a> PreparedBody<'a> {
             | ModuleOrigin::Bundled(bodies) => bodies,
             _ => None,
         };
+        let call_operands = call_operands.filter(|_| checked_source.is_some() && !python_provider);
         let syntax = parsed.syntax();
         let tokens = parsed.tokens();
         let registered_values = checked_source
@@ -616,15 +620,18 @@ impl<'a> PreparedBody<'a> {
             };
             let start = site.def.start();
             let header = scopes.functions.get_mut(&start).expect("named function");
+            let checked = checked_bodies.and_then(|bodies| bodies.get(&start));
+            let operands = call_operands
+                .filter(|_| checked.is_none())
+                .and_then(|functions| functions.get(&start));
             prepare.prepare_function(
                 header,
                 site,
-                checked_bodies
-                    .and_then(|bodies| bodies.get(&start))
-                    .filter(|body| {
-                        !python_provider
-                            || matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
-                    }),
+                checked.filter(|body| {
+                    !python_provider
+                        || matches!(body.inputs, crate::frontend::FrameInputs::Protocol { .. })
+                }),
+                operands,
             );
         }
         let initializer = if interactive {

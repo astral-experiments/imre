@@ -1712,7 +1712,7 @@ impl Inference {
                                 FixedAttribute::Call(None, call) => signature.method.is_some()
                                     && matches!(call.target, ir::RegisteredCallTarget::Method { .. })
                                     && matches!(call.arguments, ir::RegisteredArguments::Positional),
-                                FixedAttribute::CallValue { .. } | FixedAttribute::ModuleName(_) => false,
+                                FixedAttribute::OriginalCall(_) | FixedAttribute::CallValue { .. } | FixedAttribute::ModuleName(_) => false,
                             })
                         })
                     {

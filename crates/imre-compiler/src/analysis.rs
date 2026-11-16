@@ -350,6 +350,13 @@ impl<'session> OperandTypes<'session> {
             .is_some()
     }
 
+    /// A physical call index can supply its callable and keyword layout at placement.
+    pub(crate) fn original_call_index(self, call: &ExprCall) -> Option<ruff_python_ast::NodeIndex> {
+        let parsed = self.parsed();
+        self.original_operand(&parsed, call.into())?;
+        Some(call.node_index.load())
+    }
+
     pub(crate) fn scalar_type(self, operand: &Expr) -> Option<crate::ir::Type> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
@@ -519,7 +526,8 @@ impl<'session> OperandTypes<'session> {
         else {
             return None;
         };
-        if ExprRef::from(original) != operand
+        if !ruff_python_ast::AnyNodeRef::from(original).ptr_eq(operand.into())
+            && ExprRef::from(original) != operand
             || original
                 .as_name_expr()
                 .is_some_and(|name| name.ctx != ExprContext::Load)

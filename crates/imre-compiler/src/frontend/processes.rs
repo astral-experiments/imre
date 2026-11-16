@@ -1223,7 +1223,7 @@ impl Checker<'_> {
                 .registered_values()
                 .operands(self.source, self.graph.python_optimization());
             if let Some(target) =
-                source.imported_callable(name, call, self.graph.session.operand_types(self.module))
+                source.imported_call(name, call, self.graph.session.operand_types(self.module))
             {
                 let mut values = args.values;
                 let defaults = values.split_off(call.arguments.len());
@@ -1242,7 +1242,7 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::Process(op, site), values),
                 };
                 let sites = self.fixed_sites.as_mut().unwrap();
-                sites.written_call(call, &value, None, || Some(target));
+                sites.written_call(call, &value, || Some(target));
                 return Ok(value);
             }
         }
@@ -1777,6 +1777,36 @@ mod tests {
         let crate::CheckedProgram::Native(fixed) = crate::checked_lower(&mut graph).unwrap() else {
             panic!("expected the native subprocess operation")
         };
+        let types = graph.session.operand_types(graph.entry);
+        let parsed = types.parsed();
+        let def = parsed.suite()[1].as_function_def_stmt().unwrap();
+        let call = def.body[0]
+            .as_assign_stmt()
+            .unwrap()
+            .value
+            .as_call_expr()
+            .unwrap();
+        let module = call
+            .func
+            .as_attribute_expr()
+            .unwrap()
+            .value
+            .as_name_expr()
+            .unwrap();
+        let source = registered::function_source(&graph, graph.entry);
+        let mut held = source.imported_call(module, call, types).unwrap();
+        assert!(
+            matches!(held, FixedAttribute::OriginalCall(index) if index == call.node_index.load())
+        );
+        assert!(held.bind_original(source));
+        let Some((Some(_), bound)) = held.call_binding() else {
+            panic!("expected the original callable and its keyword layout");
+        };
+        assert_eq!(bound.range, call.range());
+        assert!(
+            matches!(&bound.arguments, ir::RegisteredArguments::Keywords { positional: 1, names }
+            if names.iter().map(|name| name.as_str()).eq(["text", "capture_output", "universal_newlines"]))
+        );
         let mut calls = 0;
         for function in &fixed.ir.0.functions {
             ir::walk_expressions(&function.body, &mut |expr| {
@@ -1786,6 +1816,9 @@ mod tests {
                 ) = &expr.kind
                 {
                     calls += 1;
+                    assert!(
+                        matches!(site, ir::ProcessSite::Written(site) if site.range == bound.range)
+                    );
                     assert_eq!(args.len(), 4);
                     assert!(std::ptr::eq(site.formal(args, 7), &args[1]));
                     assert!(std::ptr::eq(site.formal(args, 15), &args[2]));

@@ -3306,6 +3306,9 @@ pub(crate) struct SourceGraph {
     /// The launcher has already selected a registered module initializer.
     pub(crate) registered_startup: bool,
     registered_functions: std::cell::RefCell<RegisteredFunctions>,
+    /// Operands available to place after the selected source passes its own checks.
+    pub(crate) registered_call_operands:
+        std::cell::RefCell<HashMap<ModuleId, crate::dynamic::FunctionCallOperands>>,
     /// Default-rule error ranges for the physical sources shared by every layout attempt.
     pub(crate) registered_source_errors: std::cell::RefCell<RegisteredSourceErrors>,
     /// Contract of the original graph, valid only while its declarations still win.
@@ -3414,6 +3417,7 @@ impl SourceGraph {
 
     pub(crate) fn clear_registered_functions(&self) {
         let mut functions = self.registered_functions.borrow_mut();
+        self.registered_call_operands.borrow_mut().clear();
         functions.admitted.clear();
         functions.lexical.clear();
         functions.initializers.clear();
@@ -3454,6 +3458,19 @@ impl SourceGraph {
             .borrow_mut()
             .lexical
             .push((module, start, body));
+    }
+
+    pub(crate) fn retain_lexical_operands(
+        &self,
+        module: ModuleId,
+        start: TextSize,
+        operands: crate::dynamic::CallOperands,
+    ) {
+        self.registered_call_operands
+            .borrow_mut()
+            .entry(module)
+            .or_default()
+            .insert(start, operands.into());
     }
 
     pub(crate) fn defer_registered_function(
@@ -5274,6 +5291,7 @@ impl<'a> Loader<'a> {
             ),
             has_object_constructor_fallback: Default::default(),
             registered_functions: Default::default(),
+            registered_call_operands: Default::default(),
             registered_source_errors: Default::default(),
             registered_startup: false,
             source_contract: None,
