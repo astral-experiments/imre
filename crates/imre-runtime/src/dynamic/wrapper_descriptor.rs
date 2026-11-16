@@ -271,9 +271,6 @@ impl BuiltinDescriptor {
                 &["mro", "__subclasses__", "__setattr__", "__delattr__"][..],
             )),
             Some(("int", attr)) => Some(("int", attr, builtins::real_methods("int"))),
-            Some(("float", "as_integer_ratio")) => {
-                Some(("float", "as_integer_ratio", &["as_integer_ratio"][..]))
-            }
             Some(("float", attr)) => Some(("float", attr, builtins::real_methods("float"))),
             Some(("bytes", attr)) => Some(("bytes", attr, builtins::BYTES_METHODS)),
             Some(("complex", attr)) => Some(("complex", attr, super::complex::METHODS)),
@@ -450,7 +447,20 @@ impl BuiltinDescriptor {
             "_thread._local.__getattribute__" => (thread_local::CLASS, "__getattribute__"),
             "_thread._local.__setattr__" => (thread_local::CLASS, "__setattr__"),
             "_thread._local.__delattr__" => (thread_local::CLASS, "__delattr__"),
-            _ => return None,
+            _ => {
+                // Ordinary methods can also come from the defining type's own method table.
+                let (owner, attr, _) = slots?;
+                if attr.starts_with("__") {
+                    return None;
+                }
+                let methods = NativeTypeMethods::for_type(owner)?;
+                let &name = methods.defined.iter().find(|&&method| method == attr)?;
+                return Some(Self {
+                    owner,
+                    name,
+                    method: true,
+                });
+            }
         };
         Some(Self {
             owner,
@@ -968,8 +978,11 @@ impl BuiltinDescriptor {
                     ("__getitem__", _) if self.owner == "list" => "($self, index, /)",
                     ("join", "__doc__") => "Concatenate any number of strings.\n\nThe string whose method is called is inserted in between each given string.\nThe result is returned as a new string.\n\nExample: '.'.join(['ab', 'pq', 'rs']) -> 'ab.pq.rs'",
                     ("join", _) => "($self, iterable, /)",
-                    ("from_bytes", "__doc__") => "Return the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
-                    ("from_bytes", _) => "($type, /, bytes, byteorder='big', *, signed=False)",
+                    // Argument Clinic method definitions from CPython Objects/clinic/longobject.c.h.
+                    ("bit_count", _) if self.owner == "int" => "bit_count($self, /)\n--\n\nNumber of ones in the binary representation of the absolute value of self.\n\nAlso known as the population count.\n\n>>> bin(13)\n'0b1101'\n>>> (13).bit_count()\n3",
+                    ("bit_length", _) if self.owner == "int" => "bit_length($self, /)\n--\n\nNumber of bits necessary to represent self in binary.\n\n>>> bin(37)\n'0b100101'\n>>> (37).bit_length()\n6",
+                    ("to_bytes", _) if self.owner == "int" => "to_bytes($self, /, length=1, byteorder='big', *, signed=False)\n--\n\nReturn an array of bytes representing an integer.\n\n  length\n    Length of bytes object to use.  An OverflowError is raised if the\n    integer is not representable with the given number of bytes.  Default\n    is length 1.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Determines whether two's complement is used to represent the integer.\n    If signed is False and a negative integer is given, an OverflowError\n    is raised.",
+                    ("from_bytes", _) if self.owner == "int" => "from_bytes($type, /, bytes, byteorder='big', *, signed=False)\n--\n\nReturn the integer represented by the given array of bytes.\n\n  bytes\n    Holds the array of bytes to convert.  The argument must either\n    support the buffer protocol or be an iterable object producing bytes.\n    Bytes and bytearray are examples of built-in objects that support the\n    buffer protocol.\n  byteorder\n    The byte order used to represent the integer.  If byteorder is 'big',\n    the most significant byte is at the beginning of the byte array.  If\n    byteorder is 'little', the most significant byte is at the end of the\n    byte array.  To request the native byte order of the host system, use\n    sys.byteorder as the byte order value.  Default is to use 'big'.\n  signed\n    Indicates whether two's complement is used to represent the integer.",
                     ("hex", "__doc__") if self.owner == "float" => "Return a hexadecimal representation of a floating-point number.\n\n>>> (-0.1).hex()\n'-0x1.999999999999ap-4'\n>>> 3.14159.hex()\n'0x1.921f9f01b866ep+1'",
                     ("hex", _) if self.owner == "float" => "($self, /)",
                     ("fromhex", "__doc__") if self.owner == "bytes" => "Create a bytes object from a string of hexadecimal numbers.\n\nSpaces between two numbers are accepted.\nExample: bytes.fromhex('B9 01EF') -> b'\\\\xb9\\\\x01\\\\xef'.",
@@ -979,9 +992,8 @@ impl BuiltinDescriptor {
                     ("fromkeys", "__doc__") => "Create a new dictionary with keys from iterable and values set to value.",
                     ("fromkeys", _) => "($type, iterable, value=None, /)",
                     ("append", "__doc__") => "Append object to the end of the list.",
-                    ("pop", "__doc__") => {
-                        "Remove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range."
-                    }
+                    ("pop", _) if self.owner == "list" => "pop($self, index=-1, /)\n--\n\nRemove and return item at index (default last).\n\nRaises IndexError if list is empty or index is out of range.",
+                    ("pop", _) if self.owner == "bytearray" => "pop($self, index=-1, /)\n--\n\nRemove and return a single item from B.\n\n  index\n    The index from where to remove the item.\n    -1 (the default value) means remove the last item.\n\nIf no index argument is given, will pop the last item.",
                     ("__round__", "__doc__") if self.owner == "int" => "Rounding an Integral returns itself.\n\nRounding with an ndigits argument also returns an integer.",
                     ("__round__", "__doc__") => "Return the Integral closest to x, rounding half toward even.\n\nWhen an argument is passed, work like built-in round(x, ndigits).",
                     ("__round__", _) => "($self, ndigits=None, /)",
@@ -996,9 +1008,13 @@ impl BuiltinDescriptor {
                     ("is_integer", "__doc__") => "Return True if the float is an integer.",
                     ("as_integer_ratio" | "is_integer", _) => "($self, /)",
                     ("append", _) => "($self, object, /)",
-                    _ => "($self, index=-1, /)",
+                    _ => return None,
                 };
-                ctx.text(value)
+                let text = match value::clinic_doc(self.name, value) {
+                    Some((signature, doc)) => if name == "__doc__" { doc } else { signature },
+                    None => value,
+                };
+                ctx.text(text)
             }
             _ => return None,
         })

@@ -7334,9 +7334,7 @@ impl Context {
             .original_doc?;
         let doc = self.str_value(doc).ok()?.split('\0').next()?;
         let name = self.class_name(class).rsplit('.').next()?;
-        let signature = doc.strip_prefix(name)?;
-        let (header, _) = signature.split_once(value::TEXT_SIGNATURE_END)?;
-        (header.starts_with('(') && !header.contains("\n\n")).then(|| &signature[..=header.len()])
+        value::clinic_doc(name, doc).map(|(signature, _)| signature)
     }
 
     pub(super) fn read_layout_descriptor(

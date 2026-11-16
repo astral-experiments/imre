@@ -1169,6 +1169,14 @@ pub(super) type Result<T> = std::result::Result<T, Error>;
 
 pub(super) const TEXT_SIGNATURE_END: &str = ")\n--\n\n";
 
+/// Split a CPython Argument Clinic method definition into its public signature and docstring.
+pub(super) fn clinic_doc<'a>(name: &str, doc: &'a str) -> Option<(&'a str, &'a str)> {
+    let signature = doc.strip_prefix(name)?;
+    let (header, body) = signature.split_once(TEXT_SIGNATURE_END)?;
+    (header.starts_with('(') && !header.contains("\n\n"))
+        .then(|| (&signature[..=header.len()], body))
+}
+
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
