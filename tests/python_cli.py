@@ -103,6 +103,24 @@ def check_named_handler_filters(root, compare_module):
             compare_module(entry)
 
 
+def check_installed_return(imre, root, run):
+    fixtures = Path(__file__).resolve().with_name("fixtures") / "installed_return"
+    scripts = shutil.copytree(fixtures / "scripts", root / "installed_return")
+    search = {"PYTHONPATH": str(fixtures / "site-packages")}
+    for name, expected in (
+        ("rebound-exit", b"7 ['return']\n"),
+        ("say-hi", b"Hi from a script!\n"),
+    ):
+        result = run(imre, "-B", scripts / name, extra=search, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b""), result
+
+    result = run(imre, "-B", scripts / "unrebound", extra=search, timeout=300)
+    assert (result.returncode, result.stdout) == (1, b""), result
+    assert b'provider.py", line 6, in hello' in result.stderr, result
+    assert b'provider.py", line 2, in stop' in result.stderr, result
+    assert result.stderr.endswith(b"ValueError: original\n"), result
+
+
 def check_registered_entry_operand(imre, root, run):
     entry = root / "checked_operand.py"
     guard = (
@@ -2421,6 +2439,7 @@ def main():
         check_module_search_root(imre, root, run)
         check_reassigned_callable_operand(imre, root, run)
         check_registered_entry_operand(imre, root, run)
+        check_installed_return(imre, root, run)
         check_imported_call_arguments(imre, root, run)
         check_tracemalloc_startup(imre, run)
         check_registered_run_path(imre, root, run)

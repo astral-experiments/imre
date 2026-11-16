@@ -1,0 +1,6 @@
+#!/tmp/uvdisc/fixture-imre-install/venv/bin/python
+import sys
+from built_by_uv.cli import hello
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(hello())
