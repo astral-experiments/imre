@@ -525,13 +525,24 @@ impl Context {
 
     /// Resolve the executing operation only when a Python caller inspects this frame.
     pub(super) fn frame_position(&self, object: Id) -> Option<[u32; 4]> {
-        let frame = self
+        let Some(frame) = self
             .heap
             .execution
             .frames
             .iter()
             .rev()
-            .find(|frame| frame.object == Some(object))?;
+            .find(|frame| frame.object == Some(object))
+        else {
+            let Value::PythonFrame {
+                lineno,
+                span: Some([end_line, start, end]),
+                ..
+            } = *self.heap.get(object)
+            else {
+                return None;
+            };
+            return Some([lineno, end_line, start, end]);
+        };
         frame.call_position.or_else(|| {
             let location = frame.location.as_ref()?;
             let span = location.span?;
@@ -604,6 +615,7 @@ impl Context {
                 builtins,
                 back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
                 lineno: line,
+                span: None,
             });
             if let FrameOwner::Generator(id) = owner {
                 let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
@@ -655,6 +667,7 @@ impl Context {
             builtins,
             back: None,
             lineno,
+            span: None,
         });
         let Value::Generator { frame, .. } = self.heap.get_mut(id) else {
             unreachable!()
@@ -710,6 +723,12 @@ impl Context {
                     // An eager expression shares the published range of a definition,
                     // but its own failing instruction is highlighted in the traceback.
                     span.anchor = TracebackAnchor::Uniform;
+                }
+                if let Some(Value::PythonFrame { lineno, span, .. }) =
+                    &mut self.heap.slots[frame as usize].value
+                {
+                    *lineno = loc.line;
+                    *span = loc.span.map(|s| [s.end_line, s.start, s.end]);
                 }
                 let active = self.heap.active_exception();
                 let generator_input = error
@@ -1752,6 +1771,8 @@ pub(super) enum Value {
         // Ordinary frames retain their caller. Generator frames resolve their live resumer.
         back: Option<Id>,
         lineno: u32,
+        // The faulting instruction, until this frame executes another source position.
+        span: Option<[u32; 3]>,
     },
     Method {
         callable: Id,
@@ -6892,9 +6913,11 @@ impl Heap {
             .expect("active source location")
             .line = line;
         if let Some(id) = frame.object
-            && let Some(Value::PythonFrame { lineno, .. }) = &mut self.slots[id as usize].value
+            && let Some(Value::PythonFrame { lineno, span, .. }) =
+                &mut self.slots[id as usize].value
         {
             *lineno = line;
+            *span = None;
         }
         if self.fault_frames_current()
             && let Some(index) = self.python_depth().checked_sub(1)
