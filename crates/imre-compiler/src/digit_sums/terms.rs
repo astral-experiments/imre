@@ -2,6 +2,7 @@
 //! and representable by a byte lookup. Unknown IR always keeps the original loop.
 
 use crate::ir::{Binary, Expr, ExprKind, Statement, Type};
+use ruff_python_ast::UnaryOp;
 
 pub(super) fn table(
     term: &Expr,
@@ -75,7 +76,7 @@ impl Evaluator<'_> {
         let n = match &expr.kind {
             ExprKind::Local(slot) => self.locals[*slot]?,
             ExprKind::Int(n) => n.parse().ok()?,
-            ExprKind::Negate(a) => self.value(a)?.checked_neg()?,
+            ExprKind::Unary(UnaryOp::USub, a) => self.value(a)?.checked_neg()?,
             ExprKind::Binary(op, left, right) => {
                 let a = self.value(left)?;
                 let b = self.value(right)?;

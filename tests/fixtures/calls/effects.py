@@ -45,6 +45,11 @@ def pair(number: int, text: str) -> tuple[int, str]:
     return (number, text)
 
 
+def report_quota(remaining: int | bool) -> None:
+    print("remaining", remaining)
+    print(remaining)
+
+
 def main() -> None:
     log: list[int] = []
     print(pack(event(log, 1), third=event(log, 2), second=event(log, 3)))
@@ -62,6 +67,18 @@ def main() -> None:
     result = pair(text=text_event(log, 17), number=event(log, 18))
     print(result[0])
     print(result[1])
+    print("shipment", event(log, 19), True, 1.25, b"ok", None)
+    try:
+        print("unwritten", event(log, 20), int("not an integer"))
+    except ValueError:
+        print("failed before output")
+    try:
+        print("quantity", 10**5000)
+    except ValueError:
+        print("over limit")
+    report_quota(False)
+    report_quota(-3)
+    report_quota(2**80)
     for number in log:
         print(number)
 

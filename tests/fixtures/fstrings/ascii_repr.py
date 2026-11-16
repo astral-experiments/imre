@@ -64,6 +64,7 @@ def main() -> None:
         print(f"{bad!a}")
     except ValueError as error:
         print(f"{error!a}")
+    print(ascii([ReturnTicket("one", calls), ReturnTicket("two", calls)]))
     print(calls)
     print(ascii("a'b\"\n\r\t\x00 éΩ🐍"))
     print(ascii((None, False, 2**100, -13.25, b"\x00\xff")))

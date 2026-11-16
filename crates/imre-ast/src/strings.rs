@@ -6,6 +6,67 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::collections::HashMap;
 
+/// String methods exposed by the boxed runtime's native method descriptors.
+pub const STR_METHODS: &[&str] = &[
+    "__add__",
+    "__contains__",
+    "__eq__",
+    "__getitem__",
+    "__hash__",
+    "__str__",
+    "__format__",
+    "__mod__",
+    "__ne__",
+    "__repr__",
+    "__rmod__",
+    "capitalize",
+    "casefold",
+    "center",
+    "count",
+    "encode",
+    "endswith",
+    "expandtabs",
+    "find",
+    "format",
+    "format_map",
+    "index",
+    "isalnum",
+    "isascii",
+    "isalpha",
+    "isdecimal",
+    "isdigit",
+    "isidentifier",
+    "islower",
+    "isnumeric",
+    "isprintable",
+    "isspace",
+    "istitle",
+    "isupper",
+    "join",
+    "ljust",
+    "lower",
+    "lstrip",
+    "partition",
+    "removeprefix",
+    "removesuffix",
+    "replace",
+    "rfind",
+    "rindex",
+    "rjust",
+    "rpartition",
+    "rsplit",
+    "rstrip",
+    "split",
+    "splitlines",
+    "startswith",
+    "strip",
+    "swapcase",
+    "title",
+    "translate",
+    "upper",
+    "zfill",
+];
+
 /// Raw and byte literals have no cooked Unicode escapes.
 pub fn cooked_content(token: &Token) -> Option<TextRange> {
     if !matches!(
@@ -60,19 +121,92 @@ pub fn replacements(source: &str) -> impl Iterator<Item = u32> + '_ {
     })
 }
 
-/// CPython keeps the original expression spelling, including leading whitespace
-/// and enclosing parentheses. Commented expressions require a separate tokenizer
-/// transformation and are left unsupported.
-pub fn template_expressions<'a>(
+/// Debug fields default to repr when they have no explicit format spec.
+pub fn interpolation_conversion(field: &ast::InterpolatedElement) -> Option<char> {
+    field
+        .conversion
+        .to_char()
+        .or_else(|| (field.debug_text.is_some() && field.format_spec.is_none()).then_some('r'))
+}
+
+/// Text retained by a template literal independently of evaluating its fields.
+#[derive(Debug, Clone)]
+pub struct TemplateFieldText {
+    pub expression: String,
+    pub debug_prefix: Option<String>,
+}
+
+pub fn template_fields<'a>(
     source: &str,
     tokens: &Tokens,
     syntax: impl Into<ast::ModRef<'a>>,
-) -> HashMap<TextSize, String> {
+) -> HashMap<TextSize, TemplateFieldText> {
     use ast::visitor::{self, Visitor};
     struct Fields<'a> {
         source: &'a str,
         tokens: &'a Tokens,
-        expressions: HashMap<TextSize, String>,
+        fields: HashMap<TextSize, TemplateFieldText>,
+    }
+    impl Fields<'_> {
+        /// Remove comments in this field while keeping newlines, string contents
+        /// and comments inside nested string literals verbatim.
+        fn text(&self, range: TextRange) -> String {
+            let mut output = String::new();
+            let mut start = range.start();
+            let mut nested = 0;
+            for token in self.tokens.in_range(range) {
+                match token.kind() {
+                    TokenKind::TStringStart | TokenKind::FStringStart => nested += 1,
+                    TokenKind::TStringEnd | TokenKind::FStringEnd => nested -= 1,
+                    TokenKind::Comment if nested == 0 => {
+                        output.push_str(&self.source[TextRange::new(start, token.start())]);
+                        start = token.end();
+                    }
+                    _ => {}
+                }
+            }
+            output.push_str(&self.source[TextRange::new(start, range.end())]);
+            if output.contains('\r') {
+                output = output.replace("\r\n", "\n").replace('\r', "\n");
+            }
+            output
+        }
+
+        fn record(&mut self, field: &ast::InterpolatedElement) {
+            // Ruff omits outer grouping parentheses from the expression range.
+            // The delimiter also bounds whitespace and explicit line joins.
+            let mut suffix = self
+                .tokens
+                .after(field.expression.end())
+                .iter()
+                .filter(|t| !t.kind().is_trivia() && t.kind() != TokenKind::Rpar);
+            let Some(delimiter) = suffix.next() else {
+                return;
+            };
+            let start = field.start() + TextSize::new(1);
+            let debug_prefix = match delimiter.kind() {
+                TokenKind::Equal => suffix
+                    .next()
+                    .map(|end| self.text(TextRange::new(start, end.start()))),
+                TokenKind::Exclamation | TokenKind::Colon | TokenKind::Rbrace => None,
+                _ => return,
+            };
+            let mut expression = self.text(TextRange::new(start, delimiter.start()));
+            expression.truncate(expression.trim_end().len());
+            self.fields.insert(
+                field.start(),
+                TemplateFieldText {
+                    expression,
+                    debug_prefix,
+                },
+            );
+
+            if let Some(spec) = &field.format_spec {
+                for field in spec.elements.interpolations() {
+                    self.record(field);
+                }
+            }
+        }
     }
     impl<'a> Visitor<'a> for Fields<'_> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
@@ -83,41 +217,7 @@ pub fn template_expressions<'a>(
 
         fn visit_t_string(&mut self, template: &'a ast::TString) {
             for field in template.elements.interpolations() {
-                // Ruff's expression range omits redundant outer parentheses. End
-                // at the field delimiter to retain both those and explicit line joins.
-                let Some(delimiter) = self
-                    .tokens
-                    .after(field.expression.end())
-                    .iter()
-                    .find(|t| !t.kind().is_trivia() && t.kind() != TokenKind::Rpar)
-                else {
-                    continue;
-                };
-                if !matches!(
-                    delimiter.kind(),
-                    TokenKind::Equal
-                        | TokenKind::Exclamation
-                        | TokenKind::Colon
-                        | TokenKind::Rbrace
-                ) {
-                    continue;
-                }
-                let range = TextRange::new(field.start() + TextSize::new(1), delimiter.start());
-                if self
-                    .tokens
-                    .in_range(range)
-                    .iter()
-                    .any(|t| t.kind() == TokenKind::Comment)
-                {
-                    continue;
-                }
-                let spelling = self.source[range].trim_end();
-                let expression = if spelling.contains('\r') {
-                    spelling.replace("\r\n", "\n").replace('\r', "\n")
-                } else {
-                    spelling.to_owned()
-                };
-                self.expressions.insert(field.start(), expression);
+                self.record(field);
             }
             visitor::walk_t_string(self, template);
         }
@@ -125,15 +225,24 @@ pub fn template_expressions<'a>(
     let mut fields = Fields {
         source,
         tokens,
-        expressions: HashMap::new(),
+        fields: HashMap::new(),
     };
-    if tokens.iter().any(|t| t.kind() == TokenKind::TStringStart) {
-        match syntax.into() {
-            ast::ModRef::Module(module) => fields.visit_body(&module.body),
-            ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
-        }
+    match syntax.into() {
+        ast::ModRef::Module(module) => fields.visit_body(&module.body),
+        ast::ModRef::Expression(expr) => fields.visit_expr(&expr.body),
     }
-    fields.expressions
+    fields.fields
+}
+
+pub fn template_expressions<'a>(
+    source: &str,
+    tokens: &Tokens,
+    syntax: impl Into<ast::ModRef<'a>>,
+) -> HashMap<TextSize, String> {
+    template_fields(source, tokens, syntax)
+        .into_iter()
+        .map(|(start, field)| (start, field.expression))
+        .collect()
 }
 
 /// Limit the field metadata to forms supported by both native evaluators.
@@ -148,6 +257,57 @@ pub fn template_format_spec(
         Some([ast::InterpolatedStringElement::Literal(literal)]) => Ok(Some(literal)),
         _ => Err("nested t-string format spec"),
     }
+}
+
+/// Recognize the line boundaries used by Python's str.splitlines.
+pub fn is_line_boundary(point: u32) -> bool {
+    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+}
+
+/// Python also treats the four ASCII information separators as whitespace.
+pub fn python_whitespace(value: char) -> bool {
+    value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
+}
+
+/// Length of the common literal space/tab prefix of the supplied nonblank lines.
+pub fn common_indent<'a>(mut lines: impl Iterator<Item = &'a str>) -> usize {
+    let first = lines.next().unwrap_or("");
+    let mut margin = &first.as_bytes()[..first.len() - first.trim_start_matches([' ', '\t']).len()];
+    for line in lines {
+        if margin.is_empty() {
+            break;
+        }
+        let common = margin
+            .iter()
+            .zip(line.as_bytes())
+            .take_while(|(a, b)| a == b)
+            .count();
+        margin = &margin[..common];
+    }
+    margin.len()
+}
+
+/// CPython expands tabs at eight-character stops, then removes the common
+/// margin after the first line. Blank lines and the final newline survive.
+pub fn clean_doc(doc: &str) -> String {
+    let expanded = ruff_python_trivia::expand_tabs(doc);
+    let mut lines = expanded.split('\n');
+    let first = lines.next().unwrap_or_default().trim_start_matches(' ');
+    let margin = lines
+        .clone()
+        .filter_map(|line| {
+            let content = line.trim_start_matches(' ');
+            (!content.is_empty()).then_some(line.len() - content.len())
+        })
+        .min()
+        .unwrap_or(0);
+    let mut cleaned = first.to_owned();
+    for line in lines {
+        cleaned.push('\n');
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        cleaned.push_str(&line[margin.min(indent)..]);
+    }
+    cleaned
 }
 
 /// Return the first result of checking module, function and class docstrings.
@@ -194,4 +354,16 @@ pub fn find_docstring<'a, T>(
     }
     docs.visit_body(body);
     docs.found
+}
+
+/// Select a bucket for three ASCII bytes, ignoring ASCII letter case.
+/// The compiler records literal key prefixes and the runtime tests input prefixes.
+#[inline]
+pub fn ascii_case_prefix_bit(bytes: &[u8]) -> Option<u64> {
+    let prefix = bytes.first_chunk::<3>()?;
+    if !prefix.is_ascii() {
+        return None;
+    }
+    let [a, b, c] = prefix.map(|byte| u32::from(byte.to_ascii_lowercase()));
+    Some(1_u64 << (((a * 31 + b) * 31 + c) & 63))
 }

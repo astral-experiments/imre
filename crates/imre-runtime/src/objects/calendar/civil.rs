@@ -1,8 +1,9 @@
 //! The compact pickle constructor preserves civil components before any arithmetic normalization.
 use super::*;
 
-/// Ordinary instances use local microseconds since ordinal one. Packed instances retain
-/// CPython's field bytes, which can describe dates or clocks outside constructor ranges.
+/// Calendar arithmetic produces local microseconds since ordinal one. Parsed civil
+/// fields and pickle payloads use CPython's byte layout. Pickle payloads can also
+/// describe dates and clocks outside constructor ranges.
 #[derive(Clone, Copy)]
 pub(in crate::objects) enum Civil {
     Scalar(i64),
@@ -10,6 +11,33 @@ pub(in crate::objects) enum Civil {
 }
 
 impl Civil {
+    /// Validate parsed components before storing them in calendar order.
+    pub(super) fn from_fields(
+        [y, m, d]: [i32; 3],
+        [h, min, sec, us]: [i32; 4],
+    ) -> Result<Self, Error> {
+        check_date(y, m, d)?;
+        time_micros([h, min, sec, us, 0])?;
+        let [y0, y1] = (y as u16).to_be_bytes();
+        let [_, u0, u1, u2] = (us as u32).to_be_bytes();
+        Ok(Self::Packed([
+            y0, y1, m as u8, d as u8, h as u8, min as u8, sec as u8, u0, u1, u2,
+        ]))
+    }
+
+    pub(super) fn field(self, index: usize, fold: i32) -> i128 {
+        match self {
+            Self::Packed(b) => match index {
+                0 => u16::from_be_bytes([b[0], b[1]]).into(),
+                1..=5 => b[index + 1].into(),
+                6 => u32::from_be_bytes([0, b[7], b[8], b[9]]).into(),
+                7 => fold.into(),
+                _ => unreachable!(),
+            },
+            Self::Scalar(_) => self.fields(fold)[index],
+        }
+    }
+
     pub(super) fn from_micros(local: i128) -> Self {
         // Canonical civil values lie between 0001-01-01 and 9999-12-31.
         Self::Scalar(i64::try_from(local).expect("civil microseconds fit i64"))

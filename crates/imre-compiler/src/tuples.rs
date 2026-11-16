@@ -81,11 +81,7 @@ fn scalarize_function(
 ) {
     // Named bindings can replace a tuple midway through another expression.
     // Retain aggregate ownership until the projection pass models those writes.
-    if function
-        .expression_rebound()
-        .into_iter()
-        .any(|written| written)
-    {
+    if function.has_expression_bindings() {
         return;
     }
     let mut candidates = function
@@ -208,7 +204,7 @@ fn inspect(
             // Clearing the aggregate releases exactly the component owners.
             // It neither observes tuple identity nor lets the aggregate escape.
             Statement::Clear(_) => {}
-            Statement::SetItem(dict, key, value)
+            Statement::SetItem(_, dict, key, value)
                 if matches!(dict.ty, Type::Dict(_))
                     && let ExprKind::Local(slot) = key.kind
                     && matches!(key.ty, Type::Tuple(_)) =>
@@ -219,7 +215,7 @@ fn inspect(
                 inspect_expression(dict, candidates, producers);
                 inspect_expression(value, candidates, producers);
             }
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+            Statement::SetItem(_, a, b, c) | Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     inspect_expression(value, candidates, producers);
                 }
@@ -228,8 +224,18 @@ fn inspect(
                 inspect_expression(a, candidates, producers);
                 inspect_expression(b, candidates, producers);
             }
-            Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+            Statement::Expr(value) | Statement::Return(value) => {
                 inspect_expression(value, candidates, producers);
+            }
+            Statement::Match(_, cases) => {
+                statement.operands(|value| inspect_expression(value, candidates, producers));
+                for case in cases {
+                    for &slot in &case.captures {
+                        candidates[slot].eligible = false;
+                    }
+                    inspect(&case.body, candidates, producers, &mut HashSet::new());
+                }
+                fresh.clear();
             }
             Statement::If(condition, yes, no) => {
                 inspect_expression(condition, candidates, producers);
@@ -240,6 +246,19 @@ fn inspect(
                 inspect_expression(condition, candidates, producers);
                 inspect(body, candidates, producers, &mut HashSet::new());
                 inspect(orelse, candidates, producers, fresh);
+            }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                inspect_expression(manager, candidates, producers);
+                if let Some(binding) = binding {
+                    candidates[binding.entered].eligible = false;
+                    inspect(&binding.body, candidates, producers, fresh);
+                }
+                inspect(body, candidates, producers, fresh);
             }
             Statement::Scope { body, .. } => inspect(body, candidates, producers, fresh),
             Statement::Try {
@@ -257,7 +276,10 @@ fn inspect(
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    inspect_expression(value, candidates, producers);
+                    inspect_expression(&value.exception, candidates, producers);
+                    if let Some(cause) = &value.cause {
+                        inspect_expression(cause, candidates, producers);
+                    }
                 }
             }
             Statement::For {
@@ -274,7 +296,10 @@ fn inspect(
                 inspect(body, candidates, producers, &mut HashSet::new());
                 inspect(orelse, candidates, producers, fresh);
             }
-            Statement::Break | Statement::Continue | Statement::Exhaust => {}
+            Statement::Position(..)
+            | Statement::Break(_)
+            | Statement::Continue(_)
+            | Statement::Exhaust => {}
         }
     }
     for slot in introduced {
@@ -529,6 +554,7 @@ mod tests {
             kind: ExprKind::Call(
                 0,
                 crate::ir::CallArgs {
+                    site: crate::ir::CallSite::None,
                     exhaustive_enum_match: false,
                     values: vec![
                         Expr {
@@ -586,8 +612,8 @@ mod tests {
 
     #[test]
     fn cleared_unpacking_roots_do_not_materialize_tuples() {
-        // A list-pattern assignment exercises tuple scalarization, while a plain
-        // tuple of local targets already stages each RHS directly in the frontend.
+        // The tuple display assigns its fields directly. The enumerate row still
+        // reaches scalarization with a tuple root.
         let source = r#"
 def total(values: list[int]) -> int:
     [number, name, payload] = (1000000000000000000000000000000, "snapshot", [1])
@@ -604,10 +630,15 @@ print(total([10, 20]))
         let graph = crate::modules::SourceGraph::single(source).unwrap();
         let mut module = crate::frontend::lower(&graph).unwrap();
         let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert_eq!(before.matches("call ptr @imre_record_try_new(").count(), 2);
+        assert_eq!(
+            before
+                .matches("call ptr @imre_record_try_new_sized(")
+                .count(),
+            1
+        );
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert!(!after.contains("call ptr @imre_record_try_new("));
+        assert!(!after.contains("call ptr @imre_record_try_new_sized("));
         let function = &module.functions[0];
         fn collect_cleared(body: &[Statement], locals: &[Type], cleared: &mut Vec<Type>) {
             for statement in body {
@@ -657,7 +688,7 @@ def replace() -> str:
         };
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert!(!after.contains("call ptr @imre_record_try_new("));
+        assert!(!after.contains("call ptr @imre_record_try_new_sized("));
         let Statement::Scope {
             body,
             clear: staged,
@@ -694,7 +725,7 @@ def calculate(left: int, right: int) -> int:
         let mut module = crate::frontend::lower(&graph).unwrap();
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert!(!after.contains("call ptr @imre_record_try_new("));
+        assert!(!after.contains("call ptr @imre_record_try_new_sized("));
         assert_eq!(after.matches("call i64 @fn_0(").count(), 2);
     }
 
@@ -718,13 +749,18 @@ def total(left: str, right: str, start: int) -> int:
             let mut module = crate::frontend::lower(&graph).unwrap();
             let before =
                 crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-            assert_eq!(before.matches("call ptr @imre_record_try_new(").count(), 1);
+            assert_eq!(
+                before
+                    .matches("call ptr @imre_record_try_new_sized(")
+                    .count(),
+                1
+            );
 
             scalarize(&mut module);
 
             let after =
                 crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-            assert!(!after.contains("call ptr @imre_record_try_new("));
+            assert!(!after.contains("call ptr @imre_record_try_new_sized("));
         }
     }
 
@@ -771,7 +807,7 @@ def total(left: str, right: str) -> int:
                 ExprKind::Call(1, _) => order.push("start"),
                 ExprKind::Binary(crate::ir::Binary::FloorDivide, _, _) => order.push("floor"),
                 ExprKind::Binary(crate::ir::Binary::Modulo, _, _) => order.push("modulo"),
-                ExprKind::Builtin(Builtin::Int, _) => order.push("convert"),
+                ExprKind::Builtin(Builtin::Int(_), _) => order.push("convert"),
                 _ => {}
             });
             assert_eq!(order, expected);
@@ -795,7 +831,12 @@ def total(left: int, right: int) -> int:
         let mut module = crate::frontend::lower(&graph).unwrap();
         scalarize(&mut module);
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert_eq!(after.matches("call ptr @imre_record_try_new(").count(), 1);
+        assert_eq!(
+            after
+                .matches("call ptr @imre_record_try_new_sized(")
+                .count(),
+            1
+        );
         assert_eq!(after.matches("call ptr @fn_0(").count(), 1);
     }
 
@@ -833,12 +874,17 @@ def scoped(fail: bool) -> str:
             },
         }));
         let before = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert_eq!(before.matches("call ptr @imre_record_try_new(").count(), 1);
+        assert_eq!(
+            before
+                .matches("call ptr @imre_record_try_new_sized(")
+                .count(),
+            1
+        );
 
         scalarize(&mut module);
 
         let after = crate::llvm::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
-        assert!(!after.contains("call ptr @imre_record_try_new("));
+        assert!(!after.contains("call ptr @imre_record_try_new_sized("));
         let function = &module.functions[0];
         let [
             Statement::Return(Expr {

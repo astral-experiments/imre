@@ -21,10 +21,10 @@ static ATTRIBUTES: AttributeLayout = AttributeLayout(RecordDescriptor {
 });
 
 type Groups = HashMap<String, HashMap<String, Vec<(usize, OwnedWord)>>>;
-pub(crate) const OVERLOAD_DUMMY_ERROR: &str = "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.";
+const OVERLOAD_DUMMY_ERROR: &str = "You should not call an overloaded function. A series of @overload-decorated functions outside a stub module should always be followed by an implementation that is not @overload-ed.";
 
 /// Re-executing a source site replaces its function without reordering other overloads.
-pub(crate) fn register_overload<L: Eq, F>(group: &mut Vec<(L, F)>, line: L, function: F) {
+fn register_overload(group: &mut Vec<(usize, OwnedWord)>, line: usize, function: OwnedWord) {
     if let Some((_, previous)) = group.iter_mut().find(|(existing, _)| *existing == line) {
         *previous = function;
     } else {
@@ -32,7 +32,7 @@ pub(crate) fn register_overload<L: Eq, F>(group: &mut Vec<(L, F)>, line: L, func
     }
 }
 thread_local! {
-    // Source ordinals are compiler-assigned and independent of native code folding.
+    // A program-local ordinal can be reused by independently compiled modules.
     // These defaults contain strings and scalars only, never function owners.
     static SITES: RefCell<HashMap<u32, OwnedWord>> = RefCell::default();
     static REGISTRY: RefCell<Groups> = RefCell::default();
@@ -53,7 +53,7 @@ unsafe fn fields(function: *const usize) -> *mut usize {
 ///
 /// # Safety
 /// The callable owns a null context. Its module, qualname and short name are
-/// rooted native strings, and the ordinal names a unique source function.
+/// rooted native strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_typing_declare(
     function: *mut usize,
@@ -64,12 +64,13 @@ pub unsafe extern "C" fn imre_typing_declare(
     line: u32,
 ) {
     SITES.with_borrow_mut(|sites| {
-        let site = sites.entry(id).or_insert_with(|| {
+        let names = [module, qualname, name];
+        let initial = || {
             // SAFETY: the descriptor is static. The fresh record owns each
             // retained string and the absent marker remains zero initialized.
             unsafe {
                 let attrs = records::imre_record_new(&ATTRIBUTES.0);
-                for (i, value) in [module, qualname, name].into_iter().enumerate() {
+                for (i, value) in names.into_iter().enumerate() {
                     StrOwner::increment_strong_count(value);
                     attrs.add(i).cast::<*const Str>().write(value);
                 }
@@ -77,7 +78,20 @@ pub unsafe extern "C" fn imre_typing_declare(
                 attrs.add(SHARED).write(1);
                 OwnedWord::from_owned(attrs as usize, WordKind::new(6))
             }
-        });
+        };
+        let site = sites
+            .entry(id)
+            .and_modify(|site| {
+                let attrs = site.word as *const usize;
+                // SAFETY: the cached row owns these three strings and keeps its
+                // initial fields immutable. Each function holds its own row reference.
+                if unsafe {
+                    *attrs.cast::<[*const Str; 3]>() != names || *attrs.add(LINE) != line as usize
+                } {
+                    *site = initial();
+                }
+            })
+            .or_insert_with(initial);
         // SAFETY: transfer the new owner into the empty callable context.
         unsafe {
             site.clone().initialize_record_field(function.add(1));

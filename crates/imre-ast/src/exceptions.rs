@@ -38,6 +38,7 @@ macro_rules! exception_kinds {
         pub fn boxed_builtin_kind(name: &str) -> Option<Kind> {
             match name {
                 $(stringify!($builtin) => Some(Kind::$builtin),)*
+                "EnvironmentError" | "IOError" => Some(Kind::OSError),
                 _ => None,
             }
         }
@@ -135,22 +136,19 @@ exception_kinds! {
         BinasciiIncomplete = 70 => "binascii.Incomplete",
         PackageNotFoundError = 71 => "PackageNotFoundError",
         HError = 72 => "socket.herror",
+        ZstdError = 98 => "ZstdError",
         LzmaError = 94 => "LZMAError",
+        IllegalMonthError = 96 => "IllegalMonthError",
+        IllegalWeekdayError = 97 => "IllegalWeekdayError",
     }
 }
 
 /// Resolves an unqualified exception name accepted by the checked frontend.
 pub fn builtin_id(name: &str) -> Option<u32> {
-    let kind = match name {
-        "EnvironmentError" | "IOError" => Kind::OSError,
-        _ => match boxed_builtin_kind(name)? {
-            Kind::ChildProcessError | Kind::ProcessLookupError | Kind::BaseExceptionGroup => {
-                return None;
-            }
-            kind => kind,
-        },
-    };
-    Some(kind as u32)
+    match boxed_builtin_kind(name)? {
+        Kind::ChildProcessError | Kind::ProcessLookupError | Kind::BaseExceptionGroup => None,
+        kind => Some(kind as u32),
+    }
 }
 
 /// Indices used by typed warning filters and by the runtime's -W option.
@@ -201,11 +199,17 @@ impl Kind {
                     | Self::OverflowError
             ),
             Self::LookupError => {
-                matches!(self, Self::LookupError | Self::IndexError | Self::KeyError)
+                matches!(
+                    self,
+                    Self::LookupError | Self::IndexError | Self::KeyError | Self::IllegalMonthError
+                )
             }
+            Self::IndexError => matches!(self, Self::IndexError | Self::IllegalMonthError),
             Self::ValueError => matches!(
                 self,
                 Self::ValueError
+                    | Self::IllegalMonthError
+                    | Self::IllegalWeekdayError
                     | Self::JsonDecodeError
                     | Self::TomlDecodeError
                     | Self::BinasciiError

@@ -1,37 +1,11 @@
 //! Structural patterns over closed storage, lowered to ordinary owned branches.
 
+use ruff_python_ast::UnaryOp;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 
 use super::*;
 
-#[derive(Clone)]
-struct Flow {
-    assigned: assignments::Assigned,
-    narrowed: assignments::Narrowed,
-}
-
-impl Flow {
-    fn read(checker: &Checker<'_>) -> Self {
-        Self {
-            assigned: checker.assigned.clone(),
-            narrowed: checker.narrowed.clone(),
-        }
-    }
-
-    fn restore(&self, checker: &mut Checker<'_>) {
-        checker.assigned.clone_from(&self.assigned);
-        checker.narrowed.clone_from(&self.narrowed);
-    }
-
-    fn intersect(&mut self, other: &Self) {
-        assignments::intersect(
-            &mut self.assigned,
-            &mut self.narrowed,
-            &other.assigned,
-            &other.narrowed,
-        );
-    }
-}
+use super::assignments::Flow;
 
 struct Capture {
     name: String,
@@ -69,23 +43,13 @@ impl Pattern {
 }
 
 fn not(value: Expr) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Not(Box::new(value)),
-    }
+    Expr::not(value)
 }
 
 fn builtin(ty: Type, operation: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
         kind: ExprKind::Builtin(operation, args),
-    }
-}
-
-fn compare(left: Expr, operation: Compare, right: Expr) -> Expr {
-    Expr {
-        ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![operation]),
     }
 }
 
@@ -96,19 +60,30 @@ impl Checker<'_> {
         &mut self,
         branch: &ast::StmtMatch,
     ) -> Result<(Vec<Statement>, bool), String> {
+        // A saved command name only identifies this receiver while patterns and
+        // guards leave the local bound to the same immutable namespace.
+        let mut dispatch = match &*branch.subject {
+            ast::Expr::Attribute(attr) => attr.value.as_name_expr().map(|name| (attr, name)),
+            _ => None,
+        };
         for (index, case) in branch.cases.iter().enumerate() {
-            self.pattern_names(&case.pattern)?;
-            if case.pattern.is_irrefutable()
-                && case.guard.is_none()
-                && index + 1 != branch.cases.len()
+            let mut captures = imre_ast::executable::case_bindings(
+                case,
+                self.source,
+                index + 1 < branch.cases.len(),
+            )
+            .map_err(|(range, message)| error(self.source, &range, &message.checked()))?;
+            if let Some((_, name)) = dispatch
+                && (captures.any(|bound| bound == name.id.as_str())
+                    || case
+                        .guard
+                        .as_deref()
+                        .is_some_and(|guard| expression_rebinds(guard, name.id.as_str())))
             {
-                return Err(error(
-                    self.source,
-                    &case.pattern,
-                    "an unguarded irrefutable pattern must be the last case",
-                ));
+                dispatch = None;
             }
         }
+        let dispatch = dispatch.map(|(attr, _)| attr);
         let mut value = self.typed_expr(&branch.subject)?;
         let exhaustive = self.enum_exhaustive(value.ty, &branch.cases);
         if exhaustive && let ExprKind::Call(_, args) = &mut value.kind {
@@ -147,22 +122,6 @@ impl Checker<'_> {
                 "match requires an exact type selected from JSON",
             ));
         }
-        // A saved command name only identifies this receiver while patterns and
-        // guards leave the local bound to the same immutable namespace.
-        let dispatch = if let ast::Expr::Attribute(attr) = &*branch.subject
-            && let Some(name) = attr.value.as_name_expr()
-            && !branch.cases.iter().any(|case| {
-                case.guard
-                    .as_deref()
-                    .is_some_and(|guard| expression_rebinds(guard, name.id.as_str()))
-                    || self
-                        .pattern_names(&case.pattern)
-                        .is_ok_and(|names| names.iter().any(|bound| bound == name.id.as_str()))
-            }) {
-            Some(attr)
-        } else {
-            None
-        };
         let subject = self.hidden(value.ty);
         let selected = self.hidden(Type::Bool);
         let mut body = vec![
@@ -417,9 +376,9 @@ impl Checker<'_> {
             }
             ast::Pattern::MatchSingleton(singleton) => {
                 let test = if value.ty == Type::Bool {
-                    compare(
-                        value,
+                    pipelines::compare(
                         Compare::Equal,
+                        value,
                         Expr::boolean(singleton.value == ast::Singleton::True),
                     )
                 } else {
@@ -457,13 +416,13 @@ impl Checker<'_> {
             literal = Self::string_value(literal);
         }
         if value.ty == Type::Bool && matches!(literal.ty, Type::Int | Type::Float) {
-            value = builtin(Type::Int, Builtin::Int, vec![value]);
+            value = builtin(Type::Int, Builtin::Int(None), vec![value]);
         }
         if value.ty == literal.ty
             || (matches!(value.ty, Type::Int | Type::Float)
                 && matches!(literal.ty, Type::Int | Type::Float))
         {
-            compare(value, Compare::Equal, literal)
+            pipelines::compare(Compare::Equal, value, literal)
         } else {
             Expr::boolean(false)
         }
@@ -612,40 +571,26 @@ impl Checker<'_> {
             .patterns
             .iter()
             .position(|pattern| matches!(pattern, ast::Pattern::MatchStar(_)));
-        if sequence
-            .patterns
-            .iter()
-            .filter(|pattern| matches!(pattern, ast::Pattern::MatchStar(_)))
-            .count()
-            > 1
-        {
-            return Err(error(
-                self.source,
-                sequence,
-                "a sequence pattern can contain only one starred rest",
-            ));
-        }
-        let fixed = sequence.patterns.len() - usize::from(star.is_some());
-        if fields.as_ref().is_some_and(|fields| fields.len() < fixed) {
-            return Err(error(
-                self.source,
-                sequence,
-                "sequence pattern exceeds the fixed tuple's declared shape",
-            ));
-        }
         let mut pattern = Pattern::new(value.clone());
-        pattern.body.push(Statement::Assign(
-            success,
-            compare(
-                builtin(Type::Int, Builtin::Len, vec![value.clone()]),
-                if star.is_some() {
-                    Compare::GreaterEqual
-                } else {
-                    Compare::Equal
-                },
-                Expr::integer(fixed),
-            ),
-        ));
+        if let Some(length) = ir::pattern_length(sequence.patterns.len(), star) {
+            let matches = if let Some(fields) = &fields {
+                if fields.len() < length.required {
+                    return Err(error(
+                        self.source,
+                        sequence,
+                        "sequence pattern exceeds the fixed tuple's declared shape",
+                    ));
+                }
+                Expr::boolean(length.accepts(fields.len()))
+            } else {
+                pipelines::compare(
+                    length.op,
+                    builtin(Type::Int, Builtin::Len, vec![value.clone()]),
+                    Expr::integer(length.required),
+                )
+            };
+            pattern.body.push(Statement::Assign(success, matches));
+        }
         for (index, child) in sequence.patterns.iter().enumerate() {
             if let ast::Pattern::MatchStar(starred) = child {
                 if let Some(name) = &starred.name {
@@ -698,7 +643,7 @@ impl Checker<'_> {
                                     starred,
                                 )
                             })
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         Expr {
                             ty: self.types.list(element),
                             kind: ExprKind::List(elements),
@@ -718,7 +663,7 @@ impl Checker<'_> {
             let item = if let Some(element) = element {
                 builtin(
                     element,
-                    Builtin::ListGet,
+                    Builtin::ListGet(None),
                     vec![value.clone(), Expr::integer(position)],
                 )
             } else {
@@ -757,18 +702,8 @@ impl Checker<'_> {
         })?;
         let mut pattern = Pattern::new(value.clone());
         let mut keys = Vec::new();
-        let mut seen = HashSet::new();
         for (key, child) in mapping.keys.iter().zip(&mapping.patterns) {
             let key = mapping_key(self.pattern_literal(key)?);
-            if let Some(key) = literal_key(&key)
-                && !seen.insert(key)
-            {
-                return Err(error(
-                    self.source,
-                    mapping,
-                    "duplicate literal key in mapping pattern",
-                ));
-            }
             let slot = self.hidden(value_type);
             let mut child = self.pattern(child, self.local(slot), success)?;
             child.body.insert(
@@ -840,11 +775,7 @@ impl Checker<'_> {
                 result,
                 Expr {
                     ty: dictionary,
-                    kind: ExprKind::Dict {
-                        key: key_type,
-                        value: value_type,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
             ),
             Statement::Assign(
@@ -861,8 +792,12 @@ impl Checker<'_> {
                         value: Some(item),
                         ready,
                     },
-                    Statement::If(not(self.local(ready)), vec![Statement::Break], Vec::new()),
-                    Statement::SetItem(self.local(result), self.local(key), self.local(item)),
+                    Statement::If(
+                        not(self.local(ready)),
+                        vec![Statement::Break(None)],
+                        Vec::new(),
+                    ),
+                    Statement::assign_item(self.local(result), self.local(key), self.local(item)),
                     Statement::Clear(key),
                     Statement::Clear(item),
                 ],
@@ -872,7 +807,7 @@ impl Checker<'_> {
         pattern.body.extend(keys.into_iter().map(|key| {
             Statement::Expr(builtin(
                 Type::None,
-                Builtin::DictDelete,
+                Builtin::DeleteItem,
                 vec![self.local(result), key],
             ))
         }));
@@ -929,15 +864,7 @@ impl Checker<'_> {
                 .push(Statement::Assign(success, Expr::boolean(false)));
             self.local(unreachable)
         };
-        let mut seen = HashSet::new();
         for keyword in &class.arguments.keywords {
-            if !seen.insert(keyword.attr.as_str()) {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    "duplicate field in class pattern",
-                ));
-            }
             let field = self.classes.declarations.definitions[id]
                 .fields
                 .iter()
@@ -967,91 +894,6 @@ impl Checker<'_> {
         }
         Ok(pattern)
     }
-
-    /// Validate binding structure independently of runtime success, including
-    /// alternatives and dead cases whose values will never be extracted.
-    fn pattern_names(&self, pattern: &ast::Pattern) -> Result<HashSet<String>, String> {
-        let mut names = HashSet::new();
-        let mut add = |name: &ast::Identifier| {
-            if names.insert(name.to_string()) {
-                Ok(())
-            } else {
-                Err(error(
-                    self.source,
-                    name,
-                    "a pattern cannot capture the same name twice",
-                ))
-            }
-        };
-        let children: Vec<&ast::Pattern> = match pattern {
-            ast::Pattern::MatchAs(pattern) => {
-                if let Some(name) = &pattern.name {
-                    add(name)?;
-                }
-                pattern.pattern.iter().map(|pattern| &**pattern).collect()
-            }
-            ast::Pattern::MatchStar(pattern) => {
-                if let Some(name) = &pattern.name {
-                    add(name)?;
-                }
-                Vec::new()
-            }
-            ast::Pattern::MatchSequence(pattern) => pattern.patterns.iter().collect(),
-            ast::Pattern::MatchMapping(pattern) => {
-                if let Some(name) = &pattern.rest {
-                    add(name)?;
-                }
-                pattern.patterns.iter().collect()
-            }
-            ast::Pattern::MatchClass(pattern) => pattern
-                .arguments
-                .patterns
-                .iter()
-                .chain(
-                    pattern
-                        .arguments
-                        .keywords
-                        .iter()
-                        .map(|keyword| &keyword.pattern),
-                )
-                .collect(),
-            ast::Pattern::MatchOr(or) => {
-                let mut expected = None;
-                for (index, pattern) in or.patterns.iter().enumerate() {
-                    let names = self.pattern_names(pattern)?;
-                    if expected.as_ref().is_some_and(|expected| expected != &names) {
-                        return Err(error(
-                            self.source,
-                            pattern,
-                            "OR patterns must bind the same names in every alternative",
-                        ));
-                    }
-                    if pattern.is_irrefutable() && index + 1 != or.patterns.len() {
-                        return Err(error(
-                            self.source,
-                            pattern,
-                            "an irrefutable OR alternative must be last",
-                        ));
-                    }
-                    expected = Some(names);
-                }
-                return Ok(expected.unwrap_or_default());
-            }
-            ast::Pattern::MatchValue(_) | ast::Pattern::MatchSingleton(_) => Vec::new(),
-        };
-        for child in children {
-            for name in self.pattern_names(child)? {
-                if !names.insert(name) {
-                    return Err(error(
-                        self.source,
-                        child,
-                        "a pattern cannot capture the same name twice",
-                    ));
-                }
-            }
-        }
-        Ok(names)
-    }
 }
 
 /// Canonicalize equal numeric keys without introducing a runtime conversion.
@@ -1063,39 +905,19 @@ fn mapping_key(value: Expr) -> Expr {
     }
     let number = match &value.kind {
         ExprKind::Float(value) => *value,
-        ExprKind::Negate(inner) => match &inner.kind {
+        ExprKind::Unary(UnaryOp::USub, inner) => match &inner.kind {
             ExprKind::Float(value) => -*value,
             _ => return value,
         },
         _ => return value,
     };
-    if number.is_finite() && number.fract() == 0.0 {
-        Expr::integer(if number == 0.0 {
-            "0".to_owned()
-        } else {
-            format!("{number:.0}")
-        })
+    if let Some(integer) = imre_ast::numbers::integral_float(number) {
+        Expr::integer(integer.to_string())
     } else {
         Expr {
             ty: Type::Float,
             kind: ExprKind::Float(number),
         }
-    }
-}
-
-fn literal_key(value: &Expr) -> Option<String> {
-    match &value.kind {
-        ExprKind::Int(value) => Some(format!("int:{value}")),
-        ExprKind::Float(value) => Some(format!("float:{:016x}", value.to_bits())),
-        ExprKind::Str(value) => Some(format!("str:{value}")),
-        ExprKind::Bytes(value) => Some(format!("bytes:{value:?}")),
-        ExprKind::Negate(value) => match &value.kind {
-            ExprKind::Int(value) if value == "0" => Some("int:0".to_owned()),
-            ExprKind::Int(value) => Some(format!("int:-{value}")),
-            _ => None,
-        },
-        ExprKind::None => Some("None".to_owned()),
-        _ => None,
     }
 }
 

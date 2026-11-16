@@ -177,6 +177,27 @@ def current():
 
     check_namespace_constructor()
 
+    registered = []
+
+    class Registering(Meta):
+        @classmethod
+        def __prepare__(mcls, name, bases):
+            return {"prepared_name": name}
+
+        def __init__(cls, name, bases, namespace):
+            super().__init__(name, bases, namespace)
+            if not cls.__abstractmethods__:
+                registered.append((cls, namespace["prepared_name"]))
+
+    class Entry(metaclass=Registering):
+        @abc.abstractmethod
+        def read(self): pass
+
+    class Reader(Entry):
+        def read(self): return 42
+
+    assert registered == [(Reader, "Reader")]
+
 
 def check_namespace_constructor():
     def make_cell(value):

@@ -2,24 +2,34 @@
 //! scanning for bounded integers. Without a range, each fast read checks its
 //! own tagged word. Runtime identity guards exclude aliases of append targets.
 
+mod window_ranges;
+pub(crate) use window_ranges::{is_window_range_guard, reserved_append_window};
+
+use ruff_python_ast::CmpOp;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, contains_loop};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, contains_loop};
 
 /// Versions leaf loops after tuple scalarization.
 /// Unknown calls and mutations retain the original arbitrary-precision path.
 pub(crate) fn specialize(module: &mut Module) {
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        if function.expression_rebound().into_iter().any(|value| value) {
+        if function.has_expression_bindings() {
             continue;
         }
+        let private_cursors = crate::ir::private_string_cursors(function);
         crate::ir::rewrite_statements(&mut function.body, &mut |statement| {
-            rewrite_loop(statement, &mut function.locals);
+            rewrite_loop(statement, &mut function.locals, &private_cursors);
         });
+        window_ranges::specialize(function);
     }
 }
 
-fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
+fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>, private_cursors: &[usize]) {
+    let induction = match statement {
+        Statement::For { target, .. } => Some(*target),
+        _ => None,
+    };
     let (arguments, body, orelse, while_source) = match statement {
         Statement::For {
             args, body, orelse, ..
@@ -79,12 +89,13 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
     if !plan.scan_inputs {
         // Only this loop body was checked. Its else suite may run arbitrary code.
         crate::ir::walk_expressions_mut(body, &mut |value| {
-            if let ExprKind::Builtin(operation @ Builtin::ListGet, args) = &mut value.kind
+            if let ExprKind::Builtin(operation, args) = &mut value.kind
+                && let Builtin::ListGet(origin) = operation
                 && let ExprKind::Local(slot) = args[0].kind
                 && plan.inputs.contains_key(&slot)
                 && args[1].ty == Type::Int
             {
-                *operation = Builtin::ListGetStable;
+                *operation = Builtin::ListGetStable(origin.take());
             }
         });
     }
@@ -104,10 +115,29 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
             None => builtin(Builtin::ListPresent, vec![list_local(input)]),
         });
     }
+    if let (Some(cursor), Some(arguments)) = (induction, &arguments)
+        && !written[cursor]
+        && arguments[0]
+            .tagged_integer_literal()
+            .is_some_and(|start| start >= 0)
+        && arguments[2]
+            .tagged_integer_literal()
+            .is_some_and(|step| step > 0)
+    {
+        prove_range_windows(
+            body,
+            cursor,
+            &arguments[1],
+            &written,
+            &plan.inputs,
+            &mut guards,
+        );
+    }
     let Plan {
         outputs, appends, ..
     } = plan;
     let mut fast_body = Vec::new();
+    let cursor_loop = arguments.is_none();
     if let Some([start, mut stop, step]) = arguments {
         // Every append target passed ListDistinct against the condition's source.
         // Only this arm can reuse its length across the loop backedge.
@@ -139,8 +169,28 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
             }));
         }
     }
-    fast_body.push(fast);
-    let fallback = std::mem::replace(statement, Statement::Break);
+    if cursor_loop
+        && outputs.len() == 1
+        && let Some(&output) = outputs.first()
+        && buffer_appends(&mut fast, output, locals, private_cursors)
+    {
+        let marker = |op| {
+            Statement::Expr(Expr {
+                ty: Type::None,
+                kind: ExprKind::Builtin(op, Vec::new()),
+            })
+        };
+        fast_body.push(marker(Builtin::BeginListAppends(output)));
+        fast_body.push(Statement::Try {
+            body: vec![fast],
+            handlers: Vec::new(),
+            orelse: Vec::new(),
+            finalbody: vec![marker(Builtin::FinishListAppends(output))],
+        });
+    } else {
+        fast_body.push(fast);
+    }
+    let fallback = std::mem::replace(statement, Statement::Break(None));
     *statement = Statement::If(
         Expr {
             ty: Type::Bool,
@@ -149,6 +199,74 @@ fn rewrite_loop(statement: &mut Statement, locals: &mut Vec<Type>) {
         fast_body,
         vec![fallback],
     );
+}
+
+/// A checked leaf loop can defer publishing immediate appends when its only
+/// observations of the destination are tail reads. Other inputs are distinct,
+/// and all local values released inside the loop have native destructors.
+fn buffer_appends(
+    statement: &mut Statement,
+    output: usize,
+    locals: &[Type],
+    private_cursors: &[usize],
+) -> bool {
+    let Statement::While(_, body, orelse) = statement else {
+        return false;
+    };
+    if !orelse.is_empty() {
+        return false;
+    }
+    let scalar = |ty: Type| matches!(ty, Type::Int | Type::Bool | Type::Str | Type::None);
+    let mut safe = true;
+    let mut tail = false;
+    crate::ir::walk_writes(body, |slot, _| {
+        safe &= scalar(locals[slot])
+            || locals[slot] == Type::ListInt
+            || (locals[slot] == Type::Iterator && private_cursors.contains(&slot))
+    });
+    crate::ir::walk_expressions(body, &mut |value| {
+        safe &= match &value.kind {
+            ExprKind::Builtin(Builtin::ListGet(_), args) => {
+                let reads = matches!(args[0].kind, ExprKind::Local(slot) if slot == output)
+                    && args[1].tagged_integer_literal() == Some(-1);
+                tail |= reads;
+                reads
+            }
+            ExprKind::Builtin(Builtin::ListGetStable(_), _) => true,
+            ExprKind::Builtin(Builtin::Append, args) => {
+                args[0].ty == Type::ListInt && args[1].ty == Type::Int
+            }
+            ExprKind::Builtin(
+                Builtin::Int(_)
+                | Builtin::Ord
+                | Builtin::Bool
+                | Builtin::Abs
+                | Builtin::IntExtremum { .. },
+                args,
+            ) => args.iter().all(|arg| scalar(arg.ty)),
+            ExprKind::Builtin(..) => false,
+            ExprKind::Local(_) => scalar(value.ty) || value.ty == Type::ListInt,
+            ExprKind::Scope { value: result, .. } => scalar(result.ty),
+            _ => {
+                let mut primitive = scalar(value.ty);
+                crate::ir::children(value, |child| primitive &= scalar(child.ty));
+                primitive
+            }
+        };
+    });
+    if !safe || !tail {
+        return false;
+    }
+    crate::ir::walk_expressions_mut(body, &mut |value| {
+        if let ExprKind::Builtin(op, _) = &mut value.kind {
+            match op {
+                Builtin::ListGet(origin) => *op = Builtin::GetInAppendWindow(output, origin.take()),
+                Builtin::Append => *op = Builtin::AppendInWindow(output),
+                _ => {}
+            }
+        }
+    });
+    true
 }
 
 struct Plan<'a> {
@@ -190,7 +308,7 @@ impl Plan<'_> {
                         aliases[slot] = None;
                     }
                 }
-                Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+                Statement::Expr(value) | Statement::Return(value) => {
                     if !self.expression(value, aliases) {
                         return false;
                     }
@@ -217,12 +335,20 @@ impl Plan<'_> {
                 }
                 Statement::Raise(value) => {
                     if let Some(value) = value
-                        && !self.expression(value, aliases)
+                        && (!self.expression(&mut value.exception, aliases)
+                            || value
+                                .cause
+                                .as_mut()
+                                .is_some_and(|cause| !self.expression(cause, aliases)))
                     {
                         return false;
                     }
                 }
-                Statement::Break | Statement::Continue | Statement::Exhaust => {}
+                Statement::Match(..) => return false,
+                Statement::Position(..)
+                | Statement::Break(_)
+                | Statement::Continue(_)
+                | Statement::Exhaust => {}
                 // An exact string cursor cannot call Python or resize a list.
                 Statement::IterNext {
                     kind: crate::ir::IterNextKind::CodePoint,
@@ -235,6 +361,7 @@ impl Plan<'_> {
                 | Statement::While(..)
                 | Statement::For { .. }
                 | Statement::IterNext { .. }
+                | Statement::With { .. }
                 | Statement::Try { .. } => return false,
             }
         }
@@ -244,6 +371,9 @@ impl Plan<'_> {
     /// Appends are the only permitted mutation. Capturing their receiver's root
     /// before later operands preserves the source language's evaluation order.
     fn expression(&mut self, expression: &mut Expr, aliases: &mut [Option<usize>]) -> bool {
+        if expression.uses_python_unary_protocol() {
+            return false;
+        }
         match &mut expression.kind {
             ExprKind::Builtin(operation, args) => {
                 let receiver = args.first().and_then(|value| alias(value, aliases));
@@ -251,12 +381,12 @@ impl Plan<'_> {
                     return false;
                 }
                 match operation {
-                    Builtin::ListGet if args[0].ty == Type::ListInt => {
+                    Builtin::ListGet(origin) if args[0].ty == Type::ListInt => {
                         let Some(root) = receiver else {
                             return false;
                         };
                         if self.scan_inputs {
-                            *operation = Builtin::ListGetI32;
+                            *operation = Builtin::ListGetI32(origin.take());
                         } else if args[1].ty == Type::Int {
                             // A loop-local alias denotes this same rooted input.
                             args[0] = list_local(root);
@@ -292,6 +422,11 @@ impl Plan<'_> {
                     return false;
                 }
             }
+            ExprKind::Compare(_, ops)
+                if crate::ir::Compare::uses_python_protocol(expression.ty, ops) =>
+            {
+                return false;
+            }
             ExprKind::Compare(values, _) | ExprKind::Boolean(_, values) => {
                 for (index, value) in values.iter_mut().enumerate() {
                     if index == 0 {
@@ -311,18 +446,23 @@ impl Plan<'_> {
                     }
                 }
             }
-            ExprKind::Dict { entries, .. } => {
-                if !entries.iter_mut().all(|(key, value)| {
-                    self.expression(key, aliases) && self.expression(value, aliases)
-                }) {
+            ExprKind::Dict(entries) => {
+                if expression.ty == Type::PythonObject
+                    || !entries.iter_mut().all(|entry| {
+                        entry
+                            .key
+                            .as_mut()
+                            .is_some_and(|key| self.expression(key, aliases))
+                            && self.expression(&mut entry.value, aliases)
+                    })
+                {
                     return false;
                 }
             }
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => {
                 if !self.expression(value, aliases) {
                     return false;
@@ -345,8 +485,12 @@ impl Plan<'_> {
                     return false;
                 }
             }
-            ExprKind::BooleanValue(_, left, right) => {
-                if !self.expression(left, aliases) {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
+                if !self.expression(left, aliases)
+                    || predicate
+                        .as_mut()
+                        .is_some_and(|p| !self.expression(&mut p.condition, aliases))
+                {
                     return false;
                 }
                 let mut taken = aliases.to_vec();
@@ -410,7 +554,7 @@ fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
     let ExprKind::Compare(values, operations) = &test.kind else {
         return None;
     };
-    if !matches!(operations.as_slice(), [Compare::Less]) {
+    if !matches!(operations.as_slice(), [CmpOp::Lt]) {
         return None;
     }
     let [cursor, length] = values.as_slice() else {
@@ -439,7 +583,7 @@ fn while_arguments(test: &Expr) -> Option<([Expr; 3], usize)> {
 fn range_arguments(args: &[Expr]) -> Option<[Expr; 3]> {
     if !args.iter().all(|value| {
         matches!(value.kind, ExprKind::Local(_))
-            || small_literal(value).is_some()
+            || value.tagged_integer_literal().is_some()
             || matches!(
                 &value.kind,
                 ExprKind::Builtin(Builtin::Len, args)
@@ -459,15 +603,87 @@ fn range_arguments(args: &[Expr]) -> Option<[Expr; 3]> {
     }
 }
 
-fn small_literal(value: &Expr) -> Option<i64> {
-    let value = match &value.kind {
-        ExprKind::Int(value) => value.parse::<i64>().ok()?,
-        ExprKind::Negate(value) => small_literal(value)?.checked_neg()?,
-        _ => return None,
-    };
-    (-(1_i64 << 62)..(1_i64 << 62))
-        .contains(&value)
-        .then_some(value)
+/// The true arm of `limit - i >= width` covers every offset below the width.
+/// The range supplies the lower bound. Only the fast loop can rely on its
+/// input buffers staying stable across these reads.
+fn prove_range_windows(
+    body: &mut [Statement],
+    cursor: usize,
+    stop: &Expr,
+    written: &[bool],
+    inputs: &BTreeMap<usize, usize>,
+    guards: &mut Vec<Expr>,
+) {
+    let mut checked_limits = BTreeSet::new();
+    crate::ir::rewrite_statements(body, &mut |statement| {
+        let Statement::If(test, yes, _) = statement else {
+            return;
+        };
+        let ExprKind::Compare(operands, comparisons) = &test.kind else {
+            return;
+        };
+        let [rest, width] = operands.as_slice() else {
+            return;
+        };
+        let ExprKind::Binary(Binary::Subtract, limit, counter) = &rest.kind else {
+            return;
+        };
+        let Some(width) = width.tagged_integer_literal() else {
+            return;
+        };
+        let width = match comparisons.as_slice() {
+            [CmpOp::GtE] => width,
+            [CmpOp::Gt] => width + 1,
+            _ => return,
+        };
+        if width <= 0 || !matches!(counter.kind, ExprKind::Local(slot) if slot == cursor) {
+            return;
+        }
+        crate::ir::walk_expressions_mut(yes, &mut |value| {
+            let ExprKind::Builtin(op @ Builtin::ListGetI32(_), args) = &mut value.kind else {
+                return;
+            };
+            let [source, index] = args.as_slice() else {
+                return;
+            };
+            let ExprKind::Local(root) = source.kind else {
+                return;
+            };
+            if !inputs.contains_key(&root)
+                || !index
+                    .local_integer_offset()
+                    .is_some_and(|(slot, offset)| slot == cursor && (0..width).contains(&offset))
+            {
+                return;
+            }
+            match &limit.kind {
+                ExprKind::Builtin(Builtin::Len, items) if matches!(items.as_slice(), [item] if matches!(item.kind, ExprKind::Local(slot) if slot == root)) =>
+                    {}
+                ExprKind::Local(slot)
+                    if !written[*slot]
+                        && limit.ty == Type::Int
+                        && matches!(stop.kind, ExprKind::Local(bound) if bound == *slot) =>
+                {
+                    checked_limits.insert(root);
+                }
+                _ => return,
+            }
+            *op = Builtin::ListGetBoundedInBounds {
+                min: i64::from(i32::MIN),
+                max: i64::from(i32::MAX),
+            };
+        });
+    });
+    for root in checked_limits {
+        let length = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::Len, vec![list_local(root)]),
+        };
+        guards.push(Expr {
+            ty: Type::Bool,
+            kind: ExprKind::Compare(vec![stop.clone(), length], vec![CmpOp::LtE]),
+        });
+    }
 }
 
 fn alias(expression: &Expr, aliases: &[Option<usize>]) -> Option<usize> {
@@ -502,6 +718,138 @@ mod tests {
         module
     }
 
+    #[test]
+    fn proves_only_dominated_reads_from_stable_range_windows() {
+        let source = r#"
+def windows(data: list[int], stop: int) -> int:
+    total = 0
+    for i in range(0, stop, 3):
+        if stop - i >= 3:
+            total += data[i] + data[1 + i] + data[i + 2]
+        else:
+            total += data[i]
+    return total
+print(windows([1, 2, 3, 4], 4))
+"#;
+        let proven = |source: &str| {
+            let module = optimized(source);
+            crate::verify::module(&module).unwrap();
+            let mut count = 0;
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| {
+                    if matches!(
+                        value.kind,
+                        ExprKind::Builtin(Builtin::ListGetBoundedInBounds { .. }, _)
+                    ) {
+                        count += 1;
+                    }
+                });
+            }
+            count
+        };
+        assert_eq!(proven(source), 3);
+        assert_eq!(proven(&source.replace("i + 1", "1 + i")), 3);
+        assert_eq!(
+            proven(&source.replace("stop - i >= 3", "len(data) - i > 2")),
+            3
+        );
+        assert_eq!(proven(&source.replace("data[i + 2]", "data[i + 3]")), 2);
+        assert_eq!(
+            proven(&source.replace("range(0, stop, 3)", "range(-1, stop, 3)")),
+            0
+        );
+        assert_eq!(
+            proven(&source.replace("if stop - i", "i = 2\n        if stop - i")),
+            0
+        );
+        assert_eq!(
+            proven(&source.replace("if stop - i", "stop += 1\n        if stop - i")),
+            0
+        );
+    }
+
+    #[test]
+    fn certifies_closed_tail_ranges_after_a_scalar_cursor_scan() {
+        let source = include_str!("../../../tests/fixtures/iterables/buffered_integer_ranges.py");
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(llvm.contains("; inductive list tail -2147483648..=2147483648"));
+    }
+
+    #[test]
+    fn bounds_integer_updates_after_successful_scalar_pulls() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_cursor_counters.py");
+        let bounds_step_two = |source| {
+            let graph = crate::modules::SourceGraph::single(source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            crate::specialize(&mut module).unwrap();
+            let mut bounded = false;
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| {
+                    bounded |= matches!(value.kind, ExprKind::Builtin(
+                        Builtin::BoundedCursorValue { max, .. }, _
+                    ) if max == 3 * i64::from(i32::MAX));
+                });
+            }
+            bounded
+        };
+        assert!(bounds_step_two(source));
+        let twice = source.replace(
+            "        counter += 2",
+            "        counter += 2\n        counter += 1",
+        );
+        assert!(!bounds_step_two(&twice));
+    }
+
+    #[test]
+    fn opens_a_spare_append_window_only_for_one_write_per_pull() {
+        let source = include_str!("../../../tests/fixtures/iterables/scalar_append_windows.py");
+        let uses_spare_window = |source| {
+            crate::compile(source, &crate::CompileOptions::default())
+                .unwrap()
+                .contains("call i32 @imre_list_try_open_append_window(")
+        };
+        assert!(uses_spare_window(source));
+        let twice = source.replace(
+            "        out.append(value)",
+            "        out.append(value)\n        out.append(value)",
+        );
+        assert!(!uses_spare_window(&twice));
+    }
+
+    #[test]
+    fn buffers_only_unobserved_appends_to_one_stable_list() {
+        let source = "def fill(data: list[int], out: list[int], text: str) -> None:\n    for c in text:\n        out.append(out[-1] + data[0] + data[1] + ord(c))\nfill([1, 2], [0], 'abc')\n";
+        let operations = |source: &str| {
+            let module = optimized(source);
+            let mut calls = (0, 0, 0);
+            for function in &module.functions {
+                walk_expressions(&function.body, &mut |value| match value.kind {
+                    ExprKind::Builtin(Builtin::AppendInWindow(_), _) => calls.0 += 1,
+                    ExprKind::Builtin(Builtin::GetInAppendWindow(..), _) => calls.1 += 1,
+                    ExprKind::Builtin(Builtin::FinishListAppends(_), _) => calls.2 += 1,
+                    _ => {}
+                });
+            }
+            calls
+        };
+        assert_eq!(operations(source), (1, 1, 1));
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        let (_, after_call) = llvm
+            .split_once(" = call i64 @get_in_append_window(")
+            .unwrap();
+        assert!(
+            after_call
+                .lines()
+                .nth(1)
+                .unwrap()
+                .contains(" = icmp eq i64 ")
+        );
+
+        for observed in ["out[-2]", "out[-1] + len(out)", "out[-1] + len(data)"] {
+            assert_eq!(operations(&source.replace("out[-1]", observed)), (0, 0, 0));
+        }
+    }
+
     fn counts(module: &Module) -> (usize, usize, usize) {
         let mut result = (0, 0, 0);
         for function in module.functions.iter().chain([&module.entry]) {
@@ -511,7 +859,7 @@ mod tests {
                     result.0 += 1;
                 }
                 ExprKind::Builtin(Builtin::ListDistinct, _) => result.1 += 1,
-                ExprKind::Builtin(Builtin::ListGetI32, _) => result.2 += 1,
+                ExprKind::Builtin(Builtin::ListGetI32(_), _) => result.2 += 1,
                 _ => {}
             });
         }
@@ -537,7 +885,7 @@ fill([1, 2], [0], "abc")
         for function in &module.functions {
             walk_expressions(&function.body, &mut |expr| match &expr.kind {
                 ExprKind::Builtin(Builtin::ListPresent, _) => present += 1,
-                ExprKind::Builtin(Builtin::ListGetStable, _) => reads += 1,
+                ExprKind::Builtin(Builtin::ListGetStable(_), _) => reads += 1,
                 _ => {}
             });
         }
@@ -609,7 +957,7 @@ def triples(data: list[int], output: list[int]) -> None:
         assert_eq!(counts(&module), (1, 1, 3));
         let mut fallback_reads = 0;
         walk_expressions(&module.functions[0].body, &mut |value| {
-            if matches!(value.kind, ExprKind::Builtin(Builtin::ListGet, _)) {
+            if matches!(value.kind, ExprKind::Builtin(Builtin::ListGet(_), _)) {
                 fallback_reads += 1;
             }
         });
@@ -629,7 +977,7 @@ def transform(data: list[int]) -> list[int]:
         let mut reservations = 0;
         for function in &module.functions {
             walk_expressions(&function.body, &mut |value| match &value.kind {
-                ExprKind::Builtin(Builtin::ListGet, _) => fallback_reads += 1,
+                ExprKind::Builtin(Builtin::ListGet(_), _) => fallback_reads += 1,
                 ExprKind::Builtin(Builtin::ListReserveRange, args) => {
                     assert!(matches!(&args[4].kind, ExprKind::Int(value) if value == "1"));
                     reservations += 1;

@@ -1,10 +1,12 @@
 import gc
+import io
 import sys
 from weakref import ref
 
 
 class Parent:
     def __del__(self):
+        self.finalized_on_entry = gc.is_finalized(self)
         events.append("finalize")
         saved.append(self)
 
@@ -25,6 +27,7 @@ def weak_callback(w):
 def exercise(cyclic, unrelated):
     gc.collect(2)
     owner = Owner()
+    assert not gc.is_finalized(owner)
     owner.payload = []
     if cyclic:
         owner.loop = owner
@@ -47,6 +50,8 @@ def exercise(cyclic, unrelated):
     else:
         assert early() is saved[0] and events == ["finalize"]
 
+    assert saved[0].finalized_on_entry is cyclic
+    assert gc.is_finalized(saved[0])
     late = ref(saved[0], weak_callback)
     saved.clear()
     if cyclic:
@@ -173,7 +178,103 @@ def check_exception_finalizers():
     assert finalized == ["before", "after"]
 
 
+def check_star_import_replacement():
+    from types import ModuleType
+
+    def exported(name):
+        if name == "seen":
+            return events.copy()
+        raise AttributeError(name)
+
+    module = ModuleType("_imre_finalizer_exports")
+    module.__all__ = ["owner", "seen"]
+    module.owner = None
+    module.__getattr__ = exported
+    namespace = {"owner": Owner()}
+    sys.modules[module.__name__] = module
+    try:
+        exec("from _imre_finalizer_exports import *", namespace)
+    finally:
+        del sys.modules[module.__name__]
+    assert namespace["seen"] == ["finalize"]
+    saved.clear()
+    events.clear()
+
+
+def check_generator_frame_release():
+    released = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def __del__(self):
+            released.append(self.name)
+
+    def scoped(name):
+        item = Resource(name)
+        yield ref(item)
+        if name == "return":
+            return item
+        if name == "raise":
+            raise ValueError(name)
+
+    held = Resource("held")
+    for name in ("finish", "raise"):
+        iterator = scoped(name)
+        witness = next(iterator)
+        assert witness() is not None
+        try:
+            next(iterator)
+        except (StopIteration, ValueError) as exc:
+            assert type(exc) is (ValueError if name == "raise" else StopIteration)
+        assert witness() is None and released == [name]
+        released.clear()
+
+    iterator = scoped("return")
+    witness = next(iterator)
+    try:
+        next(iterator)
+    except StopIteration as exc:
+        result = exc.value
+    assert witness() is result and released == []
+    del result
+    assert witness() is None and released == ["return"]
+    assert held.name == "held"
+
+
+class CloseMember:
+    def __call__(self):
+        pass
+
+    def __del__(self):
+        events.append("member")
+
+
+def check_memory_stream(cls):
+    stream = cls()
+    witness = ref(stream, weak_callback)
+    stream.close = CloseMember()
+    del stream
+    assert witness() is None and events == ["member", "weak"]
+    events.clear()
+
+    stream = cls()
+    witness = ref(stream, weak_callback)
+    cycle = [stream]
+    cycle.append(cycle)
+    del cycle, stream
+    assert witness() is not None
+    gc.collect()
+    assert witness() is None and events == ["weak"]
+    events.clear()
+
+
 def current():
+    for stream_class in (io.BytesIO, io.StringIO):
+        check_memory_stream(stream_class)
+    check_generator_frame_release()
+    check_star_import_replacement()
     with open(__file__, encoding="utf-8") as retained:
         released = open(__file__, encoding="utf-8")  # noqa: SIM115
         raw = released.buffer.raw

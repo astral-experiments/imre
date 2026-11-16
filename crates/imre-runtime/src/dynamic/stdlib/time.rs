@@ -1,6 +1,5 @@
 //! Wall time and the civil-time tuples used by HTTP dates and request logging.
 use super::*;
-use crate::dynamic::builtins::bind;
 use crate::objects::Calendar;
 use crate::objects::time::{ClockParts, LocalTime, wall_time, wall_time_ns};
 
@@ -14,11 +13,13 @@ pub(in crate::dynamic) fn is_function(name: &str) -> bool {
             | "monotonic_ns"
             | "perf_counter"
             | "perf_counter_ns"
+            | "process_time"
             | "sleep"
             | "gmtime"
             | "localtime"
             | "mktime"
             | "strftime"
+            | "strptime"
             | "ctime"
             | "tzset"
     ) || text_signature(name).is_some()
@@ -46,17 +47,20 @@ pub(in crate::dynamic) fn install_timezone(ctx: &mut Context, scope: Id) -> Resu
     Ok(())
 }
 
-const FIELDS: [&str; 9] = [
-    "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday", "tm_isdst",
-];
+pub(in crate::dynamic) const STRUCT_TIME: &str = "time.struct_time";
+pub(in crate::dynamic) const STRUCT_TIME_DOC: &str = "The time value as returned by gmtime(), localtime(), and strptime(), and\n accepted by asctime(), mktime() and strftime().  May be considered as a\n sequence of 9 integers.\n\n Note that several fields' values are not the same as those defined by\n the C language standard for struct tm.  For example, the value of the\n field tm_year is the actual year, not year - 1900.  See individual\n fields' descriptions for details.";
+pub(in crate::dynamic) static LAYOUT: structseq::Layout = structseq::Layout {
+    class: STRUCT_TIME,
+    fields: &[
+        "tm_year", "tm_mon", "tm_mday", "tm_hour", "tm_min", "tm_sec", "tm_wday", "tm_yday",
+        "tm_isdst",
+    ],
+    extra: &["tm_zone", "tm_gmtoff"],
+    unnamed: 0,
+};
 
 pub(super) fn struct_time(ctx: &mut Context, values: Vec<Id>, zone: Id, offset: Id) -> Id {
-    ctx.alloc(Value::NamedTuple {
-        class: Some("time.struct_time"),
-        names: FIELDS.map(str::to_owned).into(),
-        values,
-        extras: vec![("tm_zone", zone), ("tm_gmtoff", offset)],
-    })
+    structseq::wrap(ctx, &LAYOUT, values, vec![zone, offset])
 }
 
 /// Format local civil fields with fixed English names and the caller's year width.
@@ -74,47 +78,39 @@ pub(super) fn ctime_text(fields: [i64; 9], year_width: usize) -> String {
     format!("{weekday} {month} {day:2} {hour:02}:{minute:02}:{second:02} {year:0year_width$}")
 }
 
-fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [sequence, attributes] = bind("structseq", args, kwargs, ["sequence", "dict"])?;
-    let sequence = sequence.ok_or_else(|| {
+/// Convert seconds to a signed PyTime timeout, rounding away from zero.
+pub(in crate::dynamic) fn timeout_ns(ctx: &mut Context, seconds: Id) -> Result<i64> {
+    if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(seconds)) {
+        return Ok(crate::objects::time::sleep_float_ns(*value)?);
+    }
+    let overflow = || {
         Error::new(
-            "TypeError",
-            "structseq() missing required argument 'sequence' (pos 1)",
+            "OverflowError",
+            "timestamp too large to convert to C PyTime_t",
         )
-    })?;
-    let mut values = ctx.items(sequence)?;
-    let n = values.len();
-    if !(9..=11).contains(&n) {
-        let bound = if n < 9 { "least 9" } else { "most 11" };
-        return Err(Error::new(
-            "TypeError",
-            format!("time.struct_time() takes an at {bound}-sequence ({n}-sequence given)"),
-        ));
-    }
-    let mut zone = values.get(9).copied().unwrap_or(NONE);
-    let mut offset = values.get(10).copied().unwrap_or(NONE);
-    if let Some(dict) = attributes {
-        let entries = ctx.dict_entries(dict).ok_or_else(|| {
-            Error::new(
+    };
+    let seconds = match ctx.index_integer(seconds) {
+        Ok(seconds) => seconds,
+        Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
+            let class = ctx.exact_type(seconds)?;
+            let name = super::qualified_type(ctx, class)?;
+            return Err(Error::new(
                 "TypeError",
-                "time.struct_time() takes a dict as second arg, if any",
-            )
-        })?;
-        for &(key, value) in entries {
-            match ctx.str_value(key).ok() {
-                Some("tm_zone") if n == 9 => zone = value,
-                Some("tm_gmtoff") if n < 11 => offset = value,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        "time.struct_time() got duplicate or unexpected field name(s)",
-                    ));
-                }
-            }
+                format!(
+                    "'{}' object cannot be interpreted as an integer or float",
+                    ctx.str_value(name)?
+                ),
+            ));
         }
-    }
-    values.truncate(9);
-    Ok(struct_time(ctx, values, zone, offset))
+        Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
+            return Err(overflow());
+        }
+        Err(error) => return Err(error),
+    };
+    seconds
+        .to_i64()
+        .and_then(|n| n.checked_mul(1_000_000_000))
+        .ok_or_else(overflow)
 }
 
 pub(super) fn civil(ctx: &mut Context, stamp: Option<Id>, utc: bool) -> Result<ClockParts> {
@@ -153,7 +149,7 @@ fn tuple_time(ctx: &mut Context, value: Id, name: &str) -> Result<LocalTime> {
     if matches!(
         ctx.heap.get(value),
         Value::NamedTuple {
-            class: Some("time.struct_time"),
+            class: Some(STRUCT_TIME),
             ..
         }
     ) {
@@ -183,9 +179,6 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    if name == "struct_time" {
-        return construct(ctx, args, kwargs);
-    }
     let function = match name {
         "time" => "time.time",
         "time_ns" => "time.time_ns",
@@ -194,6 +187,7 @@ pub(super) fn call(
         "monotonic_ns" => "time.monotonic_ns",
         "perf_counter" => "time.perf_counter",
         "perf_counter_ns" => "time.perf_counter_ns",
+        "process_time" => "time.process_time",
         "mktime" => "time.mktime",
         "tzset" => "time.tzset",
         _ => name,
@@ -279,38 +273,7 @@ pub(super) fn call(
                 ));
             };
             audit::event(ctx, "time.sleep", args)?;
-            let nanos = if let Value::Float(value) = ctx.heap.get(ctx.scalar_value(*seconds)) {
-                crate::objects::time::sleep_float_ns(*value)?
-            } else {
-                let overflow = || {
-                    Error::new(
-                        "OverflowError",
-                        "timestamp too large to convert to C PyTime_t",
-                    )
-                };
-                let seconds = match ctx.index_integer(*seconds) {
-                    Ok(seconds) => seconds,
-                    Err(error) if ctx.is_builtin_error(&error, "TypeError") => {
-                        let class = ctx.exact_type(*seconds)?;
-                        let name = super::qualified_type(ctx, class)?;
-                        return Err(Error::new(
-                            "TypeError",
-                            format!(
-                                "'{}' object cannot be interpreted as an integer or float",
-                                ctx.str_value(name)?
-                            ),
-                        ));
-                    }
-                    Err(error) if ctx.is_builtin_error(&error, "OverflowError") => {
-                        return Err(overflow());
-                    }
-                    Err(error) => return Err(error),
-                };
-                seconds
-                    .to_i64()
-                    .and_then(|n| n.checked_mul(1_000_000_000))
-                    .ok_or_else(overflow)?
-            };
+            let nanos = timeout_ns(ctx, *seconds)?;
             crate::objects::time::sleep_ns(nanos, || ctx.dispatch_signals())?;
             Ok(NONE)
         }
@@ -332,6 +295,9 @@ pub(super) fn call(
                 crate::objects::time::monotonic_time().map_err(crate::objects::errno_error)?;
             Ok(ctx.alloc(Value::Float(stamp.as_secs_f64())))
         }
+        "process_time" if args.is_empty() => {
+            Ok(ctx.alloc(Value::Float(crate::objects::time::process_time()?)))
+        }
         "tzset" if args.is_empty() => {
             let module = ctx.module("time")?;
             let Value::Module { scope, .. } = *ctx.heap.get(module) else {
@@ -346,7 +312,7 @@ pub(super) fn call(
             Ok(NONE)
         }
         "time" | "time_ns" | "monotonic" | "monotonic_ns" | "perf_counter" | "perf_counter_ns"
-        | "tzset" => Err(Error::new(
+        | "process_time" | "tzset" => Err(Error::new(
             "TypeError",
             format!("{function}() takes no arguments ({} given)", args.len()),
         )),
@@ -363,6 +329,16 @@ pub(super) fn call(
                 ),
             )),
         },
+        "strptime" => {
+            let mark = ctx.heap.temporary_mark();
+            let parser = ctx
+                .import_with_builtins("_strptime")
+                .and_then(|module| ctx.lookup_attr(module, "_strptime_time"));
+            // PyImport_ImportModuleAttr drops the module before the parser is called.
+            let parser = ctx.release_with_result(mark, parser)?;
+            let result = ctx.call(parser, args.to_vec(), vec![]);
+            ctx.release_with_result(mark, result)
+        }
         "strftime" => {
             let format = match args {
                 [format] | [format, _] => *format,

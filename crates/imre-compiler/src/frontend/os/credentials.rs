@@ -25,7 +25,7 @@ impl Checker<'_> {
             }
             Ok(Expr {
                 ty: returns,
-                kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Credential(name)), args),
+                kind: ExprKind::Builtin(Builtin::process(ProcessOperation::Credential(name)), args),
             })
         })
     }
@@ -125,7 +125,7 @@ impl Checker<'_> {
                     body: vec![Statement::Try {
                         body: vec![Statement::Assign(slot, result)],
                         handlers: vec![ir::ExceptHandler {
-                            kinds: Vec::new(),
+                            matcher: crate::ir::ExceptionMatcher::Any,
                             name: None,
                             body: vec![Statement::Expr(invalid_id(group, &actual))],
                         }],
@@ -145,7 +145,7 @@ fn credential_integer(mut value: Expr, group: bool, owner: &str) -> Expr {
     if value.ty == Type::Bool {
         value = Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         };
     } else if value.ty != Type::Int {
         return invalid_id(group, owner);
@@ -153,7 +153,7 @@ fn credential_integer(mut value: Expr, group: bool, owner: &str) -> Expr {
     Expr {
         ty: Type::Int,
         kind: ExprKind::Builtin(
-            Builtin::Process(ProcessOperation::CredentialId { group }),
+            Builtin::process(ProcessOperation::CredentialId { group }),
             vec![value],
         ),
     }

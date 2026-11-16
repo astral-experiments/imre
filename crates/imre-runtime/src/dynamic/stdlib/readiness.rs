@@ -1,7 +1,7 @@
 //! Boxed selectors retain Python keys and wait through their respective native backends.
 use super::super::{
     Context, builtins,
-    value::{Error, Id, MarkQueue, NONE, Result, Value},
+    value::{Error, Id, NONE, Result, Value, VisitReferences},
 };
 use crate::objects::readiness::{Poll, SelectFds};
 use std::{cell::RefCell, rc::Rc, time::Duration};
@@ -18,13 +18,18 @@ struct Registration {
 }
 
 pub(in crate::dynamic) struct Selector {
-    poll: Option<Poll>,
+    poll: Option<Rc<RefCell<Poll>>>,
+    globals: Id,
     keys: Id,
     mapping: Id,
 }
 
 /// Install the selector constructors and the concrete key class in one module scope.
 pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()> {
+    for (name, mask) in [("EVENT_READ", READ), ("EVENT_WRITE", WRITE)] {
+        let value = ctx.int(mask);
+        ctx.bind(scope, name, value);
+    }
     let selector = ctx.builtin("selectors.PollSelector");
     let select = ctx.builtin("selectors.SelectSelector");
     ctx.bind(scope, "SelectSelector", select);
@@ -36,14 +41,17 @@ pub(in crate::dynamic) fn initialize(ctx: &mut Context, scope: Id) -> Result<()>
     let key =
         super::super::namedtuple::factory(ctx, &[name, fields], &[("module".into(), module)])?;
     ctx.bind(scope, "SelectorKey", key);
-    let fields = ctx.scope("selectors", Some(scope));
-    ctx.bind(fields, "__module__", module);
+    let abc = ctx.module("_collections_abc")?;
+    let base = ctx.lookup_attr(abc, "Mapping")?;
+    let bases = ctx.alloc(Value::Tuple(vec![base]));
+    let name = ctx.text("_SelectorMapping");
+    let mut fields = vec![(ctx.text("__module__"), module)];
     for method in ["__init__", "__getitem__", "get", "__iter__", "__len__"] {
         let function = ctx.builtin(&format!("selectors._SelectorMapping.{method}"));
-        ctx.bind(fields, method, function);
+        fields.push((ctx.text(method), function));
     }
-    let base = super::super::mapping_abc::class(ctx, "Mapping")?;
-    let class = ctx.allocate_class("_SelectorMapping".into(), fields, vec![base])?;
+    let namespace = ctx.dict(fields);
+    let class = builtins::call(ctx, "type", &[name, bases, namespace], &[])?;
     ctx.bind(scope, "_SelectorMapping", class);
     Ok(())
 }
@@ -89,10 +97,7 @@ fn fd(ctx: &mut Context, obj: Id) -> Result<Id> {
 }
 
 fn native_fd(ctx: &Context, fd: Id) -> Result<i32> {
-    ctx.as_int(fd)?
-        .to_i64()
-        .and_then(|n| i32::try_from(n).ok())
-        .ok_or_else(|| Error::new("OverflowError", "Python int too large to convert to C int"))
+    Ok(ctx.borrow_int(fd)?.to_c_int()?)
 }
 
 fn reg_fd(ctx: &mut Context, handle: &RefCell<Selector>, obj: Id) -> Result<Id> {
@@ -134,43 +139,33 @@ fn poll_mask(n: i64) -> i16 {
 }
 
 /// Select waits in seconds; poll rounds positive seconds up to milliseconds.
-fn timeout(ctx: &mut Context, value: Id, poll: bool) -> Result<Option<Duration>> {
+fn timeout(ctx: &mut Context, value: Id, poll_globals: Option<Id>) -> Result<Option<Duration>> {
     if value == NONE {
         return Ok(None);
     }
-    if !poll {
+    let Some(globals) = poll_globals else {
         let zero = ctx.int(0);
         let seconds = builtins::call(ctx, "max", &[value, zero], &[])?;
         return super::select::timeout(ctx, Some(&seconds), false);
-    }
-    let s = match ctx.heap.get(value) {
-        Value::Float(value) => *value,
-        _ => {
-            let integer = ctx.as_int(value)?;
-            if integer.cmp(&crate::Int::from(0)).is_le() {
-                return Ok(Some(Duration::ZERO));
-            }
-            crate::floats::int_to_float(&integer)
-                .map_err(|_| Error::new("OverflowError", "int too large to convert to float"))?
-        }
     };
-    if s.is_nan() {
-        return Err(Error::new(
-            "ValueError",
-            "cannot convert float NaN to integer",
-        ));
+    let zero = ctx.int(0);
+    let nonpositive = ctx.binary("<=", value, zero)?;
+    if ctx.truth(nonpositive)? {
+        return Ok(Some(Duration::ZERO));
     }
-    let ms = (s.max(0.0) * 1000.0).ceil();
-    if ms.is_infinite() {
-        return Err(Error::new(
-            "OverflowError",
-            "cannot convert float infinity to integer",
-        ));
-    }
-    if ms > f64::from(i32::MAX) {
-        return Err(Error::new("OverflowError", "timeout is too large"));
-    }
-    Ok(Some(Duration::from_millis(ms as u64)))
+    let math = if matches!(ctx.heap.get(globals), Value::Scope(_)) {
+        ctx.lookup(globals, "math")?
+    } else {
+        ctx.lookup_attr(globals, "math")?
+    };
+    let ceil = ctx.lookup_attr(math, "ceil")?;
+    // Resolve the callable before multiplication, which can replace math.ceil.
+    ctx.heap.reserve_temporaries(1)?;
+    ctx.heap.keep(ceil);
+    let scale = ctx.alloc(Value::Float(1000.0));
+    let scaled = ctx.binary("*", value, scale)?;
+    let millis = ctx.call(ceil, vec![scaled], Vec::new())?;
+    super::select::timeout(ctx, Some(&millis), true)
 }
 
 impl Registration {
@@ -212,8 +207,8 @@ fn missing<T>(ctx: &mut Context, fileobj: Id) -> Result<T> {
 }
 
 impl Selector {
-    pub(in crate::dynamic) fn trace(&self, roots: &mut MarkQueue<'_>) {
-        roots.extend([self.keys, self.mapping]);
+    pub(in crate::dynamic) fn trace(&self, roots: &mut impl VisitReferences) {
+        roots.extend([self.keys, self.mapping, self.globals]);
     }
 
     /// Resolve Python keys after the native wait releases the selector borrow; int subclasses may compare in Python.
@@ -232,7 +227,11 @@ impl Selector {
                 }
             }
             let mut results = Vec::new();
-            if sets.wait(timeout)? {
+            let ready = match sets.wait(timeout, || ctx.dispatch_signals()) {
+                Err(error) if ctx.is_builtin_error(&error, "InterruptedError") => false,
+                result => result?,
+            };
+            if ready {
                 for i in 0..ctx.dict_entries(keys).unwrap().len() {
                     let (fd, entry) = ctx.dict_entries(keys).unwrap()[i];
                     let key = Registration::unpack(ctx, entry);
@@ -243,29 +242,22 @@ impl Selector {
                         results
                             .try_reserve(1)
                             .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-                        let mask = ctx.int(events);
+                        let mask = ctx.int(events & key.interests);
                         results.push(ctx.alloc(Value::Tuple(vec![key.key, mask])));
                     }
                 }
             }
             return Ok(ctx.alloc(Value::List(results)));
         }
-        let events = {
-            let mut selector = handle.borrow_mut();
-            let (count, ready) = selector.poll.as_mut().unwrap().ready(timeout)?;
-            let mut events = Vec::new();
-            events
-                .try_reserve(count)
-                .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-            events.extend(ready);
-            events
-        };
+        let poll = handle.borrow().poll.as_ref().unwrap().clone();
+        let events = Poll::ready(&poll, timeout, || ctx.dispatch_signals())?;
         let mut results = Vec::new();
         results
             .try_reserve(events.len())
             .map_err(|_| Error::new("MemoryError", "out of memory"))?;
-        for (fd, flags) in events {
-            let fd = ctx.int(i64::from(fd));
+        for event in events {
+            let flags = event.revents as u16;
+            let fd = ctx.int(i64::from(event.fd));
             let Some(key) = registration(ctx, keys, fd)? else {
                 continue;
             };
@@ -298,15 +290,6 @@ fn close(ctx: &mut Context, handle: &RefCell<Selector>) -> Result<Id> {
     Ok(NONE)
 }
 
-fn mapping_owner(ctx: &mut Context, mapping: Id) -> Result<Rc<RefCell<Selector>>> {
-    let owner = ctx.lookup_attr(mapping, "_selector")?;
-    if let Value::Selector(handle) = ctx.heap.get(owner) {
-        Ok(handle.clone())
-    } else {
-        Err(Error::new("TypeError", "expected selector"))
-    }
-}
-
 fn mapping(
     ctx: &mut Context,
     method: &str,
@@ -321,15 +304,18 @@ fn mapping(
         ctx.set_attr(receiver, "_selector", selector)?;
         return Ok(NONE);
     }
-    let handle = mapping_owner(ctx, receiver)?;
+    let owner = ctx.lookup_attr(receiver, "_selector")?;
     match method {
         "__len__" | "__iter__" => {
             builtins::bind(method, args, kwargs, [])?;
-            let keys = handle.borrow().keys;
+            let keys = match ctx.heap.get(owner) {
+                Value::Selector(handle) => handle.borrow().keys,
+                _ => ctx.lookup_attr(owner, "_fd_to_key")?,
+            };
             if method == "__iter__" {
                 ctx.iterator(keys)
             } else {
-                Ok(ctx.int(ctx.dict_entries(keys).unwrap().len() as i64))
+                builtins::call(ctx, "len", &[keys], &[])
             }
         }
         "get" | "__getitem__" => {
@@ -341,13 +327,37 @@ fn mapping(
                 (obj, None)
             };
             let obj = obj.ok_or_else(|| Error::new("TypeError", "missing file object"))?;
-            let fd = reg_fd(ctx, &handle, obj)?;
-            // fileno() can replace the mapping's owner.
-            let keys = mapping_owner(ctx, receiver)?.borrow().keys;
-            registration(ctx, keys, fd)?
-                .map(|entry| entry.key)
-                .or(default)
-                .map_or_else(|| missing(ctx, obj), Ok)
+            let fd = match ctx.heap.get(owner) {
+                Value::Selector(handle) => {
+                    let handle = Rc::clone(handle);
+                    reg_fd(ctx, &handle, obj)?
+                }
+                _ => {
+                    let lookup = ctx.lookup_attr(owner, "_fileobj_lookup")?;
+                    ctx.call(lookup, vec![obj], Vec::new())?
+                }
+            };
+            // fileno() can replace the mapping's owner, even with a different selector type.
+            ctx.heap.reserve_temporaries(1)?;
+            ctx.heap.keep(fd);
+            let owner = ctx.lookup_attr(receiver, "_selector")?;
+            if let Value::Selector(handle) = ctx.heap.get(owner) {
+                let keys = handle.borrow().keys;
+                return registration(ctx, keys, fd)?
+                    .map(|entry| entry.key)
+                    .or(default)
+                    .map_or_else(|| missing(ctx, obj), Ok);
+            }
+            let keys = ctx.lookup_attr(owner, "_fd_to_key")?;
+            let get = ctx.lookup_attr(keys, "get")?;
+            let mut args = vec![fd];
+            args.extend(default);
+            let key = ctx.call(get, args, Vec::new())?;
+            if key == NONE && default.is_none() {
+                missing(ctx, obj)
+            } else {
+                Ok(key)
+            }
         }
         _ => unreachable!(),
     }
@@ -367,14 +377,20 @@ pub(super) fn call(
     };
     if matches!(name, "PollSelector" | "SelectSelector") {
         builtins::bind(name, args, kwargs, [])?;
+        let module = ctx.module("selectors")?;
+        // Python selector methods keep their defining globals across sys.modules changes.
+        let globals = match *ctx.heap.get(module) {
+            Value::Module { scope, .. } => scope,
+            _ => module,
+        };
         let handle = Rc::new(RefCell::new(Selector {
-            poll: (name == "PollSelector").then(Poll::default),
+            globals,
+            poll: (name == "PollSelector").then(Rc::default),
             keys: ctx.dict(Vec::new()),
             mapping: NONE,
         }));
         let selector = ctx.alloc(Value::Selector(handle.clone()));
         ctx.heap.keep(selector);
-        let module = ctx.module("selectors")?;
         let class = ctx.lookup_attr(module, "_SelectorMapping")?;
         let view = ctx.call(class, vec![selector], Vec::new())?;
         handle.borrow_mut().mapping = view;
@@ -436,8 +452,9 @@ pub(super) fn call(
                     ctx.as_integer(events)?
                 };
                 let events_changed = key.interests != bits;
-                if events_changed && let Some(poll) = &mut handle.borrow_mut().poll {
-                    poll.set(native_fd(ctx, fd)?, poll_mask(bits))
+                if events_changed && let Some(poll) = &handle.borrow().poll {
+                    poll.borrow_mut()
+                        .set(native_fd(ctx, fd)?, poll_mask(bits))
                         .map_err(|_| Error::new("MemoryError", "out of memory"))?;
                 }
                 let unequal = ctx.binary("!=", data, key.data)?;
@@ -458,10 +475,11 @@ pub(super) fn call(
                 let native = native_fd(ctx, fd)?;
                 ctx.set_dictionary_key(keys, fd, entry, None, true)?;
                 if handle
-                    .borrow_mut()
+                    .borrow()
                     .poll
-                    .as_mut()
+                    .as_ref()
                     .unwrap()
+                    .borrow_mut()
                     .set(native, poll_mask(bits))
                     .is_err()
                 {
@@ -497,14 +515,23 @@ pub(super) fn call(
             if handle.borrow().poll.is_some() {
                 let number = ctx.lookup_attr(key, "fd")?;
                 let native = native_fd(ctx, number)?;
-                handle.borrow_mut().poll.as_mut().unwrap().remove(native);
+                handle
+                    .borrow()
+                    .poll
+                    .as_ref()
+                    .unwrap()
+                    .borrow_mut()
+                    .remove(native);
             }
             Ok(key)
         }
         "select" => {
             let [seconds] = builtins::bind(name, args, kwargs, ["timeout"])?;
-            let poll = handle.borrow().poll.is_some();
-            let timeout = timeout(ctx, seconds.unwrap_or(NONE), poll)?;
+            let globals = {
+                let selector = handle.borrow();
+                selector.poll.as_ref().map(|_| selector.globals)
+            };
+            let timeout = timeout(ctx, seconds.unwrap_or(NONE), globals)?;
             Selector::select(ctx, &handle, timeout)
         }
         "__enter__" | "close" => {
@@ -522,5 +549,38 @@ pub(super) fn call(
             close(ctx, &handle)
         }
         _ => Err(bad()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Selector;
+    use crate::dynamic::value::{Heap, NONE, Value};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn unowned_loop_checks_live_and_borrowed_selector_edges() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let source = heap.alloc(Value::List(Vec::new()));
+        let iterator = heap.alloc(Value::LoopIterator { source });
+        let selector = Rc::new(RefCell::new(Selector {
+            poll: None,
+            globals: NONE,
+            keys: NONE,
+            mapping: NONE,
+        }));
+        heap.alloc(Value::Selector(Rc::clone(&selector)));
+        heap.release_temporaries_since(mark);
+        let mut unowned = || heap.generator_loop_is_unowned(source, iterator, std::iter::empty());
+
+        assert!(unowned());
+        let mut borrowed = selector.borrow_mut();
+        assert!(!unowned());
+        borrowed.keys = source;
+        drop(borrowed);
+        assert!(!unowned());
+        selector.borrow_mut().keys = NONE;
+        assert!(unowned());
     }
 }

@@ -125,7 +125,11 @@ def current():
     assert list(reverse(view)) == ["b", "a"]
     cursor = reversed(view)
     assert type(cursor).__name__ == "dict_reversekeyiterator"
+    hint = type(cursor).__dict__["__length_hint__"]
+    assert hint is type(cursor).__length_hint__ and hint.__objclass__ is type(cursor)
+    assert cursor.__length_hint__() == hint(cursor) == 2
     values["changed"] = 12
+    assert hint(cursor) == 0
     try:
         next(cursor)
     except RuntimeError:

@@ -25,6 +25,19 @@ def check():
     head = original.__traceback__
     tail = head.tb_next
     alias = ValueError().with_traceback(head)
+    frame = tail.tb_frame
+    builtins = type(frame).f_builtins
+    assert builtins is vars(type(frame))["f_builtins"]
+    assert type(builtins).__get__(builtins, frame) is frame.f_builtins
+    assert builtins.__get__(frame) is frame.f_builtins
+    for edit in (lambda: setattr(frame, "f_builtins", {}), lambda: delattr(frame, "f_builtins")):
+        try:
+            edit()
+        except AttributeError as error:
+            assert str(error) == "attribute 'f_builtins' of 'frame' objects is not writable"
+        else:
+            raise AssertionError("modified frame builtins")
+    del frame
     assert refs[0]() is not None
 
     for target, value, error_type, detail in (
@@ -63,4 +76,54 @@ def check():
         assert head.tb_next is None
 
 
+def check_context_cycle(backlink):
+    error = KeyError("expired")
+    active = ValueError("handler")
+    inner = RuntimeError("inner")
+    cause = OSError("cause")
+    active.__context__ = inner
+    inner.__context__ = error if backlink else active
+    try:
+        raise active
+    except ValueError:
+        try:
+            raise error from cause
+        except KeyError as caught:
+            assert caught is error and caught.__context__ is active
+            assert caught.__cause__ is cause and caught.__suppress_context__
+            assert active.__context__ is inner
+            assert inner.__context__ is (None if backlink else active)
+
+
+def check_unwind():
+    error = capture([])
+    tail = error.__traceback__
+    seen = []
+
+    class Operand:
+        def __del__(self):
+            seen.append(error.__traceback__)
+            error.__traceback__ = None
+            error.args = ("during unwind",)
+
+    def fail_again():
+        raise error
+
+    def dispatch():
+        print(Operand(), fail_again())
+
+    try:
+        dispatch()
+    except LookupError as caught:
+        assert caught is error and caught.args == ("during unwind",)
+        assert caught.__traceback__.tb_next is None
+        head, = seen
+        assert head.tb_frame.f_code.co_name == "dispatch"
+        assert head.tb_next.tb_frame.f_code.co_name == "fail_again"
+        assert head.tb_next.tb_next is tail
+
+
 check()
+check_unwind()
+check_context_cycle(True)
+check_context_cycle(False)

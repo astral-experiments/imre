@@ -30,54 +30,41 @@ impl Batch<'_> {
 
     // A change in indentation must have the same ordering with tab widths eight and one.
     fn indentation(&mut self, source: &str, start: usize, token: usize, base: i64) -> bool {
-        fn columns(indent: &str) -> (usize, usize) {
-            indent.bytes().fold((0, 0), |(col, alt), ch| match ch {
-                b'\t' => ((col / 8 + 1) * 8, alt + 1),
-                12 => (0, 0),
-                _ => (col + 1, alt + 1),
-            })
-        }
+        use imre_ast::indentation::{columns, next_depth};
         let prefix = &source[start..token];
         let physical_start = prefix.rfind('\n').map_or(start, |n| start + n + 1);
-        // Across continuations the first nonzero prefix sets the level. INDENT
-        // itself spans the leading whitespace on the final physical line.
-        let indent = prefix
-            .split_inclusive('\n')
-            .map(|line| line.trim_end_matches(['\n', '\r', '\\']))
-            .find(|part| columns(part).0 != 0)
-            .unwrap_or("");
         let line_base = || {
             base + source[..physical_start]
                 .bytes()
                 .filter(|&c| c == b'\n')
                 .count() as i64
         };
-        let (col, alt) = columns(indent);
-        let (top, top_alt) = columns(self.indents.last().map_or("", String::as_str));
-        if col > top && alt > top_alt {
-            if self.indents.len() >= crate::dynamic::source_code::MAX_INDENT_LEVELS {
+        let depth = match next_depth(&self.indents, columns(prefix), |s| columns(s)) {
+            Ok(depth) => depth,
+            Err(mismatch) => {
+                self.error = Some(Failure::indent(
+                    &source[physical_start..],
+                    line_base(),
+                    mismatch,
+                ));
+                return false;
+            }
+        };
+        if depth > self.indents.len() {
+            if depth > crate::dynamic::source_code::MAX_INDENT_LEVELS {
                 self.error = Some(Failure::too_deep(&source[physical_start..], line_base()));
                 return false;
             }
-            self.indents.push(indent.to_owned());
+            self.indents.push(prefix.to_owned());
+            // INDENT spans the whitespace on the final physical line, even after a join.
             self.emit(K::Indent, physical_start..token, false);
-            return true;
-        }
-        let keep = self.indents.partition_point(|s| columns(s).0 <= col);
-        let (found, found_alt) = columns(self.indents[..keep].last().map_or("", String::as_str));
-        if found == col && found_alt == alt {
-            for _ in keep..self.indents.len() {
+        } else {
+            for _ in depth..self.indents.len() {
                 self.emit(K::Dedent, token..token, false);
             }
-            self.indents.truncate(keep);
-            return true;
+            self.indents.truncate(depth);
         }
-        self.error = Some(Failure::indent(
-            &source[physical_start..],
-            line_base(),
-            col >= top || found == col,
-        ));
-        false
+        true
     }
 
     fn unfinished(&mut self, source: &str, base: i64, eof: bool) {
@@ -97,13 +84,19 @@ impl Batch<'_> {
     }
 
     fn read(&mut self, source: &str, base: i64, eof: bool) {
-        // Keep unmodified source for the records even when the C tokenizer
-        // would have inserted a newline after the last physical line.
-        let input: Cow<'_, str> = if source.ends_with('\n') {
-            Cow::Borrowed(source)
+        // Decoding already handled a bytes source's BOM. For public tokens a
+        // U+FEFF still in the callback text is a potential NAME character,
+        // even at the start of a batch where Ruff would skip it. A non-ASCII
+        // identifier letter of the same UTF-8 width preserves lexer offsets;
+        // token strings, lines and diagnostics still use the original source.
+        let mut input = if self.extra && source.contains('\u{feff}') {
+            Cow::Owned(source.replace('\u{feff}', "名"))
         } else {
-            Cow::Owned(format!("{source}\n"))
+            Cow::Borrowed(source)
         };
+        if !source.ends_with('\n') {
+            input.to_mut().push('\n');
+        }
         let mut lexer = lex(&input, Mode::Module);
         let mut line_start = Some(0);
         let mut brackets = Vec::new();

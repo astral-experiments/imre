@@ -1,4 +1,8 @@
 //! Store sparse exceptions by occupied block, or one alternate scalar row and a bitmap.
+mod ranked_writes;
+mod spaced_writes;
+mod word_writes;
+
 use super::{Error, Result};
 use std::collections::HashMap;
 
@@ -445,8 +449,11 @@ impl Binary {
             _ if count.saturating_mul(distance) <= n => count,
             _ => count.min(n / num_integer::gcd(n, step)),
         };
-        let (done, last) = if distance == 1 {
-            self.set_contiguous(at, step == 1, n, writes, set)
+        let (done, last) = if distance < BLOCK && distance.is_power_of_two() {
+            self.set_strided(at, distance, step == distance, n, writes, set)
+        } else if (2..=BLOCK / 4).contains(&distance) {
+            // At least four regularly spaced writes fit in a full word.
+            self.set_spaced(at, distance, step == distance, n, writes, set)
         } else if distance == BLOCK && n.is_multiple_of(BLOCK) {
             self.set_word_stride(at, step == BLOCK, n, writes, set)
         } else {
@@ -464,6 +471,75 @@ impl Binary {
         }
     }
 
+    /// Fill an orbit from its only set bit, clearing the unvisited tail before publication.
+    #[inline(never)]
+    fn fill_scattered_orbit(
+        &mut self,
+        at: usize,
+        step: usize,
+        n: usize,
+        count: usize,
+    ) -> Option<(usize, usize)> {
+        let spacing = num_integer::gcd(n, step);
+        let period = n / spacing;
+        let mut omitted = (period - 1).saturating_sub(count);
+        // Compare individual scattered stores with a bitmap-word fill followed by
+        // clearing the complementary tail. Keep the existing sparse-tail bound
+        // when the residue class itself takes one or more words per visit.
+        let fill_words = n.div_ceil(BLOCK).min(period);
+        let tail_budget = (count / BLOCK).max(count.saturating_sub(fill_words) / 2);
+        if spacing >= step.min(n - step) || !self.contains(at) {
+            return None;
+        }
+        if omitted > tail_budget {
+            return self.fill_ranked_prefix(at, step, n, count, spacing);
+        }
+
+        // Exactly one residue class is reachable. Visit the other members in
+        // address order while the runtime owns the bitmap exclusively.
+        let (done, last) = self.set_modular(at, spacing, n, period - 1, true);
+        // The unvisited tail ends immediately before the original row in source order.
+        let mut hole = at;
+        while done == period - 1
+            && omitted != 0
+            && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            let batch = omitted.min(1024);
+            for _ in 0..batch {
+                hole = if hole >= step {
+                    hole - step
+                } else {
+                    n - (step - hole)
+                };
+                // Every omitted position is distinct and was set by the complete fill.
+                let (block, bit) = position(hole);
+                self.bits[block] &= !bit;
+            }
+            self.changed -= batch;
+            omitted -= batch;
+        }
+        if done < period - 1
+            || omitted != 0
+            || crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            // Reordered stores cannot expose a source-order prefix. Clear only
+            // the words the canonical walk reached, including its single wrap.
+            let (first_word, original) = position(at);
+            let (last_word, _) = position(last);
+            if last < at {
+                self.bits[first_word..n.div_ceil(BLOCK)].fill(0);
+                self.bits[..=last_word].fill(0);
+            } else {
+                self.bits[first_word..=last_word].fill(0);
+            }
+            self.bits[first_word] = original;
+            self.changed = 1;
+            return Some((0, at));
+        }
+        let last = (at as u128 + count as u128 * step as u128) % n as u128;
+        Some((count, last as usize))
+    }
+
     /// Apply scattered writes in index order and report the prefix completed before a signal.
     fn set_scattered(
         &mut self,
@@ -473,6 +549,13 @@ impl Binary {
         count: usize,
         set: bool,
     ) -> (usize, usize) {
+        if set && self.changed == 1 {
+            if let Some(progress) = self.fill_scattered_orbit(at, step, n, count) {
+                return progress;
+            }
+        } else if let Some(progress) = self.merge_ranked_prefix(at, step, n, count, set) {
+            return progress;
+        }
         let mut added = 0;
         let mut done = 0;
         while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
@@ -495,66 +578,6 @@ impl Binary {
         }
         self.changed += added;
         (done, at)
-    }
-
-    /// Fill each contiguous run up to its wrap or the next signal check.
-    #[inline(never)]
-    fn set_contiguous(
-        &mut self,
-        mut at: usize,
-        forward: bool,
-        n: usize,
-        count: usize,
-        set: bool,
-    ) -> (usize, usize) {
-        let mut done = 0;
-        while done < count && !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Relaxed) {
-            let chunk = (count - done).min(1024);
-            let range = if forward {
-                let first = if at + 1 == n { 0 } else { at + 1 };
-                first..first + chunk.min(n - first)
-            } else {
-                let end = if at == 0 { n } else { at };
-                end - chunk.min(end)..end
-            };
-            done += range.len();
-            at = if forward { range.end - 1 } else { range.start };
-            self.fill_range(range, set);
-        }
-        (done, at)
-    }
-
-    /// Set or clear a contiguous range and count only the bits that change.
-    fn fill_range(&mut self, range: std::ops::Range<usize>, set: bool) {
-        let end = range.end.min(self.bits.len().saturating_mul(BLOCK));
-        let mut at = range.start;
-        let mut changed = 0;
-        while at < end {
-            let offset = at % BLOCK;
-            if offset == 0 && end - at >= BLOCK {
-                let last = end / BLOCK;
-                let target = if set { u64::MAX } else { 0 };
-                for word in &mut self.bits[at / BLOCK..last] {
-                    let flips = *word ^ target;
-                    changed += flips.count_ones() as usize;
-                    *word ^= flips;
-                }
-                at = last * BLOCK;
-                continue;
-            }
-            let width = (end - at).min(BLOCK - offset);
-            let mask = (u64::MAX >> (BLOCK - width)) << offset;
-            let word = &mut self.bits[at / BLOCK];
-            let flips = mask & if set { !*word } else { *word };
-            changed += flips.count_ones() as usize;
-            *word ^= flips;
-            at += width;
-        }
-        if set {
-            self.changed += changed;
-        } else {
-            self.changed -= changed;
-        }
     }
 
     /// A one-word stride on a word-aligned ring keeps the bit within each word fixed.
@@ -900,9 +923,94 @@ mod page_tests {
     }
 
     #[test]
-    fn contiguous_row_and_word_writes_match_scalar_stores_across_wraps() {
+    fn ranked_writes_merge_with_existing_tags() {
+        let n: usize = 8193;
+        let at = n - 7;
+        let count = n / 2;
+        for step in [67, n - 67] {
+            for set in [false, true] {
+                let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
+                let mut expected = vec![false; binary.bits.len() * BLOCK];
+                for i in (0..expected.len()).step_by(5) {
+                    assert!(binary.insert(i));
+                    expected[i] = true;
+                }
+                let mut last = at;
+                for _ in 0..count {
+                    last = (last + step) % n;
+                    expected[last] = set;
+                }
+                assert_eq!(binary.set_modular(at, step, n, count, set), (count, last));
+                assert_eq!(binary.changed, expected.iter().filter(|bit| **bit).count());
+                for (i, bit) in expected.into_iter().enumerate() {
+                    assert_eq!(binary.contains(i), bit);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn complete_orbits_preserve_the_original_index_and_other_residues() {
+        for (n, at, step) in [
+            (1024usize, 1019usize, 94usize),
+            (1032, 1010, 1014),
+            (1056, 67, 99),
+            (8192, 8171, 194),
+            (8194, 8171, 194),
+            (8191, 8183, 67),
+            (8193, 8180, 195),
+            (16395, 16388, 335),
+            (16395, 16388, 16395 - 335),
+            (4096, 4081, 1069),
+        ] {
+            let period = n / num_integer::gcd(n, step);
+            for count in [
+                period / 2,
+                2 * period / 3,
+                3 * period / 4,
+                7 * period / 8,
+                period - period / 32,
+                period - period / 64,
+                period - 2,
+                period - 1,
+                period,
+                3 * period + 3,
+            ] {
+                let mut binary = Binary::empty(&[7], n.div_ceil(BLOCK)).unwrap();
+                assert!(binary.insert(at));
+                let mut expected = vec![false; binary.bits.len() * BLOCK];
+                let mut last = at;
+                expected[at] = true;
+                for _ in 0..count {
+                    last = (last + step) % n;
+                    expected[last] = true;
+                }
+                assert_eq!(binary.set_modular(at, step, n, count, true), (count, last));
+                assert_eq!(binary.changed, expected.iter().filter(|set| **set).count());
+                for (index, set) in expected.into_iter().enumerate() {
+                    assert_eq!(binary.contains(index), set);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn strided_writes_match_scalar_stores_across_wraps() {
         let n: usize = 193;
         for (n, step) in [
+            (n, 2),
+            (n, n - 2),
+            (n, 3),
+            (n, n - 3),
+            (4 * BLOCK, 5),
+            (4 * BLOCK, 4 * BLOCK - 5),
+            (n, 7),
+            (n, n - 15),
+            (n, 4),
+            (n, n - 4),
+            (n, 8),
+            (n, 16),
+            (n, 32),
             (n, 1),
             (n, n - 1),
             (4 * BLOCK, BLOCK),

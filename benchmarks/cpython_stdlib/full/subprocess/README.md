@@ -304,3 +304,11 @@ Run `readiness_original.py --imre ... --runtime ... --clang ... --opt-level {0,3
 --result ...` with the pinned interpreter, Linux procfs and strace. Apply the
 pair with `readiness_evidence.py --previous <baseline> --readiness
 raw-pipe-readiness-linux.json --result evidence-linux.json`.
+
+## Whole suite on public #8087
+
+On Linux, CPython 3.14.5 passed 308 of the 353 original methods, skipped 43 and errored twice with direct FILE and named entry. Its regression launcher, `python -m test -v test_subprocess`, passed 306, skipped 45 and errored twice on the same host. Both native tiers passed 300, skipped 41 and errored on 12 methods with direct FILE and named entry. The test runner printed 18 errors because two IDs each had four failing subtests. Of the 300 native passes, 298 also passed on stock.
+
+The first two native errors came from errpipe tests replacing `subprocess._fork_exec` before calling `Popen`. The stock implementation calls the replaceable Python name. The shipped implementation calls its native child launcher directly. A real uv Git check still returned the same 17 bytes at both tiers, including saved executables.
+
+With the original source, test support and cache withdrawn, each saved FILE executable finished 53 methods: 36 passed, nine skipped, seven errored and one failed. The 54th, `test_pass_fds_redirected`, waited on a pipe after the child lost its `fd_status.py` helper. The remaining 299 methods never started in this bounded run. [All 353 method IDs, source hashes and original dispositions](paired-public-8087.tsv)

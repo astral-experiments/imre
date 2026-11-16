@@ -34,6 +34,37 @@ def current():
     coroutine_weak_value()
     reference_repr()
     standard_stream_weak_values()
+    class_references()
+
+
+def class_references():
+    import gc
+
+    class Parent:
+        pass
+
+    class First(Parent):
+        pass
+
+    class Child(Parent):
+        def ordinary(self):
+            return 1
+
+        def owner(self):
+            return __class__
+
+    assert type in object.__subclasses__() and bool in int.__subclasses__()
+    assert Parent.__subclasses__() == [First, Child]
+    callbacks = []
+    observed = ref(Child, lambda dead: callbacks.append((dead() is None, Parent.__subclasses__())))
+    ordinary, captured = Child.ordinary, Child.owner
+    del Child
+    gc.collect()
+    assert observed() is captured(None)
+    del captured
+    gc.collect()
+    assert observed() is None and callbacks == [(True, [First])]
+    assert ordinary(None) == 1
 
 
 def equal_weak_value_keys(first, other):

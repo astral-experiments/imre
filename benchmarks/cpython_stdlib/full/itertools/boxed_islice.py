@@ -44,6 +44,32 @@ view.__init__([40], 1)
 assert list(view) == [20]
 
 
+class Init:
+    def __get__(self, instance, owner):
+        assert instance is not None
+        return instance.initialize
+
+
+class WithInit(islice):
+    __init__ = Init()
+
+    def initialize(self, *args, label):
+        self.label = label
+
+
+class Stop:
+    def __index__(self):
+        source.events.append("index")
+        return 1
+
+
+source = Source()
+view = WithInit(source, Stop(), label=3)
+assert source.events == ["index", "iter"]
+assert view.label == 3 and list(view) == [0]
+assert source.events == ["index", "iter", 0]
+
+
 class BadIndex:
     def __index__(self):
         raise RuntimeError("bad index")

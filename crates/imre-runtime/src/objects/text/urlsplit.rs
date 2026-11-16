@@ -17,11 +17,7 @@ unsafe fn decoded<'a>(word: *const c_void, is_bytes: bool) -> Result<&'a str> {
     // SAFETY: The caller supplies the matching rooted layout for this borrow.
     let raw = unsafe { data(word, is_bytes) };
     if is_bytes && let Some(i) = raw.iter().position(|b| !b.is_ascii()) {
-        return Err(bytes::ascii_decode_error(
-            // SAFETY: This branch established that word points to an owned byte buffer.
-            unsafe { crate::acquire_bytes(word as usize) },
-            i,
-        ));
+        return Err(bytes::ascii_decode_error(raw, i));
     }
     // SAFETY: bytes were checked for ASCII; string storage is UTF-8.
     Ok(unsafe { std::str::from_utf8_unchecked(raw) })
@@ -335,8 +331,7 @@ pub(crate) fn netloc_property(
         lower[..name.len()].make_ascii_lowercase();
         lower
     } else {
-        let mut lower = super::lowercase::lowercase(std::str::from_utf8(name).unwrap())
-            .map_err(|_| Error::allocation())?;
+        let mut lower = super::case_map(std::str::from_utf8(name).unwrap(), super::Case::Lower)?;
         if let Some(zone) = zone {
             lower
                 .try_reserve(1 + zone.len())

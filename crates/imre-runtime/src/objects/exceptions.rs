@@ -8,8 +8,8 @@
 use crate::StrOwner;
 mod arguments;
 mod imports;
-pub(super) use imports::imre_exception_field_repr;
 pub(crate) use imports::keyword_suggestion;
+pub(super) use imports::{imre_exception_field_repr, type_name as word_type_name};
 mod tree;
 pub(super) use tree::append_tree_entries;
 
@@ -18,7 +18,6 @@ use std::io::{self, Write};
 use std::rc::Rc;
 
 pub(crate) use imre_ast::exceptions::Kind;
-use num_traits::ToPrimitive;
 use ruff_python_literal::escape::{Escape, UnicodeEscape};
 
 use allocator_api2::boxed::Box;
@@ -83,11 +82,22 @@ pub(super) struct Exception {
 struct ExceptionDetails {
     cause: Option<crate::ObjectOwner>,
     display_context: Option<(crate::ObjectOwner, bool)>,
-    origins: Vec<(StrOwner, u64)>,
+    origins: Vec<RaiseOrigin>,
     named: Option<&'static NamedDescriptor>,
     layout: Option<Rc<NamedPayload>>,
     directories: Option<Rc<DirectoryFrame>>,
     args: Option<arguments::Cached>,
+}
+
+#[derive(Clone)]
+pub(crate) enum RaiseOrigin {
+    Line(StrOwner, u64),
+    Frame {
+        file: &'static str,
+        name: &'static str,
+        line: u32,
+        span: Option<[u32; 3]>,
+    },
 }
 
 type Formatter = unsafe extern "C" fn(*const usize) -> *const Str;
@@ -188,6 +198,15 @@ impl GroupMember {
 }
 
 impl Exception {
+    /// Retain the code before releasing the exception storage. An omitted argument stays absent.
+    fn exit_code_snapshot(&self) -> std::result::Result<Option<OwnedWord>, Kind> {
+        match &self.payload {
+            Payload::Exit(code) => Ok(code.clone()),
+            Payload::ExitArguments(args) => Ok(Some(args.0.clone())),
+            _ => Err(self.kind),
+        }
+    }
+
     /// Own every argument before invoking a formatter that can reinitialize the exception.
     fn display_snapshot(&self) -> Result<Self> {
         fn boxed<T>(value: T) -> Result<Box<T>> {
@@ -274,6 +293,14 @@ impl Exception {
         })
     }
 
+    fn push_origin(&mut self, origin: RaiseOrigin) {
+        if let Ok(details) = self.try_details_mut()
+            && details.origins.try_reserve(1).is_ok()
+        {
+            details.origins.push(origin);
+        }
+    }
+
     fn cause(&self) -> Option<&crate::ObjectOwner> {
         self.details.as_deref()?.cause.as_ref()
     }
@@ -347,12 +374,15 @@ impl Exception {
             Kind::BadGzipFile => "gzip.BadGzipFile",
             Kind::CsvError => "_csv.Error",
             Kind::GaiError => "socket.gaierror",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::LzmaError => "_lzma.LZMAError",
             Kind::ZlibError => "zlib.error",
             Kind::TomlDecodeError => "tomllib.TOMLDecodeError",
             Kind::JsonDecodeError => "json.decoder.JSONDecodeError",
             Kind::CancelledError => "asyncio.exceptions.CancelledError",
             Kind::BadZipFile => "zipfile.BadZipFile",
+            Kind::IllegalMonthError => "calendar.IllegalMonthError",
+            Kind::IllegalWeekdayError => "calendar.IllegalWeekdayError",
             Kind::PackageNotFoundError => "importlib.metadata.PackageNotFoundError",
             Kind::UnsupportedOperation => "io.UnsupportedOperation",
             kind => kind.name(),
@@ -734,6 +764,7 @@ impl Error {
     pub(crate) fn into_parts(self) -> (&'static str, Rendered) {
         let kind = match self.kind {
             Kind::BadGzipFile => "gzip.BadGzipFile",
+            Kind::ZstdError => "compression.zstd.ZstdError",
             Kind::ZlibError => "zlib.error",
             kind => kind.name(),
         };
@@ -775,13 +806,7 @@ impl Error {
                 {
                     return error;
                 }
-                MEMORY_ERRORS.with(|errors| {
-                    let slot = errors[..MEMORY_ERROR_RESERVE]
-                        .iter()
-                        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
-                        .unwrap_or(&errors[MEMORY_ERROR_RESERVE]);
-                    slot.borrow().clone()
-                })
+                MEMORY_ERRORS.with(|errors| memory_error_slot(errors).borrow().clone())
             }
             Some(payload) => exception_with_cause(self.kind, payload, self.cause),
             None => SEQUENCE_ALLOCATION_ERROR.with_borrow(crate::ObjectOwner::clone),
@@ -826,6 +851,7 @@ pub(crate) fn finish<T>(result: Result<T>, sentinel: T) -> T {
 // CPython reserves sixteen distinct errors and uses one last-resort instance
 // while all sixteen are still observable by callers.
 const MEMORY_ERROR_RESERVE: usize = 16;
+const SEQUENCE_ALLOCATION_MESSAGE: &str = "sequence allocation failed";
 
 thread_local! {
     static MEMORY_ERRORS: [RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1] =
@@ -834,7 +860,7 @@ thread_local! {
         Kind::MemoryError, StrOwner::new(Str::new("record allocation failed")),
     ));
     static SEQUENCE_ALLOCATION_ERROR: RefCell<crate::ObjectOwner> = RefCell::new(new_exception(
-        Kind::MemoryError, StrOwner::new(Str::new("sequence allocation failed")),
+        Kind::MemoryError, StrOwner::new(Str::new(SEQUENCE_ALLOCATION_MESSAGE)),
     ));
     static PENDING: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
     static ACTIVE: RefCell<Option<crate::ObjectOwner>> = const { RefCell::new(None) };
@@ -1407,6 +1433,15 @@ pub(super) fn take_pending() -> Option<crate::ObjectOwner> {
     pending
 }
 
+fn memory_error_slot(
+    errors: &[RefCell<crate::ObjectOwner>; MEMORY_ERROR_RESERVE + 1],
+) -> &RefCell<crate::ObjectOwner> {
+    errors[..MEMORY_ERROR_RESERVE]
+        .iter()
+        .find(|error| crate::ObjectOwner::strong_count(&error.borrow()) == 1)
+        .unwrap_or(&errors[MEMORY_ERROR_RESERVE])
+}
+
 /// A suspended task retains the exception dynamically active in its own handlers.
 pub(super) fn swap_active(saved: &mut Option<crate::ObjectOwner>) {
     ACTIVE.with(|active| std::mem::swap(&mut *active.borrow_mut(), saved));
@@ -1692,21 +1727,31 @@ pub unsafe extern "C" fn imre_system_exit_new(kind: u32, word: usize) -> *const 
 /// `value` is a rooted builtin exception.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_system_exit_code(value: *const Object) -> *const Object {
-    // SAFETY: the caller roots the immutable exception.
-    let kind = unsafe { (*value).0.with(|s| s.exception().kind) };
-    if kind != Kind::SystemExit {
-        return Error::new(
-            Kind::AttributeError,
-            format!("'{}' object has no attribute 'code'", kind.name()),
-        )
-        .returning(std::ptr::null());
-    }
-    // SAFETY: the returned owner keeps the original exception and code alive.
-    crate::ObjectOwner::into_raw(unsafe { crate::ObjectOwner::acquire_word(value as usize) })
+    // SAFETY: the caller roots the exception. Only an owned code or a copied kind escapes.
+    let snapshot = unsafe {
+        (*value)
+            .0
+            .with(|storage| storage.exception().exit_code_snapshot())
+    };
+    let code = match snapshot {
+        Ok(code) => code,
+        Err(kind) => {
+            return Error::new(
+                Kind::AttributeError,
+                format!("'{}' object has no attribute 'code'", kind.name()),
+            )
+            .returning(std::ptr::null());
+        }
+    };
+    let (kind, word) = code
+        .as_ref()
+        .map_or((0, 0), |code| (code.kind.raw(), code.word));
+    // SAFETY: the snapshot roots the word while boxing inspects its concrete storage.
+    unsafe { super::boxed_values::imre_box_value(kind, word) }
 }
 
 pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
-    // SAFETY: the caller roots the expected boxed or exception value.
+    // SAFETY: the caller roots the boxed value or scalar module member.
     unsafe {
         (*value)
             .0
@@ -1715,17 +1760,11 @@ pub(super) unsafe fn exit_word(value: *const Object) -> (WordKind, usize) {
     }
 }
 
-/// Borrow the concrete Python value from a box, scalar module member or exit-code view.
+/// Borrow the Python value held by a boxed view or a scalar module member.
 pub(super) fn projected_word(storage: &Storage) -> Option<(WordKind, usize)> {
     match storage {
         Storage::ObjectValue(v) => Some((v.kind, v.word)),
         Storage::ModuleMember(m) => m.scalar().map(|(k, w)| (WordKind::new(k), w)),
-        Storage::Exception(e) => match &e.payload {
-            Payload::Exit(Some(code)) => Some((code.kind, code.word)),
-            Payload::ExitArguments(args) => Some((args.0.kind, args.0.word)),
-            Payload::Exit(None) => Some((WordKind::new(0), 0)),
-            _ => None,
-        },
         _ => None,
     }
 }
@@ -1960,6 +1999,17 @@ pub extern "C" fn imre_error_pending() -> u32 {
     u32::from(PENDING_PRESENT.get())
 }
 
+/// Test a checked failure without moving its pending exception or changing its context.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_error_matches(expected_kind: u32) -> u32 {
+    PENDING.with_borrow(|slot| {
+        slot.as_ref().map_or(0, |pending| {
+            // SAFETY: the pending slot roots this exception throughout the read.
+            unsafe { imre_exception_matches(crate::ObjectOwner::as_ptr(pending), expected_kind) }
+        })
+    })
+}
+
 /// Transfers the pending reference to the caller and clears pending state.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_take() -> *const Object {
@@ -2109,6 +2159,22 @@ pub(super) fn rendered(text: Str) -> Rendered {
     StrOwner::try_new(text).map_err(|_| std::fmt::Error)
 }
 
+/// Adopt a checked display result. A failing callback retains its Python exception.
+///
+/// # Safety
+/// A non-null pointer transfers one owned native string.
+pub(super) unsafe fn display_result(text: *const Str) -> Rendered {
+    if text.is_null() {
+        return Err(std::fmt::Error);
+    }
+    // SAFETY: the display method returned one owner even if an error is pending.
+    let text = unsafe { StrOwner::from_raw(text) };
+    if imre_error_pending() != 0 {
+        return Err(std::fmt::Error);
+    }
+    Ok(text)
+}
+
 pub(super) fn finish_display(result: Rendered) -> *const Str {
     if imre_error_pending() != 0 {
         return std::ptr::null();
@@ -2185,11 +2251,11 @@ unsafe fn display(value: *const Object, repr: bool) -> *const Str {
                         if index != 0 {
                             output.write_str(", ")?;
                         }
-                        super::values::try_write_repr(&mut output, arg.word, arg.kind)?;
+                        super::values::try_write_argument_repr(&mut output, arg.word, arg.kind)?;
                     }
                 }
                 Payload::Key(key) | Payload::Exit(Some(key)) => {
-                    super::values::try_write_repr(&mut output, key.word, key.kind)?;
+                    super::values::try_write_argument_repr(&mut output, key.word, key.kind)?;
                 }
                 Payload::Process(_) | Payload::Timeout(_) | Payload::Group(_) => {
                     arguments::write_projected_repr(value, &mut output)?;
@@ -2332,6 +2398,21 @@ pub unsafe extern "C" fn imre_exception_message(value: *const Object) -> *const 
     unsafe { display(value, false) }
 }
 
+/// Return the Python diagnostic name without invoking the exception's display methods.
+///
+/// # Safety
+/// `value` must be a rooted native exception.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_name(value: *const Object) -> *const Str {
+    // SAFETY: the borrowed exception is live while its name is copied.
+    let name = unsafe {
+        object(value)
+            .0
+            .with(|s| Str::new(s.exception().diagnostic_name()))
+    };
+    finish(crate::checked_owned_str(name), std::ptr::null())
+}
+
 /// Record a Python raise site without changing the exception's message or identity.
 ///
 /// # Safety
@@ -2349,16 +2430,80 @@ pub unsafe extern "C" fn imre_exception_with_origin(
             let Storage::Exception(exception) = storage else {
                 fail("SystemError", "expected an exception object");
             };
-            let Ok(details) = exception.try_details_mut() else {
-                return;
-            };
-            let origins = &mut details.origins;
-            if origins.try_reserve(1).is_ok() {
-                crate::imre_str_retain(filename);
-                origins.push((StrOwner::from_raw(filename), line));
-            }
+            crate::imre_str_retain(filename);
+            exception.push_origin(RaiseOrigin::Line(StrOwner::from_raw(filename), line));
         });
         imre_exception_retain(value);
+    }
+    value
+}
+
+/// Append a checked operation to the exception that failed. A null value selects the
+/// pending exception as a fixed call unwinds. An explicit raise returns the same owner
+/// as `imre_exception_with_origin`.
+///
+/// # Safety
+/// A non-null value borrows a live exception. File and name are process-lifetime UTF-8
+/// constants with the supplied lengths. The columns are UTF-8 byte offsets on `line`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_exception_at_frame(
+    value: *const Object,
+    file: *const u8,
+    file_len: usize,
+    name: *const u8,
+    name_len: usize,
+    line: u32,
+    start: u32,
+    split: u32,
+    end: u32,
+) -> *const Object {
+    // SAFETY: both slices borrow immutable strings embedded in the native program.
+    let (file, name) = unsafe {
+        (
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(file, file_len)),
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(name, name_len)),
+        )
+    };
+    let record = |value: &Object| {
+        // SAFETY: the exception stays rooted and no Python code runs while appending a site.
+        unsafe {
+            value.0.with_mut(|storage| {
+                let Storage::Exception(exception) = storage else {
+                    unreachable!("checked exception");
+                };
+                if exception.kind == Kind::MemoryError {
+                    // Reusable emergency exceptions cannot retain a previous call's frames.
+                    let reserved = |slot: &RefCell<crate::ObjectOwner>| {
+                        std::ptr::eq(crate::ObjectOwner::as_ptr(&slot.borrow()), value)
+                    };
+                    if SEQUENCE_ALLOCATION_ERROR.with(reserved)
+                        || RECORD_ALLOCATION_ERROR.with(reserved)
+                        || MEMORY_ERRORS.with(|slots| slots.iter().any(reserved))
+                    {
+                        return;
+                    }
+                }
+                exception.push_origin(RaiseOrigin::Frame {
+                    file,
+                    name,
+                    line,
+                    span: (end > start).then_some([start, split, end]),
+                });
+            })
+        }
+    };
+    if value.is_null() {
+        PENDING.with_borrow(|slot| {
+            if let Some(pending) = slot {
+                record(pending);
+            }
+        });
+    } else {
+        // SAFETY: the explicit raise borrows a live exception and returns an additional owner.
+        unsafe {
+            record(object(value));
+            imre_exception_retain(value);
+        }
     }
     value
 }
@@ -2466,16 +2611,51 @@ pub extern "C" fn imre_exception_reraise() {
     }
 }
 
-/// Reports and consumes the pending error after generated-code cleanup. Returning
-/// the exit status lets the C entry point finish normally, including sanitizer
-/// teardown. A failed best-effort stdout flush preserves the original error.
+/// Terminal status computed while generated Python globals are still available.
+/// The entry point releases its owners before delivering an unhandled SIGINT.
+#[repr(C)]
+pub struct UnhandledExit {
+    status: i32,
+    interrupt: bool,
+}
+
+impl UnhandledExit {
+    fn status(status: i32) -> Self {
+        Self {
+            status,
+            interrupt: false,
+        }
+    }
+}
+
+/// Render and consume a pending exception before the entry point releases globals.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_report_unhandled(report: &mut std::mem::MaybeUninit<UnhandledExit>) {
+    report.write(report_unhandled());
+}
+
+/// Complete the reported exit after the generated program's cleanup.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_finish_unhandled(report: &UnhandledExit) -> i32 {
+    if report.interrupt {
+        crate::signals::exit_interrupt()
+    } else {
+        report.status
+    }
+}
+
+/// Report and finish in one call for callers that have already performed cleanup.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_error_unhandled() -> i32 {
+    imre_finish_unhandled(&report_unhandled())
+}
+
+fn report_unhandled() -> UnhandledExit {
     let pending = take_pending();
     let active = ACTIVE.with(RefCell::take);
     drop(active);
     let Some(pending) = pending else {
-        return 0;
+        return UnhandledExit::status(0);
     };
     enum ExitText {
         Original(StrOwner),
@@ -2485,11 +2665,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
     let code = unsafe {
         pending
             .0
-            .with(|storage| match &storage.exception().payload {
-                Payload::Exit(code) => Some(code.clone()),
-                Payload::ExitArguments(args) => Some(Some(args.0.clone())),
-                _ => None,
-            })
+            .with(|storage| storage.exception().exit_code_snapshot().ok())
     };
     let exit = code.map(|code| match code.as_ref() {
         None => (0, None),
@@ -2498,7 +2674,7 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
         Some(code) if code.kind == WordKind::new(2) => {
             // SAFETY: the snapshot owns the exact integer. CPython uses -1 on overflow.
             let integer = unsafe { crate::Int::borrow(code.word) };
-            (integer.big().to_i64().unwrap_or(-1) as i32, None)
+            (integer.exit_status(), None)
         }
         Some(code) => {
             let message = if code.kind == WordKind::new(3) {
@@ -2541,15 +2717,20 @@ pub extern "C" fn imre_error_unhandled() -> i32 {
             };
             let _ = crate::sys::write_stderr(text, true);
         }
-        return status_after_flush(status, stdout, stderr.and(crate::sys::flush_stderr()));
+        return UnhandledExit::status(finish_native_stdio(
+            status,
+            stdout,
+            stderr.and(crate::sys::flush_stderr()),
+        ));
     }
     let interrupted = kind_of(&pending) == Kind::KeyboardInterrupt;
     write_exception_chain(pending);
-    let status = status_after_flush(1, stdout, stderr.and(crate::sys::flush_stderr()));
-    if interrupted {
-        crate::signals::exit_interrupt()
-    } else {
-        status
+    // Exception display may have written more stdout after the pre-report flush.
+    let stdout = stdout.and_then(|()| crate::flush_stdout());
+    let status = finish_native_stdio(1, stdout, stderr.and(crate::sys::flush_stderr()));
+    UnhandledExit {
+        status,
+        interrupt: interrupted,
     }
 }
 
@@ -2616,11 +2797,8 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
             };
             let _ = writeln!(diagnostic, "\n{separator}\n");
         }
-        if let Some(origins) = origins.filter(|frames| !frames.is_empty()) {
-            let _ = writeln!(diagnostic, "Traceback (most recent call last):");
-            for (filename, line) in origins.iter().rev() {
-                let _ = writeln!(diagnostic, "  File \"{filename}\", line {line}");
-            }
+        if let Some(origins) = origins {
+            crate::dynamic::write_raise_origins(&origins, &mut *diagnostic);
         }
         if let Some(hint) = suggestion {
             let _ = writeln!(diagnostic, "{name}: {message}. Did you mean: '{hint}'?");
@@ -2632,13 +2810,21 @@ fn write_exception_chain(exception: crate::ObjectOwner) {
     }
 }
 
+/// A failure to flush a standard stream replaces the requested process status.
+pub(crate) fn status_after_flush(status: i32, flushed: bool) -> i32 {
+    if flushed { status } else { 120 }
+}
+
 /// CPython reports a stdout flush error, silently records a stderr flush error,
-/// and uses status 120 if either stream could not be finalized.
-pub(crate) fn status_after_flush(
+/// then applies the common process status.
+pub(crate) fn finish_native_stdio(
     status: i32,
     stdout: io::Result<()>,
     stderr: io::Result<()>,
 ) -> i32 {
+    #[cfg(unix)]
+    crate::signals::finalize();
+    let flushed = stdout.is_ok() && stderr.is_ok();
     if let Err(error) = stdout {
         let broken_pipe = error.kind() == io::ErrorKind::BrokenPipe;
         let error = super::files::errno_error(error);
@@ -2660,12 +2846,8 @@ pub(crate) fn status_after_flush(
         } else {
             let _ = writeln!(diagnostic, "{name}: {message}");
         }
-        120
-    } else if stderr.is_err() {
-        120
-    } else {
-        status
     }
+    status_after_flush(status, flushed)
 }
 
 #[cfg(test)]
@@ -3093,7 +3275,7 @@ mod tests {
 
     #[test]
     fn caught_arithmetic_and_list_failures_preserve_owners_and_allow_recovery() {
-        let big = Shared::new(BigInt::from(1_u8) << 120_u32);
+        let big = crate::wide_owner(BigInt::from(1_u8) << 120_u32);
         let weak = Shared::downgrade(&big);
         let integer = Int(Shared::into_raw(big) as usize);
         // SAFETY: the constructor transfers one owned list reference.

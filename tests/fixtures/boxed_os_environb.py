@@ -1,5 +1,6 @@
 import os
 import posix
+import subprocess
 import sys
 
 
@@ -7,8 +8,15 @@ def check_popen():
     key = "IMRE_POPEN_ENVIRON_PROBE"
     old = os.environ.get(key)
     try:
-        os.environ[key] = "inherited value"
-        with os.popen("printf '%s\\n' first \"$IMRE_POPEN_ENVIRON_PROBE\"") as reader:
+        os.environ[key] = "mapping value"
+        # putenv changes what children inherit without updating os.environ.
+        os.putenv(key, "inherited value")
+        command = "printf '%s\\n' first \"$IMRE_POPEN_ENVIRON_PROBE\""
+        result = subprocess.run(
+            ["/bin/sh", "-c", command], env=os.environ, capture_output=True, encoding="utf-8", check=True
+        )
+        assert result.stdout == "first\nmapping value\n"
+        with os.popen(command) as reader:
             assert next(iter(reader)) == "first\n"
             assert reader.read() == "inherited value\n"
         assert reader.closed

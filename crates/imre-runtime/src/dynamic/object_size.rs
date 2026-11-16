@@ -150,7 +150,7 @@ impl Context {
                 Value::Instance {
                     class,
                     property: None,
-                    cycle: None,
+                    itertools: None,
                     memory_stream: None,
                     ..
                 },

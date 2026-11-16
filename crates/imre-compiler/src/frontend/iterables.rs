@@ -1,6 +1,7 @@
 //! Concrete eager consumers share ordinary iteration and own all private roots.
 
 use super::*;
+use expansions::ExpansionSource;
 
 impl Checker<'_> {
     pub(super) fn list_call(
@@ -22,60 +23,99 @@ impl Checker<'_> {
                 "list accepts zero or one positional iterable",
             ));
         };
-        if let ast::Expr::Call(view) = source
+        let call_input = source.as_call_expr();
+        let binding = call_input.and_then(|call| self.resolve(&call.func));
+        if let Some(view) = call_input
             && let ast::Expr::Attribute(method) = &*view.func
             && method.attr.as_str() == "keys"
-            && self.resolve(&view.func).is_none()
+            && binding.is_none()
         {
             // The same non-escaping view as a key union, exhausted immediately.
             let (value, _) = self.union_operand(source)?;
             let input = self.iteration_value(value, false, source)?;
             return self.collect_list(input, false, element, call);
         }
-        if let Some(diff) = self.materialize_ndiff(source)? {
+        if let Some(scan) = call_input
+            && self.is_accumulate(scan, binding)
+        {
+            let args = self.accumulate_args(scan)?;
+            if let Some(expected) = element {
+                self.expect(expected, args.element, source)
+                    .map_err(|_| self.scoped_builtin_error("itertools.accumulate", scan))?;
+            }
+            if args.source.ty == Type::ListInt && args.function.ty == Type::None {
+                let mut operands = vec![args.source];
+                operands.extend(args.initial);
+                return Ok(args.scope.finish(Expr {
+                    ty: Type::ListInt,
+                    kind: ExprKind::Builtin(Builtin::ListAccumulate, operands),
+                }));
+            }
+            let input = self.prepare_accumulate(scan, args)?;
+            return self.collect_list(Iteration::Prepared(input), false, element, call);
+        }
+        if element.is_none_or(|ty| ty == Type::Int)
+            && let ast::Expr::Name(name) = source
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.types.cursor_element(self.locals[slot]) == Some(Type::Int)
+        {
+            let cursor = self.expr(source)?;
+            return Ok(Expr {
+                ty: Type::ListInt,
+                kind: ExprKind::Builtin(Builtin::CollectIntCursor, vec![cursor]),
+            });
+        }
+        if let Some(call) = call_input
+            && binding == Some(Binding::Intrinsic(Intrinsic::Ndiff))
+        {
+            let diff = self.materialize_ndiff(call)?;
             if let Some(element) = element {
                 self.expect(element, Type::Str, source)?;
             }
             return Ok(diff);
         }
         if let ast::Expr::Generator(generator) = source
-            && let Some(filtered) =
-                self.string_list_filter(&generator.generators, &generator.elt, element, true)?
+            && let Some(filtered) = self.string_list_filter(
+                &imre_ast::comprehension::Plan::generator(generator),
+                element,
+                None,
+            )?
         {
             return Ok(filtered);
         }
-        let (input, convert) = self.consumer_input(source, element)?;
-        if !convert
-            && let Iteration::Container {
+        let (input, mapped) = self.consumer_source(source, element)?;
+        match input {
+            ExpansionSource::Value(iterable)
+            | ExpansionSource::Iteration(Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } = &input
-            && self.types.element(iterable.ty) == Some(Type::Str)
-            && element.is_none_or(|expected| expected == Type::Str)
-        {
-            return Ok(Expr {
-                ty: iterable.ty,
-                kind: ExprKind::Builtin(Builtin::StringListCopy, vec![iterable.clone()]),
-            });
+            }) if match mapped {
+                Some(_) => iterable.ty == Type::Str && element.is_none_or(|ty| ty == Type::Int),
+                None => {
+                    self.types.element(iterable.ty) == Some(Type::Str)
+                        && element.is_none_or(|ty| ty == Type::Str)
+                }
+            } =>
+            {
+                let (ty, operation) = if mapped.is_some() {
+                    (
+                        Type::ListInt,
+                        Builtin::StringIntList(self.call_origin(call)),
+                    )
+                } else {
+                    (iterable.ty, Builtin::StringListCopy)
+                };
+                Ok(Expr {
+                    ty,
+                    kind: ExprKind::Builtin(operation, vec![iterable]),
+                })
+            }
+            input => {
+                let input = input.into_iteration(self, mapped.unwrap_or(source))?;
+                self.collect_list(input, mapped.is_some(), element, call)
+            }
         }
-        if convert
-            && element.is_none_or(|ty| ty == Type::Int)
-            && let Iteration::Container {
-                iterable,
-                items: false,
-                start: None,
-            } = &input
-            && iterable.ty == Type::Str
-        {
-            // The immutable source has no callback or observable iterator
-            // identity. Keep conversion eager and preserve its first error.
-            return Ok(Expr {
-                ty: Type::ListInt,
-                kind: ExprKind::Builtin(Builtin::StringIntList, vec![iterable.clone()]),
-            });
-        }
-        self.collect_list(input, convert, element, call)
     }
 
     /// Collect an already-evaluated iterable into a fresh list.
@@ -83,16 +123,46 @@ impl Checker<'_> {
         &mut self,
         input: Iteration,
         convert: bool,
-        mut element: Option<Type>,
+        element: Option<Type>,
         call: &impl Ranged,
     ) -> Result<Expr, String> {
-        let result = self.hidden(Type::None);
-        let mut body = self.expand_items(input, call, |checker, value| {
-            let value = checker.consumer_value(value, convert, call)?;
-            checker.expansion_insert(result, &mut element, value, false, call)
-        })?;
-        let ty = self.types.list(element.unwrap_or(Type::Int));
-        self.locals[result] = ty;
+        self.collect_list_with(input, element, call, |checker, value| {
+            checker.consumer_value(value, convert, call)
+        })
+    }
+
+    /// Keep the partial list rooted while pulling and converting its elements.
+    pub(super) fn collect_list_with(
+        &mut self,
+        input: Iteration,
+        mut element: Option<Type>,
+        call: &impl Ranged,
+        mut convert: impl FnMut(&mut Self, Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        let (body, result) = self.collect_list_body(
+            input,
+            element.unwrap_or(Type::Int),
+            call,
+            |checker, result, value| {
+                let value = convert(checker, value)?;
+                checker.expansion_insert(result, &mut element, value, false, call)
+            },
+        )?;
+        Ok(Expr::scope(body, self.local(result), vec![result]))
+    }
+
+    /// Materialize rows in a fresh list. The consumer selects how each bound row is stored.
+    pub(super) fn collect_list_body(
+        &mut self,
+        input: Iteration,
+        element: Type,
+        call: &impl Ranged,
+        mut insert: impl FnMut(&mut Self, usize, Expr) -> Result<Vec<Statement>, String>,
+    ) -> Result<(Vec<Statement>, usize), String> {
+        let result = self.hidden(self.types.list(element));
+        let mut body =
+            self.expand_items(input, call, |checker, value| insert(checker, result, value))?;
+        let ty = self.locals[result];
         body.insert(
             0,
             Statement::Assign(
@@ -103,24 +173,11 @@ impl Checker<'_> {
                 },
             ),
         );
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear: vec![result],
-            },
-        })
+        Ok((body, result))
     }
 
     /// Materializes the default line differ where the caller immediately exhausts it.
-    pub(super) fn materialize_ndiff(&mut self, source: &ast::Expr) -> Result<Option<Expr>, String> {
-        let ast::Expr::Call(call) = source else {
-            return Ok(None);
-        };
-        if self.resolve(&call.func) != Some(Binding::Intrinsic(Intrinsic::Ndiff)) {
-            return Ok(None);
-        }
+    fn materialize_ndiff(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.reject_builtin_keywords(call)?;
         let [before, after] = call.arguments.args.as_ref() else {
             return Err(error(
@@ -132,10 +189,10 @@ impl Checker<'_> {
         let ty = self.types.list(Type::Str);
         let before = self.expr_expected(before, ty)?;
         let after = self.expr_expected(after, ty)?;
-        Ok(Some(Expr {
+        Ok(Expr {
             ty,
             kind: ExprKind::Builtin(Builtin::Ndiff, vec![before, after]),
-        }))
+        })
     }
 
     /// `map` acquires its source iterator before `start` is evaluated, but
@@ -160,19 +217,24 @@ impl Checker<'_> {
         let mut method_input = None;
         if let ast::Expr::Call(view) = source
             && self.resolve(&view.func).is_none()
-            && view.arguments.args.is_empty()
-            && view.arguments.keywords.is_empty()
             && let ast::Expr::Attribute(method) = &*view.func
             && method.attr.as_str() == "values"
             && self.class_reference(&method.value).is_none()
         {
             let receiver = self.expr(&method.value)?;
-            if self
-                .types
-                .mapping(receiver.ty)
-                .is_some_and(|(_, value)| value == Type::Int)
+            if receiver.ty == Type::PythonObject {
+                let iterable = self.call_on(view, Some(receiver))?;
+                return self.bind_registered_builtin_call(call, "sum", vec![iterable]);
+            }
+            if view.arguments.is_empty()
+                && self
+                    .types
+                    .mapping(receiver.ty)
+                    .is_some_and(|(_, value)| value == Type::Int)
             {
-                let start = self.integer_fold_start(call, "0")?;
+                let start = self
+                    .integer_fold_start(call)?
+                    .unwrap_or_else(|| Expr::integer("0"));
                 return Ok(Expr {
                     ty: Type::Int,
                     kind: ExprKind::Builtin(Builtin::DictSumValues, vec![receiver, start]),
@@ -180,19 +242,29 @@ impl Checker<'_> {
             }
             // A first-party values method still produces its usual iterable.
             // Use the already checked receiver, including any walrus bindings.
-            let (Type::Class(class) | Type::StrEnum(class)) = receiver.ty else {
-                return Err(error(
-                    self.source,
-                    view,
-                    "sum of values requires an integer-valued mapping or method returning an integer iterable",
-                ));
-            };
-            let iterable = self.iteration_method_call(view, method, class, receiver)?;
-            method_input = Some(self.iteration_value(iterable, false, view)?);
+            method_input = Some(if view.arguments.is_empty() {
+                let (Type::Class(class) | Type::StrEnum(class)) = receiver.ty else {
+                    return Err(error(
+                        self.source,
+                        view,
+                        "sum of values requires an integer-valued mapping or method returning an integer iterable",
+                    ));
+                };
+                let iterable = self.iteration_method_call(view, method, class, receiver)?;
+                self.iteration_value(iterable, false, view)?
+            } else {
+                self.mapping_values_iteration(view, method, receiver)?
+            });
         }
-        if matches!(source, ast::Expr::ListComp(_)) {
-            let subtotal = self.sum_comprehension(source)?;
-            let start = self.integer_fold_start(call, "0")?;
+        if let ast::Expr::ListComp(display) = source {
+            // The exact integer reduction preserves the order of the eager comprehension.
+            let plan = imre_ast::comprehension::Plan::new(
+                &display.generators,
+                imre_ast::comprehension::Output::List(&display.elt),
+            );
+            let subtotal =
+                self.comprehension_display(source, &plan, comprehensions::Collector::IntegerSum)?;
+            let start = self.integer_fold_start(call)?;
             return Ok(add_start(subtotal, start));
         }
         let generator = matches!(source, ast::Expr::Generator(_));
@@ -209,38 +281,104 @@ impl Checker<'_> {
         } else {
             self.consumer_input(source, (!generator).then_some(Type::Int))?
         };
-        let start = self.integer_fold_start(call, "0")?;
-        if !convert
-            && let Iteration::Container {
+        let start = self.integer_fold_start(call)?;
+        let iterable = match input {
+            Iteration::Container {
                 iterable,
                 items: false,
                 start: None,
-            } = &input
-            && iterable.ty == Type::ListInt
-        {
-            if let ExprKind::Builtin(Builtin::Slice, arguments) = &iterable.kind {
-                // Capture the slice's numeric snapshot before evaluating
-                // `start`, which may mutate or replace the original list.
-                // Exact integer addition has no observable intermediate work.
-                let subtotal = Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::ListSliceSum, arguments.clone()),
-                };
-                return Ok(add_start(subtotal, start));
+            } if !convert && iterable.ty == Type::ListInt => iterable,
+            input => {
+                let result = self.hidden(Type::Int);
+                if let Some(sum) = zip_sum {
+                    self.zip_sums.insert(result, sum);
+                }
+                let start = start.unwrap_or_else(|| Expr::integer("0"));
+                return self.integer_fold(call, input, start, result, convert, Binary::Add);
             }
-            // Evaluate both arguments before borrowing the list: `start` may
-            // mutate the source through an alias. Exact integer addition has
-            // no callbacks or recoverable errors during the reduction.
-            return Ok(Expr {
+        };
+        if let ExprKind::Builtin(Builtin::Slice, arguments) = iterable.kind {
+            // Capture the slice's numeric snapshot before evaluating
+            // `start`, which may mutate or replace the original list.
+            // Exact integer addition has no observable intermediate work.
+            let subtotal = Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::ListSum, vec![iterable.clone(), start]),
-            });
+                kind: ExprKind::Builtin(Builtin::ListSliceSum, arguments),
+            };
+            return Ok(add_start(subtotal, start));
         }
-        let result = self.hidden(Type::Int);
-        if let Some(sum) = zip_sum {
-            self.zip_sums.insert(result, sum);
+        // Evaluate both arguments before borrowing the list: `start` may
+        // mutate the source through an alias. Exact integer addition has
+        // no callbacks or recoverable errors during the reduction.
+        let mut operands = vec![iterable];
+        operands.extend(start);
+        let value = Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::ListSum, operands),
+        };
+        if self
+            .fixed_sites
+            .as_ref()
+            .is_some_and(|sites| sites.has_written_operands(call))
+        {
+            self.record_named_call(call, &value);
         }
-        self.integer_fold(call, input, start, result, convert, Binary::Add)
+        Ok(value)
+    }
+
+    /// Call the shared reducer when the operand storage and successful return type are known.
+    pub(super) fn sumprod_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let ([left, right], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(error(
+                self.source,
+                call,
+                "checked math.sumprod requires two positional arguments",
+            ));
+        };
+        let mut operands = [self.expr(left)?, self.expr(right)?];
+        for value in &mut operands {
+            // A literal tuple's fields are already checked in evaluation order. The reducer
+            // consumes these private values immediately, so no tuple identity is observable.
+            if let ExprKind::Tuple(items) = &mut value.kind
+                && let Some(element) = [Type::Int, Type::Float]
+                    .into_iter()
+                    .find(|ty| items.iter().all(|item| item.ty == *ty))
+            {
+                value.ty = self.types.list(element);
+                value.kind = ExprKind::List(std::mem::take(items));
+            }
+        }
+        let ty = if operands.iter().all(|value| value.ty == Type::ListInt) {
+            Type::Int
+        } else {
+            let floats = self.types.list(Type::Float);
+            for value in &mut operands {
+                if matches!(&value.kind, ExprKind::List(items) if items.is_empty()) {
+                    value.ty = floats;
+                }
+                if value.ty != floats {
+                    return Err(error(
+                        self.source,
+                        call,
+                        "checked math.sumprod requires matching integer or float elements in lists or tuple literals",
+                    ));
+                }
+            }
+            // A fresh nonempty literal proves a successful result is a float. Otherwise
+            // the reducer can also return integer zero; preserve its concrete scalar kind.
+            if operands.iter().any(Expr::is_nonempty_list_literal) {
+                Type::Float
+            } else {
+                Type::ObjectValue
+            }
+        };
+        Ok(Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::Sumprod, Vec::from(operands)),
+        })
     }
 
     /// Lowers `math.prod` over exact integers without materializing the source.
@@ -264,7 +402,9 @@ impl Checker<'_> {
             ));
         }
         let (input, convert) = self.consumer_input(source, None)?;
-        let start = self.integer_fold_start(call, "1")?;
+        let start = self
+            .integer_fold_start(call)?
+            .unwrap_or_else(|| Expr::integer("1"));
         let result = self.hidden(Type::Int);
         self.integer_fold(call, input, start, result, convert, Binary::Multiply)
     }
@@ -335,17 +475,18 @@ impl Checker<'_> {
     }
 
     /// Checks the optional starting value after checking the eager first argument.
-    fn integer_fold_start(&mut self, call: &ast::ExprCall, identity: &str) -> Result<Expr, String> {
-        let start = call.arguments.args.get(1).or_else(|| {
-            call.arguments
-                .keywords
-                .first()
-                .map(|keyword| &keyword.value)
-        });
-        match start {
-            Some(start) => self.expr_expected(start, Type::Int),
-            None => Ok(Expr::integer(identity)),
-        }
+    fn integer_fold_start(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+        call.arguments
+            .args
+            .get(1)
+            .or_else(|| {
+                call.arguments
+                    .keywords
+                    .first()
+                    .map(|keyword| &keyword.value)
+            })
+            .map(|start| self.expr_expected(start, Type::Int))
+            .transpose()
     }
 
     /// The sealed converter has no user callback or escaping iterator object.
@@ -355,25 +496,72 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<(Iteration, bool), String> {
+        let (input, mapped) = self.consumer_source(expression, element)?;
+        Ok((
+            input.into_iteration(self, mapped.unwrap_or(expression))?,
+            mapped.is_some(),
+        ))
+    }
+
+    fn consumer_source<'e>(
+        &mut self,
+        expression: &'e ast::Expr,
+        element: Option<Type>,
+    ) -> Result<(ExpansionSource, Option<&'e ast::Expr>), String> {
         if let ast::Expr::Call(call) = expression
-            && matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
-            && matches!(call.arguments.args.as_ref(), [ast::Expr::Name(name), _] if name.id == "int")
+            && let Some(mapped) = self.bound_map(call)
         {
-            if !call.arguments.keywords.is_empty()
-                || !matches!(
-                    call.arguments.args.as_ref(),
-                    [ast::Expr::Name(name), _] if name.id == "int"
-                )
-            {
+            let (callee, converter, source) = match mapped {
+                pipelines::CallbackPipeline::MapBuiltin {
+                    callee,
+                    converter,
+                    source,
+                } if converter.id == "int" => (callee, converter, source),
+                mapped => {
+                    let input = self.callback_input(call, element, mapped)?;
+                    self.hint_empty_iteration(&input, element);
+                    return Ok((ExpansionSource::Iteration(Iteration::Prepared(input)), None));
+                }
+            };
+            if !call.arguments.keywords.is_empty() {
                 return Err(error(
                     self.source,
                     call,
                     "map requires the builtin int converter and one concrete iterable",
                 ));
             }
-            return Ok((self.expansion_input(&call.arguments.args[1], None)?, true));
+            // This consumer keeps only the iterable. A Python call needs the loaded
+            // map and converter too. Method recovery can still use its field reads.
+            if self.class.is_none() || self.settled_attributes.is_none() {
+                self.fixed_sites = None;
+            }
+            let mut input = self.expansion_source(source, None)?;
+            if self.fixed_sites.is_none()
+                && self.inference.is_none()
+                && self.registered.is_none()
+                && let Some(sites) = self.settled_attributes.as_deref_mut()
+                && let ExpansionSource::Value(value) = &mut input
+                && let Some(parameter) = source.as_name_expr()
+                && let std::collections::hash_map::Entry::Vacant(site) = sites.entry(call.range())
+                && let Some(checked) =
+                    registered::values::CheckedCall::with_parameter(parameter, value, |value| {
+                        let converter = registered::values::located(
+                            converter.range(),
+                            converter.start(),
+                            registered::values::name_binding(converter.id.clone()),
+                        );
+                        registered::values::name_call(
+                            call,
+                            callee.id.as_str(),
+                            vec![converter, value],
+                        )
+                    })
+            {
+                site.insert(FixedAttribute::CallValue(Box::new(checked)));
+            }
+            return Ok((input, Some(source)));
         }
-        Ok((self.expansion_input(expression, element)?, false))
+        Ok((self.expansion_source(expression, element)?, None))
     }
 
     pub(super) fn consumer_value(
@@ -385,6 +573,14 @@ impl Checker<'_> {
         if !convert {
             return Ok(value);
         }
+        if value.ty == Type::PythonObject
+            && self.missing_operation(&self.scoped_builtin_error("int", node))
+        {
+            return Ok(Expr {
+                ty: Type::Int,
+                ..Expr::unrepresented()
+            });
+        }
         if !matches!(value.ty, Type::Int | Type::Float | Type::Bool | Type::Str) {
             return Err(error(
                 self.source,
@@ -394,7 +590,7 @@ impl Checker<'_> {
         }
         Ok(Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         })
     }
 
@@ -416,26 +612,7 @@ impl Checker<'_> {
             Iteration::Range(args) => {
                 let args = args.into_iter().map(&mut capture).collect::<Vec<_>>();
                 if let [_, _, step] = args.as_slice() {
-                    body.push(Statement::If(
-                        Expr {
-                            ty: Type::Bool,
-                            kind: ExprKind::Compare(
-                                vec![step.clone(), Expr::integer(0)],
-                                vec![Compare::Equal],
-                            ),
-                        },
-                        vec![Statement::Raise(Some(Expr {
-                            ty: Type::Exception,
-                            kind: ExprKind::Exception {
-                                kind: exception_kind("ValueError").unwrap(),
-                                message: Some(Box::new(Expr {
-                                    ty: Type::Str,
-                                    kind: ExprKind::Str("range() arg 3 must not be zero".into()),
-                                })),
-                            },
-                        }))],
-                        Vec::new(),
-                    ));
+                    body.push(pipelines::check_range_step(step.clone()));
                 }
                 Iteration::Range(args)
             }
@@ -459,7 +636,8 @@ impl Checker<'_> {
 
 /// Eager producers finish before `start` is evaluated. Exact integer addition
 /// allows the producer's subtotal to replace a private materialized container.
-fn add_start(subtotal: Expr, start: Expr) -> Expr {
+fn add_start(subtotal: Expr, start: Option<Expr>) -> Expr {
+    let Some(start) = start else { return subtotal };
     if matches!(&start.kind, ExprKind::Int(value) if value == "0") {
         subtotal
     } else {

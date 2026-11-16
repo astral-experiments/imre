@@ -8,13 +8,19 @@ struct Uses {
     reads: usize,
     private: usize,
     appends: usize,
+    ranged: bool,
 }
 
 /// Counts every local read, including eager expression scopes and exceptional
 /// exits. Only the append receiver and the compiler's loop guards may observe
 /// the local between its unique empty initializer and its terminal conversion.
 /// Returns each scoped append receiver and the local that owns its buffer.
-pub(super) fn select(function: &Function, storage: &mut [Type]) -> Vec<(usize, usize)> {
+pub(super) fn select(
+    function: &Function,
+    storage: &mut [Type],
+    windows: &mut Vec<Option<usize>>,
+) -> Vec<(usize, usize)> {
+    windows.clear();
     if function.returns != Type::Bytes {
         return Vec::new();
     }
@@ -45,6 +51,7 @@ pub(super) fn select(function: &Function, storage: &mut [Type]) -> Vec<(usize, u
         ExprKind::Builtin(op @ (Builtin::Append | Builtin::ListReserveRange), args) => {
             if let ExprKind::Local(slot) = args[0].kind {
                 uses[slot].private += 1;
+                uses[slot].ranged |= matches!(op, Builtin::ListReserveRange);
                 uses[slot].appends += usize::from(matches!(op, Builtin::Append));
             }
         }
@@ -81,8 +88,17 @@ pub(super) fn select(function: &Function, storage: &mut [Type]) -> Vec<(usize, u
     }
     block(&function.body, storage, &uses, &writes);
     aliases.retain(|&(_, owner)| storage[owner] == Type::ByteOutput);
-    for &(capture, _) in &aliases {
+    // Straight-line outputs keep their existing fixed-width runtime append.
+    if uses.iter().any(|usage| usage.ranged) {
+        windows.extend(uses.iter().enumerate().map(|(slot, usage)| {
+            (usage.ranged && storage[slot] == Type::ByteOutput).then_some(slot)
+        }));
+    }
+    for &(capture, owner) in &aliases {
         storage[capture] = Type::ByteOutput;
+        if !windows.is_empty() {
+            windows[capture] = windows[owner];
+        }
     }
     aliases
 }

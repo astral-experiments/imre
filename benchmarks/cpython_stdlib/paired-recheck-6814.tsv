@@ -1,0 +1,156 @@
+family	original_test	occurrence	cpython_3_14_5	imre_O0	imre_O3	first_error_stage	source_requested
+importlib	test.test_importlib.metadata.test_main.ImportTests.test_resolve	1	addSuccess	addError	addError	test method	temporary module mod.py
+importlib	test.test_importlib.resources.test_contents.ContentsDiskTests.test_contents	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_contents.ContentsZipTests.test_contents	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.ImplicitContextFilesDiskTests.test_implicit_files_package	1	addSuccess	addError	addError	test method	temporary module __init__.py
+importlib	test.test_importlib.resources.test_files.ImplicitContextFilesDiskTests.test_implicit_files_submodule	1	addSuccess	addError	addError	test method	temporary module __init__.py
+importlib	test.test_importlib.resources.test_files.ImplicitContextFilesZipTests.test_implicit_files_package	1	addSuccess	addError	addError	test method	temporary module __init__.py
+importlib	test.test_importlib.resources.test_files.ImplicitContextFilesZipTests.test_implicit_files_submodule	1	addSuccess	addError	addError	test method	temporary module __init__.py
+importlib	test.test_importlib.resources.test_files.ModuleFilesDiskTests.test_module_resources	1	addSuccess	addError	addError	test method	temporary module mod.py
+importlib	test.test_importlib.resources.test_files.ModuleFilesZipTests.test_module_resources	1	addSuccess	addError	addError	test method	temporary module mod.py
+importlib	test.test_importlib.resources.test_files.OpenDiskTests.test_joinpath_with_multiple_args	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenDiskTests.test_old_parameter	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenDiskTests.test_read_bytes	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenDiskTests.test_read_text	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenDiskTests.test_traversable	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_joinpath_with_multiple_args	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_old_parameter	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_read_bytes	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_read_text	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenNamespaceZipTests.test_traversable	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenZipTests.test_joinpath_with_multiple_args	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenZipTests.test_old_parameter	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenZipTests.test_read_bytes	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenZipTests.test_read_text	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_files.OpenZipTests.test_traversable	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_common_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_contents	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_is_resource	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_open_binary	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_open_text	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_read_binary	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_read_text	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_ModuleAnchor.test_text_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_common_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_contents	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_is_resource	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_open_binary	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_open_text	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_read_binary	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_read_text	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_functional.FunctionalAPITest_StringAnchor.test_text_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_extant_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_importing_module_as_side_effect	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_missing_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_package_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_package_object	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_pathlib_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_string_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonBinaryTests.test_useless_loader	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_extant_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_importing_module_as_side_effect	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_missing_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_package_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_package_object	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_pathlib_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_string_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.CommonTextTests.test_useless_loader	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_binary	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_binary_FileNotFoundError	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_FileNotFoundError	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_default_encoding	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_given_encoding	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenDiskTests.test_open_text_with_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_binary	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_binary_FileNotFoundError	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_text_FileNotFoundError	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_text_default_encoding	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_text_given_encoding	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_open.OpenZipTests.test_open_text_with_errors	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_extant_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_importing_module_as_side_effect	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_missing_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_package_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_package_object	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_pathlib_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_string_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.CommonTests.test_useless_loader	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.PathDiskTests.test_natural_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.PathDiskTests.test_reading	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_path.PathZipTests.test_reading	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_path.PathZipTests.test_remove_in_context_manager	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_extant_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_importing_module_as_side_effect	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_missing_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_package_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_package_object	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_pathlib_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_string_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonBinaryTests.test_useless_loader	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_extant_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_importing_module_as_side_effect	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_missing_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_package_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_package_object	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_pathlib_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_string_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.CommonTextTests.test_useless_loader	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadDiskTests.test_read_bytes	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_default_encoding	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_given_encoding	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadDiskTests.test_read_text_with_errors	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_bytes	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_submodule_resource	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_submodule_resource_by_name	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_text_default_encoding	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_text_given_encoding	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_read.ReadZipTests.test_read_text_with_errors	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_init_file	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_init_no_paths	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_is_dir	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_is_file	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_iterdir	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_iterdir_duplicate	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path_common_subdir	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_join_path_compound	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_name	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_open_file	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_reader.MultiplexedPathTest.test_repr	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_entered_path_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_is_file_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_is_file_failure_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_iterdir_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_read_binary_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.DeletingZipsTest.test_read_text_does_not_keep_open	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceCornerCaseTests.test_package_has_no_reader_fallback	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_dir	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_file_exists	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceDiskTests.test_is_file_missing	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_as_file_directory	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_is_submodule_resource	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_read_submodule_resource_by_name	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_submodule_contents	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest01.test_submodule_contents_by_name	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceFromZipsTest02.test_unrelated_contents	1	addSuccess	addError	addError	setUp	ZIP member data02/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceLoaderTests.test_is_dir	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceLoaderTests.test_is_file	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceLoaderTests.test_resource_contents	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceLoaderTests.test_resource_missing	1	addSuccess	addError	addError	setUp	disk file data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceZipTests.test_is_dir	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceZipTests.test_is_file_exists	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+importlib	test.test_importlib.resources.test_resource.ResourceZipTests.test_is_file_missing	1	addSuccess	addError	addError	setUp	ZIP member data01/__init__.py
+logging	test.test_logging.ConfigFileTest.test_config0_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config0_using_cp_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config1_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config4_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config5_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config6_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config7_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config8_ok	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config9_ok	1	addSuccess	addError	addError	test method	logging/config.py:132 defaults = eval(defaults, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_config_set_handler_names	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_defaults_do_no_interpolation	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))
+logging	test.test_logging.ConfigFileTest.test_logger_disabling	1	addSuccess	addError	addError	test method	logging/config.py:154 klass = eval(klass, vars(logging))

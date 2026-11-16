@@ -1,9 +1,11 @@
 //! Keep one period of a scalar-struct producer whose ordinal is masked or reduced modulo a power of two.
 
 use super::counted;
-use crate::ir::{Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type};
 use crate::reductions::literal;
 use crate::types::Types;
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{HashMap, HashSet};
 
 /// Replace a periodic producer by an ordinary prefix and a continuation. Running the
@@ -36,10 +38,7 @@ fn specialize_block(statements: &mut [Statement], locals: &[Type], types: &Types
         };
         let within = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![limit.clone(), Expr::integer(period)],
-                vec![Compare::Less],
-            ),
+            kind: ExprKind::Compare(vec![limit.clone(), Expr::integer(period)], vec![CmpOp::Lt]),
         };
         *args = vec![Expr {
             ty: Type::Int,
@@ -165,8 +164,8 @@ fn expression_period(
             expression_period(a, ordinal, written, known)?
                 .max(expression_period(b, ordinal, written, known)?),
         ),
-        ExprKind::Negate(x) => expression_period(x, ordinal, written, known),
-        ExprKind::Builtin(Builtin::Float, args) if args.len() == 1 => {
+        ExprKind::Unary(UnaryOp::USub, x) => expression_period(x, ordinal, written, known),
+        ExprKind::Builtin(Builtin::Float(_), args) if args.len() == 1 => {
             expression_period(&args[0], ordinal, written, known)
         }
         _ => None,

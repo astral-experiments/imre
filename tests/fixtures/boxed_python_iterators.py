@@ -88,10 +88,40 @@ def current():
     source.append(4)
     assert list(cursor) == [3, 4] and log == [0, 2, 3, 4]
     assert list(filter(None, [False, "x", 0, 1])) == ["x", 1]
+    from gc import collect
+
+    def keep_even(item):
+        collect()
+        return item % 2 == 0
+
+    assert list(filter(keep_even, range(1000, 1005))) == [1000, 1002, 1004]
     from operator import length_hint
+
+    for text, name in (("", "str_ascii_iterator"), ("abc", "str_ascii_iterator"),
+                       ("é中🌍", "str_iterator"), ("x\ud800y", "str_iterator")):
+        cursor = iter(text)
+        assert type(cursor).__name__ == name and cursor.__iter__() is cursor
+        for index, character in enumerate(text):
+            assert length_hint(cursor) == len(text) - index
+            assert cursor.__next__() == character
+        assert length_hint(cursor) == 0 and next(cursor, None) is None
+        assert list(cursor) == []
+
+    cursor = iter("é🌍z")
+    assert next(cursor) == "é" and list(cursor) == ["🌍", "z"]
 
     class Text(str):
         pass
+
+    class IndexedText(str):
+        def __getitem__(self, index):
+            raise AssertionError("inherited str iteration called __getitem__")
+
+    for text in (IndexedText("abc"), IndexedText("é🌍")):
+        cursor = iter(text)
+        assert type(cursor).__name__ == "str_iterator"
+        assert list(cursor) == list(str(text))
+
     class Data(bytes):
         pass
     assert list(reversed(Text("🌓a"))) == ["a", "🌓"]
@@ -147,13 +177,14 @@ def current():
             alias.append(9)
             raise ValueError("stop")
 
-    events = []
-    try:
-        target.extend(Hint())
-    except ValueError as error:
-        print(str(error), events, alias)
-    else:
-        raise AssertionError("ignored length hint")
+    for consume in (target.extend, list, bytearray().extend):
+        events = []
+        try:
+            consume(Hint())
+        except ValueError as error:
+            print(str(error), events, alias)
+        else:
+            raise AssertionError("ignored length hint")
     growing = [4, 5]
     for index, item in enumerate(growing, start=1 << 70):
         print(index, item)

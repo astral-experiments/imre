@@ -5,7 +5,14 @@ use crate::dynamic::{
 
 pub(in crate::dynamic) const PARTIAL_CLASS: &str = "functools.partial";
 pub(in crate::dynamic) const LRU_CACHE_CLASS: &str = "functools._lru_cache_wrapper";
-pub(in crate::dynamic) const COPY_METHODS: &[&str] = &["__reduce__", "__copy__", "__deepcopy__"];
+pub(in crate::dynamic) const LRU_METHODS: &[&str] = &[
+    "__get__",
+    "__reduce__",
+    "__copy__",
+    "__deepcopy__",
+    "cache_info",
+    "cache_clear",
+];
 
 pub(super) fn placeholder(ctx: &mut Context) -> Id {
     let key = "functools.Placeholder";
@@ -15,6 +22,75 @@ pub(super) fn placeholder(ctx: &mut Context) -> Id {
     let value = ctx.alloc(Value::PartialPlaceholder);
     ctx.builtins.insert(key.to_owned(), value);
     value
+}
+
+/// Group equal keyword names without copying their strings. The first position
+/// keeps its name and the last supplied value wins, as in repeated insertion.
+#[cold]
+pub(in crate::dynamic) fn merge_wide_keywords(
+    bound: &mut Vec<(String, Id)>,
+    supplied: Vec<(String, Id)>,
+) -> Result<()> {
+    let original = bound.len();
+    let mut discard = Vec::new();
+    discard
+        .try_reserve_exact(supplied.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    discard.resize(supplied.len(), false);
+    bound
+        .try_reserve(supplied.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    bound.extend(supplied);
+
+    // Group equal names by their original indices without copying keyword strings.
+    let mut positions = Vec::new();
+    positions
+        .try_reserve_exact(bound.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    positions.extend(0..bound.len());
+    positions.sort_unstable_by(|&a, &b| bound[a].0.cmp(&bound[b].0).then(a.cmp(&b)));
+    let mut first = positions[0];
+    for &index in &positions[1..] {
+        if bound[first].0 != bound[index].0 {
+            first = index;
+        } else if index >= original {
+            bound[first].1 = bound[index].1;
+            discard[index - original] = true;
+        }
+    }
+    let mut index = 0;
+    bound.retain(|_| {
+        let keep = index < original || !discard[index - original];
+        index += 1;
+        keep
+    });
+    Ok(())
+}
+
+/// Preserve the live fields consumed by `partial.__setstate__` without creating an instance dictionary.
+pub(super) fn partial_reduce(ctx: &mut Context, receiver: Id) -> Result<Id> {
+    let Value::Partial {
+        function,
+        args,
+        keywords,
+        dictionary,
+    } = *ctx.heap.get(ctx.scalar_value(receiver))
+    else {
+        unreachable!("validated partial receiver")
+    };
+    let namespace = match *ctx.heap.get(receiver) {
+        Value::Instance { namespace, .. } => namespace,
+        _ => dictionary,
+    };
+    let class = ctx.exact_type(receiver)?;
+    let constructor_args = ctx.alloc(Value::Tuple(vec![function]));
+    let state = ctx.alloc(Value::Tuple(vec![
+        function,
+        args,
+        keywords,
+        namespace.unwrap_or(NONE),
+    ]));
+    Ok(ctx.alloc(Value::Tuple(vec![class, constructor_args, state])))
 }
 
 pub(super) fn partial_setstate(
@@ -297,8 +373,28 @@ pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
     };
     let [initial] =
         super::builtins::bind_builtin_arguments("reduce", rest, kwargs, ["initial"], 0)?;
+    fold(
+        ctx,
+        *function,
+        ReduceInput::NativeIterable(*iterable),
+        initial,
+    )
+}
+
+pub(super) enum ReduceInput {
+    NativeIterable(Id),
+    PythonIterator(Id),
+}
+
+/// Both providers share one fold, with the iterator and operand lifetimes of the selected provider.
+pub(super) fn fold(
+    ctx: &mut Context,
+    function: Id,
+    source: ReduceInput,
+    initial: Option<Id>,
+) -> Result<Id> {
     let roots = ctx.heap.temporary_mark();
-    let result = reduce_iterable(ctx, *function, *iterable, initial);
+    let result = reduce_iterable(ctx, function, source, initial);
     ctx.heap.release_temporaries_since(roots);
     match &result {
         Ok(value) => ctx.heap.keep(*value),
@@ -314,36 +410,65 @@ pub(super) fn reduce(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
 fn reduce_iterable(
     ctx: &mut Context,
     function: Id,
-    iterable: Id,
+    source: ReduceInput,
     initial: Option<Id>,
 ) -> Result<Id> {
-    let iterator = ctx.iterator(iterable).map_err(|error| {
-        let type_error = ctx.builtin("TypeError");
-        if ctx.raised_error_matches(&error, type_error) {
-            Error::new("TypeError", "reduce() arg 2 must support iteration")
-        } else {
-            error
-        }
-    })?;
+    let python = matches!(source, ReduceInput::PythonIterator(_));
+    let iterator = match source {
+        ReduceInput::NativeIterable(iterable) => ctx.iterator(iterable).map_err(|error| {
+            let type_error = ctx.builtin("TypeError");
+            if ctx.raised_error_matches(&error, type_error) {
+                Error::new("TypeError", "reduce() arg 2 must support iteration")
+            } else {
+                error
+            }
+        })?,
+        ReduceInput::PythonIterator(iterator) => iterator,
+    };
     ctx.heap.keep(iterator);
-    let mark = ctx.heap.temporary_mark();
+    let mut mark = ctx.heap.temporary_mark();
     let mut accumulator = match initial {
         Some(value) => value,
-        None => ctx.next_item(iterator)?.ok_or_else(|| {
-            Error::new(
-                "TypeError",
-                "reduce() of empty iterable with no initial value",
-            )
-        })?,
+        None => match super::builtins::call(ctx, "next", &[iterator], &[]) {
+            Ok(value) => value,
+            Err(mut exhausted) if ctx.is_stop_iteration(&exhausted) => {
+                let mut empty = Error::new(
+                    "TypeError",
+                    "reduce() of empty iterable with no initial value",
+                );
+                if python {
+                    // A builtin iterator reports exhaustion without raising in a Python frame.
+                    if exhausted.context == NONE && exhausted.trace.is_none() {
+                        exhausted.context = ctx.heap.active_exception();
+                    }
+                    empty.context = ctx.raised_instance(exhausted);
+                    empty.tracing().cause = Some(NONE);
+                }
+                return Err(empty);
+            }
+            Err(error) => return Err(error),
+        },
     };
     ctx.heap.keep(accumulator);
+    // Python enters a for loop over its first iterator after taking the optional seed.
+    let iterator = if python {
+        let second = ctx.iterator(iterator)?;
+        ctx.heap.keep_at(mark, second);
+        mark += 1;
+        second
+    } else {
+        iterator
+    };
     while let Some(item) = ctx.next_item(iterator)? {
-        // CPython keeps the last two callback operands alive until the next item arrives.
-        ctx.heap.release_temporaries_since(mark);
-        ctx.heap.keep(accumulator);
-        ctx.heap.keep(item);
+        ctx.discard_temporaries(mark, [accumulator, item]);
         accumulator = ctx.call(function, vec![accumulator, item], Vec::new())?;
-        ctx.heap.keep(accumulator);
+        if python {
+            // Storing the new value releases its predecessor; the loop still owns its element.
+            ctx.discard_temporaries(mark, [accumulator, item]);
+        } else {
+            // The C provider keeps its callback argument tuple until the next item arrives.
+            ctx.heap.keep(accumulator);
+        }
         ctx.heap.reserve_slot_or_request_collection();
         ctx.collect_garbage();
     }
@@ -403,7 +528,7 @@ pub(super) fn cache_method(ctx: &mut Context, name: &str, wrapper: Id) -> Result
     else {
         return Err(Error::new("TypeError", "expected a cache wrapper"));
     };
-    if name.ends_with(".cache_clear") {
+    if name == "cache_clear" {
         let Value::Cached {
             entries,
             hits,

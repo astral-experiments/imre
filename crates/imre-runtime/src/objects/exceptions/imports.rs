@@ -96,7 +96,7 @@ impl Positional {
             let (kind, word) = self.item(i);
             // SAFETY: each argument stays rooted by the immutable tuple.
             unsafe {
-                values::try_write_repr(output, word, kind)?;
+                values::try_write_argument_repr(output, word, kind)?;
             }
         }
         Ok(())
@@ -199,7 +199,8 @@ pub unsafe extern "C" fn imre_exception_formatter_result(
             Kind::TypeError,
             format!(
                 "{hook} returned non-string (type {})",
-                type_name(kind, word)
+                // SAFETY: the field view roots the projected word throughout display.
+                unsafe { type_name(kind, word) }
             ),
         )
         .returning(std::ptr::null())
@@ -342,7 +343,12 @@ pub unsafe extern "C" fn imre_exception_field_repr(value: *const Object) -> *con
     }
 }
 
-fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
+/// # Safety
+/// The caller roots the concrete word of the supplied kind throughout inspection.
+pub(in crate::objects) unsafe fn type_name(
+    kind: WordKind,
+    word: usize,
+) -> std::borrow::Cow<'static, str> {
     let plain = match kind.raw() {
         0 => "NoneType",
         1 => "bool",
@@ -354,7 +360,7 @@ fn type_name(kind: WordKind, word: usize) -> std::borrow::Cow<'static, str> {
             return unsafe {
                 object(word as *const Object).0.with(|s| match s {
                     Storage::Sequence(_) => "list".into(),
-                    Storage::RegexMatch(_) => "re.Match".into(),
+                    Storage::RegexMatch(_) | Storage::RegexBytesMatch(_) => "re.Match".into(),
                     Storage::Dictionary(_) => "dict".into(),
                     Storage::Set(_) => "set".into(),
                     Storage::File(file) if let Some((name, _)) = file.memory_class() => name.into(),
@@ -406,7 +412,10 @@ pub unsafe extern "C" fn imre_exception_field_len(value: *const Object) -> usize
         Err(error) => error.returning(0),
         Ok(None) => Error::new(
             Kind::TypeError,
-            format!("object of type '{}' has no len()", type_name(kind, word)),
+            // SAFETY: the field view roots the projected word through this lookup.
+            format!("object of type '{}' has no len()", unsafe {
+                type_name(kind, word)
+            }),
         )
         .returning(0),
     }

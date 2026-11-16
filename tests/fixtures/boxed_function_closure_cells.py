@@ -76,7 +76,21 @@ def make():
     return read, write
 
 
+def nested_owner(value):
+    def owner():
+        def generic[T](argument=value):
+            return argument
+        return [function for function in (generic,)][0]
+    return owner
+
+
 def current():
+    outer_value = object()
+    returned = nested_owner(outer_value)
+    assert returned()() is outer_value
+    assert returned.__code__.co_freevars == ("value",)
+    assert returned.__closure__[0].cell_contents is outer_value
+    assert returned()() is outer_value
     assert CellType is types.CellType
     assert (CellType.__module__, CellType.__name__, CellType.__qualname__) == ("builtins", "cell", "cell")
     empty = CellType()

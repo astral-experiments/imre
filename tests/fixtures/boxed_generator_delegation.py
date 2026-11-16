@@ -209,7 +209,116 @@ def delegate(child):
     yield from child
 
 
+def suspended_positions():
+    import traceback
+
+    class Gate:
+        def __await__(self):
+            return (yield "ready")
+
+    async def lookup(table):
+        return (
+            table[
+                await Gate()
+            ]
+        )
+
+    for inject in (False, True):
+        work = lookup({})
+        assert work.send(None) == "ready"
+        try:
+            if inject:
+                work.throw(LookupError("injected"))
+            else:
+                work.send("absent")
+        except LookupError as error:
+            for frame in traceback.extract_tb(error.__traceback__):
+                if frame.name == "lookup":
+                    print(frame.lineno, frame.end_lineno, frame.colno, frame.end_colno)
+
+
 def current():
+    suspended_positions()
+    closed = []
+
+    def tracked(label):
+        try:
+            yield 1
+        finally:
+            closed.append(label)
+
+    def acquire():
+        source = tracked("input")
+        binding = "initial"
+        stream = ((binding, item) for item in [next(source)])
+        binding = "updated"
+        return stream
+
+    stream = acquire()
+    assert closed == ["input"]
+    assert next(stream) == ("updated", 1)
+    stream.close()
+    closed.clear()
+
+    def stop(iterator):
+        for _ in iterator:
+            return
+
+    stop(tracked("temporary"))
+    assert closed == ["temporary"]
+    retained = tracked("retained")
+    stop(retained)
+    assert closed == ["temporary"]
+    del retained
+    assert closed == ["temporary", "retained"]
+
+    def nested_stream():
+        return (b for a in tracked("outer") for b in tracked("inner"))
+
+    closed.clear()
+    stream = nested_stream()
+    assert next(stream) == 1
+    stream.close()
+    assert closed == ["inner", "outer"]
+
+    closed.clear()
+    stream = nested_stream()
+    assert next(stream) == 1
+    error = LookupError("injected")
+    try:
+        stream.throw(error)
+    except LookupError as caught:
+        assert caught is error
+        assert caught.__traceback__.tb_next.tb_frame.f_code.co_name == "<genexpr>"
+    assert closed == ["inner"]
+    error.__traceback__ = None
+    assert closed == ["inner", "outer"]
+
+    from itertools import repeat
+
+    closed = []
+
+    def guarded(source):
+        try:
+            yield from source
+        finally:
+            closed.append("outer")
+
+    for source in (range(3), repeat(0, 3)):
+        stream = guarded(source)
+        assert next(stream) == 0
+        del stream
+        assert closed.pop() == "outer"
+
+    class ClosingRepeat(repeat):
+        def close(self):
+            closed.append("delegate")
+
+    stream = delegate(ClosingRepeat(1, 2))
+    assert next(stream) == 1
+    del stream
+    assert closed == ["delegate"]
+
     seen = []
     make = lambda value: (yield seen.append(value))
     stream = make(7)
@@ -258,6 +367,34 @@ def current():
 
     class Box:
         pass
+
+    from types import SimpleNamespace
+    for value, name in ((Box(), 'Box'), (SimpleNamespace(), 'types.SimpleNamespace')):
+        try:
+            first, *rest = value
+        except TypeError as error:
+            assert str(error) == f'cannot unpack non-iterable {name} object'
+        else:
+            raise AssertionError('unpacked a plain instance')
+
+    calls = []
+    raised = TypeError('iterator binding failed')
+
+    class ReadIterator:
+        def __get__(self, instance, owner):
+            calls.append(instance)
+            raise raised
+
+    class Items:
+        __iter__ = ReadIterator()
+
+    items = Items()
+    try:
+        first, second = items
+    except TypeError as error:
+        assert error is raised and calls == [items]
+    else:
+        raise AssertionError('lost the iterator descriptor error')
 
     print(list(stored([(1, 2), (3, 4)], Box(), [0, 0])))
     print(list(chained([2, 3], Box())))
@@ -454,3 +591,55 @@ def current():
         source = [[0], [1], [2]]
         targets = ClearingTargets(source)
         print(next(assigning_cleared_values(source, targets, use_starred)))
+
+    throw_contexts()
+
+
+def throw_contexts():
+    local = LookupError("delegating frame")
+    seed = LookupError("delegate")
+    replacement = ValueError("replacement")
+
+    def child():
+        try:
+            raise seed
+        except LookupError:
+            try:
+                yield
+            except KeyError:
+                pass
+            raise replacement
+
+    def parent():
+        try:
+            raise local
+        except LookupError:
+            yield from child()
+
+    try:
+        raise RuntimeError("caller")
+    except RuntimeError:
+        for previous in (None, seed):
+            injected = KeyError("injected")
+            injected.__context__ = previous
+            stream = (lambda: (yield))()
+            next(stream)
+            try:
+                stream.throw(injected)
+            except KeyError as exc:
+                assert exc is injected and exc.__context__ is previous
+            else:
+                raise AssertionError("lost injected exception")
+
+        for send in (False, True):
+            stream = parent()
+            next(stream)
+            try:
+                if send:
+                    next(stream)
+                else:
+                    stream.throw(KeyError("injected"))
+            except ValueError as exc:
+                assert exc is replacement and exc.__context__ is (seed if send else local)
+            else:
+                raise AssertionError("lost delegate exception")

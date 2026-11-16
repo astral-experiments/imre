@@ -20,7 +20,7 @@ impl Emitter<'_, '_> {
                         present
                     } else {
                         let (inspect, end) = (self.label(), self.label());
-                        let absent = self.current.clone();
+                        let absent = self.body.current.clone();
                         self.branch(&present, &inspect, &end);
                         self.start(&inspect);
                         let payload = if payload == Type::Float {
@@ -29,7 +29,7 @@ impl Emitter<'_, '_> {
                             self.decode_word(value.operand.clone(), payload)
                         };
                         let truth = self.truth(&payload);
-                        let inspected = self.current.clone();
+                        let inspected = self.body.current.clone();
                         self.jump(&end);
                         self.start(&end);
                         self.instruction(format!(
@@ -62,10 +62,18 @@ impl Emitter<'_, '_> {
                     }
                 }
                 Type::Bool => value.operand.clone(),
-                Type::VarTuple(_) => {
-                    let len = self
-                        .instruction(format!("call i64 @imre_tuple_len(ptr {})", value.operand));
-                    self.instruction(format!("icmp ne i64 {len}, 1"))
+                Type::Range => {
+                    let [start, stop, step] = [0, 1, 2].map(|i| {
+                        let pointer = self.field_pointer(value, i);
+                        self.field_value(&pointer, Type::Int)
+                    });
+                    let ascending = self.compare(Compare::Greater, &step, &small(0));
+                    let forward = self.compare(Compare::Less, &start, &stop);
+                    let backward = self.compare(Compare::Greater, &start, &stop);
+                    self.instruction(format!(
+                        "select i1 {}, i1 {}, i1 {}",
+                        ascending.operand, forward.operand, backward.operand
+                    ))
                 }
                 Type::Int => self.instruction(format!("icmp ne i64 {}, 1", value.operand)),
                 // Unordered-or-not-equal keeps NaN true and both signed zeros false.
@@ -149,26 +157,15 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("icmp ugt i32 {length}, 1"))
                 }
                 Type::ListInt
+                | Type::VarTuple(_)
                 | Type::Deque(_)
                 | Type::Dict(_)
                 | Type::ReadOnlyObjectMapping
                 | Type::Set(_)
                 | Type::FrozenStrings
                 | Type::StringKeys => {
-                    let family = match value.ty {
-                        Type::ListInt => "list",
-                        Type::Dict(_) | Type::ReadOnlyObjectMapping => "dict",
-                        Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "set",
-                        Type::Deque(_) => "deque",
-                        _ => unreachable!(),
-                    };
-                    // These containers have at least one word per entry, so
-                    // their lengths always fit the tagged-small representation.
-                    let length = self.instruction(format!(
-                        "call i64 @imre_{family}_len(ptr {})",
-                        value.operand
-                    ));
-                    self.instruction(format!("icmp ne i64 {length}, 1"))
+                    let length = self.container_length(value);
+                    self.instruction(format!("icmp ne i64 {}, 1", length.operand))
                 }
                 _ => unreachable!("fixed truth values and optionals were handled above"),
             }
@@ -180,63 +177,9 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Only the selected predecessor transfers ownership to the result phi.
-    /// The discarded operand is released before the RHS, including its errors.
-    pub(super) fn boolean_value(
-        &mut self,
-        and: bool,
-        left: &Expr,
-        right: &Expr,
-        returns: Type,
-    ) -> Value {
-        let left = self.operand(left);
-        if let Some(truth) = self.module.types.truthiness(left.value.ty) {
-            if truth == and {
-                self.release_operand(&left);
-                return self.expr(right);
-            }
-            let left = self.own_operand(left);
-            return self.selected_operand(left, returns, !and);
-        }
-        let test = self.truth(&left.value);
-        let (selected, next, end) = (self.label(), self.label(), self.label());
-        if and {
-            self.branch(&test.operand, &next, &selected);
-        } else {
-            self.branch(&test.operand, &selected, &next);
-        }
-        self.forget(&left.value);
-        self.start(&selected);
-        let selected_value = self.own_operand(Operand {
-            value: left.value.clone(),
-            ownership: left.ownership,
-        });
-        let selected_value = self.selected_operand(selected_value, returns, !and);
-        self.forget(&selected_value);
-        let selected_end = self.current.clone();
-        self.jump(&end);
-        self.start(&next);
-        self.release_operand(&left);
-        let right = self.expr(right);
-        self.forget(&right);
-        let right_end = self.current.clone();
-        self.jump(&end);
-        self.start(&end);
-        Value {
-            ty: returns,
-            operand: self.instruction(format!(
-                "phi {} [ {}, %{selected_end} ], [ {}, %{right_end} ]",
-                returns.llvm(),
-                selected_value.operand,
-                right.operand
-            )),
-            small_integer: selected_value.small_integer && right.small_integer,
-        }
-    }
-
     /// Converts the already-selected value using the checker's truth-branch
     /// proof. Nullable floats need an unbox; other payloads transfer their word.
-    fn selected_operand(&mut self, value: Value, returns: Type, truth: bool) -> Value {
+    pub(super) fn selected_operand(&mut self, value: Value, returns: Type, truth: bool) -> Value {
         if value.ty == returns {
             return value;
         }

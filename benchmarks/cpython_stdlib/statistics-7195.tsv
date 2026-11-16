@@ -1,0 +1,401 @@
+frozen_order	canonical_id	occurrence	kind	stock_7111	O0_7111	O3_7111	paired_at_7111	O0_7157	O3_7157	scope_7178	stock_7178	O0_7178	O3_7178	native_source_7187	stock_7187	O0_7187	O3_7187	native_source_7195	stock_7195	O0_7195	O3_7195	paired_credit
+1	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_absolute	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+2	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_absolute_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+3	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_both	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+4	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+5	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+6	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+7	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+8	test.test_statistics.ApproxEqualExactTest.test_exactly_equal_relative	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+9	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_absolute_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+10	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_absolute_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+11	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_absolute_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+12	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_absolute_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+13	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_both1	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+14	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_both2	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+15	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_both3	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+16	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_both4	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+17	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_relative_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+18	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_relative_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+19	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_relative_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+20	test.test_statistics.ApproxEqualInexactTest.test_approx_equal_relative_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+21	test.test_statistics.ApproxEqualInexactTest.test_cross_zero	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+22	test.test_statistics.ApproxEqualSpecialsTest.test_decimal_zeroes	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+23	test.test_statistics.ApproxEqualSpecialsTest.test_float_zeroes	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+24	test.test_statistics.ApproxEqualSpecialsTest.test_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+25	test.test_statistics.ApproxEqualSpecialsTest.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+26	test.test_statistics.ApproxEqualSymmetryTest.test_relative_symmetry	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+27	test.test_statistics.ApproxEqualSymmetryTest.test_symmetry	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+28	test.test_statistics.ApproxEqualUnequalTest.test_exactly_unequal_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+29	test.test_statistics.ApproxEqualUnequalTest.test_exactly_unequal_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+30	test.test_statistics.ApproxEqualUnequalTest.test_exactly_unequal_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+31	test.test_statistics.ApproxEqualUnequalTest.test_exactly_unequal_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+32	test.test_statistics.CoerceTest.test_bool	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+33	test.test_statistics.CoerceTest.test_decimal	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+34	test.test_statistics.CoerceTest.test_float	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+35	test.test_statistics.CoerceTest.test_fraction	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+36	test.test_statistics.CoerceTest.test_incompatible_types	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+37	test.test_statistics.CoerceTest.test_int	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+38	test.test_statistics.CoerceTest.test_non_numeric_types	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+39	test.test_statistics.ConvertTest.test_decimal	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+40	test.test_statistics.ConvertTest.test_float	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+41	test.test_statistics.ConvertTest.test_fraction	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+42	test.test_statistics.ConvertTest.test_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+43	test.test_statistics.ConvertTest.test_int	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+44	test.test_statistics.ConvertTest.test_invalid_input_type	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+45	test.test_statistics.ConvertTest.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+46	test.test_statistics.DecimalToRatioTest.test_infinity	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+47	test.test_statistics.DecimalToRatioTest.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+48	test.test_statistics.DecimalToRatioTest.test_negative_exponent	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+49	test.test_statistics.DecimalToRatioTest.test_positive_exponent	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+50	test.test_statistics.DecimalToRatioTest.test_regression_20536	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+51	test.test_statistics.DecimalToRatioTest.test_sign	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+52	test.test_statistics.ExactRatioTest.test_decimal	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+53	test.test_statistics.ExactRatioTest.test_decimal_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+54	test.test_statistics.ExactRatioTest.test_float	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+55	test.test_statistics.ExactRatioTest.test_float_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+56	test.test_statistics.ExactRatioTest.test_fraction	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+57	test.test_statistics.ExactRatioTest.test_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+58	test.test_statistics.ExactRatioTest.test_int	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+59	test.test_statistics.FailNegTest.test_error_msg	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+60	test.test_statistics.FailNegTest.test_negatives_raise	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+61	test.test_statistics.FailNegTest.test_pass_through	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+62	test.test_statistics.GlobalsTest.test_check_all	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+63	test.test_statistics.GlobalsTest.test_meta	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+64	test.test_statistics.IsFiniteTest.test_finite	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+65	test.test_statistics.IsFiniteTest.test_infinity	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+66	test.test_statistics.IsFiniteTest.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+67	test.test_statistics.StatisticsErrorTest.test_has_exception	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+68	test.test_statistics.SumSpecialValues.test_decimal_basiccontext_mismatched_infs_to_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+69	test.test_statistics.SumSpecialValues.test_decimal_extendedcontext_mismatched_infs_to_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+70	test.test_statistics.SumSpecialValues.test_decimal_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+71	test.test_statistics.SumSpecialValues.test_decimal_snan_raises	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+72	test.test_statistics.SumSpecialValues.test_float_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+73	test.test_statistics.SumSpecialValues.test_float_mismatched_infs	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+74	test.test_statistics.SumSpecialValues.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+75	test.test_statistics.SumTortureTest.test_torture	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+76	test.test_statistics.TestApproxEqualErrors.test_bad_rel	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+77	test.test_statistics.TestApproxEqualErrors.test_bad_tol	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+78	test.test_statistics.TestBivariateStatistics.test_small_sample_error	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	body error	body error					870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+79	test.test_statistics.TestBivariateStatistics.test_unequal_size_error	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	body error	body error					870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+80	test.test_statistics.TestCorrelationAndCovariance.test_correlation_spearman	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	pass	pass									1
+81	test.test_statistics.TestCorrelationAndCovariance.test_different_scales	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	pass	pass									1
+82	test.test_statistics.TestCorrelationAndCovariance.test_results	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	pass	pass									1
+83	test.test_statistics.TestCorrelationAndCovariance.test_sqrtprod_helper_function_fundamentals	1	method	pass	body error	body error	0	body error	body error	36-original panel	pass	pass	pass									1
+84	test.test_statistics.TestCorrelationAndCovariance.test_sqrtprod_helper_function_improved_accuracy	1	method	pass	skipped before body	skipped before body	0	skipped before body	skipped before body	36-original panel	pass	skipped before body	skipped before body									0
+85	test.test_statistics.TestFMean.test_basics	1	method	pass	body error	body error	0			outside recheck												0
+86	test.test_statistics.TestFMean.test_error_cases	1	method	pass	body error	body error	0			outside recheck												0
+87	test.test_statistics.TestFMean.test_special_values	1	method	pass	body error	body error	0			outside recheck												0
+88	test.test_statistics.TestFMean.test_weights	1	method	pass	body error	body error	0			outside recheck												0
+89	test.test_statistics.TestGeometricMean.test_basics	1	method	pass	body error	body error	0			outside recheck												0
+90	test.test_statistics.TestGeometricMean.test_big_and_small	1	method	pass	body error	body error	0			outside recheck												0
+91	test.test_statistics.TestGeometricMean.test_error_cases	1	method	pass	body error	body error	0			outside recheck												0
+92	test.test_statistics.TestGeometricMean.test_mixed_int_and_float	1	method	pass	body error	body error	0			outside recheck												0
+93	test.test_statistics.TestGeometricMean.test_special_values	1	method	pass	body error	body error	0			outside recheck												0
+94	test.test_statistics.TestGeometricMean.test_various_input_types	1	method	pass	body error	body error	0			outside recheck												0
+95	test.test_statistics.TestHarmonicMean.test_bad_arg_types	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+96	test.test_statistics.TestHarmonicMean.test_decimals_exact	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+97	test.test_statistics.TestHarmonicMean.test_doubled_data	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+98	test.test_statistics.TestHarmonicMean.test_empty_data	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+99	test.test_statistics.TestHarmonicMean.test_floats_exact	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+100	test.test_statistics.TestHarmonicMean.test_fractions	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+101	test.test_statistics.TestHarmonicMean.test_inf	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+102	test.test_statistics.TestHarmonicMean.test_ints	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+103	test.test_statistics.TestHarmonicMean.test_invalid_type_error	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+104	test.test_statistics.TestHarmonicMean.test_multiply_data_points	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+105	test.test_statistics.TestHarmonicMean.test_nan	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+106	test.test_statistics.TestHarmonicMean.test_negative_error	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+107	test.test_statistics.TestHarmonicMean.test_no_args	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+108	test.test_statistics.TestHarmonicMean.test_no_inplace_modifications	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+109	test.test_statistics.TestHarmonicMean.test_order_doesnt_matter	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+110	test.test_statistics.TestHarmonicMean.test_range_data	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+111	test.test_statistics.TestHarmonicMean.test_repeated_single_value	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+112	test.test_statistics.TestHarmonicMean.test_single_value	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+113	test.test_statistics.TestHarmonicMean.test_singleton_lists	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+114	test.test_statistics.TestHarmonicMean.test_type_of_data_collection	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+115	test.test_statistics.TestHarmonicMean.test_type_of_data_element	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+116	test.test_statistics.TestHarmonicMean.test_types_conserved	1	method	pass	body error	body error	0			outside recheck				d45212820986b72b47e087d3ca76d6c7c83ec7af	pass	pass	pass					1
+117	test.test_statistics.TestHarmonicMean.test_with_weights	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+118	test.test_statistics.TestHarmonicMean.test_zero	1	method	pass	pass	pass	1	pass	pass	36-original panel	pass	pass	pass									1
+119	test.test_statistics.TestKDE.test_kde	1	method	pass	body error	body error	0			outside recheck												0
+120	test.test_statistics.TestKDE.test_kde_kernel_specs	1	method	pass	body error	body error	0			outside recheck												0
+121	test.test_statistics.TestKDE.test_kde_random	1	method	pass	body error	body error	0			outside recheck												0
+122	test.test_statistics.TestLinearRegression.test_constant_input_error	1	method	pass	body error	body error	0			outside recheck								870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+123	test.test_statistics.TestLinearRegression.test_float_output	1	method	pass	body error	body error	0			outside recheck								870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+124	test.test_statistics.TestLinearRegression.test_proportional	1	method	pass	body error	body error	0			outside recheck								870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+125	test.test_statistics.TestLinearRegression.test_results	1	method	pass	body error	body error	0			outside recheck								870de8a74afa9ad9706baf87d66c336d38346e31	pass	pass	pass	1
+126	test.test_statistics.TestMean.test_bad_arg_types	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+127	test.test_statistics.TestMean.test_big_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+128	test.test_statistics.TestMean.test_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+129	test.test_statistics.TestMean.test_doubled_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+130	test.test_statistics.TestMean.test_empty_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+131	test.test_statistics.TestMean.test_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+132	test.test_statistics.TestMean.test_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+133	test.test_statistics.TestMean.test_inf	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+134	test.test_statistics.TestMean.test_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+135	test.test_statistics.TestMean.test_mismatched_infs	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+136	test.test_statistics.TestMean.test_nan	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+137	test.test_statistics.TestMean.test_no_args	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+138	test.test_statistics.TestMean.test_no_inplace_modifications	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+139	test.test_statistics.TestMean.test_order_doesnt_matter	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+140	test.test_statistics.TestMean.test_range_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+141	test.test_statistics.TestMean.test_regression_20561	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+142	test.test_statistics.TestMean.test_regression_25177	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+143	test.test_statistics.TestMean.test_repeated_single_value	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+144	test.test_statistics.TestMean.test_single_value	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+145	test.test_statistics.TestMean.test_torture_pep	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+146	test.test_statistics.TestMean.test_type_of_data_collection	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+147	test.test_statistics.TestMean.test_type_of_data_element	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+148	test.test_statistics.TestMean.test_types_conserved	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+149	test.test_statistics.TestMedian.test_bad_arg_types	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+150	test.test_statistics.TestMedian.test_empty_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+151	test.test_statistics.TestMedian.test_even_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+152	test.test_statistics.TestMedian.test_even_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+153	test.test_statistics.TestMedian.test_even_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+154	test.test_statistics.TestMedian.test_no_args	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+155	test.test_statistics.TestMedian.test_no_inplace_modifications	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+156	test.test_statistics.TestMedian.test_odd_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+157	test.test_statistics.TestMedian.test_odd_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+158	test.test_statistics.TestMedian.test_odd_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+159	test.test_statistics.TestMedian.test_order_doesnt_matter	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+160	test.test_statistics.TestMedian.test_range_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+161	test.test_statistics.TestMedian.test_repeated_single_value	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+162	test.test_statistics.TestMedian.test_single_value	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+163	test.test_statistics.TestMedian.test_type_of_data_collection	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+164	test.test_statistics.TestMedian.test_type_of_data_element	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+165	test.test_statistics.TestMedianDataType.test_types_conserved	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+166	test.test_statistics.TestMedianGrouped.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+167	test.test_statistics.TestMedianGrouped.test_data_type_error	1	method	pass	setup error	setup error	0			outside recheck												0
+168	test.test_statistics.TestMedianGrouped.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+169	test.test_statistics.TestMedianGrouped.test_even_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+170	test.test_statistics.TestMedianGrouped.test_even_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+171	test.test_statistics.TestMedianGrouped.test_even_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+172	test.test_statistics.TestMedianGrouped.test_even_number_repeated	1	method	pass	setup error	setup error	0			outside recheck												0
+173	test.test_statistics.TestMedianGrouped.test_interval	1	method	pass	setup error	setup error	0			outside recheck												0
+174	test.test_statistics.TestMedianGrouped.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+175	test.test_statistics.TestMedianGrouped.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+176	test.test_statistics.TestMedianGrouped.test_odd_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+177	test.test_statistics.TestMedianGrouped.test_odd_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+178	test.test_statistics.TestMedianGrouped.test_odd_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+179	test.test_statistics.TestMedianGrouped.test_odd_number_repeated	1	method	pass	setup error	setup error	0			outside recheck												0
+180	test.test_statistics.TestMedianGrouped.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+181	test.test_statistics.TestMedianGrouped.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+182	test.test_statistics.TestMedianGrouped.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+183	test.test_statistics.TestMedianGrouped.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+184	test.test_statistics.TestMedianGrouped.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+185	test.test_statistics.TestMedianGrouped.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+186	test.test_statistics.TestMedianHigh.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+187	test.test_statistics.TestMedianHigh.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+188	test.test_statistics.TestMedianHigh.test_even_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+189	test.test_statistics.TestMedianHigh.test_even_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+190	test.test_statistics.TestMedianHigh.test_even_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+191	test.test_statistics.TestMedianHigh.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+192	test.test_statistics.TestMedianHigh.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+193	test.test_statistics.TestMedianHigh.test_odd_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+194	test.test_statistics.TestMedianHigh.test_odd_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+195	test.test_statistics.TestMedianHigh.test_odd_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+196	test.test_statistics.TestMedianHigh.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+197	test.test_statistics.TestMedianHigh.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+198	test.test_statistics.TestMedianHigh.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+199	test.test_statistics.TestMedianHigh.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+200	test.test_statistics.TestMedianHigh.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+201	test.test_statistics.TestMedianHigh.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+202	test.test_statistics.TestMedianHigh.test_types_conserved	1	method	pass	setup error	setup error	0			outside recheck												0
+203	test.test_statistics.TestMedianLow.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+204	test.test_statistics.TestMedianLow.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+205	test.test_statistics.TestMedianLow.test_even_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+206	test.test_statistics.TestMedianLow.test_even_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+207	test.test_statistics.TestMedianLow.test_even_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+208	test.test_statistics.TestMedianLow.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+209	test.test_statistics.TestMedianLow.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+210	test.test_statistics.TestMedianLow.test_odd_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+211	test.test_statistics.TestMedianLow.test_odd_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+212	test.test_statistics.TestMedianLow.test_odd_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+213	test.test_statistics.TestMedianLow.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+214	test.test_statistics.TestMedianLow.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+215	test.test_statistics.TestMedianLow.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+216	test.test_statistics.TestMedianLow.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+217	test.test_statistics.TestMedianLow.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+218	test.test_statistics.TestMedianLow.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+219	test.test_statistics.TestMedianLow.test_types_conserved	1	method	pass	setup error	setup error	0			outside recheck												0
+220	test.test_statistics.TestMode.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+221	test.test_statistics.TestMode.test_bimodal_data	1	method	pass	setup error	setup error	0			outside recheck												0
+222	test.test_statistics.TestMode.test_counter_data	1	method	pass	setup error	setup error	0			outside recheck												0
+223	test.test_statistics.TestMode.test_discrete_data	1	method	pass	setup error	setup error	0			outside recheck												0
+224	test.test_statistics.TestMode.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+225	test.test_statistics.TestMode.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+226	test.test_statistics.TestMode.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+227	test.test_statistics.TestMode.test_nominal_data	1	method	pass	setup error	setup error	0			outside recheck												0
+228	test.test_statistics.TestMode.test_none_data	1	method	pass	setup error	setup error	0			outside recheck												0
+229	test.test_statistics.TestMode.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+230	test.test_statistics.TestMode.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+231	test.test_statistics.TestMode.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+232	test.test_statistics.TestMode.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+233	test.test_statistics.TestMode.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+234	test.test_statistics.TestMode.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+235	test.test_statistics.TestMode.test_types_conserved	1	method	pass	setup error	setup error	0			outside recheck												0
+236	test.test_statistics.TestMode.test_unique_data	1	method	pass	setup error	setup error	0			outside recheck												0
+237	test.test_statistics.TestModules.test_c_functions	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+238	test.test_statistics.TestModules.test_py_functions	1	method	pass	body error	body error	0			outside recheck												0
+239	test.test_statistics.TestMultiMode.test_basics	1	method	pass	body error	body error	0			outside recheck												0
+240	test.test_statistics.TestNormalDistC.test_alternative_constructor	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+241	test.test_statistics.TestNormalDistC.test_cdf	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+242	test.test_statistics.TestNormalDistC.test_copy	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+243	test.test_statistics.TestNormalDistC.test_equality	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+244	test.test_statistics.TestNormalDistC.test_hashability	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+245	test.test_statistics.TestNormalDistC.test_instantiation_and_attributes	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+246	test.test_statistics.TestNormalDistC.test_inv_cdf	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+247	test.test_statistics.TestNormalDistC.test_overlap	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+248	test.test_statistics.TestNormalDistC.test_pdf	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+249	test.test_statistics.TestNormalDistC.test_pickle	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+250	test.test_statistics.TestNormalDistC.test_properties	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+251	test.test_statistics.TestNormalDistC.test_quantiles	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+252	test.test_statistics.TestNormalDistC.test_repr	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+253	test.test_statistics.TestNormalDistC.test_same_type_addition_and_subtraction	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+254	test.test_statistics.TestNormalDistC.test_sample_generation	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+255	test.test_statistics.TestNormalDistC.test_slots	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+256	test.test_statistics.TestNormalDistC.test_translation_and_scaling	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+257	test.test_statistics.TestNormalDistC.test_unary_operations	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+258	test.test_statistics.TestNormalDistC.test_zscore	1	method	pass	skipped before body	skipped before body	0			outside recheck												0
+259	test.test_statistics.TestNormalDistPython.test_alternative_constructor	1	method	pass	body error	body error	0			outside recheck												0
+260	test.test_statistics.TestNormalDistPython.test_cdf	1	method	pass	body error	body error	0			outside recheck												0
+261	test.test_statistics.TestNormalDistPython.test_copy	1	method	pass	body error	body error	0			outside recheck												0
+262	test.test_statistics.TestNormalDistPython.test_equality	1	method	pass	body error	body error	0			outside recheck												0
+263	test.test_statistics.TestNormalDistPython.test_hashability	1	method	pass	body error	body error	0			outside recheck												0
+264	test.test_statistics.TestNormalDistPython.test_instantiation_and_attributes	1	method	pass	body error	body error	0			outside recheck												0
+265	test.test_statistics.TestNormalDistPython.test_inv_cdf	1	method	pass	body error	body error	0			outside recheck												0
+266	test.test_statistics.TestNormalDistPython.test_overlap	1	method	pass	body error	body error	0			outside recheck												0
+267	test.test_statistics.TestNormalDistPython.test_pdf	1	method	pass	body error	body error	0			outside recheck												0
+268	test.test_statistics.TestNormalDistPython.test_pickle	1	method	pass	body error	body error	0			outside recheck												0
+269	test.test_statistics.TestNormalDistPython.test_properties	1	method	pass	body error	body error	0			outside recheck												0
+270	test.test_statistics.TestNormalDistPython.test_quantiles	1	method	pass	body error	body error	0			outside recheck												0
+271	test.test_statistics.TestNormalDistPython.test_repr	1	method	pass	body error	body error	0			outside recheck												0
+272	test.test_statistics.TestNormalDistPython.test_same_type_addition_and_subtraction	1	method	pass	body error	body error	0			outside recheck												0
+273	test.test_statistics.TestNormalDistPython.test_sample_generation	1	method	pass	body error	body error	0			outside recheck												0
+274	test.test_statistics.TestNormalDistPython.test_slots	1	method	pass	body error	body error	0			outside recheck												0
+275	test.test_statistics.TestNormalDistPython.test_translation_and_scaling	1	method	pass	body error	body error	0			outside recheck												0
+276	test.test_statistics.TestNormalDistPython.test_unary_operations	1	method	pass	body error	body error	0			outside recheck												0
+277	test.test_statistics.TestNormalDistPython.test_zscore	1	method	pass	body error	body error	0			outside recheck												0
+278	test.test_statistics.TestNumericTestCase.test_error_msg_numeric	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+279	test.test_statistics.TestNumericTestCase.test_error_msg_sequence	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+280	test.test_statistics.TestNumericTestCase.test_numerictestcase_is_testcase	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+281	test.test_statistics.TestPStdev.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+282	test.test_statistics.TestPStdev.test_center_not_at_mean	1	method	pass	setup error	setup error	0			outside recheck												0
+283	test.test_statistics.TestPStdev.test_compare_to_variance	1	method	pass	setup error	setup error	0			outside recheck												0
+284	test.test_statistics.TestPStdev.test_domain_error_regression	1	method	pass	setup error	setup error	0			outside recheck												0
+285	test.test_statistics.TestPStdev.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+286	test.test_statistics.TestPStdev.test_gh_140938	1	method	pass	setup error	setup error	0			outside recheck												0
+287	test.test_statistics.TestPStdev.test_iter_list_same	1	method	pass	setup error	setup error	0			outside recheck												0
+288	test.test_statistics.TestPStdev.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+289	test.test_statistics.TestPStdev.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+290	test.test_statistics.TestPStdev.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+291	test.test_statistics.TestPStdev.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+292	test.test_statistics.TestPStdev.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+293	test.test_statistics.TestPStdev.test_shift_data	1	method	pass	setup error	setup error	0			outside recheck												0
+294	test.test_statistics.TestPStdev.test_shift_data_exact	1	method	pass	setup error	setup error	0			outside recheck												0
+295	test.test_statistics.TestPStdev.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+296	test.test_statistics.TestPStdev.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+297	test.test_statistics.TestPStdev.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+298	test.test_statistics.TestPVariance.test_accuracy_bug_20499	1	method	pass	setup error	setup error	0			outside recheck												0
+299	test.test_statistics.TestPVariance.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+300	test.test_statistics.TestPVariance.test_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+301	test.test_statistics.TestPVariance.test_domain_error_regression	1	method	pass	setup error	setup error	0			outside recheck												0
+302	test.test_statistics.TestPVariance.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+303	test.test_statistics.TestPVariance.test_exact_uniform	1	method	pass	setup error	setup error	0			outside recheck												0
+304	test.test_statistics.TestPVariance.test_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+305	test.test_statistics.TestPVariance.test_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+306	test.test_statistics.TestPVariance.test_iter_list_same	1	method	pass	setup error	setup error	0			outside recheck												0
+307	test.test_statistics.TestPVariance.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+308	test.test_statistics.TestPVariance.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+309	test.test_statistics.TestPVariance.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+310	test.test_statistics.TestPVariance.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+311	test.test_statistics.TestPVariance.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+312	test.test_statistics.TestPVariance.test_shift_data	1	method	pass	setup error	setup error	0			outside recheck												0
+313	test.test_statistics.TestPVariance.test_shift_data_exact	1	method	pass	setup error	setup error	0			outside recheck												0
+314	test.test_statistics.TestPVariance.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+315	test.test_statistics.TestPVariance.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+316	test.test_statistics.TestPVariance.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+317	test.test_statistics.TestPVariance.test_types_conserved	1	method	pass	setup error	setup error	0			outside recheck												0
+318	test.test_statistics.TestQuantiles.test_equal_inputs	1	method	pass	body error	body error	0			outside recheck												0
+319	test.test_statistics.TestQuantiles.test_equal_sized_groups	1	method	pass	body error	body error	0			outside recheck												0
+320	test.test_statistics.TestQuantiles.test_error_cases	1	method	pass	body error	body error	0			outside recheck												0
+321	test.test_statistics.TestQuantiles.test_specific_cases	1	method	pass	body error	body error	0			outside recheck												0
+322	test.test_statistics.TestQuantiles.test_specific_cases_inclusive	1	method	pass	body error	body error	0			outside recheck												0
+323	test.test_statistics.TestSign.testZeroes	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+324	test.test_statistics.TestSqrtHelpers.test_decimal_sqrt_of_frac	1	method	pass	body error	body error	0			outside recheck												0
+325	test.test_statistics.TestSqrtHelpers.test_float_sqrt_of_frac	1	method	pass	body error	body error	0			outside recheck												0
+326	test.test_statistics.TestSqrtHelpers.test_integer_sqrt_of_frac_rto	1	method	pass	body error	body error	0			outside recheck												0
+327	test.test_statistics.TestStdev.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+328	test.test_statistics.TestStdev.test_center_not_at_mean	1	method	pass	setup error	setup error	0			outside recheck												0
+329	test.test_statistics.TestStdev.test_compare_to_variance	1	method	pass	setup error	setup error	0			outside recheck												0
+330	test.test_statistics.TestStdev.test_domain_error_regression	1	method	pass	setup error	setup error	0			outside recheck												0
+331	test.test_statistics.TestStdev.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+332	test.test_statistics.TestStdev.test_iter_list_same	1	method	pass	setup error	setup error	0			outside recheck												0
+333	test.test_statistics.TestStdev.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+334	test.test_statistics.TestStdev.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+335	test.test_statistics.TestStdev.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+336	test.test_statistics.TestStdev.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+337	test.test_statistics.TestStdev.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+338	test.test_statistics.TestStdev.test_shift_data	1	method	pass	setup error	setup error	0			outside recheck												0
+339	test.test_statistics.TestStdev.test_shift_data_exact	1	method	pass	setup error	setup error	0			outside recheck												0
+340	test.test_statistics.TestStdev.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+341	test.test_statistics.TestStdev.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+342	test.test_statistics.TestStdev.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+343	test.test_statistics.TestSum.test_bytes_fail	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+344	test.test_statistics.TestSum.test_compare_with_math_fsum	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+345	test.test_statistics.TestSum.test_decimals	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+346	test.test_statistics.TestSum.test_empty_data	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+347	test.test_statistics.TestSum.test_floats	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+348	test.test_statistics.TestSum.test_fractions	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+349	test.test_statistics.TestSum.test_ints	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+350	test.test_statistics.TestSum.test_mixed_sum	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+351	test.test_statistics.TestSum.test_strings_fail	1	method	pass	pass	pass	1			127 prior pairs	pass	pass	pass									1
+352	test.test_statistics.TestVariance.test_accuracy_bug_20499	1	method	pass	setup error	setup error	0			outside recheck												0
+353	test.test_statistics.TestVariance.test_bad_arg_types	1	method	pass	setup error	setup error	0			outside recheck												0
+354	test.test_statistics.TestVariance.test_center_not_at_mean	1	method	pass	setup error	setup error	0			outside recheck												0
+355	test.test_statistics.TestVariance.test_decimals	1	method	pass	setup error	setup error	0			outside recheck												0
+356	test.test_statistics.TestVariance.test_domain_error_regression	1	method	pass	setup error	setup error	0			outside recheck												0
+357	test.test_statistics.TestVariance.test_empty_data	1	method	pass	setup error	setup error	0			outside recheck												0
+358	test.test_statistics.TestVariance.test_fractions	1	method	pass	setup error	setup error	0			outside recheck												0
+359	test.test_statistics.TestVariance.test_ints	1	method	pass	setup error	setup error	0			outside recheck												0
+360	test.test_statistics.TestVariance.test_iter_list_same	1	method	pass	setup error	setup error	0			outside recheck												0
+361	test.test_statistics.TestVariance.test_no_args	1	method	pass	setup error	setup error	0			outside recheck												0
+362	test.test_statistics.TestVariance.test_no_inplace_modifications	1	method	pass	setup error	setup error	0			outside recheck												0
+363	test.test_statistics.TestVariance.test_order_doesnt_matter	1	method	pass	setup error	setup error	0			outside recheck												0
+364	test.test_statistics.TestVariance.test_range_data	1	method	pass	setup error	setup error	0			outside recheck												0
+365	test.test_statistics.TestVariance.test_repeated_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+366	test.test_statistics.TestVariance.test_shift_data	1	method	pass	setup error	setup error	0			outside recheck												0
+367	test.test_statistics.TestVariance.test_shift_data_exact	1	method	pass	setup error	setup error	0			outside recheck												0
+368	test.test_statistics.TestVariance.test_single_value	1	method	pass	setup error	setup error	0			outside recheck												0
+369	test.test_statistics.TestVariance.test_type_of_data_collection	1	method	pass	setup error	setup error	0			outside recheck												0
+370	test.test_statistics.TestVariance.test_type_of_data_element	1	method	pass	setup error	setup error	0			outside recheck												0
+371	test.test_statistics.TestVariance.test_types_conserved	1	method	pass	setup error	setup error	0			outside recheck												0
+372	test.test_statistics.NumericTestCase.assertApproxEqual	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+373	test.test_statistics._DoNothing	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+374	test.test_statistics._calc_errors	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+375	test.test_statistics._nan_equal	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+376	test.test_statistics.approx_equal	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+377	statistics	1	doctest	pass	unregistered	unregistered	0	unregistered	unregistered	36-original panel	pass	unregistered	unregistered									0
+378	statistics.NormalDist.overlap	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+379	statistics._exact_ratio	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+380	statistics._rank	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+381	statistics._sum	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+382	statistics.correlation	1	doctest	pass	unregistered	unregistered	0	unregistered	unregistered	36-original panel	pass	doctest failure	doctest failure									0
+383	statistics.covariance	1	doctest	pass	unregistered	unregistered	0	unregistered	unregistered	36-original panel	pass	doctest failure	doctest failure									0
+384	statistics.fmean	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+385	statistics.geometric_mean	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+386	statistics.harmonic_mean	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+387	statistics.kde	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+388	statistics.kde_random	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+389	statistics.linear_regression	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+390	statistics.mean	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+391	statistics.median	1	doctest	pass	doctest failure	doctest failure	0			outside recheck												0
+392	statistics.median_grouped	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+393	statistics.median_high	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+394	statistics.median_low	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+395	statistics.mode	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+396	statistics.multimode	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+397	statistics.pstdev	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+398	statistics.pvariance	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+399	statistics.stdev	1	doctest	pass	unregistered	unregistered	0			outside recheck												0
+400	statistics.variance	1	doctest	pass	unregistered	unregistered	0			outside recheck												0

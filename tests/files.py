@@ -17,7 +17,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from textwrap import dedent
 
+from fixture_entry import imported_fixture
+
 ACCEPTED = {
+    "module_rebind": 'import sys\nsys.argv = ["replacement"]\nprint(sys.argv)',
+    "str_resource_list": "print(str([open('input.txt', 'r')]))",
+    "typing_member": "from typing import Any\nvalue: Any = 1",
     "whole_regular_file": """
         with open("large.bin", "wb") as output:
             output.write(b"a" * 262144)
@@ -731,7 +736,6 @@ REJECTED = {
     "seek": 'with open("input.txt", "r", encoding="utf-8") as stream:\n    stream.seek(0)',
     "write_type": 'with open("output.txt", "w", encoding="utf-8") as stream:\n    stream.write(1)',
     "closed_assignment": 'stream = open("input.txt", "r", encoding="utf-8")\nstream.closed = False',
-    "str_resource_list": "print(str([open('input.txt', 'r')]))",
     "text_constructor": "from typing import TextIO\nTextIO()",
     "decode_constructor": 'raise UnicodeDecodeError("not a valid constructor")',
     "generic_context": "with [1] as values:\n    print(values[0])",
@@ -740,8 +744,6 @@ REJECTED = {
     "unknown_sys_member": "import sys\nprint(sys.missing_path_member)",
     "io_unknown_member": "from io import TextCapture\nTextCapture()",
     "string_io_binary_input": "from io import StringIO\nStringIO(b'input')",
-    "typing_member": "from typing import Any\nvalue: Any = 1",
-    "module_rebind": 'import sys\nsys.argv = ["replacement"]',
     "alias_rebind": 'from sys import argv\nargv = ["replacement"]',
     "parameter_shadow": "import sys\ndef f(sys: int) -> int:\n    return sys",
     "optional_access": "from typing import TextIO\nstream: TextIO | None = None\nstream.read()",
@@ -998,7 +1000,7 @@ def main() -> None:
             result = run([compiler, "check", str(path)], temporary)
             assert result.returncode > 0 and result.stderr, (name, result)
             passed += 1
-        for module in ["sys", "typing", "io", "gzip", "zlib", "zipimport"]:
+        for module in ["sys", "io", "gzip", "zlib"]:
             project = temporary / f"shadow-{module}"
             project.mkdir()
             (project / "main.py").write_text(f"import {module}\n")
@@ -1047,6 +1049,8 @@ def main() -> None:
             )
             check_result(reference, category, f"CPython {name}")
             expected_files = snapshot(reference_dir)
+            entry = (imported_fixture(project, path)
+                     if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else path)
             for level in args.opt_levels:
                 binary = project / f"native-O{level}"
                 llvm = project / f"native-O{level}.ll"
@@ -1054,17 +1058,15 @@ def main() -> None:
                     [
                         compiler,
                         "build",
-                        str(path),
+                        str(entry),
                         "--module-root",
                         str(project),
                         "-o",
                         str(binary),
-                        "--emit-llvm",
-                        str(llvm),
+                        *(["--emit-llvm", str(llvm)] if name == "text_roundtrip" else []),
                         "--opt-level",
                         level,
                         *flags,
-                        *(["--runtime-imports"] if name in {"boxed_zipimport_resources", "named_text_update", "binary_update"} else []),
                     ],
                     temporary,
                 )
@@ -1092,6 +1094,7 @@ def main() -> None:
                     level,
                     "file bytes differ",
                 )
+                binary.unlink()
                 passed += 1
 
         # CPython surrogateescapes invalid Unix argv bytes; the native string domain

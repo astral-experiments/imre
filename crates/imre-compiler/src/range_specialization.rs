@@ -4,9 +4,10 @@
 //! slots keep the fast loop's ownership proof independent of the fallback, while
 //! both versions preserve the original visible target and Python control flow.
 
+use ruff_python_ast::CmpOp;
 use std::collections::HashSet;
 
-use crate::ir::{self, Compare, Expr, ExprKind, Module, Statement, Type};
+use crate::ir::{self, Expr, ExprKind, Module, Statement, Type};
 use crate::ranges;
 
 const MAX_SMALL: i64 = (1_i64 << 62) - 1;
@@ -17,7 +18,7 @@ pub(crate) fn specialize(module: &mut Module) {
     let small_cursors = ranges::analyze(module).into_small_cursors();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
         // Range analysis skips functions with expression rebindings.
-        if function.expression_rebound().into_iter().any(|value| value) {
+        if function.has_expression_bindings() {
             continue;
         }
         ir::rewrite_statements(&mut function.body, &mut |statement| {
@@ -111,7 +112,7 @@ fn rewrite_loop(
                 local(captured),
                 Expr::integer(MAX_SMALL - stride),
             ],
-            vec![Compare::LessEqual, Compare::LessEqual],
+            vec![CmpOp::LtE, CmpOp::LtE],
         ),
     };
     *statement = Statement::Scope {
@@ -315,12 +316,7 @@ def bindings(limit: int) -> None:
             .iter()
             .map(|function| function.locals.len())
             .collect::<Vec<_>>();
-        assert!(
-            module.functions[1]
-                .expression_rebound()
-                .into_iter()
-                .any(|value| value)
-        );
+        assert!(module.functions[1].has_expression_bindings());
         specialize(&mut module);
         assert_eq!(
             module

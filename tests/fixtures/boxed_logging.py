@@ -23,6 +23,15 @@ def current():
         assert globals()[name] is getattr(logging, name)
     assert "root" not in globals()
     check_root_records()
+    calls = []
+
+    class CustomLogger(logging.Logger):
+        def critical(self, msg, *args, **kwargs):
+            calls.append((msg, args, kwargs))
+            return 17
+
+    assert CustomLogger("custom").fatal("%s", "failure", stacklevel=2) is None
+    assert calls == [("%s", ("failure",), {"stacklevel": 2})]
     assert logging.StreamHandler().stream is sys.stderr
     stream = Stream()
     child = logging.getLogger("access.child")
@@ -144,6 +153,8 @@ def check_root_records():
             fatal("disk %s", "full")
             warn("limit %d", 7)
         assert stream.writes[-2:] == ["CRITICAL disk full\n", "WARNING limit 7\n"]
+        root.fatal("root %s", "failure")
+        assert stream.writes[-1] == "CRITICAL root failure\n"
         assert len(seen) == 1 and seen[0].category is DeprecationWarning
         assert seen[0].filename == __file__
         try:

@@ -83,10 +83,6 @@ def shutdown(handlerList=_handlerList):
             #else, swallow
 
 
-def _handler_level(level):
-    return _checkLevel(level)
-
-
 def _flush_handler_stream(handler):
     if handler.stream and hasattr(handler.stream, "flush"):
         handler.stream.flush()
@@ -142,9 +138,6 @@ def _handle_error(record):
         pass
     finally:
         del exc
-
-
-StreamHandler.terminator = "\n"
 
 
 class FileHandler(StreamHandler):
@@ -744,6 +737,12 @@ class Logger(Filterer):
         """
         if self.isEnabledFor(CRITICAL):
             self._log(CRITICAL, msg, args, **kwargs)
+
+    def fatal(self, msg, *args, **kwargs):
+        """
+        Don't use this method, use critical() instead.
+        """
+        self.critical(msg, *args, **kwargs)
 
     def __reduce__(self):
         if getLogger(self.name) is not self:

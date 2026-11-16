@@ -40,10 +40,6 @@ def _boxedSkipTest(self, reason):
     raise SkipTest(reason)
 
 
-def _boxedAddSkip(self, test, reason):
-    self.skipped.append((test, reason))
-
-
 def _boxedSkipCase(self, case, name, reason):
     self.startTest(case)
     try:
@@ -53,5 +49,4 @@ def _boxedSkipCase(self, case, name, reason):
 
 
 TestCase.skipTest = _boxedSkipTest
-TestResult.addSkip = _boxedAddSkip
 TestResult._skipCase = _boxedSkipCase

@@ -268,3 +268,30 @@ def current():
     del held
     gc.collect()
     assert key() is None and callbacks == [key]
+
+
+# Each container keeps a different instance alive across a wide mark queue.
+def wide_frontier():
+    # Keep these instances independent of the class used for exact generation counts.
+    class Branch:
+        pass
+
+    roots = []
+    refs = []
+    for i in range(65):
+        branch = Branch()
+        branch.link = branch
+        refs.append(ref(branch))
+        roots.append({"branch": ([branch],)})
+    del branch
+    gc.collect()
+    assert all(reference() is not None for reference in refs)
+    del roots[::2]
+    gc.collect()
+    assert [reference() is not None for reference in refs] == [i % 2 == 1 for i in range(65)]
+    roots.clear()
+    gc.collect()
+    assert all(reference() is None for reference in refs)
+
+
+wide_frontier()

@@ -1,6 +1,19 @@
 //! Closed, representation-checked IR. Lowering preserves owned results and may
 //! borrow rooted locals for the duration of operator and call evaluation.
 
+pub(crate) mod control;
+
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
+use std::collections::BTreeSet;
+
+/// Return the exact value when it fits in the tagged integer representation.
+pub(crate) fn tagged_integer(value: i64) -> Option<i64> {
+    (-(1_i64 << 62)..1_i64 << 62)
+        .contains(&value)
+        .then_some(value)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SysEncoding {
     Locale,
@@ -75,6 +88,8 @@ pub(crate) enum Type {
     Union(usize),
     /// An owned tagged reference to a string list or a fixed tuple of strings.
     StringIterable,
+    /// Immutable start, stop and step. Each iteration gets its own cursor.
+    Range,
     /// An internal container or string cursor, never available in user annotations.
     Iterator,
     /// A first-class cursor whose next operation transfers one exact element type.
@@ -85,6 +100,8 @@ pub(crate) enum Type {
     NamedException(usize),
     /// An owned view of a concrete Python scalar, tuple, or native module attribute.
     ObjectValue,
+    /// A live Python value rooted by the registered activation and identified in its heap.
+    PythonObject,
     ReadOnlyObjectMapping,
     /// A builtin ImportError (including its ModuleNotFoundError and marker subclasses).
     ImportException,
@@ -128,6 +145,7 @@ pub(crate) enum Type {
     Semaphore,
     /// An immutable compiled text pattern or one successful search and its captures.
     RegexPattern,
+    RegexBytesPattern,
     NativeModule,
     ModuleNamespace,
     LogRecord,
@@ -167,6 +185,7 @@ pub(crate) enum Type {
     ZipInfo,
     CsvReader,
     RegexMatch,
+    RegexBytesMatch,
     /// Immutable selections from decoded JSON. Only the object form has a source annotation.
     JsonRoot,
     JsonValue,
@@ -184,9 +203,14 @@ pub(crate) enum CalendarType {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CalendarOp {
+    MonthGrid,
+    InstanceMonthGrid,
+    FirstWeekday,
+    SetFirstWeekday,
     Date,
     DateTime,
     Combine,
+    FromIsoFormat,
     Replace { timezone_supplied: bool },
     Astimezone,
     Delta,
@@ -264,6 +288,7 @@ pub(crate) enum TypingOperation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SocketOp {
     Constant(&'static str),
+    ControlSize { padded: bool },
     GetFqdn,
     New,
     Bind,
@@ -302,8 +327,36 @@ impl Type {
         }
     }
 
+    /// The checked sequence layout multiplied by an integer in either operand order.
+    pub(crate) fn repeated_sequence(left: Self, right: Self) -> Option<Self> {
+        let sequence = match (left, right) {
+            (sequence, Self::Int) | (Self::Int, sequence) => sequence,
+            _ => return None,
+        };
+        matches!(
+            sequence,
+            Self::Str | Self::Bytes | Self::ListInt | Self::List(_)
+        )
+        .then_some(sequence)
+    }
+
     pub(crate) fn is_path(self) -> bool {
         matches!(self, Self::Path | Self::PurePath(_))
+    }
+
+    pub(crate) fn builtin_scalar_name(self) -> Option<&'static str> {
+        Some(match self {
+            Self::Bool => "bool",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Str => "str",
+            Self::Bytes => "bytes",
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn is_format_scalar(self) -> bool {
+        self.builtin_scalar_name().is_some()
     }
 }
 
@@ -351,6 +404,7 @@ impl std::fmt::Display for Type {
             Self::Iterator => "iterator",
             Self::Exception | Self::NamedException(_) => "Exception",
             Self::ObjectValue => "object value",
+            Self::PythonObject => "Python object",
             Self::WeakProxy(_) => "weakref.proxy",
             Self::ReadOnlyObjectMapping => "Mapping[str, object]",
             Self::ImportException => "ImportError",
@@ -363,6 +417,7 @@ impl std::fmt::Display for Type {
             Self::BytesIO => "io.BytesIO",
             Self::SourceModule => "module",
             Self::Path => "pathlib.Path",
+            Self::Range => "range",
             Self::PathInfo => "pathlib.types.PathInfo",
             Self::PurePath(PathFlavor::Posix) => "pathlib.PurePosixPath",
             Self::PurePath(PathFlavor::Windows) => "pathlib.PureWindowsPath",
@@ -388,6 +443,7 @@ impl std::fmt::Display for Type {
             Self::Patch(PatchKind::File) => "unidiff.PatchedFile",
             Self::Patch(PatchKind::Hunk) => "unidiff.Hunk",
             Self::RegexPattern => "re.Pattern[str]",
+            Self::RegexBytesPattern => "re.Pattern[bytes]",
             Self::NativeModule => "builtin module",
             Self::ModuleNamespace => "module namespace",
             Self::LogFormatter => "logging.Formatter",
@@ -421,6 +477,7 @@ impl std::fmt::Display for Type {
             Self::ZipInfo => "zipfile.ZipInfo",
             Self::CsvReader => "CSV reader",
             Self::RegexMatch => "re.Match[str]",
+            Self::RegexBytesMatch => "re.Match[bytes]",
             Self::JsonRoot => "JSON document",
             Self::JsonValue => "JSON value",
             Self::JsonObject => "dict[str, Any]",
@@ -456,9 +513,30 @@ pub(crate) enum SourceFrame {
     Module(String),
 }
 
+pub(crate) enum ModuleLoader<'a> {
+    Source {
+        builtin: bool,
+        text: Option<&'a [u8]>,
+    },
+    Physical {
+        kind: PhysicalModuleKind<'a>,
+        digest: [u8; 32],
+        future_flags: u32,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PhysicalModuleKind<'a> {
+    File,
+    DeclaredFile(&'a std::path::Path),
+    Zip,
+}
+
 pub(crate) struct Module {
     /// Interpreter settings already selected by the Python-style launcher.
     pub command_flags: Option<crate::CommandFlags>,
+    /// NUL-separated source registrations that mask native providers in this image.
+    pub builtin_module_sources: Option<String>,
     /// Exact storage shapes survive checking so lowering need not erase them to
     /// generic tagged slots. Class identities index `class_fields`; container
     /// identities refer to this compilation's interned type universe.
@@ -474,6 +552,8 @@ pub(crate) struct Module {
     pub globals: Vec<Type>,
     /// Source functions and entry in emission order. Synthetic helpers have no frame.
     pub source_frames: Vec<Option<SourceFrame>>,
+    /// Entries at which a cycle in the checked call graph can grow the native stack.
+    pub recursive_functions: std::collections::HashSet<usize>,
     pub functions: Vec<Function>,
     pub entry: Function,
 }
@@ -496,8 +576,13 @@ pub(crate) struct ClassMetadata {
     pub http_members: Vec<HttpMember>,
     /// A closed frozen layout whose generated constructor only stores its fields.
     pub frozen_initializer: Option<usize>,
+    /// Checked instance method used to render a retained value after type erasure.
+    pub repr_method: Option<usize>,
+    pub str_method: Option<usize>,
+    /// An explicit async override cannot be called through a synchronous text slot.
+    pub async_str: bool,
     pub value_struct: bool,
-    pub dataclass_eq: bool,
+    pub field_equality: bool,
     pub dataclass_repr: bool,
     pub toml_hash: bool,
     /// Field index for each parameter of a generated, field-only initializer.
@@ -515,8 +600,6 @@ pub(crate) struct ListBuild {
 
 pub(crate) struct ClassFieldMetadata {
     pub name: String,
-    /// A trusted bundled field containing the complete, unquoted record representation.
-    pub repr_text: bool,
     pub compare: bool,
     pub repr: bool,
 }
@@ -556,13 +639,30 @@ impl Function {
     /// write into the enclosing source scope.
     pub(crate) fn expression_rebound(&self) -> Vec<bool> {
         let mut rebound = vec![false; self.locals.len()];
-        walk_expressions(&self.body, &mut |value| {
-            if let ExprKind::Bind(slot, _) = value.kind {
-                rebound[slot] = true;
-            }
-        });
+        self.visit_expression_bindings(|slot| rebound[slot] = true);
         rebound
     }
+
+    pub(crate) fn has_expression_bindings(&self) -> bool {
+        let mut found = false;
+        self.visit_expression_bindings(|_| found = true);
+        found
+    }
+
+    fn visit_expression_bindings(&self, mut visit: impl FnMut(usize)) {
+        walk_expressions(&self.body, &mut |value| {
+            if let ExprKind::Bind(slot, _) = value.kind {
+                visit(slot);
+            }
+        });
+    }
+}
+
+/// The checked truth of a fixed-layout operand may call Python code.
+#[derive(Clone)]
+pub(crate) struct TruthPredicate {
+    pub(crate) receiver: usize,
+    pub(crate) condition: Box<Expr>,
 }
 
 #[derive(Clone)]
@@ -572,12 +672,284 @@ pub(crate) struct Expr {
 }
 
 impl Expr {
+    /// Store an already checked fixed value with its concrete word kind and owner.
+    pub(crate) fn into_object_value(self) -> Self {
+        if self.ty == Type::ObjectValue {
+            self
+        } else {
+            Self {
+                ty: Type::ObjectValue,
+                kind: ExprKind::Builtin(Builtin::BoxValue, vec![self]),
+            }
+        }
+    }
+
+    pub(crate) fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Self {
+        Self {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body,
+                value: Box::new(value),
+                clear,
+            },
+        }
+    }
+
+    pub(crate) fn written_range(&self) -> Option<ruff_text_size::TextRange> {
+        self.source_position().map(|(range, _, _)| range)
+    }
+
+    /// The source range and traceback anchor at this use, with its checked result type.
+    pub(crate) fn source_position(
+        &self,
+    ) -> Option<(
+        ruff_text_size::TextRange,
+        ruff_text_size::TextSize,
+        Option<Type>,
+    )> {
+        match &self.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredAttribute {
+                    action: AttributeAction::Load,
+                    name,
+                    range,
+                    hint,
+                },
+                _,
+            ) => Some((*range, name.range.start(), *hint)),
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, anchor, hint), _) => {
+                Some((*range, *anchor, *hint))
+            }
+            ExprKind::Invoke { args, .. } => {
+                let site = args.site.python()?;
+                let (anchor, hint) = site.call.position?;
+                Some((site.call.range, anchor, hint))
+            }
+            _ => None,
+        }
+    }
+
+    /// A source check can refine the value without changing its Python handle.
+    pub(crate) fn source_hint_mut(
+        &mut self,
+    ) -> Option<(ruff_text_size::TextRange, &mut Option<Type>)> {
+        match &mut self.kind {
+            ExprKind::Builtin(
+                Builtin::RegisteredAttribute {
+                    action: AttributeAction::Load,
+                    range,
+                    hint,
+                    ..
+                },
+                _,
+            ) => Some((*range, hint)),
+            ExprKind::Builtin(Builtin::RegisteredLocation(range, _, hint), _) => {
+                Some((*range, hint))
+            }
+            ExprKind::Invoke { args, .. } => {
+                let CallSite::Python(site) = &mut args.site else {
+                    return None;
+                };
+                Some((site.call.range, &mut site.call.position.as_mut()?.1))
+            }
+            _ => None,
+        }
+    }
+
+    /// A starred display or insertion evaluates the iterable inside its spread marker.
+    pub(crate) fn spread_operand(&self) -> Option<&Self> {
+        match &self.kind {
+            ExprKind::Builtin(Builtin::RegisteredSpread, operands) => Some(&operands[0]),
+            _ => None,
+        }
+    }
+
+    /// The checker's type at this use can refine a live Python handle.
+    pub(crate) fn checked_operand_type(&self) -> Type {
+        self.source_position()
+            .and_then(|(_, _, hint)| hint)
+            .unwrap_or(self.ty)
+    }
+
+    /// The source target of a freshly constructed unbound function or its singleton.
+    pub(crate) fn unbound_function(&self) -> Option<usize> {
+        match self.kind {
+            ExprKind::Callable {
+                function,
+                receiver: None,
+            }
+            | ExprKind::Builtin(Builtin::StaticFunction(function), _) => Some(function),
+            _ => None,
+        }
+    }
+
+    /// A direct coroutine captures its bound arguments in a private tuple.
+    pub(crate) fn coroutine_arguments(&self) -> Option<&[Expr]> {
+        let ExprKind::Builtin(Builtin::Process(ProcessOperation::Coroutine { .. }, _), args) =
+            &self.kind
+        else {
+            return None;
+        };
+        let [frame] = args.as_slice() else {
+            return None;
+        };
+        match &frame.kind {
+            ExprKind::Tuple(fields) => Some(fields),
+            _ => None,
+        }
+    }
+
+    /// Written operands available to a direct named call. A module read has no call site.
+    pub(crate) fn named_call_arguments(&self) -> Option<&[Expr]> {
+        match &self.kind {
+            ExprKind::Call(_, args) | ExprKind::Construct { args, .. } => Some(&args.values),
+            ExprKind::Exception { message, .. } => {
+                Some(message.as_deref().map_or(&[], std::slice::from_ref))
+            }
+            ExprKind::Builtin(Builtin::GlobalGet(_), _) => None,
+            ExprKind::Builtin(op, args) => (!op.takes_call_frame()).then_some(args),
+            _ => None,
+        }
+    }
+
+    /// A placed attribute uses the same field or builtin operands in either calling convention.
+    pub(crate) fn attribute_operands(&self) -> Option<&[Expr]> {
+        match &self.kind {
+            ExprKind::Field(receiver, _) => Some(std::slice::from_ref(receiver)),
+            ExprKind::Builtin(_, operands) => Some(operands),
+            _ => None,
+        }
+    }
+
+    /// The checked call supplies its physical target and source-ordered arguments.
+    pub(crate) fn python_call(&self) -> Option<&RegisteredCall> {
+        match &self.kind {
+            ExprKind::Invoke { args, .. } => Some(&args.site.python()?.call),
+            _ => None,
+        }
+    }
+
+    /// The fixed positional binder already holds the callable and the written operands in order.
+    pub(crate) fn fixed_positional_invoke_operands(&self) -> Option<(&Expr, &[Expr])> {
+        let ExprKind::Invoke { callable, args } = &self.kind else {
+            return None;
+        };
+        (matches!(callable.ty, Type::Callable(_))
+            && args.site.python().is_none()
+            && args.order.iter().copied().eq(0..args.values.len()))
+        .then_some((callable, &args.values))
+    }
+
+    pub(crate) fn is_registered_invoke(&self) -> bool {
+        let ExprKind::Invoke { callable, args } = &self.kind else {
+            return false;
+        };
+        let Some(site) = args.site.python() else {
+            return false;
+        };
+        let call = &site.call;
+        let written = if let RegisteredCallTarget::Method {
+            attribute,
+            name_start,
+            ..
+        } = &call.target
+        {
+            if !attribute.contains(*name_start) {
+                return false;
+            }
+            Some(*attribute)
+        } else {
+            let name = call.target.suspended_name();
+            if !callable.registered_invoke_target(name) {
+                return false;
+            }
+            name
+        };
+        let valid_layout = match &call.arguments {
+            RegisteredArguments::Positional => true,
+            RegisteredArguments::Keywords { positional, names } => {
+                !names.is_empty() && positional.checked_add(names.len()) == Some(args.values.len())
+            }
+            RegisteredArguments::Packed(pack) => {
+                pack.starred.len() + pack.keywords.len() == args.values.len()
+            }
+        };
+        let valid_projection = call.partition_field.is_none_or(|(field, range)| {
+            field <= 2
+                && range.contains_range(call.range)
+                && matches!(call.target, RegisteredCallTarget::Method { .. })
+                && matches!(call.arguments, RegisteredArguments::Positional)
+                && args.values.len() == 1
+        });
+        valid_layout
+            && valid_projection
+            && call.contains_target(written)
+            && site
+                .scope
+                .as_ref()
+                .is_none_or(|scope| scope.ty == Type::PythonObject)
+            && args.order.is_empty()
+    }
+
+    fn registered_invoke_target(&self, suspended_name: Option<ruff_text_size::TextRange>) -> bool {
+        if self.ty == Type::PythonObject {
+            return true;
+        }
+        let ExprKind::Builtin(Builtin::RegisteredLocation(range, ..), parts) = &self.kind else {
+            return false;
+        };
+        let [local] = parts.as_slice() else {
+            return false;
+        };
+        matches!(self.ty, Type::Callable(_))
+            && local.ty == self.ty
+            && matches!(local.kind, ExprKind::Local(_))
+            && suspended_name == Some(*range)
+    }
+
+    pub(crate) fn unrepresented() -> Self {
+        Self {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(Builtin::Unrepresented, vec![]),
+        }
+    }
+
+    pub(crate) fn is_unrepresented(&self) -> bool {
+        matches!(self.kind, ExprKind::Builtin(Builtin::Unrepresented, _))
+    }
+
     /// Read a local slot with its type at the use site.
     pub(crate) fn local(slot: usize, ty: Type) -> Self {
         Self {
             ty,
             kind: ExprKind::Local(slot),
         }
+    }
+
+    /// Read an operand at its original evaluation point in a prepared statement or region.
+    pub(crate) fn registered_input(index: usize, ty: Type) -> Self {
+        Self {
+            ty,
+            kind: ExprKind::Builtin(Builtin::RegisteredInput(index), Vec::new()),
+        }
+    }
+
+    pub(crate) fn unary(op: UnaryOp, operand: Self, ty: Type) -> Self {
+        Self {
+            ty,
+            kind: ExprKind::Unary(op, Box::new(operand)),
+        }
+    }
+
+    /// Negate an already checked condition.
+    pub(crate) fn not(operand: Self) -> Self {
+        Self::unary(UnaryOp::Not, operand, Type::Bool)
+    }
+
+    /// A unary operation on an object can run Python and mutate aliased storage.
+    pub(crate) fn uses_python_unary_protocol(&self) -> bool {
+        matches!(&self.kind, ExprKind::Unary(_, operand)
+            if self.ty == Type::PythonObject || operand.ty == Type::PythonObject)
     }
 
     pub(crate) fn none() -> Self {
@@ -602,6 +974,77 @@ impl Expr {
         }
     }
 
+    /// Only two native strings can contribute fragments without running another operation.
+    pub(crate) fn string_addends(&self) -> Option<(&Self, &Self)> {
+        if let ExprKind::Binary(Binary::Add, left, right) = &self.kind
+            && self.ty == Type::Str
+            && left.ty == Type::Str
+            && right.ty == Type::Str
+        {
+            Some((left, right))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn is_string_concat(&self) -> bool {
+        self.string_addends().is_some()
+            || matches!(self.kind, ExprKind::Builtin(Builtin::FormatJoin, _))
+    }
+
+    /// The freshly allocated list has no externally visible alias during argument evaluation.
+    pub(crate) fn is_nonempty_list_literal(&self) -> bool {
+        matches!(&self.kind, ExprKind::List(items) if !items.is_empty())
+    }
+
+    /// Read the operation beneath its diagnostic source positions.
+    pub(crate) fn without_location(&self) -> &Self {
+        let mut value = self;
+        while let ExprKind::Builtin(Builtin::RegisteredLocation(..), args) = &value.kind {
+            let [inner] = args.as_slice() else { break };
+            value = inner;
+        }
+        value
+    }
+
+    /// Read the local through its source position and representation-preserving string view.
+    pub(crate) fn viewed_local(&self) -> Option<usize> {
+        match &self.without_location().kind {
+            ExprKind::Local(slot) => Some(*slot),
+            ExprKind::Builtin(Builtin::LiteralStringView, args) => args[0].viewed_local(),
+            _ => None,
+        }
+    }
+
+    /// Return a literal integer that fits the native tagged representation.
+    pub(crate) fn tagged_integer_literal(&self) -> Option<i64> {
+        let value = match &self.kind {
+            ExprKind::Int(value) => value.parse::<i64>().ok()?,
+            ExprKind::Unary(..) if self.uses_python_unary_protocol() => return None,
+            ExprKind::Unary(UnaryOp::USub, value) => {
+                value.tagged_integer_literal()?.checked_neg()?
+            }
+            _ => return None,
+        };
+        tagged_integer(value)
+    }
+
+    /// Split an integer index into its local and the literal offset added to it.
+    pub(crate) fn local_integer_offset(&self) -> Option<(usize, i64)> {
+        if self.ty != Type::Int {
+            return None;
+        }
+        match &self.kind {
+            ExprKind::Local(slot) => Some((*slot, 0)),
+            ExprKind::Binary(Binary::Add, left, right) => match (&left.kind, &right.kind) {
+                (ExprKind::Local(slot), _) => Some((*slot, right.tagged_integer_literal()?)),
+                (_, ExprKind::Local(slot)) => Some((*slot, left.tagged_integer_literal()?)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
     /// Construct an absent optional from a literal None.
     pub(crate) fn absent(ty: Type) -> Self {
         Self {
@@ -610,25 +1053,29 @@ impl Expr {
         }
     }
 
-    /// A single explicit split whose immediately selected field is its prefix
-    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
-    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, &[Expr])> {
+    /// Operands of the checked text split, in binding order.
+    pub(crate) fn split_operands(&self) -> Option<(bool, &[Self; 3])> {
         let ExprKind::Builtin(Builtin::Text(TextOperation::Split(reverse)), args) = &self.kind
         else {
             return None;
         };
-        let [_, separator, limit] = args.as_slice() else {
+        Some((*reverse, args.as_slice().try_into().ok()?))
+    }
+
+    /// A single explicit split whose immediately selected field is its prefix
+    /// (`split(sep, 1)[0]`) or its suffix (`rsplit(sep, 1)[-1]`).
+    pub(crate) fn selected_split_args(&self, index: &Self) -> Option<(bool, [&Self; 2])> {
+        let (reverse, [source, separator, limit]) = self.split_operands()?;
+        let ExprKind::Present(separator) = &separator.kind else {
             return None;
         };
-        let selected = if *reverse {
-            matches!(&index.kind, ExprKind::Negate(one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
+        let selected = if reverse {
+            matches!(&index.kind, ExprKind::Unary(UnaryOp::USub, one) if matches!(&one.kind, ExprKind::Int(n) if n == "1"))
         } else {
             matches!(&index.kind, ExprKind::Int(n) if n == "0")
         };
-        (selected
-            && matches!(separator.kind, ExprKind::Present(_))
-            && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
-        .then_some((*reverse, args))
+        (selected && matches!(&limit.kind, ExprKind::Int(n) if n == "1"))
+            .then_some((reverse, [source, separator.as_ref()]))
     }
 }
 
@@ -661,7 +1108,7 @@ fn negative_component(value: &Expr) -> Option<i64> {
     };
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse::<i64>().ok()?,
-        ExprKind::Negate(value) => {
+        ExprKind::Unary(UnaryOp::USub, value) => {
             let ExprKind::Int(value) = &value.kind else {
                 return None;
             };
@@ -672,24 +1119,123 @@ fn negative_component(value: &Expr) -> Option<i64> {
     (-(1_i64 << 62)..0).contains(&value).then_some(value)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DisplayKind {
+    List,
+    Tuple,
+    Set,
+}
+
+/// The Python call position and, for an inline comprehension, its lexical namespace.
+#[derive(Clone)]
+pub(crate) struct InvokeSite {
+    pub call: Box<RegisteredCall>,
+    pub scope: Option<Box<Expr>>,
+}
+
+/// Immutable code identity shared by the positioned operations in one fixed activation.
+pub(crate) struct FixedFrame {
+    pub filename: String,
+    pub function: ruff_python_ast::name::Name,
+}
+
+#[derive(Clone)]
+pub(crate) struct FixedOrigin {
+    pub frame: std::sync::Arc<FixedFrame>,
+    pub line: u32,
+    /// Byte columns for a single source line: start, delimiter and end.
+    pub span: Option<[u32; 3]>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct FieldFormat {
+    pub repr_methods: Box<[usize]>,
+    pub origin: Option<Box<FixedOrigin>>,
+}
+
+/// A fused split-field conversion retains the origins of both checked operations.
+#[derive(Clone)]
+pub(crate) struct SplitFieldOrigins {
+    pub index: Option<Box<FixedOrigin>>,
+    pub conversion: Option<Box<FixedOrigin>>,
+}
+
+/// The checked position belongs to the call's fixed or Python invocation path.
+#[derive(Clone)]
+pub(crate) enum CallSite {
+    None,
+    /// A bound source call can defer its traceback until its operation is selected.
+    Written(ruff_text_size::TextRange, ruff_text_size::TextSize),
+    Fixed(FixedOrigin),
+    /// A retained local carries its loaded function identity into this invocation.
+    SavedFunction(FixedOrigin, usize),
+    Python(InvokeSite),
+}
+
+impl CallSite {
+    pub(crate) fn fixed(&self) -> Option<&FixedOrigin> {
+        match self {
+            Self::Fixed(site) | Self::SavedFunction(site, _) => Some(site),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn python(&self) -> Option<&InvokeSite> {
+        match self {
+            Self::Python(site) => Some(site),
+            _ => None,
+        }
+    }
+}
+
 /// Values are evaluated and rooted in source order. `order` is a permutation of
 /// their indices that supplies the native call's parameter order without
 /// reevaluation. Methods include their receiver first; constructors omit the
 /// implicit receiver, which is allocated only after these values are evaluated.
 #[derive(Clone)]
 pub(crate) struct CallArgs {
+    pub site: CallSite,
     /// The callee's nominal tag feeds a complete member dispatch at this site.
     pub exhaustive_enum_match: bool,
     pub values: Vec<Expr>,
+    /// Native formal order. Python binds the source-ordered values itself.
     pub order: Vec<usize>,
 }
 
 impl CallArgs {
+    /// The binder maps each formal to its unique operand. Move whole operands,
+    /// following each permutation cycle once, after their effects have been held.
+    pub(crate) fn into_formal_order(mut self) -> Vec<Expr> {
+        debug_assert_eq!(self.values.len(), self.order.len());
+        for start in 0..self.order.len() {
+            let mut index = start;
+            loop {
+                let next = std::mem::replace(&mut self.order[index], index);
+                if next == start {
+                    break;
+                }
+                self.values.swap(index, next);
+                index = next;
+            }
+        }
+        self.values
+    }
+
     /// Uses the existing positional order for calls that need no argument binding.
     pub(crate) fn positional(values: Vec<Expr>) -> Self {
+        Self::positional_at(values, CallSite::None)
+    }
+
+    pub(crate) fn positional_at(values: Vec<Expr>, site: CallSite) -> Self {
+        let order = if site.python().is_some() {
+            Vec::new()
+        } else {
+            (0..values.len()).collect()
+        };
         Self {
+            site,
             exhaustive_enum_match: false,
-            order: (0..values.len()).collect(),
+            order,
             values,
         }
     }
@@ -715,11 +1261,7 @@ pub(crate) enum ExprKind {
         clear: Vec<usize>,
     },
     List(Vec<Expr>),
-    Dict {
-        key: Type,
-        value: Type,
-        entries: Vec<(Expr, Expr)>,
-    },
+    Dict(Vec<DictEntry>),
     Set {
         element: Type,
         values: Vec<Expr>,
@@ -729,15 +1271,14 @@ pub(crate) enum ExprKind {
     Absent(Box<Expr>),
     Unwrap(Box<Expr>),
     Binary(Binary, Box<Expr>, Box<Expr>),
-    Compare(Vec<Expr>, Vec<Compare>),
+    Compare(Vec<Expr>, Vec<CmpOp>),
     Boolean(bool, Vec<Expr>),
     /// Returns the short-circuit operand, narrowed by its selected truth value,
     /// or the RHS. The operands are evaluated once and retain their identities.
-    BooleanValue(bool, Box<Expr>, Box<Expr>),
+    BooleanValue(bool, Box<Expr>, Box<Expr>, Option<TruthPredicate>),
     /// Only the selected arm runs; both arms have the expression's storage type.
     Conditional(Box<Expr>, Box<Expr>, Box<Expr>),
-    Not(Box<Expr>),
-    Negate(Box<Expr>),
+    Unary(UnaryOp, Box<Expr>),
     Call(usize, CallArgs),
     /// Captures a fixed target and, for a bound method, one owned receiver.
     Callable {
@@ -762,7 +1303,7 @@ pub(crate) enum ExprKind {
     Builtin(Builtin, Vec<Expr>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Binary {
     Add,
     Subtract,
@@ -775,8 +1316,53 @@ pub(crate) enum Binary {
     BitXor,
     LeftShift,
     RightShift,
-    Repeat,
-    Concat,
+    Power,
+    MatrixMultiply,
+}
+
+impl From<ruff_python_ast::Operator> for Binary {
+    fn from(op: ruff_python_ast::Operator) -> Self {
+        use ruff_python_ast::Operator;
+        match op {
+            Operator::Add => Self::Add,
+            Operator::Sub => Self::Subtract,
+            Operator::Mult => Self::Multiply,
+            Operator::Div => Self::Divide,
+            Operator::FloorDiv => Self::FloorDivide,
+            Operator::Mod => Self::Modulo,
+            Operator::BitAnd => Self::BitAnd,
+            Operator::BitOr => Self::BitOr,
+            Operator::BitXor => Self::BitXor,
+            Operator::LShift => Self::LeftShift,
+            Operator::RShift => Self::RightShift,
+            Operator::Pow => Self::Power,
+            Operator::MatMult => Self::MatrixMultiply,
+        }
+    }
+}
+
+impl Binary {
+    pub(crate) fn is_plain_arithmetic(self) -> bool {
+        matches!(self, Self::Add | Self::Subtract | Self::Multiply)
+    }
+
+    pub(crate) fn protocol(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Subtract => "-",
+            Self::Multiply => "*",
+            Self::Divide => "/",
+            Self::FloorDivide => "//",
+            Self::Modulo => "%",
+            Self::BitAnd => "&",
+            Self::BitOr => "|",
+            Self::BitXor => "^",
+            Self::LeftShift => "<<",
+            Self::RightShift => ">>",
+            Self::Power => "**",
+            Self::MatrixMultiply => "@",
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -787,6 +1373,44 @@ pub(crate) enum Compare {
     LessEqual,
     Greater,
     GreaterEqual,
+}
+
+impl Compare {
+    pub(crate) fn integer_pair(values: &[Expr]) -> bool {
+        matches!(values, [a, b]
+            if a.checked_operand_type() == Type::Int && b.checked_operand_type() == Type::Int)
+    }
+
+    /// Object results, identity, and membership preserve Python operand semantics.
+    pub(crate) fn uses_python_protocol(ty: Type, ops: &[CmpOp]) -> bool {
+        ty == Type::PythonObject
+            || ops
+                .iter()
+                .any(|op| matches!(op, CmpOp::Is | CmpOp::IsNot | CmpOp::In | CmpOp::NotIn))
+    }
+
+    pub(crate) fn operator(self) -> CmpOp {
+        match self {
+            Self::Equal => CmpOp::Eq,
+            Self::NotEqual => CmpOp::NotEq,
+            Self::Less => CmpOp::Lt,
+            Self::LessEqual => CmpOp::LtE,
+            Self::Greater => CmpOp::Gt,
+            Self::GreaterEqual => CmpOp::GtE,
+        }
+    }
+
+    pub(crate) fn from_operator(op: CmpOp) -> Option<Self> {
+        match op {
+            CmpOp::Eq => Some(Self::Equal),
+            CmpOp::NotEq => Some(Self::NotEqual),
+            CmpOp::Lt => Some(Self::Less),
+            CmpOp::LtE => Some(Self::LessEqual),
+            CmpOp::Gt => Some(Self::Greater),
+            CmpOp::GtE => Some(Self::GreaterEqual),
+            CmpOp::Is | CmpOp::IsNot | CmpOp::In | CmpOp::NotIn => None,
+        }
+    }
 }
 
 /// Native multiset arithmetic over integer counts. Values match the runtime ABI.
@@ -910,8 +1534,455 @@ pub(crate) enum PairTableOp {
     ViewField(usize, usize),
 }
 
+/// Prefixes that rule out every case-converted key in a literal string set.
+#[derive(Clone)]
+pub(crate) enum SetCasePrefix {
+    ExcludedBytes([u64; 2]),
+    ThreeByteHashes(u64),
+    ThreeByteValues { mask: u64, tags: Vec<u32> },
+}
+
+/// Select characters in the given set or below the Unicode scalar threshold.
+#[derive(Clone)]
+pub(crate) struct CharacterFilter {
+    pub(crate) below: u32,
+    /// Exact members of a read-only literal set of single-byte strings.
+    pub(crate) ascii_keys: Option<[u64; 2]>,
+}
+
+impl CharacterFilter {
+    /// A byte scan matches exactly when both the keys and threshold select only ASCII.
+    pub(crate) fn ascii_table(&self) -> Option<Vec<u8>> {
+        let keys = self.ascii_keys?;
+        if self.below > 128 {
+            return None;
+        }
+        let mut table = vec![0; 256];
+        for (byte, entry) in table[..128].iter_mut().enumerate() {
+            let member = keys[byte / 64] & (1_u64 << (byte % 64)) != 0;
+            *entry = u8::from((byte as u32) < self.below || member);
+        }
+        Some(table)
+    }
+}
+
+/// Operations that need a registered Python frame after the complete graph has
+/// been checked. Field formatting can share a frame required by executable
+/// text or a socket sendfile call.
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum ObjectCall {
+    ExecText,
+    SocketSendfile,
+    FormatField,
+}
+
+/// Python descriptor operation on a named attribute in the live frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AttributeAction {
+    Load,
+    Store,
+    Delete,
+    InPlace(&'static str),
+}
+
+/// An omitted key expands the value as a mapping at this point in the display.
+#[derive(Clone)]
+pub(crate) struct DictEntry {
+    pub(crate) key: Option<Expr>,
+    pub(crate) value: Expr,
+}
+
+impl ExprKind {
+    /// The exact scalar type constructed by a literal, independent of lexical type hints.
+    pub(crate) fn scalar_literal_type(&self) -> Option<Type> {
+        Some(match self {
+            Self::Int(_) => Type::Int,
+            Self::Float(_) => Type::Float,
+            Self::Str(_) | Self::Builtin(Builtin::RegisteredString(_), _) => Type::Str,
+            Self::Bytes(_) => Type::Bytes,
+            Self::Bool(_) => Type::Bool,
+            Self::None => Type::None,
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn dict_pairs(entries: Vec<(Expr, Expr)>) -> Self {
+        Self::Dict(
+            entries
+                .into_iter()
+                .map(|(key, value)| DictEntry {
+                    key: Some(key),
+                    value,
+                })
+                .collect(),
+        )
+    }
+}
+
+/// A type parameter owns its binding and its lazy fields in declaration order.
+#[derive(Clone, Debug)]
+pub(crate) struct RegisteredTypeParameter<F> {
+    pub(crate) binding: String,
+    pub(crate) name: String,
+    pub(crate) kind: TypeParameterKind,
+    pub(crate) fields: Vec<(imre_ast::TypeParameterField, F)>,
+}
+
+impl<F> RegisteredTypeParameter<F> {
+    pub(crate) fn try_map_fields<T, E>(
+        &self,
+        mut map: impl FnMut(&F) -> Result<T, E>,
+    ) -> Result<RegisteredTypeParameter<T>, E> {
+        let mut fields = Vec::with_capacity(self.fields.len());
+        for (field, value) in &self.fields {
+            fields.push((*field, map(value)?));
+        }
+        Ok(RegisteredTypeParameter {
+            binding: self.binding.clone(),
+            name: self.name.clone(),
+            kind: self.kind,
+            fields,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum TypeParameterKind {
+    TypeVar,
+    TypeVarTuple,
+    ParamSpec,
+}
+
+/// The name, location, and guard of a checked annotation value.
+#[derive(Clone)]
+pub(crate) struct AnnotationField {
+    pub(crate) name: String,
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) index: Option<usize>,
+}
+
+#[derive(Clone)]
+pub(crate) enum NamespaceAnnotation {
+    Module { index: usize },
+    Class { index: Option<usize>, name: String },
+    String { name: String },
+}
+
+/// Acquisition and adaptation are separate when a generator stores its Python iterator in `.0`.
+#[derive(Clone, Copy)]
+pub(crate) enum IteratorOp {
+    Loop(ruff_text_size::TextRange),
+    Async(ruff_text_size::TextRange),
+    Get(ruff_text_size::TextRange),
+    LoopCursor,
+}
+
+impl IteratorOp {
+    pub(crate) fn runtime_op(self) -> &'static str {
+        match self {
+            Self::Loop(_) => "iter",
+            Self::Async(_) => "async_iter",
+            Self::Get(_) => "get_iter",
+            Self::LoopCursor => "loop_cursor",
+        }
+    }
+}
+
+/// Borrow the operands consumed by registered iteration without changing their evaluation order.
+pub(crate) enum IterationOperands<'a> {
+    Iter(&'a Expr, IteratorOp),
+    Truth(&'a Expr),
+    Insert(&'a [Expr; 2]),
+    Unpack(
+        &'a Expr,
+        usize,
+        Option<usize>,
+        Option<ruff_text_size::TextRange>,
+    ),
+    Namespace(&'a [String], Option<&'a Expr>),
+}
+
+impl Builtin {
+    pub(crate) fn iteration_operands<'a>(
+        &'a self,
+        args: &'a [Expr],
+    ) -> Option<Result<IterationOperands<'a>, &'static str>> {
+        use IterationOperands::*;
+        let one = || match args {
+            [value] => Ok(value),
+            _ => Err("registered iteration operation needs one operand"),
+        };
+        let two = || {
+            args.try_into()
+                .map_err(|_| "registered iteration operation needs two operands")
+        };
+        Some(match self {
+            Self::RegisteredIter(op) => one().map(|value| Iter(value, *op)),
+            Self::Bool => one().map(Truth),
+            Self::Append | Self::SetAdd => two().map(Insert),
+            Self::RegisteredUnpack {
+                count,
+                star,
+                target,
+            } => one().map(|value| Unpack(value, *count, *star, *target)),
+            Self::RegisteredNamespace(names) => match args {
+                [] | [_] => Ok(Namespace(names, args.first())),
+                _ => Err("registered namespace takes at most one parent"),
+            },
+            _ => return None,
+        })
+    }
+}
+
+/// The generator site acquires its outer iterator in the defining scope.
+pub(crate) fn generator_operands(
+    scoped: bool,
+    args: &[Expr],
+) -> Result<(Option<&Expr>, &Expr), &'static str> {
+    match (scoped, args) {
+        (true, [scope, iterable]) => Ok((Some(scope), iterable)),
+        (false, [iterable]) => Ok((None, iterable)),
+        _ => Err("registered generator needs its outer iterable and any explicit scope"),
+    }
+}
+
+/// A call evaluates its callable or method receiver before the argument binder runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RegisteredCall {
+    /// The outer get position for an immediately indexed partition method call.
+    pub(crate) partition_field: Option<(u32, ruff_text_size::TextRange)>,
+    /// Enter the written expression before resolving the target or evaluating an argument.
+    pub(crate) position: Option<(ruff_text_size::TextSize, Option<Type>)>,
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) target: RegisteredCallTarget,
+    pub(crate) arguments: RegisteredArguments,
+}
+
+impl RegisteredCall {
+    pub(crate) fn new(
+        range: ruff_text_size::TextRange,
+        target: RegisteredCallTarget,
+        arguments: RegisteredArguments,
+    ) -> Box<Self> {
+        Box::new(Self {
+            range,
+            target,
+            arguments,
+            partition_field: None,
+            position: None,
+        })
+    }
+
+    /// The written target, when available, ends at the descriptor's interior call position.
+    pub(crate) fn contains_target(&self, written: Option<ruff_text_size::TextRange>) -> bool {
+        let end = self.target.end();
+        self.range.start() < end
+            && end < self.range.end()
+            && written.is_none_or(|range| self.range.start() <= range.start() && range.end() == end)
+    }
+
+    /// Python locates a method lookup at the attribute name in the written call.
+    pub(crate) fn method_name_start(&self) -> Option<ruff_text_size::TextSize> {
+        match &self.target {
+            RegisteredCallTarget::Method { name_start, .. } => Some(*name_start),
+            RegisteredCallTarget::Callable { .. } | RegisteredCallTarget::FixedExec { .. } => None,
+        }
+    }
+
+    pub(crate) fn invoke_site(self: Box<Self>) -> InvokeSite {
+        InvokeSite {
+            call: self,
+            scope: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RegisteredCallTarget {
+    Callable {
+        end: ruff_text_size::TextSize,
+        suspended_name: Option<ruff_text_size::TextRange>,
+    },
+    /// The fixed checker resolved builtin exec and checked the written str operand.
+    FixedExec {
+        name: ruff_text_size::TextRange,
+        module: usize,
+        operand: ruff_text_size::TextRange,
+    },
+    Method {
+        name: ruff_python_ast::name::Name,
+        attribute: ruff_text_size::TextRange,
+        name_start: ruff_text_size::TextSize,
+    },
+}
+
+impl RegisteredCallTarget {
+    pub(crate) fn end(&self) -> ruff_text_size::TextSize {
+        match self {
+            Self::Callable { end, .. } => *end,
+            Self::FixedExec { name, .. } => name.end(),
+            Self::Method { attribute, .. } => attribute.end(),
+        }
+    }
+
+    pub(crate) fn suspended_name(&self) -> Option<ruff_text_size::TextRange> {
+        match *self {
+            Self::Callable { suspended_name, .. } => suspended_name,
+            Self::FixedExec { name, .. } => Some(name),
+            Self::Method { .. } => None,
+        }
+    }
+}
+
+/// Positional values precede keyword values in Python call evaluation order.
+/// Packed entries distinguish each `*` iterable and each `**` mapping.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RegisteredArguments {
+    Positional,
+    Keywords {
+        positional: usize,
+        names: Vec<ruff_python_ast::name::Name>,
+    },
+    Packed(PackedArguments),
+}
+
+/// Source order of the positional items, starred iterables, named keywords and mappings.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PackedArguments {
+    pub(crate) starred: Vec<bool>,
+    pub(crate) keywords: Vec<Option<String>>,
+}
+
+/// A physical declaration and the layout of its evaluated header operands.
+#[derive(Clone)]
+pub(crate) enum DefinitionSite {
+    Function {
+        start: ruff_text_size::TextSize,
+        decorators: usize,
+    },
+    Class {
+        start: ruff_text_size::TextSize,
+        /// The generic parameter frame owns its own base operands.
+        arguments: Option<PackedArguments>,
+    },
+}
+
+impl DefinitionSite {
+    pub(crate) fn start(&self) -> ruff_text_size::TextSize {
+        match self {
+            Self::Function { start, .. } | Self::Class { start, .. } => *start,
+        }
+    }
+}
+
+/// A statically named import that executes in a live Python namespace.
+#[derive(Clone)]
+pub(crate) enum NamespaceImport {
+    Modules(Vec<ModuleImport>),
+    From {
+        module: String,
+        level: u32,
+        names: Vec<(String, Option<String>)>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct ModuleImport {
+    pub(crate) name: ruff_python_ast::name::Name,
+    pub(crate) asname: Option<ruff_python_ast::name::Name>,
+    /// An explicit alias for a dotted name binds the leaf module.
+    pub(crate) bind_leaf: bool,
+}
+
+/// Suspends the current Python activation after evaluating one complete operand.
+#[derive(Clone, Copy)]
+pub(crate) enum SuspendValue {
+    Yield,
+    Delegate,
+    Await,
+}
+
+/// Identity of an immutable subscription operand within one compiled Python source.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum Constant {
+    None,
+    Ellipsis,
+    Bool(bool),
+    Int(String),
+    Float(u64),
+    Complex(u64, u64),
+    Text(Vec<u8>),
+    Bytes(Vec<u8>),
+    Tuple(Vec<Self>),
+    Slice(Box<[Self; 3]>),
+}
+
+impl Constant {
+    pub(crate) fn slice(bounds: [Self; 3]) -> Self {
+        Self::Slice(Box::new(bounds))
+    }
+
+    pub(crate) fn text(text: &str) -> Self {
+        Self::Text(
+            text.chars()
+                .flat_map(|c| u32::from(c).to_le_bytes())
+                .collect(),
+        )
+    }
+
+    /// A constant key contains only immutable literals and distinguishes Python types and float bits.
+    pub(crate) fn from_expr(value: &Expr) -> Option<Self> {
+        Self::read_expr::<true>(value)
+    }
+
+    /// Check whether the expression can supply a constant key without copying its value.
+    pub(crate) fn is_constant(value: &Expr) -> bool {
+        Self::read_expr::<false>(value).is_some()
+    }
+
+    fn read_expr<const OWNED: bool>(value: &Expr) -> Option<Self> {
+        // Recognition needs only the outer Option. Its successful value can be any constant.
+        fn retain<const OWNED: bool>(make: impl FnOnce() -> Constant) -> Constant {
+            if OWNED { make() } else { Constant::None }
+        }
+        Some(match &value.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => {
+                return Self::read_expr::<OWNED>(&args[0]);
+            }
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(key), _) => {
+                retain::<OWNED>(|| key.clone())
+            }
+            ExprKind::None => Constant::None,
+            ExprKind::Bool(b) => Constant::Bool(*b),
+            ExprKind::Int(n) => retain::<OWNED>(|| Constant::Int(n.clone())),
+            ExprKind::Float(n) => Constant::Float(n.to_bits()),
+            ExprKind::Bytes(b) => retain::<OWNED>(|| Constant::Bytes(b.clone())),
+            ExprKind::Str(text) => retain::<OWNED>(|| Constant::text(text)),
+            ExprKind::Builtin(Builtin::RegisteredString(points), _) => {
+                retain::<OWNED>(|| Constant::Text(points.clone()))
+            }
+            ExprKind::Builtin(Builtin::RegisteredComplex(r, i), _) => {
+                Constant::Complex(r.to_bits(), i.to_bits())
+            }
+            ExprKind::Builtin(Builtin::RegisteredEllipsis, _) => Constant::Ellipsis,
+            ExprKind::Tuple(items) => {
+                if !OWNED {
+                    return items.iter().all(Self::is_constant).then_some(Self::None);
+                }
+                Self::Tuple(items.iter().map(Self::from_expr).collect::<Option<_>>()?)
+            }
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
+    /// An indeterminate operand during source checking. Its containing body retains
+    /// the original representation failure and is ineligible for emission.
+    Unrepresented,
+    /// A checked Python call in a discarded region still has an opaque result and effects.
+    UnrepresentedCall,
     ByteArrayNew,
     ByteArrayAppend,
     ByteArrayExtend,
@@ -935,14 +2006,17 @@ pub(crate) enum Builtin {
     TupleBufferPush,
     TupleBufferFinish,
     Cycle,
+    /// A first-class cursor that owns its current numeric prefix.
+    AccumulateCursor,
     SysStdout,
     SysHasStdout,
+    TargetLittleEndian,
     SysOriginalOutput {
         stderr: bool,
     },
     SysStdoutSet,
     SysStdoutDelete,
-    TextOptionalReceiver,
+    RequireObjectReceiver,
     TextMetadata {
         errors: bool,
     },
@@ -974,6 +2048,8 @@ pub(crate) enum Builtin {
     },
     StrEnumName,
     ClassNameView,
+    /// Read the retained nominal class from its checked constructor.
+    ConstructorClass,
     ClassNamePart {
         module: bool,
     },
@@ -987,7 +2063,7 @@ pub(crate) enum Builtin {
     IsCoroutineFunction,
     MarkCoroutine(usize),
     FunctionWrappedSet,
-    FunctionWrappedGet,
+    FunctionWrappedGet(FixedOrigin),
     StrEnumValue,
     IntEnumValue,
     HttpEnumPhrase,
@@ -1007,6 +2083,7 @@ pub(crate) enum Builtin {
     LiteralStringView,
     IntListContains,
     StringListContains,
+    StringTupleContains,
     StructListContains,
     StringContains,
     /// Immutable byte subsequence; operands are evaluated needle first.
@@ -1026,11 +2103,13 @@ pub(crate) enum Builtin {
         stderr: bool,
     },
     SysPlatform,
+    SysMaxSize,
     SysThreadInfo,
     SysThreadText {
         field: u32,
     },
     SysImplementation,
+    SysBuiltinModuleNames,
     SysStdlibModuleNames,
     SysStreamText {
         descriptor: u8,
@@ -1051,9 +2130,7 @@ pub(crate) enum Builtin {
     DocCaptureStart,
     DocCaptureTake,
     AsciiEscape,
-    MockCallList {
-        mark: bool,
-    },
+    MarkMockCallList,
     SystemExitNew {
         omit_none: bool,
     },
@@ -1075,6 +2152,7 @@ pub(crate) enum Builtin {
     TimeExtras,
     TimeExtra(bool),
     TimeSleep,
+    SignalPause,
     WarningFilter {
         category: u32,
         invalid: u32,
@@ -1096,18 +2174,41 @@ pub(crate) enum Builtin {
     LogRecord(LogRecordOperation),
     Formatter(FormatterOperation),
     Input,
+    ObjectCall(ObjectCall, usize, ruff_text_size::TextRange),
+    InputSelectStdout,
+    InputFinish,
     Chr,
+    UnicodePropertyOfOrdinal(UnicodeProperty),
     Ord,
     IntegerPower,
     ModularPower,
     NegativeIntegerPower,
-    Int,
-    Float,
+    Int(Option<Box<FixedOrigin>>),
+    Float(Option<Box<FixedOrigin>>),
     /// Represents an exact integer by its sign for a proved zero-comparison parameter.
     IntExtremum {
         minimum: bool,
     },
+    MathComb,
+    MathPerm,
+    MathFactorial,
+    IntBitCount,
     IntBitLength,
+    IntHash,
+    FloatIsInteger,
+    FloatAcos,
+    FloatAsin,
+    FloatAtan,
+    FloatDegrees,
+    FloatFmod,
+    FloatRadians,
+    FloatErfc,
+    Sumprod,
+    /// Base-two logarithm after checking the Python domain in the caller.
+    FloatLog2,
+    FloatLog10,
+    FloatLog1p,
+    IntLog10,
     IntSignAsFloat,
     Bool,
     Str,
@@ -1135,16 +2236,16 @@ pub(crate) enum Builtin {
     ObjectRecordProject(usize),
     ObjectStreamProject,
     ObjectTextProject,
-    ObjectIsExactTuple,
+    IsExactTuple,
     ObjectRecordIdentity {
         class: usize,
         reversed: bool,
     },
     MappingObjectGet,
-    ExceptionTupleView,
     ExceptionKeywordSuggestion,
-    /// A new, completely initialized record for a proven forwarding constructor.
-    ExceptionRecordFields,
+    BindSourceKeywords,
+    /// A new nominal record whose arguments initialize its complete checked layout.
+    RecordFromFields,
     /// Check the return type of __str__ or __repr__ before crossing the formatter ABI.
     ExceptionFormatterResult(bool),
     ExceptionArgs,
@@ -1156,10 +2257,14 @@ pub(crate) enum Builtin {
     ExceptionRepr,
     /// Python representation of a value with a fully known storage shape.
     Repr,
+    /// The rooted repr writer may invoke these checked Python methods.
+    ReprWithMethods(Box<[usize]>),
+    /// Base object descriptor on a rooted operand with a statically known builtin class.
+    BaseObjectRepr,
     /// object.__repr__ for a rooted source instance, bypassing its __repr__ override.
     DefaultRecordRepr,
     Len,
-    LengthResult,
+    LengthResult(Box<FixedOrigin>),
     Abs,
     FloatCopySign,
     /// Stable permutation of a fully typed list by precomputed scalar keys.
@@ -1175,6 +2280,13 @@ pub(crate) enum Builtin {
     JoinBufferAppend,
     JoinBufferFinish,
     StringFormat,
+    /// Convert the field value before evaluating its nested format specification.
+    FormatConversion(char),
+    /// Format an already converted value with its checked specification. The
+    /// targets are native repr methods that displaying this value can call.
+    FormatField(FieldFormat),
+    /// Join formatted operands in order, without invoking a str subclass's addition.
+    FormatJoin,
     StringReplace,
     Text(TextOperation),
     HexFormat {
@@ -1188,7 +2300,7 @@ pub(crate) enum Builtin {
         positive_sign: u8,
     },
     TupleGet,
-    ListGet,
+    ListGet(Option<Box<FixedOrigin>>),
     /// A live-length guard proves a private cursor or constant index is in
     /// bounds, with no intervening mutation or user code. Returns an owned
     /// element of a generic typed list; the index is canonical and nonnegative.
@@ -1209,14 +2321,26 @@ pub(crate) enum Builtin {
     /// Extend a proven periodic packed prefix and return the ordinal where normal iteration resumes.
     StructCyclePrefix,
     /// The guarded loop proves all elements fit i32 and cannot be replaced.
-    ListGetI32,
+    ListGetI32(Option<Box<FixedOrigin>>),
     /// Reads a checked index from the stable buffer in a guarded loop body.
-    ListGetStable,
+    ListGetStable(Option<Box<FixedOrigin>>),
+    /// Internal operations on the spare capacity of a single guarded leaf loop.
+    BeginListAppends(usize),
+    FinishListAppends(usize),
+    AppendInWindow(usize),
+    GetInAppendWindow(usize, Option<Box<FixedOrigin>>),
+    GetBoundedInAppendWindow {
+        output: usize,
+        min: i64,
+        max: i64,
+        origin: Option<Box<FixedOrigin>>,
+    },
     /// Every call site and intervening operation preserve these exact element
     /// bounds. The access still checks its index and returns a tagged-small Int.
     ListGetBounded {
         min: i64,
         max: i64,
+        origin: Option<Box<FixedOrigin>>,
     },
     /// A canonical reduction loop proves its direct source/cursor access is
     /// in bounds before advancing. The rooted list cannot change during the
@@ -1234,6 +2358,12 @@ pub(crate) enum Builtin {
     /// Internal identity guard between a read source and a mutated list.
     ListDistinct,
     /// Checks that a list local owns storage before borrowing its buffer.
+    CursorScanBudget(usize),
+    IntFitsI32,
+    BoundedCursorValue {
+        min: i64,
+        max: i64,
+    },
     ListPresent,
     StringGet,
     StringIter,
@@ -1241,6 +2371,7 @@ pub(crate) enum Builtin {
     SplitLinesIter,
     /// Iterates every field of a forward split by a literal ASCII separator.
     SplitByteIter(u8),
+    SortedSplitByteIter(u8),
     MatchingSplitIter(u8),
     /// Linear Unicode iteration from the final code point toward the first.
     StringReverseIter,
@@ -1251,7 +2382,11 @@ pub(crate) enum Builtin {
     TupleCacheResult,
     /// Eagerly converts immutable string code points into an integer list,
     /// preserving `list(map(int, text))` errors without character objects.
-    StringIntList,
+    StringIntList(FixedOrigin),
+    /// Materialize exact integer prefixes, optionally starting with an initial value.
+    ListAccumulate,
+    /// Consume the remaining owned values of an integer cursor into a fresh list.
+    CollectIntCursor,
     /// Two nonnegative 31-bit digit subtotals in one immediate, or -1 for fallback.
     TryDigitSums([[u8; 10]; 2]),
     Bytes,
@@ -1259,6 +2394,7 @@ pub(crate) enum Builtin {
     Encode,
     Decode,
     DecodeAscii,
+    DecodeLatin1,
     BytesHex,
     FloatDivmod,
     UrlsafeB64encode,
@@ -1301,7 +2437,7 @@ pub(crate) enum Builtin {
     HashUpdateFile,
     HashName,
     HashType,
-    HashIdentity,
+    PointerIdentity,
     HashDigestSize,
     HashBlockSize,
     HashDigest {
@@ -1316,7 +2452,6 @@ pub(crate) enum Builtin {
     BinaryTell,
     ZipOpenFile,
     ZipGetInfo,
-    ZipImportData,
     ZipInfoList,
     ZipMember,
     ZipRead,
@@ -1328,6 +2463,8 @@ pub(crate) enum Builtin {
     ZipImportIndex,
     ZipNamelist,
     ZipClose,
+    /// Read an unsigned big-endian integer from exact immutable bytes.
+    IntFromBytes,
     /// Encodes an integer with an explicit width, byte order, and sign policy.
     IntToBytes,
     /// Validates complete UTF-8 at the decode evaluation point and returns a
@@ -1352,10 +2489,13 @@ pub(crate) enum Builtin {
     IsBuiltinSubclass,
     Split,
     /// Parse a single field of an exact no-separator str.split() as a decimal integer.
-    SplitIntField(u32),
+    SplitIntField(u32, Box<SplitFieldOrigins>),
     /// Prepare small decimal fields from one private immutable split source.
     SplitIntSource(u8),
-    SplitIntCached(u32),
+    SplitIntCached(u32, Box<SplitFieldOrigins>),
+    SplitTextSource(u8),
+    SplitTextLen,
+    SplitTextField(u8, Option<Box<FixedOrigin>>),
     SplitLines,
     /// Only the first line and a joined remainder can be observed.
     JoinedSplitLines,
@@ -1367,14 +2507,13 @@ pub(crate) enum Builtin {
     StringListFilter(u32),
     /// Collect characters in a set or below a Unicode scalar threshold. An
     /// optional result represents an empty selection as an absent set.
-    FilterCharacterSet(u32),
+    FilterCharacterSet(CharacterFilter),
     /// Stable sort by the suffix after a fixed number of Unicode code points.
     StringListSortSuffix(u32),
     /// Ask whether a source has an item before evaluating a comprehension predicate.
     StringListNonempty,
     RStrip,
     SysArgv,
-    OptionalStrConcat,
     SysOrigArgv,
     CanElideMapperFrames([usize; 2]),
     SysGetFrameModuleName,
@@ -1387,6 +2526,92 @@ pub(crate) enum Builtin {
         line: u32,
     },
     FaultLine(u32),
+    /// Emit the ordered child suite bound at this index in a prepared control region.
+    RegisteredSuite(usize),
+    /// The owning checked statement or region supplies this deferred operand.
+    RegisteredInput(usize),
+    /// Evaluate each operand for its effects and release it before evaluating the next.
+    RegisteredDiscard,
+    /// Pass a completed interactive expression to the current sys.displayhook.
+    RegisteredDisplayHook,
+    /// The source position of this operand and its optional checked scalar type.
+    RegisteredLocation(
+        ruff_text_size::TextRange,
+        ruff_text_size::TextSize,
+        Option<Type>,
+    ),
+    /// Construct the native function at this physical definition site from its evaluated header.
+    RegisteredDefinition(DefinitionSite),
+    /// Evaluate packed bases in this generic header, then construct its prepared class namespace.
+    RegisteredClassNamespace(ruff_text_size::TextSize, PackedArguments),
+    /// Bind the prepared lambda at this site. An explicit lexical scope, when present,
+    /// precedes the default values in Python parameter order.
+    RegisteredLambda(ruff_text_size::TextSize, bool),
+    /// Evaluate the outer iterable after any explicit scope and acquire the child's cursor.
+    RegisteredGenerator(ruff_text_size::TextRange, bool, IteratorOp),
+    /// Construct a lazy alias whose value callable was checked at this declaration site.
+    RegisteredTypeAlias(ruff_text_size::TextSize),
+    RegisteredImport(NamespaceImport),
+    RegisteredSuspend(SuspendValue, ruff_text_size::TextRange),
+    /// Raise AssertionError at this site after evaluating its optional message.
+    RegisteredAssertionFailure {
+        statement: ruff_text_size::TextSize,
+        test: ruff_text_size::TextRange,
+    },
+    RegisteredNamespaceAnnotation(NamespaceAnnotation),
+    RegisteredAnnotationFormat,
+    /// The lazy provider's field metadata and its checked value operands share one order.
+    RegisteredAnnotations {
+        fields: Box<[AnnotationField]>,
+    },
+    /// Bind the string operand to a checked child function in this provider.
+    BindAnnotationExpression {
+        site: ruff_text_size::TextSize,
+        spelling: String,
+    },
+    /// Delete one current-scope binding, reporting a missing name at its source target.
+    RegisteredDeleteName(String, ruff_text_size::TextRange),
+    /// Resolve the code name in the live registered Python scope.
+    RegisteredName(ruff_python_ast::name::Name),
+    /// Apply Python's in-place protocol to the previously loaded target and the RHS.
+    RegisteredInPlace(&'static str),
+    /// Store evaluates the RHS before the receiver; in-place retains the receiver across the RHS.
+    RegisteredAttribute {
+        action: AttributeAction,
+        name: ruff_python_ast::Identifier,
+        range: ruff_text_size::TextRange,
+        hint: Option<Type>,
+    },
+    /// In source order, each pair consumes a key and value, and each unpack one mapping.
+    /// The registered frame owns these operands through dictionary construction.
+    /// A starred operand consumed by its enclosing registered list or tuple display.
+    RegisteredSpread,
+    /// Object and key operands, with the original subscript and end of its receiver.
+    RegisteredSubscript(ruff_text_size::TextRange, ruff_text_size::TextSize),
+    /// Two bounds represent a simple slice. A third operand is its explicit stride.
+    RegisteredSlice,
+    RegisteredIndexConstant(Constant),
+    RegisteredEllipsis,
+    RegisteredComplex(f64, f64),
+    /// Little-endian Python code points preserve non-scalar values and linked literal identity.
+    RegisteredString(Vec<u8>),
+    /// Construct a template from its literal strings tuple and its evaluated interpolations tuple.
+    RegisteredTemplate,
+    /// Capture the evaluated value and format spec without formatting the value.
+    RegisteredInterpolation {
+        expression: String,
+        conversion: Option<char>,
+    },
+    /// Acquire or adapt an iterator through its corresponding Python protocol.
+    RegisteredIter(IteratorOp),
+    /// Snapshot a sequence for ordered target stores, including the optional starred remainder.
+    RegisteredUnpack {
+        count: usize,
+        star: Option<usize>,
+        target: Option<ruff_text_size::TextRange>,
+    },
+    /// Allocate a child of the supplied Python namespace, declaring its private target names.
+    RegisteredNamespace(Vec<String>),
     GeneratorFrameEnter(String),
     GeneratorFrameLeave,
     SysSetRecursionLimit,
@@ -1446,6 +2671,7 @@ pub(crate) enum Builtin {
     HashStr,
     HashBytes,
     HashRecord,
+    FractionHash(usize, usize),
     /// A dictionary with a read-only JSON receiver and a literal string key.
     JsonGet {
         key: String,
@@ -1477,16 +2703,18 @@ pub(crate) enum Builtin {
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
     Patch(PatchOperation),
-    Process(ProcessOperation),
+    Process(ProcessOperation, Option<FixedOrigin>),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
     GzipOpen,
     /// The compile-time validated pattern is independent of the source spelling.
     RegexCompile {
-        source: String,
-        spelling: String,
+        spelling: Constant,
+        supplied_flags: u16,
+        pattern: std::sync::Arc<imre_regex::FixedPattern>,
     },
+    RegexFlags,
     RegexSpelling,
     UnittestCompilePattern,
     RegexSearch,
@@ -1495,6 +2723,10 @@ pub(crate) enum Builtin {
         verbose: bool,
     },
     RegexSub(Vec<u8>),
+    RegexCollect {
+        program: imre_regex::Collection,
+        split: bool,
+    },
     RegexGroupDict,
     RegexFindIter,
     RegexMatchStart,
@@ -1611,29 +2843,48 @@ pub(crate) enum Builtin {
     DictTryPop(Type),
     /// Arguments are key then dictionary, matching membership evaluation order.
     DictContains,
-    DictDelete,
+    /// Delete the evaluated key from its receiver. Each entry uses its native storage.
+    DeleteItem,
     DictClear,
     DictUpdate,
     /// False visits keys; true visits key/value pairs without an intermediate tuple.
     DictIter(bool),
     /// Arguments are the element then set, matching membership evaluation order.
     SetContains,
+    SetCaseLengthPossible,
+    SetCasePrefixPossible(SetCasePrefix),
     SetAdd,
     SetDiscard,
     SetIter,
     FreezeStrings,
     ExceptionMessage,
+    ExceptionName,
     JsonErrorField(u32),
-    /// Attaches an explicit cause to a fresh, unescaped builtin exception.
-    ExceptionWithCause,
     /// Record the source location of a raised Python exception.
-    ExceptionOrigin(u64),
+    ExceptionOrigin(FixedOrigin),
     ExceptionCause,
     ActiveException,
     ExceptionSuppressContext,
 }
 
 impl Builtin {
+    pub(crate) fn process(operation: ProcessOperation) -> Self {
+        Self::Process(operation, None)
+    }
+
+    /// Takes a private argument record, whose fields were bound at the source call.
+    pub(crate) fn takes_call_frame(&self) -> bool {
+        matches!(
+            self,
+            Self::Process(
+                ProcessOperation::Coroutine { .. }
+                    | ProcessOperation::IndirectCoroutine { .. }
+                    | ProcessOperation::ContextNew { .. },
+                _
+            )
+        )
+    }
+
     /// Position of a read-only key that can borrow a stack tuple for the call.
     pub(crate) fn tuple_probe_index(&self) -> Option<usize> {
         match self {
@@ -1760,11 +3011,15 @@ pub(crate) enum StrDescriptor {
     IsTitle,
     Title,
     SwapCase,
+    IsNumeric,
+    Capitalize,
+    IsDecimal,
 }
 impl StrDescriptor {
     pub(crate) fn named(name: &str) -> Option<Self> {
         Some(match name {
             "lower" => Self::Lower,
+            "capitalize" => Self::Capitalize,
             "title" => Self::Title,
             "swapcase" => Self::SwapCase,
             "strip" => Self::Strip,
@@ -1773,7 +3028,9 @@ impl StrDescriptor {
             "isalnum" => Self::IsAlnum,
             "isascii" => Self::IsAscii,
             "isalpha" => Self::IsAlpha,
+            "isdecimal" => Self::IsDecimal,
             "isdigit" => Self::IsDigit,
+            "isnumeric" => Self::IsNumeric,
             "istitle" => Self::IsTitle,
             "islower" => Self::IsLower,
             "zfill" => Self::ZFill,
@@ -1786,7 +3043,9 @@ impl StrDescriptor {
             Self::IsAlnum
                 | Self::IsAscii
                 | Self::IsAlpha
+                | Self::IsDecimal
                 | Self::IsDigit
+                | Self::IsNumeric
                 | Self::IsLower
                 | Self::IsTitle
         )
@@ -1794,6 +3053,7 @@ impl StrDescriptor {
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Lower => "lower",
+            Self::Capitalize => "capitalize",
             Self::Title => "title",
             Self::SwapCase => "swapcase",
             Self::Strip => "strip",
@@ -1802,7 +3062,9 @@ impl StrDescriptor {
             Self::IsAlnum => "isalnum",
             Self::IsAscii => "isascii",
             Self::IsAlpha => "isalpha",
+            Self::IsDecimal => "isdecimal",
             Self::IsDigit => "isdigit",
+            Self::IsNumeric => "isnumeric",
             Self::IsTitle => "istitle",
             Self::IsLower => "islower",
             Self::ZFill => "zfill",
@@ -1830,8 +3092,26 @@ pub(crate) enum PatchOperation {
     HunkText,
 }
 
+/// Character properties shared by checked calls and the native Unicode database.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum UnicodeProperty {
+    Bidirectional,
+    Category,
+    EastAsianWidth,
+}
+
+impl UnicodeProperty {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Bidirectional => "bidirectional",
+            Self::Category => "category",
+            Self::EastAsianWidth => "east_asian_width",
+        }
+    }
+}
+
 /// Closed string operations preserve exact argument and storage types.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextOperation {
     Predicate(TextPredicate),
     SplitLineEnds,
@@ -1839,6 +3119,7 @@ pub(crate) enum TextOperation {
     ZFill {
         copy: bool,
     },
+    UnicodeProperty(UnicodeProperty),
     Normalize,
     Lower,
     Upper,
@@ -1867,12 +3148,11 @@ pub(crate) enum TextOperation {
     UrlTranscode {
         encode: bool,
     },
-    Dedent,
     ShlexSplit,
     ShlexQuote,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum UrlProperty {
     Username,
@@ -1881,12 +3161,14 @@ pub(crate) enum UrlProperty {
     Port,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextPredicate {
     Alnum,
     Ascii,
     Alpha,
+    Decimal,
     Digit,
+    Numeric,
     Space,
     Lower,
     Title,
@@ -1894,7 +3176,7 @@ pub(crate) enum TextPredicate {
 }
 
 /// Numeric selectors for the runtime's imre_path_query ABI.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum PathQuery {
     Exists = 0,
@@ -1908,7 +3190,7 @@ pub(crate) enum PathQuery {
 }
 
 /// Operations on a link's stored target name and its destination (POSIX link ABI).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub(crate) enum PathLink {
     Symlink = 0,
@@ -1917,20 +3199,18 @@ pub(crate) enum PathLink {
 }
 
 /// Native path operations keep their exact result types in the checked IR.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PathOperation {
     Scripts,
     OsExists,
     New,
     PureNew(PathFlavor),
-    JoinObject,
     Drive,
     Root,
     Anchor,
     Parts,
     CountPart,
     AsPosix,
-    Join,
     Match {
         full: bool,
     },
@@ -2117,7 +3397,6 @@ pub(crate) enum LogOperation {
     AddLevel,
     LevelName,
     LevelForName,
-    CheckLevel,
     InvalidLevel,
     Disable,
     EnabledCache,
@@ -2421,10 +3700,12 @@ impl InstanceType {
             Self::Exact(Type::Str) => {
                 matches!(ty, Type::Str | Type::StrLiteral(_) | Type::StrEnum(_))
             }
-            Self::Exact(Type::BuiltinClass) => matches!(
-                ty,
-                Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
-            ),
+            Self::Exact(Type::BuiltinClass) => {
+                matches!(
+                    ty,
+                    Type::BuiltinClass | Type::Placeholder(PlaceholderKind::Class)
+                ) || types.constructor_base(ty).is_some()
+            }
             Self::Exact(expected) => {
                 expected == ty
                     || (types.time_attributes(expected).is_some()
@@ -2437,7 +3718,7 @@ impl InstanceType {
             Self::Deque => matches!(ty, Type::Deque(_)),
             Self::Dict => matches!(ty, Type::Dict(_)),
             Self::Set => matches!(ty, Type::Set(_)),
-            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::CodecInfo),
+            Self::Tuple => matches!(ty, Type::Tuple(_) | Type::VarTuple(_) | Type::CodecInfo),
             Self::SimpleNamespace => matches!(ty, Type::SimpleNamespace(_)),
             Self::ModuleSpec => matches!(ty, Type::ModuleSpec(_)),
             Self::Exception(_) => matches!(
@@ -2453,16 +3734,54 @@ impl InstanceType {
 
 #[derive(Clone)]
 pub(crate) struct ExceptHandler {
-    /// Empty for a bare handler; otherwise fixed builtin exception categories.
-    pub kinds: Vec<u32>,
+    pub matcher: ExceptionMatcher,
     pub name: Option<usize>,
     pub body: Vec<Statement>,
+}
+
+/// The manager protocol and the context expression's traceback position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ContextSite {
+    pub is_async: bool,
+    pub range: ruff_text_size::TextRange,
+    pub anchor: ruff_text_size::TextSize,
+}
+
+/// The enter result stays live through this protected assignment, before the suite.
+#[derive(Clone)]
+pub(crate) struct ContextBinding {
+    pub entered: usize,
+    pub body: Vec<Statement>,
+}
+
+#[derive(Clone)]
+pub(crate) enum ExceptionMatcher {
+    /// A bare handler matches every pending exception.
+    Any,
+    /// An empty tuple matches none of the fixed builtin categories.
+    Categories(Vec<u32>),
+    /// Evaluate the Python class only when a pending exception reaches this handler.
+    Object(ruff_text_size::TextRange, Box<Expr>),
+    /// Split and detach a subgroup while leaving unmatched exceptions for the next arm.
+    Subgroup(ruff_text_size::TextRange, Box<Expr>),
+}
+
+/// The implicit await position and optional source statement to restore before each pull.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AsyncPull {
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) header: Option<ruff_text_size::TextSize>,
 }
 
 /// Selects the pull ABI for a cursor created by the compiler.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IterNextKind {
     Generic,
+    /// A Python row is unpacked at the written target after its cursor advances.
+    Pair(ruff_text_size::TextRange),
+    Async(AsyncPull),
+    /// An owned field from a private single-byte split cursor.
+    SplitField,
     String,
     CodePoint,
     /// One unsigned UTF-8 byte. The loop lowerer creates a hidden string
@@ -2470,8 +3789,130 @@ pub(crate) enum IterNextKind {
     Utf8Byte,
 }
 
+/// Operand evaluation order for a subscript assignment or a dictionary display.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ItemOrder {
+    Assignment,
+    Display,
+}
+
+impl ItemOrder {
+    /// Return the receiver, index and value in their storage roles after evaluation.
+    pub(crate) fn evaluate<T, R>(
+        self,
+        receiver: T,
+        index: T,
+        value: T,
+        mut evaluate: impl FnMut(T) -> R,
+    ) -> (R, R, R) {
+        match self {
+            Self::Assignment => {
+                let value = evaluate(value);
+                (evaluate(receiver), evaluate(index), value)
+            }
+            Self::Display => (evaluate(receiver), evaluate(index), evaluate(value)),
+        }
+    }
+}
+
+/// A fixed-layout update has a checked arithmetic operation. A live Python item
+/// uses its in-place protocol, including the fallback to the binary operator.
+#[derive(Clone, Copy)]
+pub(crate) enum ItemUpdate {
+    Fixed(Binary),
+    Protocol(&'static str),
+}
+
+/// The bound on the number of items in a checked sequence pattern.
+pub(crate) struct PatternLength {
+    pub(crate) required: usize,
+    pub(crate) op: Compare,
+}
+
+impl PatternLength {
+    pub(crate) fn accepts(&self, length: usize) -> bool {
+        length == self.required
+            || (length > self.required && matches!(self.op, Compare::GreaterEqual))
+    }
+}
+
+/// A sole star accepts any sequence length without invoking its length protocol.
+pub(crate) fn pattern_length(items: usize, star: Option<usize>) -> Option<PatternLength> {
+    let (op, required) = match star {
+        None => (Compare::Equal, items),
+        Some(_) if items > 1 => (Compare::GreaterEqual, items - 1),
+        Some(_) => return None,
+    };
+    Some(PatternLength { op, required })
+}
+
+#[derive(Clone)]
+pub(crate) enum MatchTest {
+    Always,
+    Singleton(Option<bool>),
+    Equal(Expr),
+    Or(Vec<MatchTest>),
+    Capture(Box<MatchTest>, usize),
+    Sequence {
+        star: Option<usize>,
+        items: Vec<MatchTest>,
+    },
+    Mapping(Vec<(Expr, MatchTest)>, Option<usize>),
+    Class {
+        range: ruff_text_size::TextRange,
+        class: Expr,
+        positional: Vec<MatchTest>,
+        keywords: Vec<(String, MatchTest)>,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchPattern {
+    pub(crate) test: MatchTest,
+    pub(crate) names: Vec<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct MatchCase {
+    pub(crate) pattern: MatchPattern,
+    pub(crate) captures: Vec<usize>,
+    pub(crate) guard: Option<Expr>,
+    pub(crate) body: Vec<Statement>,
+}
+
+#[derive(Clone)]
+pub(crate) struct RaisedException {
+    pub(crate) exception: Expr,
+    pub(crate) cause: Option<Box<Expr>>,
+    pub(crate) origin: Option<Box<FixedOrigin>>,
+}
+
+/// One field projection in a single checked source body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FieldUse {
+    pub slot: usize,
+    pub target: ruff_text_size::TextRange,
+}
+
+#[derive(Clone)]
+pub(crate) enum StoreField {
+    Native(usize),
+    Written(FieldUse, ruff_python_ast::Identifier),
+}
+
+impl StoreField {
+    pub(crate) fn slot(&self) -> usize {
+        match self {
+            Self::Native(slot) => *slot,
+            Self::Written(field, _) => field.slot,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
+    /// An original statement checkpoint and its optional call without a separate highlight.
+    Position(ruff_text_size::TextRange, Option<ruff_text_size::TextRange>),
     Assign(usize, Expr),
     /// Transfers an owned local to another local, resetting its source.
     Move(usize, usize),
@@ -2482,12 +3923,14 @@ pub(crate) enum Statement {
         body: Vec<Statement>,
         clear: Vec<usize>,
     },
-    SetItem(Expr, Expr, Expr),
-    AugmentItem(Expr, Expr, Binary, Expr),
-    SetField(Expr, usize, Expr),
-    AugmentField(Expr, usize, Binary, Expr),
+    SetItem(ItemOrder, Expr, Expr, Expr),
+    AugmentItem(Expr, Expr, ItemUpdate, Expr),
+    SetField(Expr, StoreField, Expr),
+    AugmentField(Expr, StoreField, Binary, Expr),
     Expr(Expr),
     If(Expr, Vec<Statement>, Vec<Statement>),
+    /// The evaluated subject survives failed guards, with captures bound before the guard.
+    Match(Expr, Vec<MatchCase>),
     /// The final suite runs only on condition failure or iterator exhaustion.
     While(Expr, Vec<Statement>, Vec<Statement>),
     For {
@@ -2509,11 +3952,18 @@ pub(crate) enum Statement {
         ready: usize,
     },
     Return(Expr),
-    Break,
-    Continue,
+    /// Written loop jumps checkpoint their source before unwinding. Synthesized breaks have no site.
+    Break(Option<ruff_text_size::TextRange>),
+    Continue(ruff_text_size::TextRange),
     /// A compiler-owned iterator reached its end; unlike break, this runs else.
     Exhaust,
-    Assert(Expr),
+    /// A successfully acquired exit protects the target binding and suite.
+    With {
+        manager: Expr,
+        site: ContextSite,
+        binding: Option<ContextBinding>,
+        body: Vec<Statement>,
+    },
     /// Handlers protect only `body`; `finalbody` runs for every exit reason.
     Try {
         body: Vec<Statement>,
@@ -2522,27 +3972,97 @@ pub(crate) enum Statement {
         finalbody: Vec<Statement>,
     },
     /// None re-raises the dynamically active exception, including across calls.
-    Raise(Option<Expr>),
+    Raise(Option<RaisedException>),
+}
+
+// Visit value patterns in source order with either a shared or a mutable borrow.
+macro_rules! pattern_expressions {
+    ($test:expr, $visit:expr) => {{
+        let mut pending = vec![$test];
+        while let Some(test) = pending.pop() {
+            match test {
+                MatchTest::Equal(value) => ($visit)(value),
+                MatchTest::Or(tests) | MatchTest::Sequence { items: tests, .. } => {
+                    pending.extend(tests.into_iter().rev())
+                }
+                MatchTest::Capture(inner, _) => pending.push(inner),
+                MatchTest::Mapping(items, _) => {
+                    let mut children = Vec::with_capacity(items.len());
+                    for (key, child) in items {
+                        ($visit)(key);
+                        children.push(child);
+                    }
+                    pending.extend(children.into_iter().rev());
+                }
+                MatchTest::Class {
+                    class,
+                    positional,
+                    keywords,
+                    ..
+                } => {
+                    ($visit)(class);
+                    pending.extend(keywords.into_iter().rev().map(|(_, test)| test));
+                    pending.extend(positional.into_iter().rev());
+                }
+                MatchTest::Always | MatchTest::Singleton(_) => {}
+            }
+        }
+    }};
 }
 
 // Match ergonomics preserve the borrow of each operand and suite for inspection or rewriting.
 macro_rules! statement_children {
     ($statement:expr, $expression:expr, $suite:expr) => {
         match $statement {
-            Statement::Assign(_, value)
-            | Statement::Expr(value)
-            | Statement::Return(value)
-            | Statement::Assert(value) => ($expression)(value),
-            Statement::SetItem(a, b, c) | Statement::AugmentItem(a, b, _, c) => {
+            Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
+                ($expression)(value)
+            }
+            Statement::SetItem(order, receiver, index, value) => {
+                order.evaluate(receiver, index, value, $expression);
+            }
+            Statement::AugmentItem(a, b, _, c) => {
                 for value in [a, b, c] {
                     ($expression)(value);
                 }
             }
-            Statement::SetField(a, _, b) | Statement::AugmentField(a, _, _, b) => {
+            Statement::SetField(receiver, _, rhs) => {
+                ($expression)(rhs);
+                ($expression)(receiver);
+            }
+            Statement::AugmentField(a, _, _, b) => {
                 ($expression)(a);
                 ($expression)(b);
             }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                ($expression)(manager);
+                if let Some(ContextBinding { body, .. }) = binding {
+                    ($suite)(body);
+                }
+                ($suite)(body);
+            }
             Statement::Scope { body, .. } => ($suite)(body),
+            Statement::Match(subject, cases) => {
+                ($expression)(subject);
+                for MatchCase {
+                    pattern,
+                    guard,
+                    body,
+                    ..
+                } in cases
+                {
+                    let MatchPattern { test, .. } = pattern;
+                    pattern_expressions!(test, $expression);
+                    if let Some(guard) = guard {
+                        ($expression)(guard);
+                    }
+                    ($suite)(body);
+                }
+            }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 ($expression)(test);
                 ($suite)(yes);
@@ -2564,58 +4084,176 @@ macro_rules! statement_children {
                 finalbody,
             } => {
                 ($suite)(body);
-                for ExceptHandler { body, .. } in handlers {
+                for ExceptHandler { matcher, body, .. } in handlers {
+                    if let ExceptionMatcher::Object(_, class)
+                    | ExceptionMatcher::Subgroup(_, class) = matcher
+                    {
+                        ($expression)(class);
+                    }
                     ($suite)(body);
                 }
                 ($suite)(orelse);
                 ($suite)(finalbody);
             }
-            Statement::Raise(Some(value)) => ($expression)(value),
-            Statement::Move(..)
+            Statement::Raise(Some(RaisedException {
+                exception, cause, ..
+            })) => {
+                ($expression)(exception);
+                if let Some(cause) = cause {
+                    ($expression)(cause);
+                }
+            }
+            Statement::Position(..)
+            | Statement::Move(..)
             | Statement::Clear(_)
             | Statement::Raise(None)
             | Statement::IterNext { .. }
-            | Statement::Break
-            | Statement::Continue
+            | Statement::Break(_)
+            | Statement::Continue(_)
             | Statement::Exhaust => {}
         }
     };
 }
 
 impl Statement {
+    pub(crate) fn set_field(receiver: Expr, slot: usize, value: Expr) -> Self {
+        Self::SetField(receiver, StoreField::Native(slot), value)
+    }
+
+    /// Returns the arms taken when the tested local is true and false, respectively.
+    pub(crate) fn branches_for_flag(&self, flag: usize) -> Option<(&[Self], &[Self])> {
+        let Self::If(test, yes, no) = self else {
+            return None;
+        };
+        match &test.kind {
+            ExprKind::Local(slot) if *slot == flag => Some((yes, no)),
+            ExprKind::Unary(UnaryOp::Not, value) if matches!(value.kind, ExprKind::Local(slot) if slot == flag) => {
+                Some((no, yes))
+            }
+            _ => None,
+        }
+    }
+
+    pub(crate) fn assign_item(receiver: Expr, key: Expr, value: Expr) -> Self {
+        Self::SetItem(ItemOrder::Assignment, receiver, key, value)
+    }
+
+    pub(crate) fn store_global(slot: usize, value: Expr) -> Self {
+        Self::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(Builtin::GlobalSet(slot), vec![value]),
+        })
+    }
+
+    pub(crate) fn raise(exception: Expr) -> Self {
+        Self::raise_at(exception, None, None)
+    }
+
+    pub(crate) fn raise_at(
+        exception: Expr,
+        cause: Option<Expr>,
+        origin: Option<FixedOrigin>,
+    ) -> Self {
+        Self::Raise(Some(RaisedException {
+            exception,
+            cause: cause.map(Box::new),
+            origin: origin.map(Box::new),
+        }))
+    }
+
+    /// Visit immediate operands, including the subject, value patterns and guards of a match.
+    pub(crate) fn operands<'a>(&'a self, visit: impl FnMut(&'a Expr)) {
+        let mut visit = visit;
+        statement_children!(self, &mut visit, |_| {});
+    }
+
     /// Visits nested suites in source order, excluding suites owned by expressions.
     pub(crate) fn suites<'a>(&'a self, mut visit: impl FnMut(&'a [Statement])) {
         statement_children!(self, |_| {}, visit);
     }
 }
 
-enum Node<'a> {
+pub(crate) enum Node<'a> {
     Statement(&'a Statement),
     Expression(&'a Expr),
 }
 
-fn walk_nodes<'a>(body: &'a [Statement], visit: &mut impl FnMut(Node<'a>)) {
-    for statement in body {
-        visit(Node::Statement(statement));
-        statement_children!(statement, |value| walk_expression(value, visit), |suite| {
-            walk_nodes(suite, visit)
-        });
+impl Node<'_> {
+    /// The coroutine writer consumes the tuple's fields without emitting the tuple itself.
+    pub(crate) fn has_fixed_site_in(&self, parent: Option<&Expr>) -> bool {
+        self.has_fixed_site() && !parent.is_some_and(|expr| expr.coroutine_arguments().is_some())
+    }
+
+    /// A Python handle already represents both a present value and None. A native
+    /// optional tag around the written operand has no source position of its own.
+    pub(crate) fn has_fixed_site(&self) -> bool {
+        match self {
+            Self::Expression(expr) => match &expr.kind {
+                ExprKind::Present(_) => false,
+                ExprKind::Absent(value) => value.ty != Type::None,
+                _ => true,
+            },
+            Self::Statement(_) => true,
+        }
     }
 }
 
-fn walk_expression<'a>(value: &'a Expr, visit: &mut impl FnMut(Node<'a>)) {
-    visit(Node::Expression(value));
-    if let ExprKind::Scope { body, value, .. } = &value.kind {
-        walk_nodes(body, visit);
-        walk_expression(value, visit);
+/// Visits every IR node together with its immediate containing expression, when present.
+pub(crate) fn walk_nodes<'a>(
+    body: &'a [Statement],
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
+    all_nodes(body, &mut |node, parent| {
+        visit(node, parent);
+        true
+    });
+}
+
+/// Visit a suite until its caller rejects an operation.
+pub(crate) fn all_nodes<'a>(
+    body: &'a [Statement],
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
+) -> bool {
+    for statement in body {
+        if !visit(Node::Statement(statement), None) {
+            return false;
+        }
+        let mut complete = true;
+        statement_children!(
+            statement,
+            |value| { complete = complete && all_operand_nodes(value, None, visit) },
+            |suite| { complete = complete && all_nodes(suite, visit) }
+        );
+        if !complete {
+            return false;
+        }
+    }
+    true
+}
+
+/// Visit an operand and its scoped statements until the caller declines one.
+pub(crate) fn all_operand_nodes<'a>(
+    expression: &'a Expr,
+    parent: Option<&'a Expr>,
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>) -> bool,
+) -> bool {
+    if !visit(Node::Expression(expression), parent) {
+        return false;
+    }
+    if let ExprKind::Scope { body, value, .. } = &expression.kind {
+        all_nodes(body, visit) && all_operand_nodes(value, Some(expression), visit)
     } else {
-        children(value, |child| walk_expression(child, visit));
+        let mut complete = true;
+        children(expression, |child| {
+            complete = complete && all_operand_nodes(child, Some(expression), visit);
+        });
+        complete
     }
 }
 
 /// Visits all statement nodes once, including those nested inside eager expressions.
 pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Statement)) {
-    walk_nodes(body, &mut |node| {
+    walk_nodes(body, &mut |node, _| {
         if let Node::Statement(statement) = node {
             visit(statement);
         }
@@ -2624,17 +4262,39 @@ pub(crate) fn walk_statements<'a>(body: &'a [Statement], visit: &mut impl FnMut(
 
 /// Includes loops in eager expression scopes when deciding whether a suite can be cloned.
 pub(crate) fn contains_loop(body: &[Statement]) -> bool {
-    let mut found = false;
-    walk_statements(body, &mut |statement| {
-        found |= matches!(statement, Statement::For { .. } | Statement::While(..));
+    let loop_free = all_nodes(body, &mut |node, _| {
+        !matches!(
+            node,
+            Node::Statement(Statement::For { .. } | Statement::While(..))
+        )
     });
-    found
+    !loop_free
+}
+
+/// Walk one expression with the same parent and nested-scope information as a suite.
+pub(crate) fn walk_operand_nodes<'a>(
+    value: &'a Expr,
+    visit: &mut impl FnMut(Node<'a>, Option<&'a Expr>),
+) {
+    all_operand_nodes(value, None, &mut |node, parent| {
+        visit(node, parent);
+        true
+    });
+}
+
+/// Visits an operand and its nested expressions, including eager scope bodies.
+pub(crate) fn walk_operand_expressions<'a>(value: &'a Expr, visit: &mut impl FnMut(&'a Expr)) {
+    walk_operand_nodes(value, &mut |node, _| {
+        if let Node::Expression(expression) = node {
+            visit(expression);
+        }
+    });
 }
 
 /// Visits expression trees, including statements embedded in eager expressions.
 /// Analyses must include every checked branch, even when it never executes.
 pub(crate) fn walk_expressions<'a>(body: &'a [Statement], visit: &mut impl FnMut(&'a Expr)) {
-    walk_nodes(body, &mut |node| {
+    walk_nodes(body, &mut |node, _| {
         if let Node::Expression(value) = node {
             visit(value);
         }
@@ -2652,7 +4312,7 @@ pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
     for &parameter in &function.params {
         exposed[parameter] = true;
     }
-    walk_nodes(&function.body, &mut |node| {
+    walk_nodes(&function.body, &mut |node, _| {
         match &node {
             Node::Statement(Statement::IterNext {
                 iterator,
@@ -2685,14 +4345,201 @@ pub(crate) fn private_string_cursors(function: &Function) -> Vec<usize> {
         .collect()
 }
 
+/// Find private cursors restarted from a parameter that is rooted throughout the
+/// containing loop. Every creation and pull must lie inside that same loop.
+pub(crate) fn invariant_string_cursors(function: &Function, private: &[usize]) -> BTreeSet<usize> {
+    let mut result = BTreeSet::new();
+    if private.is_empty() {
+        return result;
+    }
+    let mut creates = vec![0_usize; function.locals.len()];
+    let mut pulls = vec![0_usize; function.locals.len()];
+    walk_statements(&function.body, &mut |statement| match statement {
+        Statement::Assign(
+            slot,
+            Expr {
+                kind: ExprKind::Builtin(Builtin::StringIter, _),
+                ..
+            },
+        ) => creates[*slot] += 1,
+        Statement::IterNext { iterator, .. } => pulls[*iterator] += 1,
+        _ => {}
+    });
+    let candidates: Vec<_> = private
+        .iter()
+        .copied()
+        .filter(|&slot| creates[slot] == 1)
+        .collect();
+    if candidates.is_empty() {
+        return result;
+    }
+    fn loops(body: &[Statement], visit: &mut impl FnMut(&Statement, &[Statement])) {
+        for statement in body {
+            match statement {
+                Statement::While(_, body, orelse) | Statement::For { body, orelse, .. } => {
+                    visit(statement, body);
+                    loops(orelse, visit);
+                }
+                _ => statement.suites(|suite| loops(suite, visit)),
+            }
+        }
+    }
+    // Lowering sometimes saves the source before initializing scalar loop counters.
+    fn parameter_source(before: &[Statement], source: usize, stable: &[bool]) -> bool {
+        if stable[source] {
+            return true;
+        }
+        for statement in before.iter().rev() {
+            match statement {
+                Statement::Assign(
+                    target,
+                    Expr {
+                        kind: ExprKind::Local(origin),
+                        ..
+                    },
+                ) if *target == source => return stable[*origin],
+                Statement::Assign(
+                    target,
+                    Expr {
+                        kind: ExprKind::Int(_) | ExprKind::Bool(_),
+                        ..
+                    },
+                ) if *target != source => {}
+                _ => break,
+            }
+        }
+        false
+    }
+    fn mark(suite: &[Statement], stable: &[bool], eligible: &[bool], result: &mut BTreeSet<usize>) {
+        for (index, statement) in suite.iter().enumerate() {
+            if let Statement::Assign(
+                slot,
+                Expr {
+                    kind: ExprKind::Builtin(Builtin::StringIter, args),
+                    ..
+                },
+            ) = statement
+                && eligible[*slot]
+                && let ExprKind::Local(source) = args[0].kind
+                && parameter_source(&suite[..index], source, stable)
+            {
+                result.insert(*slot);
+            }
+            statement.suites(|nested| mark(nested, stable, eligible, result));
+        }
+    }
+    loops(&function.body, &mut |statement, body| {
+        let mut stable = vec![false; function.locals.len()];
+        for &parameter in &function.params {
+            stable[parameter] = function.locals[parameter] == Type::Str;
+        }
+        walk_writes(std::slice::from_ref(statement), |slot, _| {
+            stable[slot] = false
+        });
+        if !stable.iter().any(|&rooted| rooted) {
+            return;
+        }
+        let mut inside = vec![0_usize; function.locals.len()];
+        walk_statements(body, &mut |statement| {
+            if let Statement::IterNext { iterator, .. } = statement {
+                inside[*iterator] += 1;
+            }
+        });
+        let mut eligible = vec![false; function.locals.len()];
+        for &slot in &candidates {
+            eligible[slot] = inside[slot] == pulls[slot];
+        }
+        mark(body, &stable, &eligible, &mut result);
+    });
+    result
+}
+
+/// A local keeps a fact only if every value copied into it also has that fact.
+/// Copy edges can point backward through a loop or through a moved temporary.
+pub(crate) fn propagate_copy_facts(proven: &mut [bool], copies: &[(usize, usize)]) {
+    loop {
+        let mut changed = false;
+        for &(source, target) in copies {
+            if !proven[source] && proven[target] {
+                proven[target] = false;
+                changed = true;
+            }
+        }
+        if !changed {
+            return;
+        }
+    }
+}
+
+/// A callable operand keeps its origin through scopes, wrapper assignments, and local copies.
+pub(crate) fn retain_unproven_operands<'a>(
+    function: &'a Function,
+    owners: &mut Vec<&'a Expr>,
+    inputs: &[&CallArgs],
+    operand: impl Fn(&'a Expr) -> Option<&'a Expr>,
+    proven: impl Fn(&Expr) -> bool,
+) {
+    fn origin(value: &Expr) -> &Expr {
+        match &value.kind {
+            ExprKind::Builtin(Builtin::FunctionWrappedSet, args) => origin(&args[0]),
+            ExprKind::Scope { value, .. } => origin(value),
+            _ => value,
+        }
+    }
+
+    let mut plain = vec![true; function.locals.len()];
+    for (index, &parameter) in function.params.iter().enumerate() {
+        plain[parameter] = !inputs.is_empty()
+            && inputs.iter().all(|args| {
+                args.order
+                    .get(index)
+                    .and_then(|&source| args.values.get(source))
+                    .is_some_and(|value| proven(origin(value)))
+            });
+    }
+    let mut copies = Vec::new();
+    walk_nodes(&function.body, &mut |node, _| {
+        if let Node::Expression(value) = &node
+            && let Some(owner) = operand(value)
+        {
+            owners.push(owner);
+        }
+        match node {
+            // Clearing a slot does not give it a new callable.
+            Node::Statement(Statement::Clear(_) | Statement::Scope { .. })
+            | Node::Expression(Expr {
+                kind: ExprKind::Scope { .. },
+                ..
+            }) => {}
+            Node::Statement(Statement::Move(target, source)) => copies.push((*source, *target)),
+            _ => node_writes(node, &mut |slot, value| match value.map(origin) {
+                Some(Expr {
+                    kind: ExprKind::Local(source),
+                    ..
+                }) => copies.push((*source, slot)),
+                Some(value) if proven(value) => {}
+                _ => plain[slot] = false,
+            }),
+        }
+    });
+    propagate_copy_facts(&mut plain, &copies);
+    owners.retain(|owner| match origin(owner) {
+        Expr {
+            kind: ExprKind::Local(slot),
+            ..
+        } => !plain[*slot],
+        value => !proven(value),
+    });
+}
+
 /// Visits every local write in a suite. Only ordinary assignments carry a right-hand side.
 pub(crate) fn walk_writes(body: &[Statement], mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_nodes(body, &mut |node| node_writes(node, &mut visit));
+    walk_nodes(body, &mut |node, _| node_writes(node, &mut visit));
 }
 
 /// Visits writes during operand evaluation, including assignments in eager scopes.
 pub(crate) fn walk_expression_writes(value: &Expr, mut visit: impl FnMut(usize, Option<&Expr>)) {
-    walk_expression(value, &mut |node| node_writes(node, &mut visit));
+    walk_operand_nodes(value, &mut |node, _| node_writes(node, &mut visit));
 }
 
 /// Whether evaluating an operand leaves the previously loaded local in place.
@@ -2712,6 +4559,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                     }
                 }
                 ExprKind::Bind(slot, _) => visit(*slot, None),
+                ExprKind::BooleanValue(_, left, _, Some(predicate)) => {
+                    visit(predicate.receiver, Some(left));
+                    visit(predicate.receiver, None);
+                }
                 _ => {}
             }
             return;
@@ -2720,6 +4571,11 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
     };
     match statement {
         Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::Match(_, cases) => {
+            for &slot in cases.iter().flat_map(|case| &case.captures) {
+                visit(slot, None);
+            }
+        }
         Statement::Clear(slot) => visit(*slot, None),
         Statement::Move(target, source) => {
             visit(*target, None);
@@ -2730,6 +4586,10 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
                 visit(slot, None);
             }
         }
+        Statement::With {
+            binding: Some(binding),
+            ..
+        } => visit(binding.entered, None),
         Statement::For {
             target,
             cursor,
@@ -2768,9 +4628,11 @@ macro_rules! expression_children {
                     $visit(message);
                 }
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    $visit(key);
+            ExprKind::Dict(entries) => {
+                for DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        $visit(key);
+                    }
                     $visit(value);
                 }
             }
@@ -2796,8 +4658,14 @@ macro_rules! expression_children {
             }
             ExprKind::Invoke {
                 callable,
-                args: CallArgs { values, .. },
+                args: CallArgs { site, values, .. },
             } => {
+                if let CallSite::Python(InvokeSite {
+                    scope: Some(scope), ..
+                }) = site
+                {
+                    $visit(scope);
+                }
                 $visit(callable);
                 for value in values {
                     $visit(value);
@@ -2810,10 +4678,16 @@ macro_rules! expression_children {
             | ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => $visit(value),
-            ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
+                $visit(left);
+                if let Some(TruthPredicate { condition, .. }) = predicate {
+                    $visit(condition);
+                }
+                $visit(right);
+            }
+            ExprKind::Binary(_, left, right) => {
                 $visit(left);
                 $visit(right);
             }

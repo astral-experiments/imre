@@ -52,6 +52,18 @@ def current():
 
 
 def check_receivers(native_range):
+    for args, kwargs, expected in (
+        ((), {}, "range expected at least 1 argument, got 0"),
+        ((1, 2, 3, 4), {}, "range expected at most 3 arguments, got 4"),
+        ((1, 2, 3, 4), {"stop": 5}, "range() takes no keyword arguments"),
+    ):
+        try:
+            native_range(*args, **kwargs)
+        except TypeError as error:
+            assert str(error) == expected
+        else:
+            raise AssertionError("invalid range arguments accepted")
+
     class range:
         pass
 

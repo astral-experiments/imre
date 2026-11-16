@@ -1,4 +1,5 @@
 import os
+import sys
 import tempfile
 from tempfile import TemporaryDirectory
 
@@ -18,6 +19,19 @@ def current():
             owner.cleanup()
         finally:
             os.close(fd)
+        denied = FileExistsError("directory creation denied")
+
+        def reject(event, args):
+            if event == "tempfile.mkdtemp" and os.path.dirname(args[0]) == kept:
+                assert not os.path.exists(args[0])
+                raise denied
+
+        sys.addaudithook(reject)
+        try:
+            with TemporaryDirectory(dir=kept):
+                raise AssertionError("expected mkdtemp audit hook to reject the directory")
+        except FileExistsError as error:
+            assert error is denied
         assert os.listdir(kept) == []
     assert os.path.isdir(kept)
     os.rmdir(kept)

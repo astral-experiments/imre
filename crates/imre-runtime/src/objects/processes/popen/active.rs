@@ -15,7 +15,9 @@ pub(in crate::objects) fn retain_live_owner(owner: &crate::ObjectOwner) {
     // Finalization reads status, writes a warning and polls; none calls Python.
     let keep = unsafe {
         owner.0.with_mut(|storage| match storage {
-            Storage::Popen(process) => process.finalize(),
+            Storage::Popen(process) => {
+                process.begin_finalization() && process.control.poll_for_cleanup().is_none()
+            }
             _ => false,
         })
     };
@@ -29,6 +31,10 @@ pub(in crate::objects) fn retain_live_owner(owner: &crate::ObjectOwner) {
                         .values
                         .push(crate::ObjectOwner::into_raw(owner.clone()) as usize);
                     entries.update_header();
+                });
+                // _active now owns the finalized object. Dropping it later releases its pipes.
+                with_process(crate::ObjectOwner::as_ptr(owner), |process| {
+                    process.drop_action = DropAction::Release;
                 });
             }
         });
@@ -54,9 +60,7 @@ pub(in crate::objects::processes) fn cleanup() {
                     let done = object(*word as *const Object)
                         .0
                         .with(|storage| match storage {
-                            Storage::Popen(process) => {
-                                matches!(process.control.poll(), Ok(Some(_)))
-                            }
+                            Storage::Popen(process) => process.control.poll_for_cleanup().is_some(),
                             _ => false,
                         });
                     if done {
@@ -93,4 +97,44 @@ pub extern "C" fn imre_popen_cleanup() {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_popen_identity(handle: *const Object) -> usize {
     Int::from_usize(handle as usize).into_raw()
+}
+
+#[test]
+fn releasing_a_finalized_owner_closes_stdin_and_leaves_the_exit_for_waitpid() {
+    use crate::objects::processes::tests::args;
+
+    let argv = args(&[
+        "python3",
+        "-c",
+        "import os, select; raise SystemExit(37 if select.select([0], [], [], 5)[0] and not os.read(0, 1) else 1)",
+    ]);
+    let config = LaunchConfig::basic(
+        crate::ObjectOwner::as_ptr(&argv).cast(),
+        5,
+        std::ptr::null(),
+        std::ptr::null(),
+        1 << 12,
+        Int::small(-1).unwrap().0,
+    );
+    // SAFETY: argv stays rooted, and the configuration requests a stdin pipe.
+    let raw = unsafe { imre_popen_config(&config) };
+    assert!(!raw.is_null());
+    // SAFETY: the constructor returned a new Popen reference.
+    let owner = unsafe { crate::ObjectOwner::from_raw(raw) };
+    // SAFETY: owner keeps the Popen alive while we acquire its shared child control.
+    let control = unsafe { with_process(raw, |process| process.control.clone()) };
+    retain_live_owner(&owner);
+    // An inconclusive cleanup removes the owner, but the caller can clear its cached status.
+    control.set_status(Some(ReturnCode::DeadState));
+    cleanup();
+    control.set_status(None);
+    crate::objects::release_object_owner(owner);
+    cleanup();
+
+    let mut status = 0;
+    // SAFETY: status is writable and this process is the child's parent.
+    let pid = unsafe { libc::waitpid(control.pid, &mut status, 0) };
+    assert_eq!(pid, control.pid);
+    assert!(libc::WIFEXITED(status));
+    assert_eq!(libc::WEXITSTATUS(status), 37);
 }

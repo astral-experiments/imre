@@ -11,7 +11,6 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "expressions"
 
 REJECTED = {
     "conditional_int_string": 'print(1 if True else "wrong")\n',
-    "conditional_bool_int": "print(True if False else 1)\n",
     "conditional_container_types": 'values = [1] if True else ["wrong"]\n',
     "conditional_wrong_context": "values: list[str] = [] if True else [1]\n",
     "conditional_wrong_optional": "value: int | None = None if True else False\n",
@@ -19,8 +18,6 @@ REJECTED = {
     "conditional_narrowing_does_not_escape": "def bad(value: int | None) -> int:\n    result = value + 1 if value is not None else 0\n    return value\n",
     "conditional_dead_dynamic": 'print(1 if True else eval("2"))\n',
     "conditional_unused_dynamic": 'def unused() -> int:\n    return eval("1") if False else 2\nprint(1)\n',
-    "conditional_recursion": "def recursive(value: int) -> int:\n    return recursive(value) if False else value\nrecursive(1)\n",
-    "conditional_indirect_recursion": "def first(value: int) -> int:\n    return second(value) if False else value\ndef second(value: int) -> int:\n    return first(value) if True else 0\nfirst(1)\n",
     "string_index_bool": 'print("abc"[True])\n',
     "string_index_string": 'print("abc"["0"])\n',
     "string_index_optional": 'def bad(index: int | None) -> str:\n    return "abc"[index]\n',
@@ -47,6 +44,15 @@ IMPORTED_REJECTIONS = {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": 'if __name__ == "__main__":\n    print(1 if True else eval("2"))\n',
     },
+    "dead_imported_argument_contract": {
+        "main.py": 'from helper import checked\n\nprint(checked("wrong") if False else 1)\n',
+        "helper.py": "def checked(value: int) -> int:\n    return value\n",
+    },
+}
+
+CHECKED = {
+    "conditional_recursion": "def recursive(value: int) -> int:\n    return recursive(value) if False else value\nrecursive(1)\n",
+    "conditional_indirect_recursion": "def first(value: int) -> int:\n    return second(value) if False else value\ndef second(value: int) -> int:\n    return first(value) if True else 0\nfirst(1)\n",
     "unused_conditional_recursion": {
         "main.py": "import helper\nprint(1)\n",
         "helper.py": "def recursive(value: int) -> int:\n    return value if True else recursive(value)\n",
@@ -92,6 +98,7 @@ if __name__ == "__main__":
         fixtures=FIXTURES,
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
+        checked=CHECKED,
         errors=ERRORS,
         label="expression and sequence",
         description=__doc__,

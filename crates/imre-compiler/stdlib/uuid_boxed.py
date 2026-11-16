@@ -772,10 +772,10 @@ def uuid3(namespace, name):
 
 def uuid4() -> UUID:
     """Generate a random UUID."""
-    value = int.from_bytes(os.urandom(16))
-    value &= ~((0xf << 76) | (3 << 62))
-    value |= (4 << 76) | (2 << 62)
-    return UUID(int=value)
+    int_uuid_4 = int.from_bytes(os.urandom(16))
+    int_uuid_4 &= _RFC_4122_CLEARFLAGS_MASK
+    int_uuid_4 |= _RFC_4122_VERSION_4_FLAGS
+    return UUID._from_int(int_uuid_4)
 
 def uuid5(namespace, name):
     """Generate a UUID from the SHA-1 hash of a namespace UUID and a name."""

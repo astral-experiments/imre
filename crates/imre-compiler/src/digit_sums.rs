@@ -6,10 +6,9 @@
 //! weighted = sum([3 * d for d in digits[-2::-2]])
 //! ```
 
-use crate::ir::{
-    self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
-};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 use crate::reductions::{count_writes, literal};
+use ruff_python_ast::CmpOp;
 
 mod terms;
 
@@ -32,7 +31,7 @@ pub(crate) fn specialize(module: &mut Module) {
         let mut producer = false;
         ir::walk_expressions(&function.body, &mut |e| match e.kind {
             ExprKind::Local(id) => reads[id] += 1,
-            ExprKind::Builtin(Builtin::StringIntList, _) => producer = true,
+            ExprKind::Builtin(Builtin::StringIntList(_), _) => producer = true,
             _ => {}
         });
         if !producer {
@@ -73,7 +72,7 @@ fn fuse(
         else {
             continue;
         };
-        let ExprKind::Builtin(Builtin::StringIntList, args) = &producer.kind else {
+        let ExprKind::Builtin(Builtin::StringIntList(_), args) = &producer.kind else {
             continue;
         };
         let [text] = args.as_slice() else { continue };
@@ -97,10 +96,7 @@ fn fuse(
         };
         let success = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![local(pack), Expr::integer(0)],
-                vec![Compare::GreaterEqual],
-            ),
+            kind: ExprKind::Compare(vec![local(pack), Expr::integer(0)], vec![CmpOp::GtE]),
         };
         let unpack = |phase| {
             let (op, bits) = if phase == 0 {
@@ -114,17 +110,22 @@ fn fuse(
             }
         };
         let outputs = vec![
-            Statement::Clear(*list),
             Statement::Assign(*a, unpack(x.phase)),
             Statement::Assign(*b, unpack(y.phase)),
         ];
-        let fallback = body.drain(i..i + 3).collect();
+        // The list has no uses outside these two reductions. Only the fallback
+        // materializes it, so release its owner in that same scope.
+        let clear = vec![*list];
+        let fallback = Statement::Scope {
+            body: body.drain(i..i + 3).collect(),
+            clear,
+        };
         body.insert(
             i,
             Statement::Scope {
                 body: vec![
                     Statement::Assign(pack, attempt),
-                    Statement::If(success, outputs, fallback),
+                    Statement::If(success, outputs, vec![fallback]),
                 ],
                 clear: vec![pack],
             },
@@ -190,7 +191,7 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
     let ExprKind::Compare(test, ops) = &test.kind else {
         return None;
     };
-    let ExprKind::Builtin(Builtin::ListGet, args) = &load.kind else {
+    let ExprKind::Builtin(Builtin::ListGet(_), args) = &load.kind else {
         return None;
     };
     let ExprKind::Binary(Binary::Add, length, offset) = &start.kind else {
@@ -212,7 +213,7 @@ fn mapped_helper(function: &Function) -> Option<Lane> {
         || clear.contains(sum)
         || !is_local(input, *param)
         || !orelse.is_empty()
-        || !matches!(ops.as_slice(), [Compare::GreaterEqual])
+        || !matches!(ops.as_slice(), [CmpOp::GtE])
         || !matches!(test.as_slice(),[c,z] if is_local(c,*cursor) && literal(z)==Some(0))
         || !matches!(&length.kind, ExprKind::Builtin(Builtin::Len,args) if matches!(args.as_slice(), [s] if is_local(s,*list)))
         || !matches!(args.as_slice(), [s,c] if is_local(s,*list) && is_local(c,*cursor))

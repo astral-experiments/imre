@@ -1,6 +1,9 @@
+# run, check_output and the POSIX pipe exchange are from CPython 3.14.5 Lib/subprocess.py.
+# Copyright (c) 2003-2005 Peter Astrand. See stdlib/docstrings/LICENSE.
 """POSIX process handles for runtime-loaded Imre modules."""
 import _imre_subprocess as _process
-from _weakref import ref as _ref
+import os
+import select
 from time import monotonic as _time
 from types import GenericAlias as _GenericAlias
 from warnings import warn as _warn
@@ -13,7 +16,9 @@ __all__ = ["Popen", "PIPE", "STDOUT", "call", "check_call", "getstatusoutput",
            "getoutput", "check_output", "run", "CalledProcessError", "DEVNULL",
            "SubprocessError", "TimeoutExpired", "CompletedProcess"]
 
+_mswindows = False
 _PopenSelector = selectors.PollSelector
+_PIPE_BUF = getattr(select, "PIPE_BUF", 512)
 
 PIPE = -1
 STDOUT = -2
@@ -23,9 +28,14 @@ _active = []
 
 
 def _cleanup():
-    for child in _active[:]:
-        if child.poll() is not None:
-            _active.remove(child)
+    if _active is not None:
+        for child in _active[:]:
+            if child._internal_poll(_deadstate=sys.maxsize) is not None:
+                try:
+                    _active.remove(child)
+                except ValueError:
+                    # A concurrent cleanup may already have removed this child.
+                    pass
     _process.cleanup()
 
 
@@ -155,44 +165,10 @@ def _text_encoding():
     return getencoding()
 
 
-def _decode(data, stream):
-    if data is None:
-        return None
-    return data.decode(stream.encoding, stream.errors).replace("\r\n", "\n").replace("\r", "\n")
-
-
-def _flush_stdin(stream):
-    try:
-        stream.flush()
-    except BrokenPipeError:
-        pass
-    except ValueError:
-        if not stream.closed:
-            raise
-
-
 def _exec_search_path(env):
-    """Read the POSIX search path independently of the child's saved environment."""
-    from os import environ, fsdecode, fsencode
-    if env is None:
-        env = environ
-    try:
-        path = env.get("PATH")
-    except TypeError:
-        path = None
-    try:
-        byte_path = env[b"PATH"]
-    except (KeyError, TypeError):
-        pass
-    else:
-        if path is not None:
-            raise ValueError("env cannot contain 'PATH' and b'PATH' keys")
-        path = byte_path
-    if path is None:
-        return b"/bin:/usr/bin"
-    if isinstance(path, bytes):
-        path = fsdecode(path)
-    return b":".join(fsencode(part) for part in path.split(":"))
+    """Encode the executable search path for the native POSIX launcher."""
+    import os
+    return b":".join(os.fsencode(directory) for directory in os.get_exec_path(env))
 
 
 def _get_group_id(group):
@@ -262,6 +238,7 @@ class Popen:
                  stderr=None, preexec_fn=None, *, close_fds=True, shell=False, cwd=None, env=None, restore_signals=True, pass_fds=(),
                  universal_newlines=None, encoding=None, errors=None, text=None, start_new_session=False,
                  umask=-1, pipesize=-1, process_group=None, startupinfo=None, creationflags=0, group=None, extra_groups=None, user=None):
+        _cleanup()
         if bufsize is None:
             bufsize = -1
         if not isinstance(bufsize, int):
@@ -294,7 +271,6 @@ class Popen:
         if line_buffering:
             bufsize = -1
         self._communication_started = False
-        _cleanup()
         self.args = args
         self.returncode = None
         self.pipesize = pipesize
@@ -319,8 +295,6 @@ class Popen:
                     self.stdout = io.TextIOWrapper(self.stdout, encoding=self.encoding, errors=errors)
                 if self.stderr is not None:
                     self.stderr = io.TextIOWrapper(self.stderr, encoding=self.encoding, errors=errors)
-            self._stdin_ref = None if self.stdin is None else _ref(self.stdin)
-            self._replacement_output = None
             self._input = None
             self._execute_child(args, executable, preexec_fn, close_fds, pass_fds, cwd, env,
                                 startupinfo, creationflags, shell, *fds, restore_signals,
@@ -361,13 +335,16 @@ class Popen:
             return result[:76] + "...>"
         return result
 
-    def __del__(self, _warn=_warn):
-        if self._handle is None or not _process.started(self._handle):
+    def __del__(self, _maxsize=sys.maxsize, _warn=_warn):
+        handle = self._handle
+        if handle is None or not _process.started(handle):
             return
         if self.returncode is None:
             _warn("subprocess %s is still running" % self.pid, ResourceWarning, source=self)
-        if self._internal_poll() is None and _active is not None:
+        self._internal_poll(_deadstate=_maxsize)
+        if self.returncode is None and _active is not None:
             _active.append(self)
+        _process.finalized(handle)
 
     @property
     def universal_newlines(self):
@@ -381,9 +358,12 @@ class Popen:
     def pid(self):
         return _process.pid(self._handle)
 
-    def _internal_poll(self):
+    def _internal_poll(self, _deadstate=None):
         if self.returncode is None:
-            status = _process.poll(self._handle)
+            try:
+                status = _process.poll(self._handle, _deadstate)
+            except OSError:
+                status = _deadstate
             if status is not None:
                 self.returncode = status
         return self.returncode
@@ -476,129 +456,141 @@ class Popen:
             raise
         return stdout, stderr
 
-    def _communicate(self, input, endtime, orig_timeout):
-        use_select = _PopenSelector is not selectors.PollSelector
-        if use_select and _PopenSelector is not getattr(selectors, "SelectSelector", None):
-            raise NotImplementedError("unsupported subprocess selector")
-        same_stdin = self._stdin_ref is None if self.stdin is None else (
-            self._stdin_ref is not None and self._stdin_ref() is self.stdin)
-        if self._replacement_output is not None or (not self._communication_started and not same_stdin):
-            return self._communicate_replaced_stdin(input, endtime, orig_timeout)
-        if not self._communication_started and self.stdin is not None:
-            # Publish earlier writes even if converting the new input raises.
-            _flush_stdin(self.stdin)
-        if self.stdin is not None and self._input is None:
-            if input is not None and self.text_mode:
-                # A false input closes stdin before encoding, even for a codec
-                # that produces a BOM from the empty string.
-                if not input:
-                    try:
-                        self.stdin.close()
-                    except BrokenPipeError:
-                        pass
-                input = input.encode(self.stdin.encoding, self.stdin.errors)
-            self._input = input
+    def _translate_newlines(self, data, encoding, errors):
+        return data.decode(encoding, errors).replace("\r\n", "\n").replace("\r", "\n")
 
-        # Retain the exporter for retries, but only pin its storage while this
-        # call is using it. The native pipe loop owns the byte offset.
-        input = self._input
-        if not input:
-            input = None
-        elif isinstance(input, memoryview):
-            input = input.cast("B")
-        elif type(input) is not bytes:
-            input = memoryview(input)
-        timeout = None if endtime is None else endtime - _time()
-        out, err, expired = _process.communicate(self._handle, input, timeout, use_select)
-        if expired:
-            raise TimeoutExpired(self.args, orig_timeout, output=out, stderr=err)
+    def _check_timeout(self, endtime, orig_timeout, stdout_seq, stderr_seq,
+                       skip_check_and_raise=False):
+        """Convenience for checking if a timeout has expired."""
+        if endtime is None:
+            return
+        if skip_check_and_raise or _time() > endtime:
+            raise TimeoutExpired(
+                    self.args, orig_timeout,
+                    output=b''.join(stdout_seq) if stdout_seq else None,
+                    stderr=b''.join(stderr_seq) if stderr_seq else None)
+
+    def _communicate(self, input, endtime, orig_timeout):
+        if self.stdin and not self._communication_started:
+            # Flush stdio buffer.  This might block, if the user has
+            # been writing to .stdin in an uncontrolled fashion.
+            try:
+                self.stdin.flush()
+            except BrokenPipeError:
+                pass  # communicate() must ignore BrokenPipeError.
+            except ValueError:
+                # ignore ValueError: I/O operation on closed file.
+                if not self.stdin.closed:
+                    raise
+            if not input:
+                try:
+                    self.stdin.close()
+                except BrokenPipeError:
+                    pass  # communicate() must ignore BrokenPipeError.
+
+        stdout = None
+        stderr = None
+
+        # Only create this mapping if we haven't already.
+        if not self._communication_started:
+            self._fileobj2output = {}
+            if self.stdout:
+                self._fileobj2output[self.stdout] = []
+            if self.stderr:
+                self._fileobj2output[self.stderr] = []
+
+        if self.stdout:
+            stdout = self._fileobj2output[self.stdout]
+        if self.stderr:
+            stderr = self._fileobj2output[self.stderr]
+
+        self._save_input(input)
+
+        if self._input:
+            if not isinstance(self._input, memoryview):
+                input_view = memoryview(self._input)
+            else:
+                input_view = self._input.cast("b")  # byte input required
+
+        with _PopenSelector() as selector:
+            if self.stdin and not self.stdin.closed and self._input:
+                selector.register(self.stdin, selectors.EVENT_WRITE)
+            if self.stdout and not self.stdout.closed:
+                selector.register(self.stdout, selectors.EVENT_READ)
+            if self.stderr and not self.stderr.closed:
+                selector.register(self.stderr, selectors.EVENT_READ)
+
+            while selector.get_map():
+                timeout = self._remaining_time(endtime)
+                if timeout is not None and timeout <= 0:
+                    self._check_timeout(endtime, orig_timeout,
+                                        stdout, stderr,
+                                        skip_check_and_raise=True)
+                    raise RuntimeError(  # Impossible :)
+                        '_check_timeout(..., skip_check_and_raise=True) '
+                        'failed to raise TimeoutExpired.')
+
+                ready = selector.select(timeout)
+                self._check_timeout(endtime, orig_timeout, stdout, stderr)
+
+                # XXX Rewrite these to use non-blocking I/O on the file
+                # objects; they are no longer using C stdio!
+
+                for key, events in ready:
+                    if key.fileobj is self.stdin:
+                        chunk = input_view[self._input_offset :
+                                           self._input_offset + _PIPE_BUF]
+                        try:
+                            self._input_offset += os.write(key.fd, chunk)
+                        except BrokenPipeError:
+                            selector.unregister(key.fileobj)
+                            key.fileobj.close()
+                        else:
+                            if self._input_offset >= len(input_view):
+                                selector.unregister(key.fileobj)
+                                key.fileobj.close()
+                    elif key.fileobj in (self.stdout, self.stderr):
+                        data = os.read(key.fd, 32768)
+                        if not data:
+                            selector.unregister(key.fileobj)
+                            key.fileobj.close()
+                        self._fileobj2output[key.fileobj].append(data)
         try:
-            self.wait(timeout=None if endtime is None else endtime - _time())
+            self.wait(timeout=self._remaining_time(endtime))
         except TimeoutExpired as exc:
             exc.timeout = orig_timeout
             raise
+
+        # All data exchanged.  Translate lists into strings.
+        if stdout is not None:
+            stdout = b''.join(stdout)
+        if stderr is not None:
+            stderr = b''.join(stderr)
+
+        # Translate newlines, if requested.
+        # This also turns bytes into strings.
         if self.text_mode:
-            out, err = _decode(out, self.stdout), _decode(err, self.stderr)
-        return out, err
+            if stdout is not None:
+                stdout = self._translate_newlines(stdout,
+                                                  self.stdout.encoding,
+                                                  self.stdout.errors)
+            if stderr is not None:
+                stderr = self._translate_newlines(stderr,
+                                                  self.stderr.encoding,
+                                                  self.stderr.errors)
 
-    def _communicate_replaced_stdin(self, input, deadline, timeout):
-        # The process handle still owns its original pipe. Use the public stream's
-        # descriptor for readiness and writes, and leave the original pipe alone.
-        import os
-        import select
+        return (stdout, stderr)
 
-        if self._replacement_output is None:
-            self._replacement_output = [[], []]
-            self._replacement_input = b""
-            self._replacement_offset = 0
-            self._communication_started = True
-            if self.stdin:
-                _flush_stdin(self.stdin)
-                if input:
-                    if self.text_mode:
-                        input = input.encode(self.stdin.encoding, self.stdin.errors)
-                    self._replacement_input = input
-                else:
-                    try:
-                        self.stdin.close()
-                    except BrokenPipeError:
-                        pass
-        elif input:
-            raise ValueError("Cannot send input after starting communication")
-
-        input_bytes = self._replacement_input
-        if isinstance(input_bytes, memoryview):
-            # The write offset is in bytes. A strided view cannot be cast.
-            input_bytes = input_bytes.cast("B")
-        elif not isinstance(input_bytes, (bytes, bytearray)):
-            input_bytes = bytes(memoryview(input_bytes))
-        output = self._replacement_output
-        with _PopenSelector() as selector:
-            pending = 0
-            if (self.stdin and not self.stdin.closed and
-                    self._replacement_offset < len(input_bytes)):
-                selector.register(self.stdin.fileno(), selectors.EVENT_WRITE, self.stdin)
-                pending += 1
-            for stream in (self.stdout, self.stderr):
-                if stream and not stream.closed:
-                    selector.register(stream.fileno(), selectors.EVENT_READ, stream)
-                    pending += 1
-            while pending:
-                remaining = None if deadline is None else deadline - _time()
-                ready = selector.select(remaining) if remaining is None or remaining > 0 else []
-                if deadline is not None and _time() >= deadline:
-                    raise TimeoutExpired(self.args, timeout,
-                                         output=b"".join(output[0]) if output[0] else None,
-                                         stderr=b"".join(output[1]) if output[1] else None)
-                for key, _ in ready:
-                    if key.data is self.stdin:
-                        offset = self._replacement_offset
-                        chunk = input_bytes[offset:offset + getattr(select, "PIPE_BUF", 512)]
-                        try:
-                            self._replacement_offset += os.write(key.fd, chunk)
-                        except BrokenPipeError:
-                            pass
-                        else:
-                            if self._replacement_offset < len(input_bytes):
-                                continue
-                    else:
-                        data = os.read(key.fd, 32768)
-                        output[0 if key.data is self.stdout else 1].append(data)
-                        if data:
-                            continue
-                    selector.unregister(key.fd)
-                    key.data.close()
-                    pending -= 1
-        try:
-            self.wait(timeout=None if deadline is None else deadline - _time())
-        except TimeoutExpired as exc:
-            exc.timeout = timeout
-            raise
-        stdout = None if self.stdout is None else b"".join(output[0])
-        stderr = None if self.stderr is None else b"".join(output[1])
-        if self.text_mode:
-            return _decode(stdout, self.stdout), _decode(stderr, self.stderr)
-        return stdout, stderr
+    def _save_input(self, input):
+        # This method is called from the _communicate_with_*() methods
+        # so that if we time out while communicating, we can continue
+        # sending input if we retry.
+        if self.stdin and self._input is None:
+            self._input_offset = 0
+            self._input = input
+            if input is not None and self.text_mode:
+                self._input = self._input.encode(self.stdin.encoding,
+                                                 self.stdin.errors)
 
     def send_signal(self, sig):
         self.poll()
@@ -709,15 +701,56 @@ def check_call(*popenargs, **kwargs):
 
 
 def check_output(*popenargs, timeout=None, **kwargs):
-    for key in ("stdout", "check"):
-        if key in kwargs:
-            raise ValueError(f"{key} argument not allowed, it will be overridden.")
-    if "input" in kwargs and kwargs["input"] is None:
-        # Explicit None supplies EOF, like an empty input in the corresponding mode.
-        text = (kwargs.get("text") or kwargs.get("universal_newlines")
-                or kwargs.get("encoding") or kwargs.get("errors"))
-        kwargs["input"] = "" if text else b""
-    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True, **kwargs).stdout
+    r"""Run command with arguments and return its output.
+
+    If the exit code was non-zero it raises a CalledProcessError.  The
+    CalledProcessError object will have the return code in the returncode
+    attribute and output in the output attribute.
+
+    The arguments are the same as for the Popen constructor.  Example:
+
+    >>> check_output(["ls", "-l", "/dev/null"])
+    b'crw-rw-rw- 1 root root 1, 3 Oct 18  2007 /dev/null\n'
+
+    The stdout argument is not allowed as it is used internally.
+    To capture standard error in the result, use stderr=STDOUT.
+
+    >>> check_output(["/bin/sh", "-c",
+    ...               "ls -l non_existent_file ; exit 0"],
+    ...              stderr=STDOUT)
+    b'ls: non_existent_file: No such file or directory\n'
+
+    There is an additional optional argument, "input", allowing you to
+    pass a string to the subprocess's stdin.  If you use this argument
+    you may not also use the Popen constructor's "stdin" argument, as
+    it too will be used internally.  Example:
+
+    >>> check_output(["sed", "-e", "s/foo/bar/"],
+    ...              input=b"when in the course of fooman events\n")
+    b'when in the course of barman events\n'
+
+    By default, all communication is in bytes, and therefore any "input"
+    should be bytes, and the return value will be bytes.  If in text mode,
+    any "input" should be a string, and the return value will be a string
+    decoded according to locale encoding, or by "encoding" if set. Text mode
+    is triggered by setting any of text, encoding, errors or universal_newlines.
+    """
+    for kw in ('stdout', 'check'):
+        if kw in kwargs:
+            raise ValueError(f'{kw} argument not allowed, it will be overridden.')
+
+    if 'input' in kwargs and kwargs['input'] is None:
+        # Explicitly passing input=None was previously equivalent to passing an
+        # empty string. That is maintained here for backwards compatibility.
+        if kwargs.get('universal_newlines') or kwargs.get('text') or kwargs.get('encoding') \
+                or kwargs.get('errors'):
+            empty = ''
+        else:
+            empty = b''
+        kwargs['input'] = empty
+
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+               **kwargs).stdout
 
 
 def getstatusoutput(cmd, *, encoding=None, errors=None):
@@ -746,31 +779,86 @@ class CompletedProcess:
         self.stdout = stdout
         self.stderr = stderr
 
+    # From CPython 3.14.5 Lib/subprocess.py. See stdlib/docstrings/LICENSE.
+    def __repr__(self):
+        args = ['args={!r}'.format(self.args),
+                'returncode={!r}'.format(self.returncode)]
+        if self.stdout is not None:
+            args.append('stdout={!r}'.format(self.stdout))
+        if self.stderr is not None:
+            args.append('stderr={!r}'.format(self.stderr))
+        return "{}({})".format(type(self).__name__, ', '.join(args))
+
     def check_returncode(self):
         if self.returncode:
             raise CalledProcessError(self.returncode, self.args, self.stdout, self.stderr)
 
 
-def run(*popenargs, input=None, capture_output=False, timeout=None, check=False, **kwargs):
+def run(*popenargs,
+        input=None, capture_output=False, timeout=None, check=False, **kwargs):
+    """Run command with arguments and return a CompletedProcess instance.
+
+    The returned instance will have attributes args, returncode, stdout and
+    stderr. By default, stdout and stderr are not captured, and those attributes
+    will be None. Pass stdout=PIPE and/or stderr=PIPE in order to capture them,
+    or pass capture_output=True to capture both.
+
+    If check is True and the exit code was non-zero, it raises a
+    CalledProcessError. The CalledProcessError object will have the return code
+    in the returncode attribute, and output & stderr attributes if those streams
+    were captured.
+
+    If timeout (seconds) is given and the process takes too long,
+     a TimeoutExpired exception will be raised.
+
+    There is an optional argument "input", allowing you to
+    pass bytes or a string to the subprocess's stdin.  If you use this argument
+    you may not also use the Popen constructor's "stdin" argument, as
+    it will be used internally.
+
+    By default, all communication is in bytes, and therefore any "input" should
+    be bytes, and the stdout and stderr will be bytes. If in text mode, any
+    "input" should be a string, and stdout and stderr will be strings decoded
+    according to locale encoding, or by "encoding" if set. Text mode is
+    triggered by setting any of text, encoding, errors or universal_newlines.
+
+    The other arguments are the same as for the Popen constructor.
+    """
     if input is not None:
-        if kwargs.get("stdin") is not None:
-            raise ValueError("stdin and input arguments may not both be used.")
-        kwargs["stdin"] = PIPE
+        if kwargs.get('stdin') is not None:
+            raise ValueError('stdin and input arguments may not both be used.')
+        kwargs['stdin'] = PIPE
+
     if capture_output:
-        if kwargs.get("stdout") is not None or kwargs.get("stderr") is not None:
-            raise ValueError("stdout and stderr arguments may not be used with capture_output.")
-        kwargs["stdout"] = PIPE
-        kwargs["stderr"] = PIPE
-    # run owns its streams. Only the resulting data is exposed to the caller.
-    if len(popenargs) < 2:
-        kwargs.setdefault("bufsize", 0)
+        if kwargs.get('stdout') is not None or kwargs.get('stderr') is not None:
+            raise ValueError('stdout and stderr arguments may not be used '
+                             'with capture_output.')
+        kwargs['stdout'] = PIPE
+        kwargs['stderr'] = PIPE
+
     with Popen(*popenargs, **kwargs) as process:
         try:
             stdout, stderr = process.communicate(input, timeout=timeout)
-        except BaseException:
+        except TimeoutExpired as exc:
             process.kill()
+            if _mswindows:
+                # Windows accumulates the output in a single blocking
+                # read() call run on child threads, with the timeout
+                # being done in a join() on those threads.  communicate()
+                # _after_ kill() is required to collect that and add it
+                # to the exception.
+                exc.stdout, exc.stderr = process.communicate()
+            else:
+                # POSIX _communicate already populated the output so
+                # far into the TimeoutExpired exception.
+                process.wait()
             raise
-        code = process.poll()
-        if check and code:
-            raise CalledProcessError(code, process.args, output=stdout, stderr=stderr)
-    return CompletedProcess(process.args, code, stdout, stderr)
+        except:  # Including KeyboardInterrupt, communicate handled that.
+            process.kill()
+            # We don't call process.wait() as .__exit__ does that for us.
+            raise
+        retcode = process.poll()
+        if check and retcode:
+            raise CalledProcessError(retcode, process.args,
+                                     output=stdout, stderr=stderr)
+    return CompletedProcess(process.args, retcode, stdout, stderr)

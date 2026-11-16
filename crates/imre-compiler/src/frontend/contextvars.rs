@@ -122,14 +122,19 @@ impl Checker<'_> {
         Ok(op(Op::Var, self.types.context_var(ty), args))
     }
 
+    /// The layout of a present token payload, including one stored in a nullable slot.
+    fn present_payload(&self, token: Type) -> Option<Type> {
+        let value = self.types.context_value(token)?;
+        Some(self.types.payload(value).unwrap_or(value))
+    }
+
     pub(super) fn context_attribute(&self, receiver: &Expr, name: &str) -> Option<Expr> {
         let (kind, ty) = match (receiver.ty, name) {
             (Type::ContextVar(_), "name") => (Op::Name, Type::Str),
             (Type::ContextToken(id), "var") => (Op::TokenVar, Type::ContextVar(id)),
             (Type::ContextToken(_), "old_value")
                 if self
-                    .types
-                    .context_value(receiver.ty)
+                    .present_payload(receiver.ty)
                     .is_some_and(|ty| ty == Type::ObjectValue || self.boxable_value(ty)) =>
             {
                 (Op::Old, Type::ObjectValue)
@@ -176,8 +181,18 @@ impl Checker<'_> {
             if !matches!(receiver.ty, Type::ContextToken(_)) {
                 continue;
             }
-            let a = op(Op::WasMissing, Type::Bool, vec![receiver]);
             let sentinel = self.expr(sentinel)?;
+            // A present object can be the singleton. Read it just as an assigned local would.
+            if self.present_payload(receiver.ty) == Some(Type::ObjectValue) {
+                let previous = op(Op::Old, Type::ObjectValue, vec![receiver]);
+                let operands = if first {
+                    vec![previous, sentinel]
+                } else {
+                    vec![sentinel, previous]
+                };
+                return Ok(Some(Self::identity_result(operands, negate)));
+            }
+            let a = op(Op::WasMissing, Type::Bool, vec![receiver]);
             let mut body = Vec::new();
             let mut clear = Vec::new();
             let value = if first {
@@ -188,14 +203,7 @@ impl Checker<'_> {
                 body.push(Statement::Expr(sentinel));
                 a
             };
-            let value = if negate {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(value)),
-                }
-            } else {
-                value
-            };
+            let value = if negate { Expr::not(value) } else { value };
             return Ok(Some(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Scope {
@@ -245,7 +253,7 @@ impl Checker<'_> {
         let message = Expr {
             ty: Type::Str,
             kind: ExprKind::Binary(
-                Binary::Concat,
+                Binary::Add,
                 Box::new(unpacking::string("a ContextVar key was expected, got ")),
                 Box::new(repr),
             ),
@@ -413,22 +421,16 @@ impl Checker<'_> {
         }
     }
     fn context_run(&mut self, ctx: Expr, call: &ast::ExprCall) -> Result<Expr, String> {
-        let [fn_node, args @ ..] = call.arguments.args.as_ref() else {
-            let failure = self.sys_type_error(
-                call,
-                Type::None,
-                "run() missing 1 required positional argument".to_string(),
-            )?;
-            self.graph
-                .checked_missing_argument(self.module, call.range());
-            return Ok(Expr {
-                ty: Type::None,
-                kind: ExprKind::Scope {
-                    body: vec![Statement::Expr(ctx)],
-                    value: Box::new(failure),
-                    clear: vec![],
-                },
-            });
+        let mut scope = calls::ArgumentScope::default();
+        let ctx = scope.hold(self, ctx);
+        let (fn_node, args) = match imre_ast::context_run_arguments(&call.arguments.args) {
+            Ok(args) => args,
+            Err(message) => {
+                let failure = self.sys_type_error(call, Type::None, message.to_owned())?;
+                self.graph
+                    .checked_missing_argument(self.module, call.range());
+                return Ok(scope.finish(failure));
+            }
         };
         if !call.arguments.keywords.is_empty() {
             return Err(error(
@@ -437,20 +439,17 @@ impl Checker<'_> {
                 "Context.run currently requires the complete positional callback signature",
             ));
         }
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        let ctx = self.bind_context_operand(ctx, &mut body, &mut clear);
         let bound = if let ast::Expr::Attribute(attr) = fn_node
             && matches!(attr.attr.as_str(), "get" | "set" | "reset")
             && let Ok(var) = self.expr(&attr.value)
             && let Type::ContextVar(id) = var.ty
         {
             let ty = self.types.context_value(var.ty).unwrap();
-            let var = self.bind_context_operand(var, &mut body, &mut clear);
+            let var = scope.hold(self, var);
             Some(match (attr.attr.as_str(), args) {
                 ("set", [arg]) => {
                     let v = self.expr_expected(arg, ty)?;
-                    let v = self.bind_context_operand(v, &mut body, &mut clear);
+                    let v = scope.hold(self, v);
                     op(Op::Set, Type::ContextToken(id), vec![var, v])
                 }
                 ("reset", [arg]) => {
@@ -458,13 +457,13 @@ impl Checker<'_> {
                     if !matches!(t.ty, Type::ContextToken(_)) {
                         return Err(error(self.source, arg, "ContextVar.reset requires a Token"));
                     }
-                    let t = self.bind_context_operand(t, &mut body, &mut clear);
+                    let t = scope.hold(self, t);
                     op(Op::Reset, Type::None, vec![var, t])
                 }
                 ("get", []) => self.context_get(None, var, None, call)?,
                 ("get", [arg]) => {
                     let fallback = Self::string_value(self.expr(arg)?);
-                    let fallback = self.bind_context_operand(fallback, &mut body, &mut clear);
+                    let fallback = scope.hold(self, fallback);
                     self.context_get(None, var, Some(fallback), call)?
                 }
                 _ => {
@@ -511,13 +510,11 @@ impl Checker<'_> {
                 }
                 _ => None,
             };
-            let callback = direct
-                .is_none()
-                .then(|| self.bind_context_operand(callback, &mut body, &mut clear));
+            let callback = direct.is_none().then(|| scope.hold(self, callback));
             let mut values = Vec::new();
             for (arg, ty) in args.iter().zip(params) {
                 let value = self.expr_expected(arg, ty)?;
-                values.push(self.bind_context_operand(value, &mut body, &mut clear));
+                values.push(scope.hold(self, value));
             }
             if let Some(function) = direct {
                 self.calls.insert(function);
@@ -539,10 +536,10 @@ impl Checker<'_> {
         };
         let returns = invoked.ty;
         let previous = op(Op::Enter, Type::Context, vec![ctx.clone()]);
-        let previous = self.bind_context_operand(previous, &mut body, &mut clear);
+        let previous = scope.hold(self, previous);
         let result = self.hidden(returns);
-        clear.push(result);
-        body.push(Statement::Try {
+        scope.clear.push(result);
+        scope.body.push(Statement::Try {
             body: vec![Statement::Assign(result, invoked)],
             handlers: Vec::new(),
             orelse: Vec::new(),
@@ -552,13 +549,6 @@ impl Checker<'_> {
                 vec![ctx, previous],
             ))],
         });
-        Ok(Expr {
-            ty: returns,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear,
-            },
-        })
+        Ok(scope.finish(self.local(result)))
     }
 }

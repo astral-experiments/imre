@@ -2,7 +2,7 @@
 
 import _collections_abc
 import operator as _operator
-from _collections_abc import MutableMapping as _MutableMapping, MutableSequence as _MutableSequence
+from _collections_abc import MutableMapping as _MutableMapping
 from itertools import repeat as _repeat
 
 try:
@@ -18,9 +18,6 @@ try:
     from _collections import _deque_iterator
 except ImportError:
     pass
-
-_MutableSequence.register(deque)
-
 
 def _elements(items):
     for key, count in items:
@@ -191,22 +188,23 @@ class Counter(dict):
         raise NotImplementedError("Counter.fromkeys() is undefined.  Use Counter(iterable) instead.")
 
     def update(self, iterable=None, /, **counts):
-        if isinstance(iterable, dict):
-            if self:
-                get = self.get
-                for key, count in iterable.items():
-                    self[key] = count + get(key, 0)
+        if iterable is not None:
+            if isinstance(iterable, _collections_abc.Mapping):
+                if self:
+                    get = self.get
+                    for key, count in iterable.items():
+                        self[key] = count + get(key, 0)
+                else:
+                    super().update(iterable)
             else:
-                super().update(iterable)
-        elif iterable is not None:
-            _count_elements(self, iterable)
+                _count_elements(self, iterable)
         if counts:
             self.update(counts)
 
     def subtract(self, iterable=None, /, **counts):
         if iterable is not None:
             get = self.get
-            if isinstance(iterable, dict):
+            if isinstance(iterable, _collections_abc.Mapping):
                 for key, count in iterable.items():
                     self[key] = get(key, 0) - count
             else:

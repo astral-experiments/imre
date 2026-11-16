@@ -3,10 +3,15 @@
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
+pub(super) const DEBUG_SAVEALL: i32 = 32;
+// CPython also counts the collectable and uncollectable reporting bits in DEBUG_LEAK.
+pub(super) const DEBUG_LEAK: i32 = 2 | 4 | DEBUG_SAVEALL;
+
 const DEFAULT_THRESHOLDS: [i32; 3] = [2000, 10, 10];
 
 pub(super) struct GcSettings {
     pub(super) enabled: AtomicBool,
+    pub(super) debug: AtomicI32,
     thresholds: Mutex<[i32; 3]>,
     // Most allocations only need to compare the young count.
     young: AtomicI32,
@@ -16,6 +21,7 @@ impl Default for GcSettings {
     fn default() -> Self {
         Self {
             enabled: AtomicBool::new(true),
+            debug: AtomicI32::new(0),
             thresholds: Mutex::new(DEFAULT_THRESHOLDS),
             young: AtomicI32::new(DEFAULT_THRESHOLDS[0]),
         }
@@ -43,6 +49,8 @@ pub(super) struct GcSchedule {
     counts: [i32; 3],
     requested: bool,
     settling: bool,
+    // The public collection includes both callback phases outside the heap's cyclic pass.
+    pub(super) collecting: bool,
     long_lived_pending: usize,
     long_lived_total: usize,
 }
@@ -54,6 +62,7 @@ impl GcSchedule {
         if self.counts[0] > young
             && young != 0
             && !collecting
+            && !self.collecting
             && !self.settling
             && settings.enabled.load(Ordering::Relaxed)
         {
@@ -68,7 +77,7 @@ impl GcSchedule {
     }
 
     pub(super) fn requested(&self) -> bool {
-        self.requested
+        self.requested && !self.collecting
     }
 
     pub(super) fn begin_settling(&mut self) {

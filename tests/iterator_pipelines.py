@@ -11,11 +11,11 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterator_pipelines"
 REQUIRE_INT = "def require_int(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "invalid_call_inside_invalid_range": REQUIRE_INT + "range(1, 2, 3, require_int('x'))\n",
     "producer_escape": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        yield i\nsaved = values()\n",
     "producer_handler": "from collections.abc import Iterator\ndef values() -> Iterator[int]:\n    for i in range(2):\n        try:\n            yield i\n        finally:\n            print(i)\nfor x in values():\n    print(x)\n",
     "sentinel_escaped": "saved = iter(lambda: 'x', 'x')\n",
     "sentinel_types": "for x in iter(lambda: b'x', 'x'):\n    print(x)\n",
-    "sentinel_defaults": "for x in iter(lambda v=b'': v, b''):\n    print(x)\n",
     "sentinel_optional_capture": "def f(value: str | None) -> None:\n    if value is not None:\n        for x in iter(lambda: value, ''):\n            value = None\n",
     "sentinel_unbound_iter": "def f() -> None:\n    for x in iter(lambda: '', ''):\n        print(x)\n    iter = 3\nf()\n",
     "sentinel_deleted_capture": "def f() -> None:\n    error = ValueError('first')\n    for i, word in enumerate(iter(lambda: str(error), 'stop')):\n        print(i, word)\n        try:\n            raise ValueError('second')\n        except ValueError as error:\n            pass\nf()\n",
@@ -27,6 +27,8 @@ REJECTED = {
     "min_float_generator": "print(min(float(i) for i in range(2)))\n",
     "max_generator_default": "print(max((i for i in range(2)), default=0))\n",
     "min_mixed_values": "print(min(1, 2.5))\n",
+    "min_default_wrong_return": "def result() -> int:\n    return min(['z'], default='?')\nresult()\n",
+    "max_default_wrong_argument": REQUIRE_INT + "max([1], default=require_int('bad'))\n",
     "groupby_stored": "from itertools import groupby\nruns = groupby([1])\n",
     "groupby_group_escapes": "from itertools import groupby\nfor key, group in groupby([1]):\n    members = list(group)\n    saved = group\n",
     "groupby_group_delayed": "from itertools import groupby\nfor key, group in groupby([1]):\n    print(key)\n    members = list(group)\n",
@@ -51,7 +53,6 @@ REJECTED = {
     "generator_constructor_partial_self": "class Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = sum(self.value + value for value in range(0))\nItem()\n",
     "generator_constructor_partial_source": "class Item:\n    values: list[int]\n    def __init__(self) -> None:\n        self.values = list(self for self in self.values)\nItem()\n",
     "generator_async": "async def bad(values: list[int]):\n    return any(value async for value in values)\n",
-    "generator_yield_function": "def values():\n    yield 1\nprint(any(values()))\n",
     "zip_escaped": "values = zip([1], [2])\n",
     "zip_scalar": "values = list(zip([1], 2))\n",
     "zip_unknown_keyword": "values = list(zip([1], exact=True))\n",

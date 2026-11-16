@@ -47,6 +47,22 @@ def current():
         else:
             raise AssertionError("accepted an impossible width")
 
+    value = b"xy"
+    method = bytes.rjust
+    assert method.__objclass__ is bytes and method.__text_signature__ == bytes.ljust.__text_signature__
+    assert value.rjust(4) == b"  xy"
+    assert value.rjust(-1) is value
+    derived = Packet(value)
+    copied = derived.rjust(2)
+    assert type(copied) is bytes and copied == value
+    assert method(derived, 4, Buffer(b"\xff")) == b"\xff\xffxy"
+    try:
+        derived.rjust(1, memoryview(b"!"))
+    except TypeError as error:
+        assert str(error) == "rjust() argument 2 must be a byte string of length 1, not memoryview"
+    else:
+        raise AssertionError("accepted a memoryview as fill")
+
     target = bytearray(b"abc")
     fill = bytearray(b"x")
 
@@ -59,4 +75,6 @@ def current():
 
     assert target.ljust(Width(), fill) == b"z??"
     assert target == b"z" and fill == b"?"
+    fill[0] = 120
+    assert b"z".rjust(Width(), fill) == b"??z"
     print("binary ljust matched")

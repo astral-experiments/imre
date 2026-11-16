@@ -1,6 +1,8 @@
 //! Keep single-character iteration results as code points when their only uses
 //! are comparisons and `ord`. Copying or moving a local preserves its value.
 
+mod indexed;
+
 use crate::ir::{self, Builtin, Expr, ExprKind, Function, IterNextKind, Module, Statement, Type};
 
 #[derive(Default)]
@@ -48,15 +50,14 @@ pub(crate) fn specialize(module: &mut Module) {
 
 fn specialize_function(function: &mut Function) {
     let mut producers = Vec::new();
-    ir::walk_statements(&function.body, &mut |stmt| {
-        if let Statement::IterNext {
+    ir::rewrite_statements(&mut function.body, &mut |stmt| match stmt {
+        Statement::IterNext {
             kind: IterNextKind::String,
             key,
             ..
-        } = stmt
-        {
-            producers.push(*key);
-        }
+        } => producers.push(*key),
+        Statement::For { .. } => indexed::specialize(stmt, &mut function.locals),
+        _ => {}
     });
     if producers.is_empty() {
         return;
@@ -83,7 +84,7 @@ fn specialize_function(function: &mut Function) {
         }
         Statement::Move(target, source) => link(&mut uses, *target, *source),
         Statement::IterNext {
-            kind: IterNextKind::Generic,
+            kind: IterNextKind::Generic | IterNextKind::SplitField,
             key,
             value,
             ..
@@ -105,10 +106,11 @@ fn specialize_function(function: &mut Function) {
                 uses[slot].handled_reads += 1;
             }
         }
-        ExprKind::Compare(values, _)
-            if values
-                .iter()
-                .all(|v| result_slot(v).is_some() || one_character(v).is_some()) =>
+        ExprKind::Compare(values, ops)
+            if !ir::Compare::uses_python_protocol(expr.ty, ops)
+                && values
+                    .iter()
+                    .all(|v| result_slot(v).is_some() || one_character(v).is_some()) =>
         {
             // Unicode scalar order is also lexicographic order for exact
             // one-character strings. Every local in a chain must qualify.
@@ -169,8 +171,9 @@ fn specialize_function(function: &mut Function) {
                 expr.ty = Type::Int;
             }
         }
-        ExprKind::Compare(values, _)
-            if values.iter().filter_map(result_slot).any(|i| scalars[i]) =>
+        ExprKind::Compare(values, ops)
+            if !ir::Compare::uses_python_protocol(expr.ty, ops)
+                && values.iter().filter_map(result_slot).any(|i| scalars[i]) =>
         {
             for value in values {
                 if let Some(code) = one_character(value) {
@@ -208,6 +211,45 @@ mod tests {
             .body
             .insert(0, Statement::Expr(Expr::local(private[0], Type::Iterator)));
         assert!(crate::ir::private_string_cursors(function).is_empty());
+    }
+
+    #[test]
+    fn only_restarts_cursors_rooted_by_a_stable_parameter() {
+        for (setup, count) in [("", 1), ("        text = 'replacement'\n", 0)] {
+            let source = format!(
+                "def scan(text: str) -> int:\n    score = 0\n    for i in range(3):\n{setup}        for ch in text:\n            score += ord(ch)\n    return score\n"
+            );
+            let graph = crate::modules::SourceGraph::single(&source).unwrap();
+            let mut module = crate::frontend::lower(&graph).unwrap();
+            crate::tuples::scalarize(&mut module);
+            super::specialize(&mut module);
+            let function = module
+                .functions
+                .iter()
+                .find(|f| f.params.len() == 1)
+                .unwrap();
+            let private = crate::ir::private_string_cursors(function);
+            assert_eq!(private.len(), 1);
+            assert_eq!(
+                crate::ir::invariant_string_cursors(function, &private).len(),
+                count
+            );
+        }
+    }
+
+    #[test]
+    fn allocates_the_saved_cursor_start_before_initializing_it() {
+        let source = "def scan(text: str) -> int:\n    total = 0\n    for i in range(2):\n        for ch in text:\n            total += ord(ch)\n    return total\nprint(scan('é'))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        let prefix = "store ptr null, ptr ";
+        let mut initializers = llvm
+            .match_indices("store ptr null, ptr %scratch")
+            .peekable();
+        assert!(initializers.peek().is_some());
+        for (position, _) in initializers {
+            let slot = llvm[position + prefix.len()..].lines().next().unwrap();
+            assert!(llvm[..position].contains(&format!("{slot} = alloca ptr")));
+        }
     }
 
     #[test]

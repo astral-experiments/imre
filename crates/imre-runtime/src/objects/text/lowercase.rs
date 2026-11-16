@@ -1,4 +1,6 @@
 //! Default Unicode 16 case conversion, as used by Python 3.14.
+mod casefold;
+
 use crate::StrOwner;
 use std::sync::LazyLock;
 
@@ -85,6 +87,7 @@ pub(crate) enum Case {
     Capitalize,
     Title,
     Swap,
+    Fold,
 }
 
 /// Apply a full mapping to an original scalar. Only title consults its immediate
@@ -103,7 +106,9 @@ fn mapped_char(
     } else {
         case == Case::Capitalize && first
     };
-    let mapping = if title {
+    let mapping = if case == Case::Fold {
+        casefold::mapping(ch)
+    } else if title {
         unicode_case_mapping::to_titlecase(ch)
     } else if case == Case::Upper || (case == Case::Swap && contains(&LOWERCASE, ch)) {
         unicode_case_mapping::to_uppercase(ch)
@@ -138,23 +143,12 @@ fn case_chars(source: &str, case: Case) -> impl Iterator<Item = char> {
 }
 
 /// Map a scalar string with the same Unicode data used by native string operations.
-pub(crate) fn case_map(source: &str, case: Case) -> super::Result<String> {
-    let mut result = String::new();
-    result
-        .try_reserve_exact(source.len())
-        .map_err(|_| Error::allocation())?;
-    if case == Case::Lower && source.is_ascii() {
-        result.push_str(source);
-        result.make_ascii_lowercase();
-        return Ok(result);
+pub(crate) fn case_map(source: &str, case: Case) -> super::Result<Str> {
+    match case {
+        Case::Title | Case::Swap => map_chars(source, case),
+        _ => convert(source, case),
     }
-    for ch in case_chars(source, case) {
-        result
-            .try_reserve(ch.len_utf8())
-            .map_err(|_| Error::allocation())?;
-        result.push(ch);
-    }
-    Ok(result)
+    .map_err(|_| Error::allocation())
 }
 
 /// Preserve surrogates as uncased boundaries when mapping Python code points.
@@ -198,7 +192,7 @@ pub unsafe extern "C" fn imre_str_case_map(source: *const Str, title: u32) -> *c
     } else {
         let case = if title != 0 { Case::Title } else { Case::Swap };
         case_map(source, case)
-            .and_then(|value| StrOwner::try_new(Str::from(value)).map_err(|_| Error::allocation()))
+            .and_then(|value| StrOwner::try_new(value).map_err(|_| Error::allocation()))
     };
     finish(result.map(StrOwner::into_raw), std::ptr::null())
 }
@@ -208,8 +202,7 @@ pub(in crate::objects) fn lowercase_chars(source: &str) -> impl Iterator<Item = 
     case_chars(source, Case::Lower)
 }
 
-/// CPython titlecases just the first code point for capitalize, then lowercases
-/// the rest in the context of the original string (not of the suffix alone).
+/// Lower, upper, capitalize and fold have a direct ASCII mapping.
 fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
     if source.is_ascii() {
         let mut result = Str::try_new(source)?;
@@ -226,22 +219,16 @@ fn convert(source: &str, case: Case) -> Result<Str, ReserveError> {
         }
         return Ok(result);
     }
+    map_chars(source, case)
+}
+
+fn map_chars(source: &str, case: Case) -> Result<Str, ReserveError> {
     let mut result = Str::try_with_capacity(source.len())?;
     for ch in case_chars(source, case) {
         result.try_reserve(ch.len_utf8())?;
         result.push(ch);
     }
     Ok(result)
-}
-
-/// Lowercase a full string with the runtime's pinned Unicode data.
-pub(in crate::objects) fn lowercase(source: &str) -> Result<Str, ReserveError> {
-    convert(source, Case::Lower)
-}
-
-/// Titlecase the first character and lowercase the rest in their original context.
-pub(crate) fn capitalize(source: &str) -> super::Result<Str> {
-    convert(source, Case::Capitalize).map_err(|_| Error::allocation())
 }
 
 /// Lowercase an exact native string, setting a pending MemoryError on allocation failure.
@@ -253,9 +240,7 @@ pub unsafe extern "C" fn imre_str_lower(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        lowercase(source)
-            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
-            .map_err(|_| Error::allocation()),
+        case_map(source, Case::Lower).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }
@@ -269,9 +254,7 @@ pub unsafe extern "C" fn imre_str_upper(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string throughout conversion.
     let source = unsafe { &*value };
     finish(
-        convert(source, Case::Upper)
-            .map(|s| StrOwner::into_raw(StrOwner::new(s)))
-            .map_err(|_| Error::allocation()),
+        case_map(source, Case::Upper).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }
@@ -285,7 +268,7 @@ pub unsafe extern "C" fn imre_str_capitalize(value: *const Str) -> *const Str {
     // SAFETY: the caller roots the string.
     let source = unsafe { &*value };
     finish(
-        capitalize(source).map(|s| StrOwner::into_raw(StrOwner::new(s))),
+        case_map(source, Case::Capitalize).map(|s| StrOwner::into_raw(StrOwner::new(s))),
         std::ptr::null(),
     )
 }

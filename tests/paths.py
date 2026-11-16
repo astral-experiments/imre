@@ -24,7 +24,7 @@ REJECTED = {
     "wrong_join": "Path('a') / 1",
     "unknown_nested_joinpath_value": "def real(x: int) -> int:\n    return x\nPath('a').joinpath(wrong=real(unknown=1))",
     "with_name_type": "Path('a').with_name(Path('b'))",
-    "open_update": "Path('a').open('r+')",
+    "open_repeated_update": "Path('a').open('r++')",
     "open_binary_encoding": "Path('a').open('rb', encoding='utf-8')",
     "open_dynamic_mode": "mode = 'r'\nPath('a').open(mode)",
     "open_repeated_mode": "Path('a').open('r', mode='w')",

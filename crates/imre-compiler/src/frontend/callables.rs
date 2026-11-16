@@ -17,7 +17,7 @@ pub(super) fn contains_callable(ty: Type, types: &Types) -> bool {
             .any(|ty| contains_callable(ty, types))
 }
 
-fn invalid_aggregate(ty: Type, types: &Types) -> bool {
+pub(super) fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     if matches!(
         ty,
         Type::Callable(_) | Type::ForwardRef(_) | Type::AnnotationValue(_) | Type::CmpKey(..)
@@ -43,30 +43,71 @@ fn invalid_aggregate(ty: Type, types: &Types) -> bool {
     }
 }
 
-/// Checks inferred displays as well as annotations, including discarded values.
-pub(super) fn validate_storage(function: &ir::Function, types: &Types) -> Result<(), String> {
+/// Ordinary dictionary values use the synchronous positional callable ABI.
+pub(super) fn handler_signature(ty: Type, types: &Types) -> Option<Type> {
+    let (key, item) = types.mapping(ty)?;
+    if !matches!(item, Type::Callable(_)) || ty != types.dict(key, item) {
+        return None;
+    }
+    types.with_callback_signature(item, |_, _| item)
+}
+
+#[derive(Default)]
+pub(super) struct DictionaryWrites {
+    pub(super) display: bool,
+    pub(super) needs_targets: bool,
+}
+
+/// Check inferred displays and annotations while visiting the function's call and frame uses.
+pub(super) fn validate_storage(
+    function: &ir::Function,
+    types: &Types,
+    dictionaries: &mut HashMap<Type, DictionaryWrites>,
+    mut visit: impl FnMut(&Expr),
+) -> std::result::Result<(), String> {
+    let unsupported = |ty| invalid_aggregate(ty, types) && handler_signature(ty, types).is_none();
     let mut invalid = invalid_aggregate(function.returns, types)
-        || function
-            .locals
-            .iter()
-            .any(|&ty| invalid_aggregate(ty, types));
-    // A cold indirect call owns a private argument frame for its continuation.
-    // Its callable cannot enter a language-visible tuple or container.
-    let mut frames = HashSet::new();
-    ir::walk_expressions(&function.body, &mut |value| {
-        if let ExprKind::Builtin(
-            Builtin::Process(
-                ir::ProcessOperation::IndirectCoroutine { .. }
-                | ir::ProcessOperation::Coroutine { .. }
-                | ir::ProcessOperation::ContextNew { .. },
-            ),
-            args,
-        ) = &value.kind
+        || function.locals.iter().copied().any(unsupported);
+    let signature =
+        |dict| handler_signature(dict, types).filter(|&item| !types.is_plain_callback(item));
+    // A source singleton has no bound receiver. A cached adapter owns extra
+    // context even when coerced to the same positional signature.
+    let fixed = |value: &Expr| {
+        matches!(value.kind, ExprKind::Builtin(Builtin::StaticFunction(id), _)
+        if types.cache_adapter(id).is_none())
+    };
+    ir::walk_nodes(&function.body, &mut |node, parent| {
+        let mut insert = |dict, value: &Expr| {
+            if let Some(item) = signature(dict)
+                && !fixed(value)
+            {
+                dictionaries.entry(item).or_default().needs_targets = true;
+            }
+        };
+        let value = match node {
+            ir::Node::Statement(Statement::SetItem(_, dict, _, value)) => {
+                insert(dict.ty, value);
+                return;
+            }
+            ir::Node::Statement(_) => return,
+            ir::Node::Expression(value) => value,
+        };
+        visit(value);
+        // A framed call's sole operand is its private argument record.
+        if !matches!(parent.map(|p| &p.kind), Some(ExprKind::Builtin(op, _)) if op.takes_call_frame())
         {
-            frames.insert(std::ptr::from_ref(&args[0]));
-        }
-        if !frames.contains(&std::ptr::from_ref(value)) {
-            invalid |= invalid_aggregate(value.ty, types);
+            invalid |= unsupported(value.ty);
+            match &value.kind {
+                ExprKind::Dict(entries) if !entries.is_empty() => {
+                    if let Some(item) = signature(value.ty) {
+                        let writes = dictionaries.entry(item).or_default();
+                        writes.display = true;
+                        writes.needs_targets |= entries.iter().any(|entry| !fixed(&entry.value));
+                    }
+                }
+                ExprKind::Builtin(Builtin::DictSetDefault, args) => insert(args[0].ty, &args[2]),
+                _ => {}
+            }
         }
     });
     if invalid {
@@ -81,57 +122,74 @@ pub(super) fn invoked_signature(value: &Expr) -> Option<Type> {
     match &value.kind {
         ExprKind::Invoke { callable, .. } => Some(callable.ty),
         ExprKind::Builtin(
-            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }),
+            Builtin::Process(ir::ProcessOperation::IndirectCoroutine { signature, .. }, _),
             _,
         ) => Some(*signature),
         _ => None,
     }
 }
 
-/// Creation does not call a function. Every compatible constructed target is
-/// nevertheless a possible edge at an indirect invocation, including dead code.
-pub(super) fn targets(
+pub(super) const EAGER_CALLBACK_ABI: &str = "an Awaitable callback must be defined with async def";
+
+pub(super) fn validate_targets(
     functions: &[ir::Function],
-    entry: &ir::Function,
     types: &Types,
-) -> Result<HashMap<Type, HashSet<usize>>, String> {
-    let mut targets = HashMap::<Type, HashSet<usize>>::new();
-    for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |value| {
-            if let ExprKind::Callable { function, .. } = &value.kind {
-                targets.entry(value.ty).or_default().insert(*function);
-                if let Some(signature) = types.method_signature(value.ty) {
-                    targets.entry(signature).or_default().insert(*function);
-                }
-            }
-        });
-    }
+    targets: &crate::callables::SourceTargets,
+) -> std::result::Result<(), Diagnostic> {
     // A cold callback adapter executes an async body and returns the awaited
     // result. An eager factory returns a coroutine object through a different ABI.
-    for (signature, candidates) in &targets {
+    for (signature, candidates) in targets {
         let (_, returns) = types.signature(*signature).unwrap();
         if matches!(returns, Type::Coroutine(_))
             && candidates
                 .iter()
-                .any(|&id| functions[id].returns == returns)
+                .any(|target| functions[target.function].returns == returns)
         {
-            return Err("an Awaitable callback must be defined with async def".into());
+            return Err(
+                Diagnostic::from(EAGER_CALLBACK_ABI).classified(Kind::UnsupportedRepresentation)
+            );
         }
     }
-    Ok(targets)
+    Ok(())
 }
 
-impl Checker<'_> {
-    /// Capture a native receiver once and give a saved method its positional signature.
-    pub(super) fn bound_builtin(
+impl Signature {
+    fn callable_type(&self, types: &Types, skip: usize) -> Type {
+        types.callable(
+            self.params[skip..].iter().map(|p| p.ty).collect(),
+            if self.asynchronous {
+                types.coroutine(self.returns)
+            } else {
+                self.returns
+            },
+        )
+    }
+
+    fn has_defaults_after_receiver(&self) -> bool {
+        self.params
+            .iter()
+            .skip(1)
+            .any(|param| param.default.is_some())
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A saved method keeps the source signature that originally bound its receiver.
+    pub(super) fn saved_method(&self, ty: Type) -> Option<(&'a Signature, Option<Type>)> {
+        let (class, index, receiver) = self.types.source_method_site(ty)?;
+        let method = &self.classes.declarations.definitions[class].methods[index];
+        Some((&self.classes.methods[class][method.name.as_str()], receiver))
+    }
+
+    /// Give a native method a positional signature and capture its receiver when present.
+    pub(super) fn builtin_callable(
         &mut self,
-        node: &impl Ranged,
-        receiver: Expr,
+        receiver: Option<Expr>,
         builtin: Builtin,
         parameters: Vec<Type>,
         returns: Type,
     ) -> Expr {
-        let mut locals = vec![receiver.ty];
+        let mut locals: Vec<_> = receiver.iter().map(|value| value.ty).collect();
         locals.extend(&parameters);
         let mut arguments: Vec<_> = locals
             .iter()
@@ -159,20 +217,19 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: error(self.source, node, "recursive native method adapter"),
             },
         );
         Expr {
             ty: self.types.callable(parameters, returns),
             kind: ExprKind::Callable {
                 function: id,
-                receiver: Some(Box::new(receiver)),
+                receiver: receiver.map(Box::new),
             },
         }
     }
 
     /// Expose str.join or a bound string's join as an exact native callback.
-    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>, site: &impl Ranged) -> Expr {
+    pub(super) fn string_join_value(&mut self, receiver: Option<Expr>) -> Expr {
         let list = self.types.list(Type::Str);
         let context = receiver.map(|value| Expr {
             ty: self.types.tuple(vec![Type::Str]),
@@ -195,8 +252,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module]
-                    .error(site, "recursive calls through str.join are unsupported"),
                 function: ir::Function {
                     params: vec![0, 1],
                     locals: vec![first, list],
@@ -259,70 +314,153 @@ impl Checker<'_> {
                 "function values require fixed positional parameters",
             ));
         }
-        let method_site = signature.method.filter(|_| {
-            receiver.is_some()
-                && expected.is_none()
-                && !signature.asynchronous
-                && signature.params[skip..].iter().any(|p| p.default.is_some())
+        let class_method = signature.method.is_some_and(|method| {
+            method.kind(self.classes.declarations) == crate::classes::MethodKind::Class
         });
-        let mut signature = signature.clone();
-        // A later call to the saved method can supply its missing formal types.
+        let method_site = signature
+            .method
+            .filter(|_| class_method || (receiver.is_some() && !signature.asynchronous));
+        let mut signature = Cow::Borrowed(signature);
+        // A saved method with defaults can infer missing formals at its later source-bound call.
         if let Some(inference) = self.inference
-            && method_site.is_none()
+            && (expected.is_some()
+                || method_site.is_none()
+                || class_method
+                || !signature.has_defaults_after_receiver())
         {
             let asynchronous = signature.asynchronous;
-            inference
-                .callable_signature(
-                    &mut signature,
-                    skip,
-                    expected
-                        .and_then(|ty| self.types.signature(ty))
-                        .map(|(params, result)| {
-                            let returns = if asynchronous {
-                                self.types.awaited(result).unwrap_or(result)
-                            } else {
-                                result
-                            };
-                            (params, returns)
-                        }),
-                )
-                .map_err(|message| error(self.source, node, message))?;
+            inference.callable_signature(
+                signature.to_mut(),
+                skip,
+                expected
+                    .and_then(|ty| self.types.signature(ty))
+                    .map(|(params, result)| {
+                        let returns = if asynchronous {
+                            self.types.awaited(result).unwrap_or(result)
+                        } else {
+                            result
+                        };
+                        (params, returns)
+                    }),
+                self,
+                node,
+            )?;
         }
-        let ty = self.types.callable(
-            signature.params[skip..]
-                .iter()
-                .map(|parameter| parameter.ty)
-                .collect(),
-            if signature.asynchronous {
-                self.types.coroutine(signature.returns)
-            } else {
-                signature.returns
-            },
-        );
+        let ty = signature.callable_type(self.types, skip);
         let unbound = receiver.is_none();
         let ty = if let Some(method) = method_site {
-            self.types
-                .bound_source_method(ty, method.class, method.index)
+            // Inherited reads share a source binder even when they select different
+            // native bodies. Keep specialized layouts and nonliteral defaults local.
+            let class = &self.classes.declarations.definitions[method.class];
+            let owner = self.classes.declarations.ids[&class.method_origins[method.index]];
+            let method = if class_method
+                && owner != method.class
+                && let Some(original) =
+                    self.classes.methods[owner].get(class.methods[method.index].name.as_str())
+                && original.returns == signature.returns
+                && original
+                    .params
+                    .iter()
+                    .map(|p| p.ty)
+                    .eq(signature.params.iter().map(|p| p.ty))
+                && class.methods[method.index]
+                    .parameters
+                    .iter_non_variadic_params()
+                    .all(|p| p.default.as_deref().is_none_or(ast::Expr::is_literal_expr))
+            {
+                original.method.unwrap()
+            } else {
+                method
+            };
+            self.types.source_method(
+                ty,
+                method.class,
+                method.index,
+                receiver.as_ref().map(|r| r.ty),
+            )
         } else if unbound && let Some(&policy) = self.classes.cached.get(&signature.id) {
             self.types.declared_cache(ty, signature.id, policy)
         } else {
             ty
         };
+        // The inherited spelling retains its checked receiver type. Its source
+        // function accepts that instance through the declaring class's native ABI.
+        let declaration = if unbound
+            && !signature.asynchronous
+            && let Some(method) = signature.method
+            && method.kind(self.classes.declarations) == crate::classes::MethodKind::Instance
+            && !self.classes.cached.contains_key(&signature.id)
+        {
+            let class = &self.classes.declarations.definitions[method.class];
+            let owner = self.classes.declarations.ids[&class.method_origins[method.index]];
+            self.classes.methods[owner]
+                .get(class.methods[method.index].name.as_str())
+                .filter(|original| {
+                    owner != method.class
+                        && !original.asynchronous
+                        && !self.classes.producer_items.contains_key(&original.id)
+                        && !self.classes.cached.contains_key(&original.id)
+                        && original.returns == signature.returns
+                        && original
+                            .params
+                            .first()
+                            .zip(signature.params.first())
+                            .is_some_and(|(formal, receiver)| {
+                                formal.ty == Type::Class(owner)
+                                    && receiver.ty == Type::Class(method.class)
+                                    && self.record_upcast(receiver.ty, formal.ty)
+                            })
+                        && original.params.iter().skip(1).map(|p| p.ty).eq(signature
+                            .params
+                            .iter()
+                            .skip(1)
+                            .map(|p| p.ty))
+                })
+        } else {
+            None
+        };
+        let (function, entry_ty) = if let Some(original) = declaration {
+            let receiver = signature.params[0].ty;
+            let formal = original.params[0].ty;
+            if self
+                .types
+                .may_own_file(receiver, &self.classes.fields, true)
+                != self.types.may_own_file(formal, &self.classes.fields, true)
+            {
+                return Err(self.scoped_builtin_error(
+                    "an inherited callable with different receiver ownership",
+                    node,
+                ));
+            }
+            (original.id, original.callable_type(self.types, 0))
+        } else {
+            (signature.id, ty)
+        };
         let value = Expr {
-            ty,
+            ty: entry_ty,
             kind: ExprKind::Callable {
-                function: signature.id,
+                function,
                 receiver: receiver.map(Box::new),
             },
         };
-        Ok(if unbound {
-            Expr {
+        if unbound {
+            let value = if entry_ty == ty {
+                value
+            } else {
+                Expr {
+                    ty,
+                    kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
+                }
+            };
+            Ok(Expr {
                 ty,
-                kind: ExprKind::Builtin(Builtin::StaticFunction(signature.id), vec![value]),
-            }
+                kind: ExprKind::Builtin(Builtin::StaticFunction(function), vec![value]),
+            })
+        } else if let Some(expected) = expected {
+            self.coerce(value, expected, node)
         } else {
-            value
-        })
+            Ok(value)
+        }
     }
 
     /// An escaping callable has no environment to store enclosing locals.
@@ -352,34 +490,51 @@ impl Checker<'_> {
         if matches!(*lambda.body, ast::Expr::Yield(_)) {
             return Err(self.object_builtin_error("generator lambda", lambda));
         }
+        // A declared result still needs the fixed Callable type checks.
+        let layout = if returns.is_some() {
+            Kind::UnsupportedRepresentation
+        } else {
+            Kind::ScopedObject
+        };
         let declared = lambda.parameters.as_deref();
-        if declared.is_some_and(|parameters| {
+        let object_signature = declared.is_some_and(|parameters| {
             parameters.vararg.is_some()
                 || parameters.kwarg.is_some()
                 || !parameters.kwonlyargs.is_empty()
                 || parameters
                     .iter_non_variadic_params()
                     .any(|parameter| parameter.default.is_some())
-        }) {
-            return Err(error(
-                self.source,
+        });
+        let mut unavailable = object_signature.then(|| {
+            self.classified_error(
+                layout,
                 lambda,
-                "lambdas require positional parameters without defaults or variadics",
-            ));
-        }
+                "lambda defaults and variadic parameters require the registered binder",
+            )
+        });
         let names = declared
             .into_iter()
             .flat_map(|parameters| parameters.iter_non_variadic_params())
             .collect::<Vec<_>>();
-        let parameters = parameters
-            .or_else(|| names.is_empty().then(Vec::new))
-            .ok_or_else(|| {
-                error(
-                    self.source,
+        let parameters = if object_signature {
+            for parameter in &names {
+                if let Some(default) = &parameter.default {
+                    self.expr(default)?;
+                }
+            }
+            vec![Type::PythonObject; names.len()]
+        } else if let Some(parameters) = parameters {
+            parameters
+        } else {
+            if !names.is_empty() {
+                unavailable = Some(self.classified_error(
+                    Kind::ScopedObject,
                     lambda,
-                    "lambda parameters require an exact Callable context or a map/filter input",
-                )
-            })?;
+                    "lambda parameter layouts require the registered binder",
+                ));
+            }
+            vec![Type::PythonObject; names.len()]
+        };
         if parameters.len() != names.len() {
             return Err(error(
                 self.source,
@@ -387,18 +542,38 @@ impl Checker<'_> {
                 "lambda parameter count does not match its Callable context",
             ));
         }
-        let mut bound = narrowing::expression_assignments(&lambda.body);
+        let (reads, mut bound) = function_scope::expression_bindings(&lambda.body);
         bound.extend(names.iter().map(|parameter| parameter.name().to_string()));
-        let mut captures = comprehensions::free_reads(&lambda.body, bound.clone())
+        let variadics = declared
             .into_iter()
+            .flat_map(|params| {
+                params
+                    .vararg
+                    .as_deref()
+                    .map(|param| (param, self.types.var_tuple(Type::PythonObject)))
+                    .into_iter()
+                    .chain(
+                        params
+                            .kwarg
+                            .as_deref()
+                            .map(|param| (param, self.types.dict(Type::Str, Type::PythonObject))),
+                    )
+            })
+            .collect::<Vec<_>>();
+        bound.extend(variadics.iter().map(|(param, _)| param.name.to_string()));
+        let mut captures = reads
+            .into_iter()
+            .filter(|name| !bound.contains(name))
             .filter_map(|name| self.names.get(&name).map(|&slot| (slot, name)))
             .collect::<Vec<_>>();
         if !pull && !captures.is_empty() {
-            return Err(error(
-                self.source,
-                lambda,
-                "capturing lambdas are unsupported; only parameters and fixed module bindings may be read",
-            ));
+            unavailable.get_or_insert_with(|| {
+                self.classified_error(
+                    layout,
+                    lambda,
+                    "an escaping lambda requires closure cells in its registered frame",
+                )
+            });
         }
         let id = self.helpers.reserve();
         let omitted_free = self.unbound_assert_captures();
@@ -411,9 +586,12 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        // Keep the binder's layout failure while checking the lambda body for
+        // independent source errors, just as for any other checked region.
+        *helper.unrepresented.get_mut() = unavailable;
+        helper.frame = LexicalFrame::Named(ast::name::Name::new_static("<lambda>"));
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
-        helper.local_iter = bound.contains("iter");
         helper.class = self.class;
         helper.class_receiver = self
             .class_receiver
@@ -421,9 +599,11 @@ impl Checker<'_> {
             .filter(|name| !bound.contains(name));
         let mut params = Vec::new();
         for (parameter, &ty) in names.iter().zip(&parameters) {
-            let slot = helper.declare(parameter.name().as_str(), ty, *parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(&parameter.parameter, ty, None, None)?;
             params.push(slot);
+        }
+        for (parameter, ty) in variadics {
+            params.push(helper.bind_parameter(parameter, ty, None, None)?);
         }
         let mut args = Vec::with_capacity(captures.len());
         captures.sort_unstable_by_key(|(slot, _)| *slot);
@@ -437,16 +617,27 @@ impl Checker<'_> {
             }
             // A later pull may see a different optional or union arm.
             let value = self.local(source);
-            let slot = helper.declare(&name, value.ty, lambda)?;
+            let slot = helper.declare_binding(&name, value.ty, lambda, true, None)?;
             helper.assigned.insert(slot);
+            // An escaping lambda reads the later cell value. Only its lexical annotation survives.
+            let origin = if pull {
+                self.assigned.value_source(source)
+            } else {
+                self.declared_slots
+                    .get(&source)
+                    .copied()
+                    .map(ValueSource::Declaration)
+            };
+            helper.assigned.set_value_source(slot, origin);
             params.push(slot);
             args.push(value);
         }
-        let body = if let Some(returns) = returns {
-            helper.expr_expected(&lambda.body, returns)?
+        let result = if let Some(returns) = returns {
+            helper.expr_expected(&lambda.body, returns)
         } else {
-            helper.expr(&lambda.body)?
+            helper.expr(&lambda.body)
         };
+        let body = helper.finish_region(result)?;
         let returns = body.ty;
         let mut body = vec![Statement::Return(body)];
         helper.fault_frame(&mut body, "<lambda>", lambda.start());
@@ -463,8 +654,6 @@ impl Checker<'_> {
                 calls: helper.calls,
                 class_reads: helper.class_reads.into_inner(),
                 source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(lambda, "recursive calls are unsupported in this prototype"),
             },
         );
         if pull {
@@ -485,6 +674,13 @@ impl Checker<'_> {
 
     /// Callable types contain positional types, not parameter names or defaults.
     pub(super) fn invoke(&mut self, call: &ast::ExprCall, callable: Expr) -> Result<Expr, String> {
+        if callable.ty == Type::PythonObject {
+            if let Some(result) = self.discarded_call(Type::PythonObject) {
+                self.check_discarded_arguments(call, 0)?;
+                return Ok(result);
+            }
+            return self.call_with_target(call, callable);
+        }
         if let Type::WeakProxy(class) = callable.ty {
             return self.weak_proxy_call(call, callable, class);
         }
@@ -573,17 +769,28 @@ impl Checker<'_> {
         if let Some(result) = self.invoke_bound_unittest(call, &callable)? {
             return Ok(result);
         }
-        if let Some((class, index)) = self.types.bound_method_site(callable.ty) {
-            let method = &self.classes.declarations.definitions[class].methods[index];
-            let signature = self.classes.methods[class][method.name.as_str()].clone();
-            let (returns, args) = self.bind_source(call, &signature, None, 1, None)?;
-            return Ok(Expr {
-                ty: returns,
-                kind: ExprKind::Invoke {
-                    callable: Box::new(callable),
-                    args,
-                },
-            });
+        if let Some((signature, receiver)) = self.saved_method(callable.ty) {
+            // A required positional instance call already has its receiver-bound ABI.
+            let bind_declaration = receiver.is_none_or(|ty| ty == Type::BuiltinClass)
+                || !call.arguments.keywords.is_empty()
+                || signature.has_defaults_after_receiver();
+            if !signature.asynchronous && bind_declaration {
+                let signature = signature.clone();
+                let (returns, args) = self.bind_source(
+                    call,
+                    &signature,
+                    None,
+                    usize::from(receiver.is_some()),
+                    None,
+                )?;
+                return Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Invoke {
+                        callable: Box::new(callable),
+                        args,
+                    },
+                });
+            }
         }
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
@@ -592,63 +799,574 @@ impl Checker<'_> {
                 "an indirect call requires a nonoptional exact Callable value",
             )
         })?;
-        if !call.arguments.keywords.is_empty() || call.arguments.args.len() != params.len() {
+        self.positional_invoke(call, callable, params, returns, None)
+    }
+
+    pub(super) fn registered_callback(&mut self, expr: &ast::Expr) -> Result<Option<Expr>, String> {
+        let Some(call) = expr.as_call_expr() else {
+            return Ok(None);
+        };
+        let Some(slot) = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .copied()
+        else {
+            return Ok(None);
+        };
+        let ty = self.locals[slot];
+        if !self.assigned.contains(&slot) {
+            return Ok(None);
+        }
+        let Some((params, returns)) = self
+            .types
+            .with_callback_signature(ty, |params, returns| {
+                registered::values::fixed_positional_arguments(call)
+                    .then(|| (params.to_vec(), returns))
+            })
+            .flatten()
+        else {
+            return Ok(None);
+        };
+        self.positional_invoke(call, self.local(slot), params, returns, Some(expr))
+            .map(Some)
+    }
+
+    fn positional_invoke(
+        &mut self,
+        call: &ast::ExprCall,
+        callable: Expr,
+        params: Vec<Type>,
+        returns: Type,
+        registered_site: Option<&ast::Expr>,
+    ) -> Result<Expr, String> {
+        let needs_cell_default = call.arguments.args.len() < params.len()
+            && matches!(callable.kind, ExprKind::Local(slot)
+                if self.assigned.value_source(slot) == Some(ValueSource::ReboundMethod));
+        // A positional Callable carries no keyword names. The selected dictionary
+        // value binds the written keywords in its Python call frame.
+        if !call.arguments.keywords.is_empty()
+            && matches!(&callable.kind, ExprKind::Builtin(Builtin::DictGet, args)
+                if handler_signature(args[0].ty, self.types).is_some())
+        {
+            return Ok(Expr {
+                ty: returns,
+                ..self.call_live_target(call, callable)?
+            });
+        }
+        if !call.arguments.keywords.is_empty()
+            || (call.arguments.args.len() != params.len() && !needs_cell_default)
+        {
             return Err(error(
                 self.source,
                 call,
                 "indirect calls require the full positional Callable signature; keywords and omitted defaults are unsupported",
             ));
         }
+        let local = call
+            .func
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()));
+        let saved = match &callable.kind {
+            ExprKind::Local(slot) => self.saved_call_target(*slot),
+            _ => None,
+        };
+        // A stored function supplies layout evidence even when this invocation must
+        // still load the callable. Keep the stronger saved-target proof for direct dispatch.
+        let sequence_callee = self.inference.and_then(|inference| {
+            if let Some(ValueSource::Function(id)) = self.value_source(&callable)
+                && !call
+                    .func
+                    .as_name_expr()
+                    .is_some_and(|name| self.live_module_name(&name.id))
+            {
+                Some((inference, id))
+            } else {
+                None
+            }
+        });
+        let local_callable = matches!(callable.kind, ExprKind::Local(slot)
+            if local == Some(&slot) && self.locals[slot] == callable.ty && matches!(callable.ty, Type::Callable(_)));
+        let declaration = local
+            .and_then(|slot| self.declared_slots.get(slot))
+            .copied()
+            .or_else(|| self.value_declaration(&callable));
         let index_callable = self.types.index_callable_signature(callable.ty).is_some();
-        let values = call
-            .arguments
-            .args
-            .iter()
-            .zip(params)
-            .enumerate()
-            .map(|(slot, (argument, ty))| {
-                if slot == 0 && index_callable {
-                    self.integer_index(argument)
-                } else {
-                    self.expr_expected(argument, ty)
-                }
+        let cold_frame = registered_site.is_none() && matches!(returns, Type::Coroutine(_));
+        // Resolve the loaded callable before an argument can replace its slot.
+        let eager = cold_frame
+            && self.asynchronous
+            && self.registered.is_none()
+            && matches!(self.value_source(&callable), Some(ValueSource::CoroutineCallback(_, target))
+                if self.types.coroutine_target(target).is_none());
+        let mut values = Vec::with_capacity(call.arguments.args.len() + usize::from(cold_frame));
+        let source = self.source;
+        // An omitted expression may have a source contract of its own. The ordinary
+        // binder checks the call whenever its unevaluated tail contains one.
+        let last_source_operand = std::cell::LazyCell::new(|| {
+            call.arguments.args.iter().rposition(|arg| {
+                !arg.is_literal_expr() || calls::scalar_literal(arg, source).is_err()
             })
-            .collect::<Result<Vec<_>, _>>()?;
-        if let Type::Coroutine(_) = returns {
+        });
+        for (slot, (argument, ty)) in call.arguments.args.iter().zip(params).enumerate() {
+            let checked_tail = || last_source_operand.is_none_or(|last| last <= slot);
+            let value = if registered_site.is_some() || slot == 0 && index_callable {
+                let value = self.expr(argument)?;
+                if self.terminating_operand(&value) && checked_tail() {
+                    value
+                } else if registered_site.is_none() {
+                    self.index_value(value, argument)?
+                } else if value.ty == ty {
+                    // A Python activation passes the original object, without conversion.
+                    value
+                } else {
+                    return Err(
+                        self.scoped_builtin_error("a converted callable argument", argument)
+                    );
+                }
+            } else {
+                let context = sequence_callee.map_or(ty, |(inference, id)| {
+                    inference.sequence_context(id, slot, ty, argument)
+                });
+                calls::Supplied::Source(argument).check_with(
+                    self,
+                    context,
+                    false,
+                    None,
+                    |checker, value, expected, site| {
+                        if checker.terminating_operand(&value) && checked_tail() {
+                            return Ok(value);
+                        }
+                        if let Some((inference, id)) = sequence_callee
+                            && let Some(member) =
+                                inference.sequence_member(id, slot, value.ty, checker.types)
+                        {
+                            return inference.bind_sequence(id, slot, member, checker, value, site);
+                        }
+                        checker.coerce(value, expected, site).map_err(|error| {
+                            if !local_callable {
+                                return error;
+                            }
+                            // The inferred signature supplies a layout for this copy. Only a
+                            // saved target or a written declaration owns its argument contract.
+                            if saved.is_none()
+                                && declaration.is_none()
+                                && matches!(&error, Failure::Diagnostic(d) if d.kind == Kind::ExactType)
+                                && matches!(checker.value_source(&callable), Some(ValueSource::Function(_)))
+                            {
+                                return checker.scoped_builtin_error("a converted callable argument", site);
+                            }
+                            let Some(parameter) = checker
+                                .graph
+                                .session
+                                .original_callee_is_annotated_parameter(
+                                    checker.module,
+                                    call,
+                                    site.range(),
+                                    &checker.graph.modules[checker.module].parsed,
+                                )
+                            else {
+                                return error;
+                            };
+                            error
+                                .at_callable_argument(site.range(), || parameter)
+                                .expected_from(declaration, site.range())
+                        })
+                    },
+                )?
+            };
+            if self.terminating_operand(&value) && checked_tail() {
+                if value.ty != ty {
+                    self.graph
+                        .checked_argument_type(self.module, argument.range());
+                }
+                values.insert(0, callable);
+                return Ok(calls::ArgumentScope::stopped(self, values, value, returns));
+            }
+            values.push(value);
+        }
+        if needs_cell_default {
+            // The checked positional ABI constrains supplied arguments. The current
+            // function in the shared cell owns the defaults for the remaining slots.
+            self.require_registered_operation(call)?;
+            return Ok(Expr {
+                ty: returns,
+                ..Expr::unrepresented()
+            });
+        }
+        if let Some(expr) = registered_site {
+            return Ok(self.located_callback(expr, call, callable, values));
+        }
+        if eager {
+            let failure =
+                self.classified_error(Kind::UnsupportedRepresentation, call, EAGER_CALLBACK_ABI);
+            if self.missing_operation(&failure) {
+                return Ok(Expr {
+                    ty: returns,
+                    ..Expr::unrepresented()
+                });
+            }
+        }
+        if cold_frame {
             return Ok(self.indirect_coroutine(callable, values, returns));
         }
-        Ok(Expr {
+        let mut args = ir::CallArgs::positional(values);
+        if let Some(id) = saved {
+            args.site = ir::CallSite::SavedFunction(self.call_origin(call), id);
+        }
+        let value = Expr {
             ty: returns,
             kind: ExprKind::Invoke {
                 callable: Box::new(callable),
-                args: ir::CallArgs::positional(values),
+                args,
             },
-        })
+        };
+        if let Some(sites) = &mut self.fixed_sites
+            && registered::values::fixed_positional_arguments(call)
+        {
+            sites.positional_invoke(call, &value, local_callable);
+        }
+        Ok(value)
+    }
+
+    pub(super) fn saved_call_target(&self, slot: usize) -> Option<usize> {
+        if self.tracks_called_bindings()
+            && self.module_namespace.is_unexposed()
+            && let Some(ValueSource::Function(id)) = self.assigned.value_source(slot)
+        {
+            Some(id)
+        } else {
+            None
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_trailing_declaration_preserves_a_raising_call_operand() {
+        let project = tempfile::tempdir().unwrap();
+        let main = project.path().join("raising_operand.py");
+        let source = include_str!("../../../../tests/fixtures/callables/raising_operand.py");
+        std::fs::write(
+            &main,
+            format!("{source}\n\ndef unrelated() -> int:\n    return 19\n"),
+        )
+        .unwrap();
+        crate::check_file(&main, None).unwrap();
+    }
+
+    #[test]
+    fn a_type_checking_only_raise_preserves_the_physical_argument_error() {
+        let project = tempfile::tempdir().unwrap();
+        let main = project.path().join("main.py");
+        std::fs::write(
+            &main,
+            "from typing import TYPE_CHECKING\ndef stop() -> None:\n    if TYPE_CHECKING:\n        raise ValueError()\ndef take(x: int) -> int:\n    return x\ntake(stop())\ndef unrelated() -> int:\n    return 19\n",
+        )
+        .unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            error.contains("main.py:7:6: Imre: expected int, got None"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn stored_provider_callable_selects_its_own_unsolved_signature() {
+        use crate::frontend::{lower_with_caller_cache, phase::Kind};
+        use crate::modules::SourceGraph;
+        use std::fs;
+
+        let project = tempfile::tempdir().unwrap();
+        let installed = tempfile::tempdir().unwrap();
+        let provider = installed.path().join("support.py");
+        fs::write(
+            &provider,
+            "def earlier(text): return text\ndef selected(exc): return exc\n",
+        )
+        .unwrap();
+        let entry = project.path().join("app.py");
+        fs::write(
+            &entry,
+            "import support\ntry:\n    raise KeyError('marker')\nexcept KeyError as error:\n    helper = support.selected\n    print(helper(error))\n",
+        )
+        .unwrap();
+        let mut graph = SourceGraph::load(&entry, None, &[installed.path().to_path_buf()]).unwrap();
+        let diagnostic = lower_with_caller_cache(&mut graph, None, None)
+            .err()
+            .unwrap();
+        assert_eq!(diagnostic.kind, Kind::ScopedObject);
+        assert_eq!(
+            diagnostic.to_string(),
+            format!(
+                "{}:2:1: Imre: using this function as a value requires Python argument binding",
+                provider.canonicalize().unwrap().display()
+            ),
+        );
+    }
+
+    #[test]
+    fn registered_entry_reuses_the_typed_callback_body() {
+        use crate::frontend::caller_cache::observe_lowerings;
+        use crate::ir::{self, ExprKind, Type};
+        use crate::modules::SourceGraph;
+        use ruff_text_size::Ranged;
+
+        let source = concat!(
+            "from typing import Callable\n",
+            "def report(n: int, sink: Callable[[int], None]) -> None:\n",
+            "    sink(n + 1)\n",
+            "def first(n): print(n)\n",
+            "def second(n): print(n)\n",
+            "def publish(sink): sink(3)\n",
+            "def marker(n: int) -> None: print(n)\n",
+            "report(7, marker)\n",
+            "handlers = {'first': first, 'second': second}\n",
+            "publish(handlers[input()])\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, source).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (program, lowered) = observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert!(matches!(program, crate::CheckedProgram::Registered(_)));
+        let site = graph.modules[graph.entry].parsed.syntax().body[1].start();
+        let bodies = graph.registered_functions();
+        let body = &bodies[&graph.entry][&site].function;
+        assert_eq!(lowered.iter().filter(|name| *name == "report").count(), 1);
+        assert!(matches!(body.locals[body.params[1]], Type::Callable(_)));
+        let mut invokes = 0;
+        ir::walk_expressions(&body.body, &mut |expr| {
+            if let ExprKind::Invoke { callable, args } = &expr.kind {
+                assert!(expr.is_registered_invoke());
+                assert!(matches!(callable.ty, Type::Callable(_)));
+                assert_eq!(args.values[0].ty, Type::Int);
+                let range = args.site.python().unwrap().call.range;
+                assert_eq!(&source[range], "sink(n + 1)");
+                invokes += 1;
+            }
+        });
+        assert_eq!(invokes, 1);
+
+        std::fs::write(&path, source.replace("sink(n + 1)", "sink('bad')")).unwrap();
+        let error = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("app.py:3:10: Imre: expected int, got str"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_named_loop_tests_the_checked_callbacks_python_result() {
+        use crate::ir;
+        use crate::modules::SourceGraph;
+        use ruff_text_size::Ranged;
+
+        let source = include_str!("../../../../tests/fixtures/boxed_while_truth.py");
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("app.py");
+        std::fs::write(&app, "import subject\nsubject.current()\n").unwrap();
+        std::fs::write(dir.path().join("subject.py"), source).unwrap();
+        let mut graph = SourceGraph::load(&app, None, &[]).unwrap();
+        graph.registered_startup = true;
+        crate::checked_lower(&mut graph).unwrap();
+
+        let (module, subject) = graph
+            .modules
+            .iter()
+            .enumerate()
+            .find(|(_, module)| module.name == "subject")
+            .unwrap();
+        let consume = subject
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .find_map(|stmt| {
+                stmt.as_function_def_stmt()
+                    .filter(|f| f.name.as_str() == "consume")
+            })
+            .unwrap();
+        let functions = graph.registered_functions();
+        let body = &functions[&module][&consume.start()].function;
+        let mut calls = Vec::new();
+        ir::walk_expressions(&body.body, &mut |expr| {
+            if expr.is_registered_invoke()
+                && let ir::ExprKind::Invoke { args, .. } = &expr.kind
+            {
+                calls.push(&subject.source[args.site.python().unwrap().call.range]);
+            }
+        });
+        assert_eq!(
+            calls.iter().filter(|&&site| site == "right()").count(),
+            1,
+            "{calls:?}"
+        );
+    }
+
+    #[test]
+    fn callable_parameter_owns_its_argument_in_a_checked_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main.py");
+        let declarations = "import ast\nfrom collections.abc import Callable\ndef take(x: str) -> str: return x\ndef apply(take: Callable[[int], int]) -> int:\n";
+        std::fs::write(&main, format!("{declarations}    return take('x')\n")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(
+            error.contains("main.py:5:17: Imre: expected int, got str"),
+            "{error}"
+        );
+
+        std::fs::write(&main, format!("{declarations}    return take(1)\n")).unwrap();
+        crate::check_file(&main, None).unwrap();
+    }
+
+    #[test]
+    fn a_copied_callable_keeps_its_declared_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("aliases.py");
+        let source = concat!(
+            "from collections.abc import Callable\n",
+            "def apply(cb: Callable[[int], int]) -> int:\n",
+            "    method = cb\n",
+            "    if False:\n",
+            "        return method('x')\n",
+            "    return 42\n",
+            "def expose(): return locals()\n",
+            "print(set([1, 2]))\n",
+        );
+        std::fs::write(&file, source).unwrap();
+        let error = crate::check_file(&file, None).unwrap_err();
+        assert!(
+            error.contains("aliases.py:5:23: Imre: expected int, got str"),
+            "{error}"
+        );
+        std::fs::write(&file, source.replace("'x'", "7")).unwrap();
+        crate::check_file(&file, None).unwrap();
+    }
+
+    #[test]
+    fn a_reassigned_callable_keeps_its_declared_argument() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("callbacks.py");
+        let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\nasync def run(replacement: Callable[[int], Awaitable[int]]) -> int:\n    cb: Callable[[int], Awaitable[int]] = cold\n    cb = replacement\n    return await cb('wrong')\n";
+        std::fs::write(&path, source).unwrap();
+        let failure = crate::check_file(&path, None).unwrap_err();
+        assert!(
+            failure.contains("callbacks.py:7:21: Imre: expected int, got str"),
+            "{failure}"
+        );
+        std::fs::write(&path, source.replace("'wrong'", "7")).unwrap();
+        crate::check_file(&path, None).unwrap();
+    }
+
+    #[test]
     fn eager_coroutine_factories_remain_direct_calls() {
+        use crate::frontend::{lower, lower_with_caller_cache, phase::Kind};
+        use crate::ir::{self, Builtin, ExprKind, ProcessOperation};
+        use crate::modules::SourceGraph;
+
         let source = "from collections.abc import Awaitable, Callable\nasync def cold(x: int) -> int:\n    return x\ndef factory(x: int) -> Awaitable[int]:\n    return cold(x)\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("callbacks.py");
         for callback in ["cold", "factory", "lambda x: cold(x)"] {
             let program = format!(
                 "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = {callback}\n    return await cb(7)\n"
             );
+            let mut graph = SourceGraph::single(&program).unwrap();
             if callback == "cold" {
-                crate::check(&program).unwrap();
+                let module = lower(&graph).unwrap();
+                let mut indirect = false;
+                ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+                    indirect |= matches!(
+                        expr.kind,
+                        ExprKind::Builtin(
+                            Builtin::Process(ProcessOperation::IndirectCoroutine { .. }, _),
+                            _
+                        )
+                    );
+                });
+                assert!(indirect);
             } else {
-                assert!(
-                    crate::check(&program)
-                        .unwrap_err()
-                        .contains("Awaitable callback must be defined with async def")
+                let Err(error) = lower_with_caller_cache(&mut graph, None, None) else {
+                    panic!("eager factory cannot enter a cold callback adapter");
+                };
+                assert_eq!(error.kind, Kind::UnsupportedRepresentation);
+                assert_eq!(
+                    error.to_string(),
+                    format!(
+                        "{}:8:18: Imre: an Awaitable callback must be defined with async def",
+                        graph.modules[graph.entry].path.display()
+                    )
                 );
             }
+            std::fs::write(&path, &program).unwrap();
+            crate::check(&program).unwrap();
+            crate::check_file(&path, None).unwrap();
+            if callback != "cold" {
+                let mut entry = SourceGraph::load(&path, None, &[]).unwrap();
+                crate::checked_lower(&mut entry).unwrap();
+                let (functions, _) = entry.take_registered_functions();
+                let start =
+                    ruff_text_size::TextSize::try_from(program.find("async def cold").unwrap())
+                        .unwrap();
+                let cold = &functions[&entry.entry][&start];
+                assert!(
+                    matches!(cold.function.body.as_slice(), [ir::Statement::Return(value)]
+                    if matches!(value.kind, ExprKind::Local(0)))
+                );
+                let caller = dir.path().join("main.py");
+                std::fs::write(
+                    &caller,
+                    "import asyncio\nimport callbacks\nprint(asyncio.run(callbacks.run()))\n",
+                )
+                .unwrap();
+                let mut imported = SourceGraph::load(&caller, None, &[]).unwrap();
+                crate::checked_lower(&mut imported).unwrap();
+                let id = imported
+                    .modules
+                    .iter()
+                    .position(|module| module.name == "callbacks")
+                    .unwrap();
+                let (functions, _) = imported.take_registered_functions();
+                let body = |declaration| {
+                    let start =
+                        ruff_text_size::TextSize::try_from(program.find(declaration).unwrap())
+                            .unwrap();
+                    &functions[&id][&start]
+                };
+                let sites = |declaration| {
+                    body(declaration)
+                        .fixed_sites
+                        .iter()
+                        .map(|&site| &program[site])
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(sites("async def cold"), ["return x", "x"]);
+                assert_eq!(sites("def factory"), ["return cold(x)", "cold(x)", "x"]);
+                let factory = body("def factory");
+                assert!(matches!(factory.fixed_attribute(factory.fixed_sites[1]),
+                    Some(crate::frontend::FixedAttribute::Call(Some(callee), _))
+                    if matches!(&callee.without_location().kind,
+                        ExprKind::Builtin(Builtin::RegisteredName(name), _) if name == "cold")));
+            }
         }
-        crate::check(&format!(
-            "{source}async def run() -> int:\n    return await factory(7)\n"
-        ))
-        .unwrap();
+        for tail in ["return 7", "cb = cold\n    return await cb(7)"] {
+            let source = format!(
+                "{source}async def run() -> int:\n    cb: Callable[[int], Awaitable[int]] = factory\n    {tail}\n"
+            );
+            let mut graph = SourceGraph::single(&source).unwrap();
+            let Err(failure) = lower_with_caller_cache(&mut graph, None, None) else {
+                panic!("the stored factory still needs graph validation");
+            };
+            assert_eq!(failure.to_string(), super::EAGER_CALLBACK_ABI);
+        }
+        let direct = format!("{source}async def run() -> int:\n    return await factory(7)\n");
+        let module = lower(&SourceGraph::single(&direct).unwrap()).unwrap();
+        let mut calls_factory = false;
+        ir::walk_expressions(&module.functions[2].body, &mut |expr| {
+            calls_factory |= matches!(expr.kind, ExprKind::Call(1, _));
+        });
+        assert!(calls_factory);
     }
 }

@@ -111,7 +111,7 @@ impl Checker<'_> {
                 let count = if size.ty == Type::Bool {
                     Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![size]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![size]),
                     }
                 } else {
                     size

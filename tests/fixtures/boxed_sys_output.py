@@ -44,6 +44,22 @@ assert buffer.write(b"then:") == 5
 assert sys.stdout.write("\n") == 1
 assert sys.stdout.flush() is None
 
+# Reconfiguration flushes the previous text before changing the live stream.
+out = sys.__stdout__
+encoding, errors = out.encoding, out.errors
+out.write("old")
+os.write(1, b"A")
+assert out.reconfigure(errors="backslashreplace") is None
+os.write(1, b"B")
+out.reconfigure(encoding="ascii", errors="backslashreplace", write_through=True)
+assert (sys.stdout.encoding, sys.stdout.errors, sys.stdout.write_through) == (
+    "ascii", "backslashreplace", True
+)
+assert out.write("é") == 1
+out.buffer.write(b"C")
+out.reconfigure(encoding=encoding, errors=errors, write_through=False)
+out.write("\n")
+
 err_buffer = original.buffer
 assert original.flush() is None
 assert original.write("pending") == 7

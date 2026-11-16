@@ -1,11 +1,12 @@
 //! Static POSIX calls expose a native Path through the same boundary as os.fspath.
 use super::*;
 use crate::ir::PosixPathOperation;
+use std::result::Result;
 
 impl Checker<'_> {
     /// Consume a concrete path sequence once. Display elements use the closed
     /// str/bytes union when needed, so mixed types reach Python's runtime error.
-    fn posix_commonpath(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
+    fn posix_commonpath(&mut self, expression: &ast::Expr) -> phase::Result<Expr, String> {
         let expression = if let ast::Expr::Call(call) = expression
             && self.is_builtin_iter(call)
             && call.arguments.keywords.is_empty()
@@ -80,7 +81,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         operation: PosixPathOperation,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let join = operation == PosixPathOperation::Join;
         let param = match operation {
@@ -89,18 +90,18 @@ impl Checker<'_> {
             PosixPathOperation::Normpath | PosixPathOperation::Abspath => "path",
             _ => "p",
         };
-        let (first, rest) = match (
+        let written = match (
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),
         ) {
-            ([first, rest @ ..], []) if join || rest.is_empty() => (first, rest),
+            (args @ [_, ..], []) if join || args.len() == 1 => args,
             ([], [keyword])
                 if keyword
                     .arg
                     .as_ref()
                     .is_some_and(|name| name.as_str() == param) =>
             {
-                (&keyword.value, &[][..])
+                std::slice::from_ref(&keyword.value)
             }
             _ => {
                 return Err(error(
@@ -115,25 +116,24 @@ impl Checker<'_> {
             }
         };
         if operation == PosixPathOperation::Commonpath {
-            return self.posix_commonpath(first);
+            return self.posix_commonpath(&written[0]);
         }
-        let mut operands = Vec::with_capacity(1 + rest.len());
-        for expression in std::iter::once(first).chain(rest) {
-            operands.push((expression, self.expr(expression)?));
+        let operands = registered::values::call_arguments(call, |arg| self.expr(arg))?;
+        if (join || operation == PosixPathOperation::Abspath)
+            && operands.iter().any(|value| value.ty == Type::PythonObject)
+        {
+            return self.call_import_with_operands(call, operands);
         }
-        let bytes = operands[0].1.ty == Type::Bytes;
+        let bytes = operands[0].ty == Type::Bytes;
         let mixed = join
             && operands
                 .iter()
-                .any(|(_, value)| (value.ty == Type::Bytes) != bytes);
+                .any(|value| (value.ty == Type::Bytes) != bytes);
         // CPython's mixed-type diagnostic inspects the unconverted tail even
         // when the component that first failed appears earlier in the call.
-        let path_in_tail = operands
-            .iter()
-            .skip(1)
-            .any(|(_, value)| value.ty == Type::Path);
+        let path_in_tail = operands[1..].iter().any(|value| value.ty == Type::Path);
         let mut args = Vec::with_capacity(operands.len());
-        for (index, (expression, value)) in operands.into_iter().enumerate() {
+        for (index, (value, expression)) in operands.into_iter().zip(written).enumerate() {
             let value = if mixed
                 && index > 0
                 && self

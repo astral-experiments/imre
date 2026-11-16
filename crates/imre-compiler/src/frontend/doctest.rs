@@ -3,11 +3,15 @@
 
 use super::*;
 
-use crate::modules::doctest::{sealed, source_docstrings};
+use crate::modules::doctest::documents;
 
 impl Checker<'_> {
-    pub(super) fn doctest_suite(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
+    pub(super) fn doctest_suite(
+        &mut self,
+        call: &ast::ExprCall,
+        binding: Option<Binding>,
+    ) -> Result<Option<Expr>, String> {
+        if binding == Some(Binding::Intrinsic(Intrinsic::DocExecute)) {
             let def = self.graph.doctest_runner().ok_or_else(|| {
                 error(
                     self.source,
@@ -26,9 +30,9 @@ impl Checker<'_> {
         if let Some(Binding::Intrinsic(
             op @ (Intrinsic::DocCaptureStart
             | Intrinsic::DocCaptureTake
-            | Intrinsic::DocAscii
+            | Intrinsic::DocExceptionName
             | Intrinsic::DocDisplay),
-        )) = self.resolve(&call.func)
+        )) = binding
         {
             self.reject_builtin_keywords(call)?;
             let (ty, kind) = match (op, call.arguments.args.as_ref()) {
@@ -40,11 +44,11 @@ impl Checker<'_> {
                     Type::Str,
                     ExprKind::Builtin(Builtin::DocCaptureTake, vec![]),
                 ),
-                (Intrinsic::DocAscii, [value]) => (
+                (Intrinsic::DocExceptionName, [exc]) => (
                     Type::Str,
                     ExprKind::Builtin(
-                        Builtin::AsciiEscape,
-                        vec![self.expr_expected(value, Type::Str)?],
+                        Builtin::ExceptionName,
+                        vec![self.expr_expected(exc, Type::Exception)?],
                     ),
                 ),
                 (Intrinsic::DocDisplay, [value]) => {
@@ -110,7 +114,7 @@ impl Checker<'_> {
             };
             return Ok(Some(Expr { ty, kind }));
         }
-        let Some(Binding::Definition(def)) = self.resolve(&call.func) else {
+        let Some(Binding::Definition(def)) = binding else {
             return Ok(None);
         };
         let owner = &self.graph.modules[def.module];
@@ -178,47 +182,50 @@ impl Checker<'_> {
         let Some(sig) = self.functions.get(&def) else {
             return Ok(None);
         };
-        let mut docs = Vec::new();
-        let module_name = match target {
-            Binding::Module(id) => {
-                let source = &self.graph.modules[id];
-                if source.bindings.contains_key("__test__") {
-                    return Err(error(
-                        self.source,
-                        node,
-                        "DocTestSuite __test__ additions require static documentation bindings",
-                    ));
-                }
-                source_docstrings(&source.name, &source.parsed.syntax().body, true, &mut docs);
-                source.name.as_str()
+        let filename = if let Binding::Module(id) = target {
+            if self.graph.modules[id].bindings.contains_key("__test__") {
+                return Err(error(
+                    self.source,
+                    node,
+                    "DocTestSuite __test__ additions require static documentation bindings",
+                ));
             }
-            Binding::IntrinsicModule(module) if let Some(catalog) = sealed(module) => {
-                catalog.append_to(&mut docs);
-                catalog.module
-            }
-            _ => return Ok(None),
+            Some(self.graph.module_filename(id))
+        } else {
+            None
         };
+        let Some((module_name, docs)) = documents(&self.graph.modules, target, &self.graph.session)
+        else {
+            return Ok(None);
+        };
+        let mut docs: Vec<_> = docs.iter().collect();
         docs.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let pair = self.types.tuple(vec![Type::Str, Type::Str]);
-        let values = docs
-            .into_iter()
-            .map(|(name, doc)| Expr {
-                ty: pair,
-                kind: ExprKind::Tuple(
-                    [name, doc]
-                        .into_iter()
-                        .map(|s| Expr {
-                            ty: Type::Str,
-                            kind: ExprKind::Str(s),
-                        })
-                        .collect(),
-                ),
-            })
-            .collect();
+        let optional_line = self.types.optional(Type::Int);
+        let entry = self.types.tuple(vec![Type::Str, Type::Str, optional_line]);
+        let mut values = Vec::with_capacity(docs.len());
+        for (name, doc, offset) in docs {
+            let line = match (target, *offset) {
+                (Binding::Module(id), Some(offset)) => {
+                    Expr::integer(self.graph.session.source_line(id, offset) - 1)
+                }
+                _ => Expr::none(),
+            };
+            values.push(Expr {
+                ty: entry,
+                kind: ExprKind::Tuple(vec![
+                    unpacking::string(name),
+                    unpacking::string(doc),
+                    self.coerce(line, optional_line, node)?,
+                ]),
+            });
+        }
         let catalog = Expr {
-            ty: self.types.list(pair),
+            ty: self.types.list(entry),
             kind: ExprKind::List(values),
         };
+        let filename =
+            filename.map_or_else(Expr::none, |path| unpacking::string(path.to_string_lossy()));
+        let filename = self.coerce(filename, self.types.optional(Type::Str), node)?;
         self.calls.insert(sig.id);
         Ok(Some(Expr {
             ty: sig.returns,
@@ -229,6 +236,7 @@ impl Checker<'_> {
                         ty: Type::Str,
                         kind: ExprKind::Str(module_name.to_owned()),
                     },
+                    filename,
                     catalog,
                 ]),
             ),

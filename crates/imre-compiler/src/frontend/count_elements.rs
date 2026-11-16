@@ -54,7 +54,7 @@ impl Checker<'_> {
                 .iter()
                 .chain(call.arguments.keywords.iter().map(|k| &k.value))
                 .map(|arg| self.count_argument(arg))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             return Ok(raise("TypeError", message, arguments));
         }
         let target = &call.arguments.args[0];
@@ -184,7 +184,7 @@ impl Checker<'_> {
                         target,
                     )?)
                 } else {
-                    Statement::SetItem(mapped.clone(), key, count)
+                    Statement::assign_item(mapped.clone(), key, count)
                 }])
             },
         )?;

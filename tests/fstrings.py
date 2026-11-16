@@ -23,28 +23,31 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures" / "fstrings"
 
 # Literal whitespace is data, while expression/code indentation remains checked.
 ACCEPTED = {
+    "tab_expression_indentation": 'print(f"""{\n\t1\n}""")\n',
+    "tab_code_indentation": 'if True:\n\tprint(f"{1}")\n',
+    "continuation_padding": 'def message() -> str:\n    \t# This comment does not start a statement.\n    return (\n\tf"{4}"\n    )\nprint(message())\n',
+    "blank_line_padding": 'if True:\n\t\f\n    print(f"{4}")\n',
     "shadowed_ascii": 'def ascii(value: str) -> str:\n    return "shadow: " + value\nprint(ascii("é"))\nprint(f"{\'é\'!a}")\n',
+    "descriptor_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(repr([Item()]))\n',
+    "nested_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(ascii([Item()]))\n',
     "ascii_conversion": 'print(f"{1!a}")\n',
     "repr_conversion": 'print(f"{1!r}:{True!r}:{None!r}")\n',
     "literal_control_characters": 'value = 7\nprint(f"""first\n\tliteral tab {value}\n\fliteral form feed\nlast""")\n',
     "nested_literal_whitespace": 'print(f"""outer:{"""inner\n\ttext\n\fform feed"""}:end""")\n',
-}
-
-REJECTED = {
-    "descriptor_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(repr([Item()]))\n',
-    "nested_user_repr": 'class Item:\n    def __repr__(self) -> str:\n        return "é"\nprint(ascii([Item()]))\n',
-    "ascii_format_spec": 'print(f"{1!a:+d}")\n',
     "debug_field": 'value = 1\nprint(f"{value=}")\n',
     "debug_str_conversion": 'value = 1\nprint(f"{value=!s}")\n',
     "debug_empty_spec": 'value = 1\nprint(f"{value=:}")\n',
     "integer_width_spec": 'print(f"{1:+5d}")\n',
-    "decimal_float": 'print(f"{1.5:+}")\n',
-    "decimal_conversion": 'print(f"{1!r:+d}")\n',
     "string_format_spec": "print(f\"{'text':s}\")\n",
     "dynamic_empty_format_spec": 'spec = ""\nprint(f"{1:{spec}}")\n',
     "literal_empty_dynamic_spec": "print(f\"{1:{''}}\")\n",
     "nested_empty_dynamic_spec": "print(f\"{1:{f''}}\")\n",
     "excessive_precision_spec": 'print(f"{1:.1001f}")\n',
+}
+
+REJECTED = {
+    "decimal_float": 'print(f"{1.5:+}")\n',
+    "decimal_conversion": 'print(f"{1!r:+d}")\n',
     "numeric_string_conversion": 'print(f"{1!s:.2f}")\n',
     "numeric_string_field": "print(f\"{'text':.2f}\")\n",
     "dict_field": 'values = {1: 2}\nprint(f"{values}")\n',
@@ -57,14 +60,13 @@ REJECTED = {
     "surrogate_adjacent_ordinary": 'print(rf"{1}" "\\uD800")\n',
     "surrogate_inner_ordinary": "print(rf\"{'\\uD800'}\")\n",
     "surrogate_inner_fstring": "print(rf\"{f'\\uD800{1}'}\")\n",
-    "tab_expression_indentation": 'print(f"""{\n\t1\n}""")\n',
     "form_feed_expression_indentation": 'print(f"""{\n\f1\n}""")\n',
-    "tab_code_indentation": 'if True:\n\tprint(f"{1}")\n',
     "unused_unsupported_field": 'def unused() -> str:\n    return f"{(1, 2)}"\nprint(1)\n',
     "unused_dynamic_field": "def unused() -> str:\n    return f\"{eval('1')}\"\nprint(1)\n",
 }
 
 ERRORS = {
+    "ascii_format_spec": ('print(f"{1!a:+d}")\n', "ValueError"),
     "late_field": (
         'def field(number: int) -> int:\n    print(number)\n    if number == 2:\n        raise ValueError("late field")\n    return number\nprint(f"{field(1)}:{field(2)}:{field(3)}")\n',
         "ValueError",
@@ -83,22 +85,10 @@ def rejection_message(name: str) -> str:
         return "numeric format specifications require an unconverted int, float, or bool"
     if name == "builtin_rebinding":
         return "rebinding a builtin, definition, or imported module is unsupported"
-    if name.startswith("debug_"):
-        return "debug f-string fields are unsupported"
-    if name == "nested_user_repr":
-        return "ascii requires a supported representation"
-    if name == "descriptor_user_repr":
-        return "generated repr cannot format"
-    if name == "ascii_format_spec":
-        return "formatted strings support !a with an empty format specification"
-    if name.endswith("_spec"):
-        if "dynamic" in name:
-            return "f-string format specifications must be literal"
-        return "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000"
     if name.startswith("surrogate_"):
         return "surrogate string escapes are unsupported"
-    if name.endswith("_indentation"):
-        return "indentation must use spaces, not tabs or form feeds"
+    if name == "form_feed_expression_indentation":
+        return "form feeds are unsupported in indentation"
     if name == "unused_dynamic_field":
         return ""
     return "unsupported value type for default f-string conversion"

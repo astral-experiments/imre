@@ -84,6 +84,20 @@ def current():
     selected = (value < value < tail()) and sentinel
     assert selected is sentinel
     assert log == ["compare", "truth", "truth"]
+    log.clear()
+
+    def otherwise(flag, value):
+        return (None if flag else (value and sentinel)) and sentinel
+
+    def when_true(flag, value):
+        return ((value and sentinel) if flag else None) and sentinel
+
+    value = Probe([False], log)
+    assert otherwise(False, value) is value
+    assert log == ["truth"]
+    log.clear()
+    assert when_true(True, Probe([False, True], log)) is sentinel
+    assert log == ["truth", "truth"]
 
 
 def skipped_literal():

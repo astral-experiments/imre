@@ -1,5 +1,7 @@
 //! Binds closed signatures without conflating argument evaluation and ABI order.
 
+use std::ops::ControlFlow;
+
 use super::*;
 
 /// Evaluate the supplied call operands in order, then raise the checked TypeError.
@@ -31,6 +33,37 @@ pub(super) enum ParameterKind {
 }
 
 impl ParameterKind {
+    pub(super) fn fixed(parameters: &ast::Parameters, index: usize) -> Self {
+        if index < parameters.posonlyargs.len() {
+            Self::PositionalOnly
+        } else if index < parameters.posonlyargs.len() + parameters.args.len() {
+            Self::PositionalOrKeyword
+        } else {
+            Self::KeywordOnly
+        }
+    }
+
+    pub(super) fn accepts_positional(self) -> bool {
+        matches!(self, Self::PositionalOnly | Self::PositionalOrKeyword)
+    }
+
+    /// An individual parameter can be known even when another slot is missing
+    /// or follows a spread. Inference and dormant lexical checks use Ruff's
+    /// partial lookups without claiming that the entire call binds.
+    pub(super) fn known_argument<'a>(
+        self,
+        arguments: &'a ast::Arguments,
+        index: usize,
+        name: &str,
+    ) -> Option<&'a ast::Expr> {
+        match self {
+            Self::PositionalOnly => arguments.find_positional(index),
+            Self::PositionalOrKeyword => arguments.find_argument_value(name, index),
+            Self::KeywordOnly => arguments.find_keyword(name).map(|kw| &kw.value),
+            Self::Variadic | Self::KeywordRest => None,
+        }
+    }
+
     /// Construct a parameter for a builtin call signature.
     pub(super) fn parameter(self, name: &str, ty: Type, default: Option<Expr>) -> Parameter {
         Parameter {
@@ -41,6 +74,187 @@ impl ParameterKind {
             sign_only: false,
         }
     }
+}
+
+pub(crate) fn known_declared_argument<'a>(
+    arguments: &'a ast::Arguments,
+    parameters: &ast::Parameters,
+    index: usize,
+    name: &str,
+) -> Option<&'a ast::Expr> {
+    ParameterKind::fixed(parameters, index).known_argument(arguments, index, name)
+}
+
+/// Bind an explicit keyword before checking its value. A positional-only name
+/// can still be collected by **kwargs without occupying its positional slot.
+fn keyword_slot<'a>(
+    parameters: impl Iterator<Item = (&'a str, ParameterKind)>,
+    name: &str,
+    rest: Option<usize>,
+    occupied: impl FnOnce(usize) -> bool,
+) -> std::result::Result<usize, String> {
+    let fixed = parameters.enumerate().find(|(_, (parameter, kind))| {
+        *parameter == name && !matches!(kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+    });
+    match (fixed, rest) {
+        (Some((index, (_, kind))), _) if kind != ParameterKind::PositionalOnly => {
+            if occupied(index) {
+                Err(format!("multiple values for argument {name:?}"))
+            } else {
+                Ok(index)
+            }
+        }
+        (_, Some(index)) => Ok(index),
+        (Some(_), None) => Err(format!("parameter {name:?} is positional-only")),
+        (None, None) => Err(format!("unexpected keyword argument {name:?}")),
+    }
+}
+
+/// Bind supplied values in evaluation order, leaving omitted slots for the caller. Checked
+/// lowering and the initializer proof use different value consumers for the same
+/// slots. Checking one supplied value can fail before a later binding error.
+fn bind_fixed<'a, P, E, B>(
+    call: &'a ast::ExprCall,
+    parameters: &[P],
+    shape: impl Fn(&P) -> (&str, ParameterKind),
+    offset: usize,
+    mut bind: impl FnMut(usize, &'a ast::Expr) -> std::result::Result<ControlFlow<B>, E>,
+    error: impl Fn(TextRange, String) -> E,
+) -> std::result::Result<ControlFlow<B, Vec<usize>>, E> {
+    let mut order = vec![usize::MAX; parameters.len() + offset];
+    if offset > 0 {
+        order[0] = 0;
+    }
+    for (position, supplied) in call.arguments.iter_source_order().enumerate() {
+        let index = match supplied {
+            ast::ArgOrKeyword::Arg(value) => {
+                if !parameters
+                    .get(position)
+                    .is_some_and(|p| shape(p).1.accepts_positional())
+                {
+                    return Err(error(value.range(), "too many positional arguments".into()));
+                }
+                position
+            }
+            ast::ArgOrKeyword::Keyword(keyword) => {
+                let name = keyword.arg.as_deref().expect("fixed keyword");
+                keyword_slot(parameters.iter().map(&shape), name, None, |i| {
+                    order[i + offset] != usize::MAX
+                })
+                .map_err(|reason| error(keyword.range(), reason))?
+            }
+        };
+        if let ControlFlow::Break(stop) = bind(index, supplied.value())? {
+            return Ok(ControlFlow::Break(stop));
+        }
+        order[index + offset] = position + offset;
+    }
+    Ok(ControlFlow::Continue(order))
+}
+
+type SourceArgument<'a> = (&'a ast::ParameterWithDefault, &'a ast::Expr);
+
+pub(crate) struct FixedArguments<T, P> {
+    pub(crate) supplied: Vec<T>,
+    pub(crate) missing: Option<P>,
+}
+
+impl<T, P> FixedArguments<T, P> {
+    fn complete(self) -> Option<Vec<T>> {
+        self.missing.is_none().then_some(self.supplied)
+    }
+}
+
+pub(crate) fn missing_required_argument(
+    source: &str,
+    call: &ast::ExprCall,
+    name: &str,
+) -> Diagnostic {
+    Diagnostic::at(source, call, format!("missing required argument {name:?}"))
+}
+
+/// Return the supplied operands only when all required formals bind.
+pub(crate) fn fixed_call_arguments<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+) -> Option<Vec<SourceArgument<'a>>> {
+    bind_source_arguments(call, parameters)?.complete()
+}
+
+/// Bind the written operands of a proved declaration before checking its omitted formals.
+pub(crate) fn bind_source_arguments<'a>(
+    call: &'a ast::ExprCall,
+    parameters: &'a ast::Parameters,
+) -> Option<FixedArguments<SourceArgument<'a>, &'a ast::ParameterWithDefault>> {
+    if has_unpacking(call) {
+        return None;
+    }
+    let fixed: Vec<_> = parameters
+        .iter_non_variadic_params()
+        .enumerate()
+        .map(|(i, p)| (p, ParameterKind::fixed(parameters, i)))
+        .collect();
+    supplied_fixed_parameters(
+        call,
+        &fixed,
+        |(p, k)| (p.name().as_str(), *k),
+        |(p, _)| p.default.is_none().then_some(*p),
+        |i, arg| (fixed[i].0, arg),
+    )
+}
+
+/// Keep the first missing formal alongside the supplied values in evaluation order.
+fn supplied_fixed_parameters<'a, P, T, M>(
+    call: &'a ast::ExprCall,
+    parameters: &[P],
+    shape: impl Fn(&P) -> (&str, ParameterKind),
+    required: impl Fn(&P) -> Option<M>,
+    mut value: impl FnMut(usize, &'a ast::Expr) -> T,
+) -> Option<FixedArguments<T, M>> {
+    let mut supplied = Vec::with_capacity(call.arguments.len());
+    let order = bind_fixed(
+        call,
+        parameters,
+        shape,
+        0,
+        |index, arg| {
+            supplied.push(value(index, arg));
+            Ok(ControlFlow::<()>::Continue(()))
+        },
+        |_, _| (),
+    )
+    .ok()?
+    .continue_value()?;
+    let missing = parameters
+        .iter()
+        .zip(order)
+        .filter(|(_, slot)| *slot == usize::MAX)
+        .find_map(|(p, _)| required(p));
+    Some(FixedArguments { supplied, missing })
+}
+
+/// Map written keyword operands to their checked parameters. Positional calls use their source indices.
+pub(super) fn checked_parameter_indices(
+    call: &ast::ExprCall,
+    parameters: &[Parameter],
+) -> Option<Vec<usize>> {
+    if has_unpacking(call) {
+        return None;
+    }
+    if call.arguments.keywords.is_empty() {
+        let (written, omitted) = parameters.split_at_checked(call.arguments.len())?;
+        return (written.iter().all(|p| p.kind.accepts_positional())
+            && omitted.iter().all(|p| p.default.is_some()))
+        .then(Vec::new);
+    }
+    supplied_fixed_parameters(
+        call,
+        parameters,
+        |p| (p.name.as_str(), p.kind),
+        |p| p.default.is_none().then_some(()),
+        |index, _| index,
+    )?
+    .complete()
 }
 
 /// A builtin parameter that accepts either a positional or a keyword argument.
@@ -57,6 +271,21 @@ pub(super) struct Parameter {
     pub sign_only: bool,
 }
 
+impl Parameter {
+    pub(super) fn has_python_default(&self) -> bool {
+        self.default.as_ref().is_some_and(Expr::is_unrepresented)
+    }
+}
+
+/// A source call binds the declaration's parameters after any bound receiver.
+pub(super) enum CallParameters<'a> {
+    Source {
+        signature: &'a Signature,
+        skip: usize,
+    },
+    Slice(&'a [Parameter]),
+}
+
 /// Defaults have no user-visible effects or mutable identity. Checking them at
 /// definition time also rejects unsupported defaults in never-called functions.
 /// Only one optional sign on a numeric literal is accepted as an expression.
@@ -65,15 +294,12 @@ pub(super) fn scalar_default(
     expected: Type,
     types: &Types,
     source: &str,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     let mut value = scalar_literal(expression, source)?;
     let ty = value.ty;
     let concrete = types.payload(expected).unwrap_or(expected);
     if expected == Type::ObjectValue && ty == Type::None {
-        return Ok(Expr {
-            ty: expected,
-            kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
-        });
+        return Ok(value.into_object_value());
     }
     if literals::accepts(types, concrete, &value) {
         value = literals::view(value, concrete);
@@ -102,7 +328,7 @@ pub(super) fn scalar_default(
             return Ok(Expr { ty: expected, kind });
         }
     }
-    Err(error(
+    Err(diagnostic_message(
         source,
         expression,
         &format!("default requires exact type {expected}, got {ty}"),
@@ -110,53 +336,20 @@ pub(super) fn scalar_default(
 }
 
 /// A scalar default also supplies an exact type for an unannotated parameter.
-pub(crate) fn scalar_literal(expression: &ast::Expr, source: &str) -> Result<Expr, String> {
-    let (ty, kind) = match expression {
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Int(value),
-            ..
-        }) => (Type::Int, ExprKind::Int(value.to_string())),
-        ast::Expr::NumberLiteral(ast::ExprNumberLiteral {
-            value: ast::Number::Float(value),
-            ..
-        }) => (Type::Float, ExprKind::Float(*value)),
-        ast::Expr::UnaryOp(unary)
-            if matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
-                && matches!(&*unary.operand, ast::Expr::NumberLiteral(value) if matches!(&value.value, ast::Number::Int(_) | ast::Number::Float(_))) =>
-        {
-            let ast::Expr::NumberLiteral(value) = &*unary.operand else {
-                unreachable!()
-            };
-            let (ty, kind) = match &value.value {
-                ast::Number::Int(value) => (Type::Int, ExprKind::Int(value.to_string())),
-                ast::Number::Float(value) => (Type::Float, ExprKind::Float(*value)),
-                _ => unreachable!(),
-            };
-            let kind = if unary.op == ast::UnaryOp::USub {
-                ExprKind::Negate(Box::new(Expr { ty, kind }))
-            } else {
-                kind
-            };
-            (ty, kind)
-        }
-        ast::Expr::BooleanLiteral(value) => (Type::Bool, ExprKind::Bool(value.value)),
-        ast::Expr::StringLiteral(value) => {
-            check_string(value, source)?;
-            (Type::Str, ExprKind::Str(value.value.to_string()))
-        }
-        ast::Expr::BytesLiteral(value) => {
-            (Type::Bytes, ExprKind::Bytes(value.value.bytes().collect()))
-        }
-        ast::Expr::NoneLiteral(_) => (Type::None, ExprKind::None),
-        _ => {
-            return Err(error(
-                source,
-                expression,
-                "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
-            ));
-        }
-    };
-    Ok(Expr { ty, kind })
+pub(crate) fn scalar_literal(
+    expression: &ast::Expr,
+    source: &str,
+) -> std::result::Result<Expr, String> {
+    if let Some(literal) = literals::signed_number(expression, |ty| ty != Type::PythonObject) {
+        return Ok(literal);
+    }
+    literals::unsigned_scalar(expression, source)?.ok_or_else(|| {
+        diagnostic_message(
+            source,
+            expression,
+            "defaults must be int, float, bool, str, bytes, or None literals; numbers may have one sign",
+        )
+    })
 }
 
 pub(super) fn starred(call: &ast::ExprCall) -> bool {
@@ -191,19 +384,43 @@ impl<'a> Supplied<'a> {
         checker: &mut Checker<'_>,
         ty: Type,
         sign_only: bool,
+        declaration: Option<TypeDeclaration>,
     ) -> Result<Expr, String> {
-        match self {
-            Self::Source(node) => checker.direct_argument(node, ty, sign_only),
-            Self::Field(value, node) => checker.direct_value(value, node, ty, sign_only),
+        self.check_with(
+            checker,
+            ty,
+            sign_only,
+            declaration,
+            |checker, value, ty, site| checker.direct_value(value, site, ty, sign_only),
+        )
+    }
+
+    /// Check an operand in context. The destination sees only its evaluated value.
+    pub(super) fn check_with(
+        self,
+        checker: &mut Checker<'_>,
+        ty: Type,
+        sign_only: bool,
+        declaration: Option<TypeDeclaration>,
+        coerce: impl Fn(&Checker<'_>, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+    ) -> Result<Expr, String> {
+        if let Self::Source(node) = self
+            && !sign_only
+        {
+            return checker.expr_in_context(node, ty, |_, _| false, coerce, declaration);
         }
+        let node = self.site();
+        let value = self.value(checker)?;
+        coerce(checker, value, ty, node)
+            .map_err(|error| error.expected_from(declaration, node.range()))
     }
 }
 
 /// Roots source expressions in Python evaluation order while expanding fixed tuples.
 #[derive(Default)]
 pub(super) struct ArgumentScope {
-    body: Vec<Statement>,
-    clear: Vec<usize>,
+    pub(super) body: Vec<Statement>,
+    pub(super) clear: Vec<usize>,
 }
 
 impl ArgumentScope {
@@ -224,6 +441,26 @@ impl ArgumentScope {
         self.body.push(Statement::Assign(slot, value));
         self.clear.push(slot);
         checker.local(slot)
+    }
+
+    /// An eager operand raised before invocation. Root the evaluated prefix
+    /// in call order and release it in stack order when the last operand unwinds.
+    pub(super) fn stopped(
+        checker: &mut Checker<'_>,
+        prefix: Vec<Expr>,
+        stop: Expr,
+        returns: Type,
+    ) -> Expr {
+        let mut scope = Self::default();
+        for value in prefix {
+            scope.hold(checker, value);
+        }
+        scope.clear.reverse();
+        scope.body.push(Statement::Expr(stop));
+        // As for an unbound read, this slot supplies only the unreachable result layout.
+        let unreachable = checker.hidden(returns);
+        scope.clear.push(unreachable);
+        scope.finish(checker.local(unreachable))
     }
 
     pub(super) fn spread(
@@ -264,25 +501,99 @@ impl ArgumentScope {
         }
     }
 }
-pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
-    starred(call)
-        || call
-            .arguments
-            .keywords
+/// Split off a single mapping only if every keyword belongs to the typed rest parameter.
+pub(super) fn rest_keywords<'a>(
+    call: &'a ast::ExprCall,
+    params: &[Parameter],
+) -> (&'a [ast::Keyword], Option<&'a ast::Expr>) {
+    let keywords = call.arguments.keywords.as_ref();
+    if let [spread] = keywords
+        && spread.arg.is_none()
+        && !starred(call)
+        && let Some((rest, positional)) = params.split_last()
+        && rest.kind == ParameterKind::KeywordRest
+        && positional
             .iter()
-            .any(|keyword| keyword.arg.is_none())
+            .all(|p| p.kind == ParameterKind::PositionalOnly)
+    {
+        return (&[], Some(&spread.value));
+    }
+    (keywords, None)
 }
+
+/// A resolved native function can bind fixed named parameters from one trailing mapping.
+pub(super) fn named_mapping<'a>(
+    call: &'a ast::ExprCall,
+    params: &[Parameter],
+) -> Option<&'a ast::Expr> {
+    let (last, explicit) = call.arguments.keywords.split_last()?;
+    (last.arg.is_none()
+        && !starred(call)
+        && explicit.iter().all(|kw| kw.arg.is_some())
+        && params.iter().any(|p| {
+            matches!(
+                p.kind,
+                ParameterKind::PositionalOrKeyword | ParameterKind::KeywordOnly
+            )
+        }))
+    .then_some(&last.value)
+}
+
+pub(super) fn unpacked_keywords(call: &ast::ExprCall) -> bool {
+    call.arguments
+        .keywords
+        .iter()
+        .any(|keyword| keyword.arg.is_none())
+}
+
+pub(super) fn has_unpacking(call: &ast::ExprCall) -> bool {
+    starred(call) || unpacked_keywords(call)
+}
+
+pub(super) const UNSUPPORTED_UNPACKING: &str = "argument unpacking is unsupported";
 
 /// Every dispatch route uses a closed signature, including methods reached
 /// through iterable consumers before ordinary call-expression lowering.
 pub(super) fn reject_unpacking(call: &ast::ExprCall, source: &str) -> Result<(), String> {
     if has_unpacking(call) {
-        return Err(error(source, call, "argument unpacking is unsupported"));
+        return Err(error(source, call, UNSUPPORTED_UNPACKING));
     }
     Ok(())
 }
 
 impl Checker<'_> {
+    /// Preserve the live lookup and eager arguments when a checked operand prevents
+    /// an otherwise unsupported method invocation from reaching its binder.
+    pub(super) fn unsupported_method_call(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+        diagnostic: &str,
+    ) -> Result<Expr, String> {
+        let operands = self.graph.session.operand_types(self.module);
+        if !call.arguments.is_empty()
+            && operands.is_bound_method(&call.func)
+            && let Some(returns) = operands.stopped_call_result(call)
+        {
+            let mut stopped = false;
+            let args = registered::values::call_arguments(call, |arg| {
+                self.expr(arg)
+                    .inspect(|value| stopped |= self.terminating_operand(value))
+            });
+            if stopped {
+                return self.registered_method_call_with_values(
+                    call,
+                    method,
+                    receiver,
+                    returns,
+                    Some(args?),
+                );
+            }
+        }
+        Err(error(self.source, call, diagnostic))
+    }
+
     /// Format an unexpected keyword using the runtime's CPython spelling rules.
     pub(super) fn keyword_error_message(
         &self,
@@ -444,9 +755,8 @@ impl Checker<'_> {
             params,
             receiver,
             Some(scope),
-            None,
-            |checker, index, argument| {
-                argument.checked(checker, params[index].ty, params[index].sign_only)
+            &mut |checker, index, argument| {
+                argument.checked(checker, params[index].ty, params[index].sign_only, None)
             },
         )
     }
@@ -465,8 +775,7 @@ impl Checker<'_> {
             params,
             receiver,
             None,
-            None,
-            |checker, index, argument| {
+            &mut |checker, index, argument| {
                 let Supplied::Source(node) = argument else {
                     unreachable!("only source calls expand tuples")
                 };
@@ -475,25 +784,60 @@ impl Checker<'_> {
         )
     }
 
+    /// Keep one native binder for the different operand-lowering callbacks.
     pub(super) fn bind_supplied(
         &mut self,
         call: &ast::ExprCall,
         params: &[Parameter],
         receiver: Option<Expr>,
-        mut scope: Option<&mut ArgumentScope>,
-        default_owner: Option<(usize, usize)>,
-        mut check: impl FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+        scope: Option<&mut ArgumentScope>,
+        check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
     ) -> Result<ir::CallArgs, String> {
+        Ok(self
+            .bind_eager_arguments(
+                call,
+                CallParameters::Slice(params),
+                receiver,
+                scope,
+                None,
+                check,
+            )?
+            .continue_value()
+            .expect("only direct source calls can stop during binding"))
+    }
+
+    pub(super) fn bind_eager_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        parameters: CallParameters<'_>,
+        receiver: Option<Expr>,
+        mut scope: Option<&mut ArgumentScope>,
+        stop_return: Option<Type>,
+        check: &mut dyn FnMut(&mut Self, usize, Supplied<'_>) -> Result<Expr, String>,
+    ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
+        let (params, source_signature) = match parameters {
+            CallParameters::Slice(params) => (params, None),
+            CallParameters::Source { signature, skip } => {
+                (&signature.params[skip..], Some((signature, skip)))
+            }
+        };
+        let default_owner = source_signature.map(|(sig, skip)| (sig.id, skip));
+        let declaration = |index| {
+            source_signature.and_then(|(sig, skip)| sig.parameter_declaration(index + skip))
+        };
+        let mut check = |checker: &mut Self, index, input: Supplied<'_>| {
+            let range = input.site().range();
+            check(checker, index, input)
+                .map_err(|error| error.expected_from(declaration(index), range))
+        };
         let offset = usize::from(receiver.is_some());
         let mut values = Vec::new();
-        let mut order = vec![usize::MAX; params.len() + offset];
         if let Some(value) = receiver {
             values.push(if let Some(scope) = scope.as_deref_mut() {
                 scope.hold(self, value)
             } else {
                 value
             });
-            order[0] = 0;
         }
         let rest = params
             .iter()
@@ -501,6 +845,82 @@ impl Checker<'_> {
         let pack = params
             .iter()
             .position(|p| p.kind == ParameterKind::Variadic);
+        if pack.is_none() && rest.is_none() && !has_unpacking(call) {
+            let mut written = (offset == 1
+                && self.settled_attributes.is_some()
+                && self
+                    .fixed_sites
+                    .as_ref()
+                    .is_some_and(|sites| sites.inside_site(call.range()))
+                && matches!(&values[0].kind, ExprKind::Local(_))
+                && call
+                    .func
+                    .as_attribute_expr()
+                    .is_some_and(|field| field.value.is_name_expr()))
+            .then(Vec::new);
+            let source = self.source;
+            let order = bind_fixed(
+                call,
+                params,
+                |p| (&p.name, p.kind),
+                offset,
+                |index, supplied| {
+                    let mut value = check(self, index, Supplied::Source(supplied))?;
+                    if let Some(args) = &mut written {
+                        if let Some(arg) = self
+                            .fixed_sites
+                            .as_ref()
+                            .and_then(|sites| sites.written_literal(supplied, &mut value))
+                        {
+                            args.push(arg);
+                        } else {
+                            written = None;
+                        }
+                    }
+                    if let Some(returns) = stop_return
+                        && self.terminating_operand(&value)
+                    {
+                        let stop = if values.is_empty() {
+                            value
+                        } else {
+                            ArgumentScope::stopped(
+                                self,
+                                std::mem::take(&mut values),
+                                value,
+                                returns,
+                            )
+                        };
+                        return Ok(ControlFlow::Break(stop));
+                    }
+                    let value = if let Some(scope) = scope.as_deref_mut() {
+                        scope.hold(self, value)
+                    } else {
+                        value
+                    };
+                    values.push(value);
+                    Ok(ControlFlow::Continue(()))
+                },
+                |at, msg| error(source, &at, &msg),
+            )?;
+            let order = match order {
+                ControlFlow::Continue(order) => order,
+                ControlFlow::Break(stop) => return Ok(ControlFlow::Break(stop)),
+            };
+            if let Some(written) = written
+                && let Some(sites) = &mut self.fixed_sites
+                && let std::collections::hash_map::Entry::Vacant(site) =
+                    sites.attributes.entry(call.range())
+                && let Some(method) =
+                    registered::values::CheckedCall::method(call, &mut values[0], written)
+            {
+                site.insert(FixedAttribute::CallValue(Box::new(method)));
+            }
+            return self.complete_call_arguments(call, params, values, order, default_owner);
+        }
+        let mut order = vec![usize::MAX; params.len() + offset];
+        if offset > 0 {
+            order[0] = 0;
+        }
         let mut packed = Vec::new();
         let mut forwarded = None;
         let mut extra = Vec::new();
@@ -519,7 +939,8 @@ impl Checker<'_> {
                     .as_name_expr()
                     .is_some_and(|name| self.positional_pack.as_deref() == Some(name.id.as_str()))
             {
-                let value = self.expr_expected(&star.value, params[index].ty)?;
+                let value =
+                    self.expr_expected_from(&star.value, params[index].ty, declaration(index))?;
                 forwarded = Some(if let Some(scope) = scope.as_deref_mut() {
                     scope.hold(self, value)
                 } else {
@@ -531,18 +952,17 @@ impl Checker<'_> {
                             input: Supplied<'_>,
                             scope: Option<&mut ArgumentScope>|
              -> Result<(), String> {
-                let ordinary = params.get(positional).is_some_and(|parameter| {
-                    matches!(
-                        parameter.kind,
-                        ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
-                    )
-                });
+                let ordinary = params
+                    .get(positional)
+                    .is_some_and(|p| p.kind.accepts_positional());
                 if !ordinary {
                     let index = pack.ok_or_else(|| {
                         error(checker.source, arg, "too many positional arguments")
                     })?;
                     let value = if let Some(element) = checker.types.element(params[index].ty) {
-                        input.checked(checker, element, false)?
+                        input.checked(checker, element, false, declaration(index))?
+                    } else if default_owner.is_none() {
+                        check(checker, index, input)?
                     } else {
                         input.value(checker)?
                     };
@@ -566,7 +986,7 @@ impl Checker<'_> {
             if let ast::Expr::Starred(star) = arg {
                 let scope = scope
                     .as_deref_mut()
-                    .ok_or_else(|| error(self.source, arg, "argument unpacking is unsupported"))?;
+                    .ok_or_else(|| error(self.source, arg, UNSUPPORTED_UNPACKING))?;
                 for field in scope.spread(self, star)? {
                     bind(self, Supplied::Field(field, arg), Some(scope))?;
                 }
@@ -585,20 +1005,22 @@ impl Checker<'_> {
                 }
             } else {
                 let ty = self.types.tuple(packed.iter().map(|arg| arg.ty).collect());
-                let expected = if let (Some(inference), Some((function, skip))) =
-                    (self.inference, default_owner)
-                {
-                    inference.learn_parameter(function, index + skip, ty);
-                    inference.parameter(function, index + skip)
-                } else {
-                    Some(params[index].ty)
-                };
-                if expected != Some(ty) {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "an unannotated variadic parameter requires the same tuple shape at every call",
-                    ));
+                // A source function shares its inferred pack across calls. A builtin
+                // consumes this call's checked tuple directly.
+                if let Some((function, skip)) = default_owner {
+                    let expected = if let Some(inference) = self.inference {
+                        inference.learn_parameter(function, index + skip, ty);
+                        inference.parameter(function, index + skip)
+                    } else {
+                        Some(params[index].ty)
+                    };
+                    if expected != Some(ty) {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "an unannotated variadic parameter requires the same tuple shape at every call",
+                        ));
+                    }
                 }
                 Expr {
                     ty,
@@ -607,7 +1029,16 @@ impl Checker<'_> {
             };
             values.push(value);
         }
-        for keyword in &call.arguments.keywords {
+        let named_mapping = default_owner.and_then(|_| named_mapping(call, params));
+        let (keywords, rest_mapping) = if named_mapping.is_some() {
+            (
+                &call.arguments.keywords[..call.arguments.keywords.len() - 1],
+                None,
+            )
+        } else {
+            rest_keywords(call, params)
+        };
+        for keyword in keywords {
             let name = keyword
                 .arg
                 .as_ref()
@@ -619,18 +1050,19 @@ impl Checker<'_> {
                     )
                 })?
                 .as_str();
-            let fixed = params.iter().position(|p| {
-                p.name == name
-                    && !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
-            });
-            if let Some(index) = rest
-                && fixed.is_none_or(|i| params[i].kind == ParameterKind::PositionalOnly)
-            {
+            let index = keyword_slot(
+                params.iter().map(|p| (p.name.as_str(), p.kind)),
+                name,
+                rest,
+                |i| order[i + offset] != usize::MAX,
+            )
+            .map_err(|message| error(self.source, keyword, &message))?;
+            if Some(index) == rest {
                 let (_, element) = self
                     .types
                     .mapping(params[index].ty)
                     .expect("typed keyword rest");
-                let value = self.expr_expected(&keyword.value, element)?;
+                let value = self.expr_expected_from(&keyword.value, element, declaration(index))?;
                 let value = if let Some(scope) = scope.as_deref_mut() {
                     scope.hold(self, value)
                 } else {
@@ -645,28 +1077,6 @@ impl Checker<'_> {
                 ));
                 continue;
             }
-            let index = fixed.ok_or_else(|| {
-                error(
-                    self.source,
-                    keyword,
-                    &format!("unexpected keyword argument {name:?}"),
-                )
-            })?;
-            let parameter = &params[index];
-            if parameter.kind == ParameterKind::PositionalOnly {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    &format!("parameter {name:?} is positional-only"),
-                ));
-            }
-            if order[index + offset] != usize::MAX {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    &format!("multiple values for argument {name:?}"),
-                ));
-            }
             order[index + offset] = values.len();
             let value = check(self, index, Supplied::Source(&keyword.value))?;
             values.push(if let Some(scope) = scope.as_deref_mut() {
@@ -675,72 +1085,321 @@ impl Checker<'_> {
                 value
             });
         }
+        let bound_mapping = if let Some(node) = named_mapping {
+            let scope = scope.ok_or_else(|| error(self.source, node, UNSUPPORTED_UNPACKING))?;
+            Some(self.bind_mapped_keywords(
+                call,
+                node,
+                params,
+                scope,
+                &mut values,
+                &mut order[offset..],
+            )?)
+        } else {
+            None
+        };
         if let Some(index) = rest {
             let (key, value) = self
                 .types
                 .mapping(params[index].ty)
                 .expect("typed keyword rest");
             order[index + offset] = values.len();
-            values.push(Expr {
-                ty: params[index].ty,
-                kind: ExprKind::Dict {
-                    key,
-                    value,
-                    entries: extra,
-                },
-            });
+            let dictionary = if let Some(mapping) = bound_mapping {
+                if extra.is_empty() {
+                    mapping
+                } else {
+                    let first = Expr {
+                        ty: params[index].ty,
+                        kind: ExprKind::dict_pairs(extra),
+                    };
+                    self.plain_dictionary(
+                        ArgumentScope::default(),
+                        (key, value),
+                        vec![first, mapping],
+                    )
+                }
+            } else if let Some(mapping) = rest_mapping {
+                let input = self.expr(mapping)?;
+                self.expect(params[index].ty, input.ty, mapping)?;
+                let mut copy = ArgumentScope::default();
+                let input = copy.hold(self, input);
+                self.plain_dictionary(copy, (key, value), vec![input])
+            } else {
+                Expr {
+                    ty: params[index].ty,
+                    kind: ExprKind::dict_pairs(extra),
+                }
+            };
+            values.push(dictionary);
         }
+        self.complete_call_arguments(call, params, values, order, default_owner)
+    }
+
+    /// Supply omitted formals only on the native call, after all written operands have bound.
+    fn complete_call_arguments(
+        &mut self,
+        call: &ast::ExprCall,
+        params: &[Parameter],
+        mut values: Vec<Expr>,
+        mut order: Vec<usize>,
+        default_owner: Option<(usize, usize)>,
+    ) -> Result<ControlFlow<Expr, ir::CallArgs>, String> {
+        let offset = order.len() - params.len();
+        values.reserve_exact(order.len() - values.len());
         for (index, parameter) in params.iter().enumerate() {
             if order[index + offset] == usize::MAX {
-                let default = parameter.default.as_ref().ok_or_else(|| {
-                    error(
-                        self.source,
-                        call,
-                        &format!("missing required argument {:?}", parameter.name),
-                    )
-                })?;
+                let default = parameter
+                    .default
+                    .as_ref()
+                    .ok_or_else(|| missing_required_argument(self.source, call, &parameter.name))?;
                 order[index + offset] = values.len();
-                let value = match &default.kind {
-                    ExprKind::Present(value) => &**value,
-                    _ => default,
-                };
-                if let ExprKind::Call(id, _) = &value.kind {
-                    self.calls.insert(*id);
-                }
-                // A starred tuple can supply several parameters and keyword-rest has its
-                // own operand. Record the actual omission at the point that copies it.
-                if let Some(reads) = &mut self.default_reads {
-                    if let Some((id, skip)) = default_owner
-                        && matches!(default.kind, ExprKind::Int(_) | ExprKind::Bool(_))
-                    {
-                        reads.push((id, skip + index));
-                    } else if !matches!(
-                        &default.kind,
-                        ExprKind::None | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::Float(_)
-                    ) && !matches!(&default.kind, ExprKind::Absent(value) if matches!(value.kind, ExprKind::None))
-                    {
-                        // A composite default can embed a changed int or bool.
-                        self.default_reads = None;
-                    }
-                }
-                values.push(default.clone());
+                self.record_default_read(default, default_owner, index);
+                values.push(self.default_value(default, parameter.ty, &call.func)?);
             }
         }
-        Ok(ir::CallArgs {
+        Ok(ControlFlow::Continue(ir::CallArgs {
             values,
             order,
+            site: ir::CallSite::Written(call.range(), call.func.end()),
             exhaustive_enum_match: false,
-        })
+        }))
+    }
+
+    fn record_default_read(
+        &mut self,
+        default: &Expr,
+        default_owner: Option<(usize, usize)>,
+        index: usize,
+    ) {
+        let value = match &default.kind {
+            ExprKind::Present(value) => &**value,
+            _ => default,
+        };
+        if let ExprKind::Call(id, _) = &value.kind {
+            self.calls.insert(*id);
+        }
+        // A starred tuple can supply several parameters and keyword-rest has its
+        // own operand. Record the actual omission at the point that copies it.
+        if let Some(reads) = &mut self.default_reads {
+            if let Some((id, skip)) = default_owner
+                && matches!(default.kind, ExprKind::Int(_) | ExprKind::Bool(_))
+            {
+                reads.push((id, skip + index));
+            } else if !matches!(
+                &default.kind,
+                ExprKind::None | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::Float(_)
+            ) && !matches!(&default.kind, ExprKind::Absent(value) if matches!(value.kind, ExprKind::None))
+            {
+                // A composite default can embed a changed int or bool.
+                self.default_reads = None;
+            }
+        }
+    }
+
+    fn default_value(&mut self, default: &Expr, ty: Type, at: &ast::Expr) -> Result<Expr, String> {
+        if default.ty == Type::BuiltinClass
+            && let Some(class) = self.types.constructor_base(ty)
+        {
+            self.record_constructor_value(class, class, ty, at)
+        } else {
+            Ok(default.clone())
+        }
+    }
+
+    /// Bind a live mapping after all earlier operands have acquired roots. The native
+    /// binder writes to fresh formal and rest dictionaries in original key order.
+    fn bind_mapped_keywords(
+        &mut self,
+        call: &ast::ExprCall,
+        node: &ast::Expr,
+        params: &[Parameter],
+        scope: &mut ArgumentScope,
+        values: &mut Vec<Expr>,
+        order: &mut [usize],
+    ) -> Result<Expr, String> {
+        let rest = params
+            .iter()
+            .position(|p| p.kind == ParameterKind::KeywordRest);
+        let Some(Binding::Definition(id)) = self.resolve(&call.func) else {
+            return Err(error(
+                self.source,
+                call,
+                "keyword mapping requires a resolved function",
+            ));
+        };
+        let module = &self.graph.modules[id.module];
+        let ast::Stmt::FunctionDef(function) = &module.parsed.syntax().body[id.statement] else {
+            return Err(error(
+                self.source,
+                call,
+                "keyword mapping requires a function definition",
+            ));
+        };
+        let name = function.name.as_str().to_owned();
+        let qualified = format!("{}.{name}", self.runtime_module_name(id.module));
+        let input = self.expr(node)?;
+        let (key, element) = self.types.mapping(input.ty).ok_or_else(|| {
+            error(
+                self.source,
+                node,
+                "keyword mapping requires a typed dictionary",
+            )
+        })?;
+        self.expect(Type::Str, key, node)?;
+        if let Some(index) = rest {
+            let (_, target) = self
+                .types
+                .mapping(params[index].ty)
+                .expect("typed keyword rest");
+            self.expect(target, element, node)?;
+        }
+        let input = scope.hold(self, input);
+        let empty = |key| Expr {
+            ty: self.types.dict(key, element),
+            kind: ExprKind::Dict(Vec::new()),
+        };
+        let fixed = empty(Type::Int);
+        let rest = empty(Type::Str);
+        let slots = scope.hold(self, fixed);
+        let remainder = scope.hold(self, rest);
+        let signature = self.keyword_signature(params);
+        let explicit: Vec<_> = call
+            .arguments
+            .keywords
+            .iter()
+            .filter_map(|kw| kw.arg.as_deref())
+            .map(unpacking::string)
+            .collect();
+        let explicit = Expr {
+            ty: self.types.tuple(vec![Type::Str; explicit.len()]),
+            kind: ExprKind::Tuple(explicit),
+        };
+        scope.body.push(Statement::Expr(Expr {
+            ty: Type::None,
+            kind: ExprKind::Builtin(
+                Builtin::BindSourceKeywords,
+                vec![
+                    input,
+                    slots.clone(),
+                    remainder.clone(),
+                    unpacking::string(qualified),
+                    signature,
+                    explicit,
+                    Expr::integer(call.arguments.args.len()),
+                ],
+            ),
+        }));
+        let fixed = params.iter().enumerate().filter(|(_, p)| {
+            !matches!(p.kind, ParameterKind::Variadic | ParameterKind::KeywordRest)
+        });
+        for (slot, (index, parameter)) in fixed.enumerate() {
+            if order[index] != usize::MAX
+                || !matches!(
+                    parameter.kind,
+                    ParameterKind::PositionalOrKeyword | ParameterKind::KeywordOnly
+                )
+            {
+                continue;
+            }
+            let key = Expr::integer(slot);
+            let mapped = Expr {
+                ty: element,
+                kind: ExprKind::Builtin(Builtin::DictGet, vec![slots.clone(), key.clone()]),
+            };
+            let mapped = self.direct_value(mapped, node, parameter.ty, parameter.sign_only)?;
+            let arg = if let Some(default) = &parameter.default {
+                self.default_reads = None;
+                if let ExprKind::Call(id, _) = &default.kind {
+                    self.calls.insert(*id);
+                }
+                let has = Expr {
+                    ty: Type::Bool,
+                    kind: ExprKind::Builtin(Builtin::DictContains, vec![key, slots.clone()]),
+                };
+                Expr {
+                    ty: parameter.ty,
+                    kind: ExprKind::Conditional(
+                        Box::new(has),
+                        Box::new(mapped),
+                        Box::new(self.default_value(default, parameter.ty, &call.func)?),
+                    ),
+                }
+            } else {
+                mapped
+            };
+            order[index] = values.len();
+            values.push(scope.hold(self, arg));
+        }
+        Ok(remainder)
+    }
+
+    /// A pooled, immutable declaration shared by all visits to this call. The
+    /// fixed parameters precede the names with keyword-only defaults; positional
+    /// defaults form a suffix. Actual arguments are separate IR operands.
+    fn keyword_signature(&self, params: &[Parameter]) -> Expr {
+        let pos = |p: &&Parameter| {
+            matches!(
+                p.kind,
+                ParameterKind::PositionalOnly | ParameterKind::PositionalOrKeyword
+            )
+        };
+        let fixed = |p: &&Parameter| {
+            !matches!(p.kind, ParameterKind::KeywordRest | ParameterKind::Variadic)
+        };
+        let mut fields = vec![
+            Expr::integer(
+                params
+                    .iter()
+                    .take_while(|p| p.kind == ParameterKind::PositionalOnly)
+                    .count(),
+            ),
+            Expr::integer(params.iter().filter(pos).count()),
+            Expr::integer(params.iter().filter(fixed).count()),
+            Expr::integer(
+                params
+                    .iter()
+                    .filter(pos)
+                    .filter(|p| p.default.is_some())
+                    .count(),
+            ),
+        ];
+        for kind in [ParameterKind::Variadic, ParameterKind::KeywordRest] {
+            fields.push(Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Bool(params.iter().any(|p| p.kind == kind)),
+            });
+        }
+        fields.extend(
+            params
+                .iter()
+                .filter(fixed)
+                .chain(
+                    params
+                        .iter()
+                        .filter(|p| p.kind == ParameterKind::KeywordOnly && p.default.is_some()),
+                )
+                .map(|p| unpacking::string(&p.name)),
+        );
+        Expr {
+            ty: self.types.tuple(fields.iter().map(|e| e.ty).collect()),
+            kind: ExprKind::Tuple(fields),
+        }
     }
 
     /// Keyword permutation happens only after supplied expressions have executed
     /// and acquired independent roots. Identity order needs no extra scope.
     pub(super) fn ordered_builtin(
         &mut self,
-        operation: Builtin,
+        mut operation: Builtin,
         returns: Type,
-        arguments: ir::CallArgs,
+        mut arguments: ir::CallArgs,
     ) -> Expr {
+        if let Builtin::Process(op, origin @ None) = &mut operation
+            && let ir::CallSite::Written(range, callee_end) = arguments.site
+            && Builtin::process(*op).contract(&arguments.values).may_raise
+        {
+            *origin = Some(self.fixed_origin(range, Some((callee_end, b'('))));
+        }
         if arguments
             .order
             .iter()
@@ -752,29 +1411,30 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(operation, arguments.values),
             };
         }
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in arguments.values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
+        // Moving an immediate across an operand changes neither its evaluation nor its lifetime.
+        let immediate = |value: &Expr| match &value.kind {
+            ExprKind::Bool(_) | ExprKind::None => true,
+            ExprKind::Absent(inner) => matches!(inner.kind, ExprKind::None),
+            ExprKind::Int(_) => value.tagged_integer_literal().is_some(),
+            _ => false,
+        };
+        let mut scope = ArgumentScope::default();
+        let mut previous = None;
+        let in_source_order = arguments.order.iter().all(|&index| {
+            immediate(&arguments.values[index])
+                || previous.replace(index).is_none_or(|last| last < index)
+        });
+        if !in_source_order {
+            for value in &mut arguments.values {
+                if !immediate(value) {
+                    *value = scope.hold(self, std::mem::replace(value, Expr::none()));
+                }
+            }
         }
-        let args = arguments
-            .order
-            .iter()
-            .map(|&index| self.local(clear[index]))
-            .collect();
-        Expr {
+        scope.finish(Expr {
             ty: returns,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(Expr {
-                    ty: returns,
-                    kind: ExprKind::Builtin(operation, args),
-                }),
-                clear,
-            },
-        }
+            kind: ExprKind::Builtin(operation, arguments.into_formal_order()),
+        })
     }
 
     pub(super) fn reject_builtin_keywords(&self, call: &ast::ExprCall) -> Result<(), String> {

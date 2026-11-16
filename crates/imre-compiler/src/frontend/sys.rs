@@ -83,9 +83,6 @@ impl Checker<'_> {
 
     /// Read scalar fields of the immutable startup settings selected for a command.
     pub(super) fn command_flag(&self, attr: &ast::ExprAttribute) -> Result<Option<Expr>, String> {
-        if self.resolve(&attr.value) != Some(Binding::Intrinsic(Intrinsic::SysFlags)) {
-            return Ok(None);
-        }
         if attr.attr.as_str() == "optimize" {
             return Ok(Some(Expr::integer(i64::from(
                 self.graph.python_optimization(),
@@ -101,7 +98,7 @@ impl Checker<'_> {
             };
             return Ok(Some(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![mode]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![mode]),
             }));
         }
         let Some((flags, _)) = &self.graph.command_startup else {
@@ -124,6 +121,7 @@ impl Checker<'_> {
             "context_aware_warnings" => flags.context_aware_warnings,
             "dont_write_bytecode" => flags.dont_write_bytecode,
             "no_user_site" => flags.no_user_site,
+            "no_site" => flags.no_site,
             "warn_default_encoding" => flags.warn_default_encoding,
             _ => return Err(error(self.source, attr, "unsupported sys.flags field")),
         };
@@ -230,13 +228,7 @@ impl Checker<'_> {
                     | "fileno"
             )
         {
-            Expr {
-                ty: stream,
-                kind: ExprKind::Builtin(
-                    Builtin::TextOptionalReceiver,
-                    vec![value, unpacking::string(name)],
-                ),
-            }
+            records::require_object_receiver(value, stream, name)
         } else {
             value
         }
@@ -413,9 +405,13 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn sys_call(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    pub(super) fn sys_call(
+        &mut self,
+        call: &ast::ExprCall,
+        binding: Option<Binding>,
+    ) -> Result<Option<Expr>, String> {
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.keywords.is_empty()
             && let [module, ast::Expr::StringLiteral(name)] = call.arguments.args.as_slice()
             && self.resolve(module)
@@ -430,7 +426,7 @@ impl Checker<'_> {
             }));
         }
         if matches!(&*call.func, ast::Expr::Name(name) if name.id == "hasattr" && !self.names.contains_key("hasattr"))
-            && self.resolve(&call.func).is_none()
+            && binding.is_none()
             && call.arguments.keywords.is_empty()
             && let [module, ast::Expr::StringLiteral(attr)] = call.arguments.args.as_slice()
             && let Some(Binding::IntrinsicModule(namespace @ crate::modules::IntrinsicModule::Sys)) =
@@ -447,7 +443,7 @@ impl Checker<'_> {
         {
             return Ok(Some(Expr::boolean(true)));
         }
-        match self.resolve(&call.func) {
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::SysDisplayHook)) => {
                 if !call.arguments.keywords.is_empty() {
                     return self
@@ -545,25 +541,38 @@ impl Checker<'_> {
             }
             _ => {}
         }
-        let ast::Expr::Attribute(attribute) = &*call.func else {
+        let (None, ast::Expr::Attribute(attribute)) = (binding, &*call.func) else {
             return Ok(None);
         };
-        let stderr = match self.resolve(&attribute.value) {
-            Some(Binding::Intrinsic(Intrinsic::Stdout | Intrinsic::OriginalStdout)) => {
-                // The ordinary TextIO method path evaluates and retains the receiver first.
-                return Ok(None);
-            }
-            Some(Binding::Intrinsic(Intrinsic::Stderr)) => true,
-            _ => return Ok(None),
-        };
+        let receiver = self.resolve(&attribute.value);
+        if attribute.attr.as_str() == "reconfigure"
+            && matches!(
+                receiver,
+                Some(Binding::Intrinsic(
+                    Intrinsic::Stdin
+                        | Intrinsic::Stdout
+                        | Intrinsic::OriginalStdout
+                        | Intrinsic::Stderr
+                ))
+            )
+        {
+            return Err(self.scoped_builtin_error("io.TextIOWrapper.reconfigure", call));
+        }
+        if receiver != Some(Binding::Intrinsic(Intrinsic::Stderr)) {
+            return Ok(None);
+        }
         self.reject_builtin_keywords(call)?;
         let (ty, op, args) = match (attribute.attr.as_str(), call.arguments.args.as_slice()) {
             ("write", [text]) => (
                 Type::Int,
-                Builtin::SysStreamWrite { stderr },
+                Builtin::SysStreamWrite { stderr: true },
                 vec![self.expr_expected(text, Type::Str)?],
             ),
-            ("flush", []) => (Type::None, Builtin::SysStreamFlush { stderr }, Vec::new()),
+            ("flush", []) => (
+                Type::None,
+                Builtin::SysStreamFlush { stderr: true },
+                Vec::new(),
+            ),
             _ => {
                 return Err(error(
                     self.source,
@@ -785,7 +794,7 @@ fn normalize_len_key(types: &Types, value: Expr) -> Expr {
     match value.ty {
         Type::Bool => Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
         },
         Type::StrLiteral(_) => literals::view(value, Type::Str),
         Type::Tuple(_) => {

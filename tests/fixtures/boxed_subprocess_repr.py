@@ -21,3 +21,12 @@ def current():
             assert child.wait() == 0
             full = prefix + arg + suffix
             assert repr(child) == (full if length == 80 else full[:76] + "...>")
+
+    args = ["/bin/sh", "-c", "printf output; exit 3"]
+    result = subprocess.run(args, capture_output=True)
+    assert repr(result) == f"CompletedProcess(args={args!r}, returncode=3, stdout=b'output', stderr=b'')"
+
+    class Report(subprocess.CompletedProcess):
+        pass
+
+    assert repr(Report("cmd", 0, stderr="")) == "Report(args='cmd', returncode=0, stderr='')"

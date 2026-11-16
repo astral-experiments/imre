@@ -5,6 +5,7 @@ class Derived(int):
 
 class Override(Derived):
     numerator = 3
+    real = 4
 
 
 def current():
@@ -16,13 +17,17 @@ def current():
     assert type(True.numerator) is int and True.numerator == 1
     assert False.numerator == 0 and type(False.denominator) is int
     assert Override(8).numerator == 3
-    for field in ("numerator", "denominator"):
+    assert Override(8).real == 4
+    assert integer.real is integer and type(derived.real) is int
+    assert True.real == 1 and type(True.real) is int
+    assert False.imag == 0 and type(False.imag) is int
+    for field, expected in (("numerator", integer), ("denominator", 1),
+                            ("real", integer), ("imag", 0)):
         descriptor = getattr(int, field)
         assert descriptor is getattr(bool, field) and descriptor is getattr(Derived, field)
         assert type(descriptor).__name__ == "getset_descriptor"
         assert descriptor.__objclass__ is int and descriptor.__qualname__ == "int." + field
         assert descriptor.__get__(None, int) is descriptor
-        expected = integer if field == "numerator" else 1
         derived.__dict__[field] = object()
         assert getattr(derived, field) == expected and descriptor.__get__(derived) == expected
         for method, args in ((setattr, (derived, field, 9)), (delattr, (derived, field)),

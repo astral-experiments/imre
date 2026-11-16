@@ -31,7 +31,7 @@ pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> O
         let Statement::SetField(object, index, value) = statement else {
             return None;
         };
-        if *index != field
+        if index.slot() != field
             || value.ty != *ty
             || args.values[field].ty != *ty
             || !matches!(object.kind, ExprKind::Local(slot) if slot == *receiver)
@@ -47,42 +47,68 @@ pub(super) fn replacement_fields<'a>(module: &Module, expression: &'a Expr) -> O
     Some(&args.values)
 }
 
-fn bytes(output: &mut String, name: &str, value: &str) {
-    write!(
-        output,
-        "@{name} = private unnamed_addr constant [{} x i8] c\"",
-        value.len()
-    )
-    .unwrap();
-    for byte in value.bytes() {
-        write!(output, "\\{byte:02X}").unwrap();
-    }
-    output.push_str("\"\n");
-}
-
 /// Names and field flags are shared constants. Record allocation size, field
 /// offsets, and ownership operations do not depend on generated value behavior.
-pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut String) -> String {
+pub(super) fn semantics(
+    module: &Module,
+    ty: Type,
+    fields: &[Type],
+    name: &str,
+    units: &mut Output,
+    resource_types: &HashSet<Type>,
+    repr_methods: &HashSet<usize>,
+) -> String {
+    let (repr, str_method) = match ty {
+        Type::Class(class) => module
+            .class_metadata
+            .get(class)
+            .map_or((None, None), |meta| (meta.repr_method, meta.str_method)),
+        _ => (None, None),
+    };
+    // A checked call transfers resource-bearing parameters, including an inherited
+    // method's declared receiver. All other receiver parameters are borrowed.
+    let takes_self = |id: usize| {
+        let method = &module.functions[id];
+        resource_types.contains(&method.locals[method.params[0]])
+    };
+    let repr_takes_self = repr.is_some_and(takes_self);
+    let str_takes_self = str_method.is_some_and(takes_self);
+    let str_needs_depth =
+        str_method.is_some_and(|id| function_source_frame(module, repr_methods, id).is_none());
+    let repr = repr.map(|id| units.function_ref(module, id));
+    let str_method = str_method.map(|id| units.function_ref(module, id));
+    let output = units.entry_buffer();
     let named = module.types.tuple_metadata(ty);
+    // These field owners can be dropped without scheduling child records.
+    let scalar_fields = fields.iter().all(|ty| {
+        matches!(
+            ty,
+            Type::None | Type::Bool | Type::Int | Type::Float | Type::Str | Type::Bytes
+        )
+    });
     let (kind, flags, class_name, qualified_name, fields) = match ty {
         Type::Class(class) => {
             let Some(metadata) = module.class_metadata.get(class) else {
                 return "null".to_owned();
             };
-            let flags = u32::from(metadata.dataclass_eq)
+            let flags = u32::from(metadata.field_equality)
                 | (u32::from(metadata.dataclass_repr) << 1)
                 | (u32::from(metadata.toml_hash) << 2)
                 | (u32::from(metadata.value_struct) << 3)
-                | (u32::from(metadata.fields.iter().any(|f| f.repr_text)) << 4);
+                | (u32::from(scalar_fields) << 6)
+                | (u32::from(repr_takes_self) << 7)
+                | (u32::from(repr.is_some()) << 8)
+                | (u32::from(str_method.is_some()) << 9)
+                | (u32::from(str_takes_self) << 10)
+                | (u32::from(metadata.async_str) << 11)
+                | (u32::from(str_needs_depth) << 12);
             // The runtime walks the physical layout. Hidden cache and shadow fields
             // own their payloads, but have no public name, equality, or repr role.
             let layout = (0..module.class_fields[class].len()).map(|index| {
                 metadata.fields.get(index).map_or(("", 0), |field| {
                     (
                         field.name.as_str(),
-                        u32::from(field.compare)
-                            | (u32::from(field.repr) << 1)
-                            | (u32::from(field.repr_text) << 2),
+                        u32::from(field.compare) | (u32::from(field.repr) << 1),
                     )
                 })
             });
@@ -113,6 +139,7 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
                 field_metadata(output, name, layout.into_iter()),
             )
         }
+        Type::Range => return "null".to_owned(),
         Type::SysImplementation => (
             0,
             2,
@@ -165,7 +192,9 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             // Private frames can also have tuple-shaped storage. Only a Python tuple
             // display gets the same exact-type flag as a runtime-built tuple.
             let exact = module.types.is_plain_or_declared_tuple(ty);
-            (1, 3 | (u32::from(exact) << 5), "", "", "null".to_owned())
+            let leaf = exact && scalar_fields;
+            let flags = 3 | (u32::from(exact) << 5) | (u32::from(leaf) << 6);
+            (1, flags, "", "", "null".to_owned())
         }
         _ => unreachable!("only public record layouts have value behavior"),
     };
@@ -174,14 +203,23 @@ pub(super) fn semantics(module: &Module, ty: Type, name: &str, output: &mut Stri
             return "ptr null, i64 0".to_owned();
         }
         let symbol = format!("repr_{prefix}_{name}");
-        bytes(output, &symbol, value);
+        write_private_bytes(output, &symbol, value);
         format!("ptr @{symbol}, i64 {}", value.len())
     };
     let class_name = names(output, "name", class_name);
     let qualified_name = names(output, "qualified", qualified_name);
+    let (method_types, methods) = match (repr, str_method) {
+        (repr, Some(string)) => {
+            // The str extension follows the existing repr slot even when only str is defined.
+            let repr = repr.map_or_else(|| "null".to_owned(), |symbol| format!("@{symbol}"));
+            (", ptr, ptr", format!(", ptr {repr}, ptr @{string}"))
+        }
+        (Some(symbol), None) => (", ptr", format!(", ptr @{symbol}")),
+        (None, None) => ("", String::new()),
+    };
     writeln!(
         output,
-        "@semantics_{name} = private constant {{ i32, i32, ptr, i64, ptr, i64, ptr }} {{ i32 {kind}, i32 {flags}, {class_name}, {qualified_name}, ptr {fields} }}"
+        "@semantics_{name} = private constant {{ i32, i32, ptr, i64, ptr, i64, ptr{method_types} }} {{ i32 {kind}, i32 {flags}, {class_name}, {qualified_name}, ptr {fields}{methods} }}"
     )
     .unwrap();
     format!("@semantics_{name}")
@@ -199,7 +237,7 @@ fn field_metadata<'a>(
             continue;
         }
         let symbol = format!("repr_field_{name}_{index}");
-        bytes(output, &symbol, field);
+        write_private_bytes(output, &symbol, field);
         fields.push(format!(
             "{{ ptr, i64, i32 }} {{ ptr @{symbol}, i64 {}, i32 {flags} }}",
             field.len()
@@ -217,7 +255,6 @@ fn field_metadata<'a>(
 
 impl Emitter<'_, '_> {
     /// Formatting borrows the exact typed root and returns a single owned string.
-    /// The descriptor traversal never calls user code or mutates child storage.
     pub(super) fn value_repr(&mut self, value: &Value) -> Value {
         let word = self.word(value);
         let operand = self.instruction(format!(

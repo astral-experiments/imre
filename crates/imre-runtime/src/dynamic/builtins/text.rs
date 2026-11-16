@@ -6,16 +6,13 @@ use ruff_python_literal::cformat::{
     CConversionFlags, CFormatContext, CFormatError, CFormatErrorType, CFormatPart,
     CFormatPrecision, CFormatQuantity, CFormatSpec, CFormatString, CFormatType,
 };
-use ruff_python_literal::format::{
-    FieldName, FieldNamePart, FieldType, FormatPart, FormatString, FromTemplate,
-};
 
 use super::super::operators::append_rendered_text;
 use super::super::stdlib::codecs::{decode_named, encode_text_object};
 use super::*;
 
 use crate::objects::{
-    Case, is_line_boundary, python_whitespace, split_parts, translate,
+    Case, codepoint_line, python_whitespace, split_parts, translate,
     visit_line_fields as split_lines,
 };
 
@@ -72,11 +69,22 @@ pub(super) fn construct(
                 }
                 Some(ctx.scalar_value(value))
             } else {
-                value
+                value.map(|id| ctx.string_storage(id).unwrap_or(id))
             };
             let number = match storage.map(|id| ctx.heap.get(id)) {
                 None => crate::Int::from(0),
-                Some(Value::Str(s)) => crate::integer_text::parse_radix(s, radix as u32)?,
+                Some(Value::Str(s)) if value == storage => {
+                    if base.is_none()
+                        && let Some(digit) = crate::integer_text::single_decimal_digit(s)
+                    {
+                        crate::Int::from(i64::from(digit))
+                    } else {
+                        crate::integer_text::parse_radix(s, radix as u32)?
+                    }
+                }
+                Some(Value::Str(_) | Value::SurrogateStr(_)) => {
+                    parse_integer_string(ctx, value.unwrap(), radix as u32)?
+                }
                 Some(Value::Bytes(b) | Value::ByteArray(b)) => {
                     crate::integer_text::parse_bytes_radix(b, radix as u32)?
                 }
@@ -127,6 +135,9 @@ pub(super) fn construct(
             {
                 return Ok(tzname);
             }
+            // A descriptor can return a temporary callable. Its lifetime ends with
+            // the slot call, even when another Python callback immediately uses the text.
+            let before_slot = ctx.heap.temporary_mark();
             let string_hook = ctx.bound_slot(value, "__str__")?;
             if string_hook.is_none()
                 && let Value::Raised(error) = ctx.heap.get(value)
@@ -138,48 +149,57 @@ pub(super) fn construct(
                 let text = ctx.checked_format(value, false)?;
                 return Ok(ctx.text(text));
             }
-            let (name, method) = match string_hook {
-                Some(method) => ("__str__", Some(method)),
+            let method = match string_hook {
+                Some(method) => Some(method),
                 None if matches!(ctx.heap.get(value), Value::Raised(_))
                     || ctx.string_storage(value).is_some() =>
                 {
-                    ("__str__", None)
+                    None
                 }
-                None => ("__repr__", ctx.bound_slot(value, "__repr__")?),
+                None => ctx.bound_slot(value, "__repr__")?,
             };
             if let Some(method) = method {
-                let result = ctx.call(method, Vec::new(), Vec::new())?;
+                let result = ctx.call(method, Vec::new(), Vec::new());
+                let result = ctx.release_with_result(before_slot, result)?;
                 if ctx.string_storage(result).is_none() {
                     return Err(type_error(format!(
-                        "{name} returned non-string (type {})",
+                        "__str__ returned non-string (type {})",
                         ctx.type_name(result)
                     )));
                 }
                 return Ok(result);
             }
             if let Value::Raised(error) = ctx.heap.get(value)
-                && let Some(fields) = error
-                    .trace
-                    .as_ref()
-                    .and_then(|trace| trace.source_syntax.as_ref())
-                && ctx.string_storage(fields[1].get()).is_none()
-                && !matches!(ctx.heap.get(fields[2].get()), Value::Int(_))
+                && let Some(fields) = ctx.syntax_members(error)
             {
-                // Without a location, SyntaxError delegates directly to str(msg), including its identity.
-                let message = fields[0].get();
-                if matches!(ctx.heap.get(message), Value::Str(_)) {
-                    return Ok(message);
+                let (message, filename, line) = (fields[0], fields[1], fields[2]);
+                if let Some(suffix) = ctx.surrogate_syntax_suffix(filename, line)? {
+                    return ctx.with_slot_depth(
+                        "maximum recursion depth exceeded while getting the str of an object",
+                        |ctx| {
+                            let text = super::call(ctx, "str", &[message], &[])?;
+                            ctx.concat_strings(text, suffix)
+                        },
+                    );
                 }
-                let class = match ctx.heap.get(message) {
-                    Value::Instance { class, .. } => Some(*class),
-                    Value::Raised(error) => Some(error.class),
-                    _ => None,
-                };
-                if class.is_some_and(|class| {
-                    ctx.class_attr(class, "__str__").is_some()
-                        || ctx.class_attr(class, "__repr__").is_some()
-                }) {
-                    return super::call(ctx, "str", &[message], &[]);
+                if ctx.string_storage(filename).is_none()
+                    && !matches!(ctx.heap.get(line), Value::Int(_))
+                {
+                    // Without a location, SyntaxError delegates directly to str(msg), including its identity.
+                    if matches!(ctx.heap.get(message), Value::Str(_)) {
+                        return Ok(message);
+                    }
+                    let class = match ctx.heap.get(message) {
+                        Value::Instance { class, .. } => Some(*class),
+                        Value::Raised(error) => Some(error.class),
+                        _ => None,
+                    };
+                    if class.is_some_and(|class| {
+                        ctx.class_attr(class, "__str__").is_some()
+                            || ctx.class_attr(class, "__repr__").is_some()
+                    }) {
+                        return super::call(ctx, "str", &[message], &[]);
+                    }
                 }
             }
             if let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(value)) {
@@ -229,7 +249,11 @@ pub(super) fn construct(
                 }
                 _ => {
                     let source = value.unwrap();
-                    let bytes = bytes_from_source(ctx, source, name == "bytes")?;
+                    let bytes = if name == "bytes" {
+                        bytes_from_source(ctx, source, ByteConsumer::Bytes)?
+                    } else {
+                        bytes_from_iterable(ctx, source)?
+                    };
                     // An exact tuple or buffer fills newly allocated bytes. The iterable
                     // writer instead finishes from known byte data and can return a singleton.
                     if name == "bytes"
@@ -258,6 +282,38 @@ pub(super) fn construct(
     }
 }
 
+/// Parse a string whose original Python repr is needed if conversion fails.
+fn parse_integer_string(ctx: &mut Context, value: Id, base: u32) -> Result<crate::Int> {
+    const REPR_LIMIT: usize = 200;
+
+    let text = match ctx.heap.get(ctx.scalar_value(value)) {
+        Value::Str(s) => Cow::Borrowed(s.as_str()),
+        Value::SurrogateStr(points) => {
+            // CPython substitutes '?' at the first unconvertible code point. Keep the
+            // prefix so an embedded NUL still gets the normal integer digit-limit check.
+            let mut text: String = points.iter().map_while(|&cp| char::from_u32(cp)).collect();
+            text.push('?');
+            Cow::Owned(text)
+        }
+        _ => unreachable!("expected str storage"),
+    };
+    if let Some(integer) = crate::integer_text::try_parse_radix(&text, base)? {
+        return Ok(integer);
+    }
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let mut message: Vec<_> = format!("invalid literal for int() with base {base}: ")
+        .chars()
+        .map(u32::from)
+        .collect();
+    match ctx.heap.get(ctx.scalar_value(repr)) {
+        Value::Str(text) => message.extend(text.chars().take(REPR_LIMIT).map(u32::from)),
+        Value::SurrogateStr(points) => message.extend(points.iter().take(REPR_LIMIT)),
+        _ => return Err(type_error("expected str")),
+    }
+    let message = ctx.text_codepoints(message);
+    Err(ctx.exception("ValueError", &[message]))
+}
+
 pub(super) fn bytes_hex(
     ctx: &mut Context,
     owner: &str,
@@ -266,36 +322,49 @@ pub(super) fn bytes_hex(
 ) -> Result<Id> {
     let (receiver, rest) = method_receiver_args(ctx, owner, "hex", args, &[])?;
     let [sep, group] = bind_method_arguments("hex", rest, kwargs, ["sep", "bytes_per_sep"], 2)?;
-    let group = match group {
-        Some(id) => ctx.index_integer(id)?.big().to_i32().ok_or_else(|| {
-            Error::new("OverflowError", "Python int too large to convert to C int")
-        })?,
-        None => 1,
-    };
-    let separator = if let Some(sep) = sep {
-        let len = ctx.with_buffer_export(receiver, |ctx| super::call(ctx, "len", &[sep], &[]))?;
-        if ctx.as_integer(len)? != 1 {
-            return Err(Error::new("ValueError", "sep must be length 1."));
-        }
-        let byte = match ctx.heap.get(ctx.scalar_value(sep)) {
-            // A str subclass may override __len__. CPython still requires one-byte storage.
-            Value::Str(text) if text.chars().all(|ch| u32::from(ch) <= 0xff) => {
-                Some(text.as_bytes().first().copied().unwrap_or(0))
-            }
-            Value::Str(_) | Value::SurrogateStr(_) => None,
-            Value::Bytes(bytes) => Some(bytes.first().copied().unwrap_or(0)),
-            _ => return Err(type_error("sep must be str or bytes.")),
-        };
-        Some(
-            byte.filter(u8::is_ascii)
-                .ok_or_else(|| Error::new("ValueError", "sep must be ASCII."))?,
-        )
-    } else {
-        None
-    };
+    let group = hex_group(ctx, group)?;
+    let separator = sep
+        .map(|sep| ctx.with_buffer_export(receiver, |ctx| hex_separator(ctx, sep, true)))
+        .transpose()?;
     let bytes = ctx.bytes_like(receiver)?;
+    if separator.is_none() || group == 0 {
+        return Ok(ctx.text(crate::objects::hash_hex(bytes)?.into_string()));
+    }
     let output = crate::objects::hex_with_separator(bytes, separator, group)?;
-    Ok(ctx.text(output.into_string()))
+    Ok(ctx.text(String::from_utf8(output).expect("ASCII separator and hex digits")))
+}
+
+pub(in crate::dynamic) fn hex_group(ctx: &mut Context, group: Option<Id>) -> Result<i32> {
+    match group {
+        Some(id) => {
+            ctx.index_integer(id)?.big().to_i32().ok_or_else(|| {
+                Error::new("OverflowError", "Python int too large to convert to C int")
+            })
+        }
+        None => Ok(1),
+    }
+}
+
+pub(in crate::dynamic) fn hex_separator(
+    ctx: &mut Context,
+    sep: Id,
+    ascii_only: bool,
+) -> Result<u8> {
+    let len = super::call(ctx, "len", &[sep], &[])?;
+    if ctx.as_integer(len)? != 1 {
+        return Err(Error::new("ValueError", "sep must be length 1."));
+    }
+    let byte = match ctx.heap.get(ctx.scalar_value(sep)) {
+        // A str subclass may override __len__. CPython still requires one-byte storage.
+        Value::Str(text) if text.chars().all(|ch| u32::from(ch) <= 0xff) => {
+            Some(text.chars().next().unwrap_or_default() as u8)
+        }
+        Value::Str(_) | Value::SurrogateStr(_) => None,
+        Value::Bytes(bytes) => Some(bytes.first().copied().unwrap_or(0)),
+        _ => return Err(type_error("sep must be str or bytes.")),
+    };
+    byte.filter(|byte| !ascii_only || byte.is_ascii())
+        .ok_or_else(|| Error::new("ValueError", "sep must be ASCII."))
 }
 
 /// Decode one contiguous ASCII buffer, accepting whitespace only between complete pairs.
@@ -390,6 +459,16 @@ pub(super) fn fromhex(
     }
 }
 
+/// Decode a bytearray position or size before inspecting its potentially mutated storage.
+fn bytearray_index(ctx: &mut Context, value: Id) -> Result<isize> {
+    crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
+        Error::new(
+            "OverflowError",
+            "Python int too large to convert to C ssize_t",
+        )
+    })
+}
+
 /// Apply a bytearray method to the underlying storage of an exact or subclass receiver.
 pub(super) fn bytearray_method(
     ctx: &mut Context,
@@ -437,14 +516,70 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
+    if matches!(method, "insert" | "pop") && !kwargs.is_empty() {
+        return Err(type_error(format!("{name}() takes no keyword arguments")));
+    }
+    if method == "insert" {
+        let [index, item] = args else {
+            return Err(type_error(format!(
+                "insert expected 2 arguments, got {}",
+                args.len()
+            )));
+        };
+        let index = bytearray_index(ctx, *index)?;
+        let byte = ctx.byte_value(*item)?;
+        // Either __index__ can resize the receiver or change its active exports.
+        let storage = ctx.scalar_value(receiver);
+        let len = ctx.bytes_like(storage)?.len();
+        if len == isize::MAX as usize {
+            return Err(Error::new(
+                "OverflowError",
+                "cannot add more objects to bytearray",
+            ));
+        }
+        ctx.check_bytearray_resize(storage)?;
+        let position = if index < 0 {
+            len.saturating_add_signed(index)
+        } else {
+            len.min(index as usize)
+        };
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        data.try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        data.insert(position, byte);
+        return Ok(NONE);
+    }
+    if method == "pop" {
+        let index = match args {
+            [] => -1,
+            [index] => bytearray_index(ctx, *index)?,
+            _ => {
+                return Err(type_error(format!(
+                    "pop expected at most 1 argument, got {}",
+                    args.len()
+                )));
+            }
+        };
+        // __index__ can resize the bytearray or acquire a new buffer export.
+        let storage = ctx.scalar_value(receiver);
+        let len = ctx.bytes_like(storage)?.len();
+        if len == 0 {
+            return Err(Error::new("IndexError", "pop from empty bytearray"));
+        }
+        let index = crate::normalized_index(index, len)
+            .ok_or_else(|| Error::new("IndexError", "pop index out of range"))?;
+        ctx.check_bytearray_resize(storage)?;
+        let Value::ByteArray(data) = ctx.heap.get_mut(storage) else {
+            unreachable!()
+        };
+        let byte = data.remove(index);
+        return Ok(ctx.int(i64::from(byte)));
+    }
     let argument = one_positional_arg(name, args, kwargs)?;
     if method == "resize" {
-        let size = crate::signed_index(&ctx.index_integer(argument)?).ok_or_else(|| {
-            Error::new(
-                "OverflowError",
-                "Python int too large to convert to C ssize_t",
-            )
-        })?;
+        let size = bytearray_index(ctx, argument)?;
         let size = usize::try_from(size).map_err(|_| {
             Error::new(
                 "ValueError",
@@ -469,6 +604,60 @@ pub(super) fn bytearray_method(
         }
         return Ok(NONE);
     }
+    #[cfg(target_os = "linux")]
+    if method == "extend"
+        && matches!(
+            ctx.heap.get(argument),
+            Value::Mmap { .. } | Value::MemoryView { .. }
+        )
+        && let Ok(Some((owner, range))) = super::super::stdlib::mmap::mapped_span(ctx, argument)
+    {
+        if !range.is_empty() {
+            let map = std::rc::Rc::clone(super::super::stdlib::mmap::region(ctx.heap.get(owner))?);
+            ctx.check_bytearray_resize(storage)?;
+            let Value::ByteArray(target) = ctx.heap.get_mut(storage) else {
+                unreachable!()
+            };
+            let len = range.len();
+            super::super::memoryview::Storage::Mapped(&map, range)
+                .append_buffered(target, 0, len)?;
+        }
+        return Ok(NONE);
+    }
+    if method == "extend"
+        && receiver != argument
+        && let Some(export) = ctx.buffer_slot(argument, "__buffer__")
+    {
+        // A buffer is inserted at the end observed before acquisition, while still exported.
+        let position = data.len() as i64;
+        let insert = |ctx: &mut Context, view| {
+            let end = ctx.int(position);
+            let slice = ctx.alloc(Value::Slice([end, end, NONE]));
+            ctx.put_item(storage, slice, view).map(|()| NONE)
+        };
+        if let Some(method) = export {
+            return ctx
+                .with_contiguous_python_buffer(argument, method, 0, |ctx, view| {
+                    Ok(insert(ctx, view))
+                })
+                .map_err(|_| {
+                    type_error(format!(
+                        "can't set bytearray slice from {:.100}",
+                        ctx.type_name(argument)
+                    ))
+                })?;
+        }
+        if matches!(
+            ctx.heap.get(ctx.scalar_value(argument)),
+            Value::Bytes(_) | Value::ByteArray(_)
+        ) && ctx
+            .buffer_slot(argument, "__release_buffer__")
+            .flatten()
+            .is_some()
+        {
+            return ctx.with_native_bytes_export(argument, insert);
+        }
+    }
     let byte;
     let extra = if method == "append" {
         byte = [ctx.byte_value(argument)?];
@@ -486,7 +675,7 @@ pub(super) fn bytearray_method(
         })?;
         Cow::Owned(super::super::copy_ids(bytes)?)
     } else {
-        Cow::Owned(bytes_from_iterable(ctx, argument)?)
+        Cow::Owned(bytes_from_source(ctx, argument, ByteConsumer::Extend)?)
     };
     if !extra.is_empty() {
         ctx.check_bytearray_resize(storage)?;
@@ -517,7 +706,7 @@ pub(super) fn call_bytes_method(ctx: &mut Context, source: Id) -> Result<Option<
 }
 
 pub(in super::super) fn bytes_from_iterable(ctx: &mut Context, obj: Id) -> Result<Vec<u8>> {
-    bytes_from_source(ctx, obj, false)
+    bytes_from_source(ctx, obj, ByteConsumer::Iterable)
 }
 
 /// The count form allocates distinct single-byte results, unlike the iterable writer.
@@ -544,11 +733,25 @@ fn bytes_count(ctx: &mut Context, source: Id) -> Result<Option<Vec<u8>>> {
     }
 }
 
-fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Result<Vec<u8>> {
-    if bytes_constructor && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj)) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ByteConsumer {
+    Bytes,
+    Extend,
+    Iterable,
+}
+
+fn bytes_from_source(ctx: &mut Context, obj: Id, consumer: ByteConsumer) -> Result<Vec<u8>> {
+    #[cfg(target_os = "linux")]
+    if matches!(ctx.heap.get(obj), Value::Mmap { .. }) {
+        return Ok(ctx.read_buffer_bytes(obj)?.into_owned());
+    }
+    if consumer == ByteConsumer::Bytes
+        && let Value::Array(array) = ctx.heap.get(ctx.scalar_value(obj))
+    {
         return super::super::copy_ids(array.as_bytes());
     }
     if matches!(ctx.heap.get(obj), Value::MemoryView { .. }) {
+        ctx.check_view_export(obj)?;
         return ctx.memoryview_bytes(obj);
     }
     if matches!(
@@ -557,28 +760,54 @@ fn bytes_from_source(ctx: &mut Context, obj: Id, bytes_constructor: bool) -> Res
     ) {
         return super::super::copy_ids(ctx.bytes_like(obj)?);
     }
-    // PyBytes_FromObject replaces TypeError only while acquiring the iterator.
     let iter = ctx.iterator(obj).map_err(|error| {
         let ty = ctx.builtin("TypeError");
-        if bytes_constructor && ctx.raised_error_matches(&error, ty) {
-            type_error(format!(
+        if !ctx.raised_error_matches(&error, ty) {
+            return error;
+        }
+        match consumer {
+            ByteConsumer::Bytes => type_error(format!(
                 "cannot convert '{:.200}' object to bytes",
                 ctx.type_name(obj)
-            ))
-        } else {
-            error
+            )),
+            ByteConsumer::Extend => type_error(format!(
+                "can't extend bytearray with {:.100}",
+                ctx.type_name(obj)
+            )),
+            ByteConsumer::Iterable => error,
         }
     })?;
     ctx.heap.keep(iter);
-    let mark = ctx.heap.temporary_mark();
     let mut bytes = Vec::new();
+    if consumer == ByteConsumer::Extend {
+        let default = ctx.int(32);
+        let hint = ctx.length_hint(obj, Some(default))?;
+        let size = ctx.as_integer(hint)? as usize;
+        // CPython's temporary bytearray needs room for a trailing NUL.
+        if size == isize::MAX as usize {
+            return Err(Error::new("MemoryError", ""));
+        }
+        bytes
+            .try_reserve_exact(size)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+    }
+    let mark = ctx.heap.temporary_mark();
     while let Some(item) = ctx.next_item(iter)? {
         ctx.heap.keep(item);
-        let byte = ctx
-            .index_integer(item)?
-            .to_i64()
-            .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?;
+        let byte = if consumer == ByteConsumer::Extend {
+            ctx.byte_value(item).map_err(|error| {
+                if ctx.string_storage(obj).is_some() && ctx.is_builtin_error(&error, "TypeError") {
+                    type_error("expected iterable of integers; got: 'str'")
+                } else {
+                    error
+                }
+            })?
+        } else {
+            ctx.index_integer(item)?
+                .to_i64()
+                .and_then(|n| u8::try_from(n).ok())
+                .ok_or_else(|| Error::new("ValueError", "bytes must be in range(0, 256)"))?
+        };
         bytes
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
@@ -597,98 +826,29 @@ pub(in super::super) fn zeroed_bytes(size: i64) -> Result<Vec<u8>> {
     Ok(data)
 }
 
-struct FixedFloatSpec {
-    sign: u8,
-    width: usize,
-    zero: bool,
-    precision: u32,
-    percent: bool,
-}
-
-impl FixedFloatSpec {
-    /// Parse the supported sign, decimal width and bounded precision for f and %.
-    fn parse(spec: &str) -> Result<Option<Self>> {
-        let Some(prefix) = spec.strip_suffix(['f', '%']) else {
-            return Ok(None);
-        };
-        let (digits, sign) = match prefix.as_bytes().first() {
-            Some(&sign @ (b'+' | b' ')) => (&prefix[1..], sign),
-            Some(b'-') => (&prefix[1..], 0),
-            _ => (prefix, 0),
-        };
-        let (width, places) = digits.split_once('.').unwrap_or((digits, "6"));
-        let Ok(precision) = places.parse::<u32>() else {
-            return Ok(None);
-        };
-        if precision > 1000
-            || !width
-                .bytes()
-                .chain(places.bytes())
-                .all(|b| b.is_ascii_digit())
-        {
-            return Ok(None);
-        }
-        let zero = width.starts_with('0');
-        let width = if width.is_empty() {
-            0
-        } else {
-            width
-                .parse::<isize>()
-                .map_err(|_| Error::new("ValueError", "Too many decimal digits in format string"))?
-                as usize
-        };
-        Ok(Some(Self {
-            sign,
-            width,
-            zero,
-            precision,
-            percent: spec.ends_with('%'),
-        }))
-    }
-
-    /// Pad the rounded ASCII result, keeping a numeric sign ahead of zero fill.
-    fn render(&self, number: f64) -> Result<String> {
-        let text =
-            crate::objects::format_fixed_float(number, self.precision, self.percent, self.sign)?;
-        if self.width <= text.len() {
-            return Ok(text.into_string());
-        }
-        let head = usize::from(self.zero && text.starts_with(['+', '-', ' ']));
-        let mut padded = String::new();
-        padded
-            .try_reserve_exact(self.width)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        padded.push_str(&text[..head]);
-        padded.extend(std::iter::repeat_n(
-            if self.zero { '0' } else { ' ' },
-            self.width - text.len(),
-        ));
-        padded.push_str(&text[head..]);
-        Ok(padded)
-    }
-}
-
-/// Convert a numeric formatting operand to binary64, checking large integers first.
-fn float_operand(ctx: &Context, value: Id) -> Result<Option<f64>> {
-    Ok(match ctx.heap.get(ctx.scalar_value(value)) {
-        Value::Float(n) => Some(*n),
-        Value::Int(n) => Some(crate::floats::int_to_float(n)?),
-        Value::Bool(b) => Some(f64::from(u8::from(*b))),
-        _ => None,
-    })
-}
-
 /// Apply the type's format method and return its string, including a string subclass.
 pub(in super::super) fn format_value(ctx: &mut Context, value: Id, spec: Option<Id>) -> Result<Id> {
+    let spec_storage = spec.and_then(|id| ctx.string_storage(id));
     if let Some(spec) = spec
-        && ctx.string_storage(spec).is_none()
+        && spec_storage.is_none()
     {
-        return Err(type_error(format!(
-            "format() argument 2 must be str, not {}",
+        let kind = if spec == NONE {
+            "None"
+        } else {
             ctx.type_name(spec)
+        };
+        return Err(type_error(format!(
+            "format() argument 2 must be str, not {kind}"
         )));
     }
     let method = match ctx.heap.get(value) {
+        Value::Str(_) | Value::SurrogateStr(_)
+            if spec_storage.is_none_or(
+                |id| matches!(ctx.heap.get(id), Value::Str(text) if text.is_empty()),
+            ) =>
+        {
+            return Ok(value);
+        }
         Value::Calendar {
             value: calendar, ..
         } if matches!(calendar.class(), "date" | "datetime" | "time") => {
@@ -724,10 +884,32 @@ pub(super) fn builtin_format(
     value: Id,
     spec: Option<Id>,
 ) -> Result<Id> {
-    let spec = spec
-        .map(|spec| ctx.str_value(spec))
-        .transpose()?
-        .unwrap_or("");
+    let scalar_tail;
+    let mut surrogate_fill = None;
+    let spec = match spec {
+        Some(id)
+            if owner == "str"
+                && let Value::SurrogateStr(points) = ctx.heap.get(ctx.scalar_value(id))
+                && let [fill, rest @ ..] = points.as_slice()
+                && char::from_u32(*fill).is_none()
+                && let Some(tail) = rest
+                    .iter()
+                    .copied()
+                    .map(char::from_u32)
+                    .collect::<Option<String>>()
+                && matches!(crate::format_grammar::alignment(&tail), (None, Some(_), _)) =>
+        {
+            // Keep the Python fill code point when only the alignment and its tail fit in UTF-8.
+            surrogate_fill = Some(*fill);
+            scalar_tail = tail;
+            scalar_tail.as_str()
+        }
+        Some(id) => ctx.str_value(id)?,
+        None => "",
+    };
+    if owner == "object" {
+        crate::objects::scalar_format::check_object_spec(spec, ctx.type_name(value))?;
+    }
     if spec.is_empty() {
         if let Value::Int(number) = ctx.heap.get(value) {
             let text = super::super::operators::rendered_integer(number)?;
@@ -735,38 +917,63 @@ pub(super) fn builtin_format(
         }
         return super::call(ctx, "str", &[value], &[]);
     }
-    if owner == "object" {
-        return Err(type_error(format!(
-            "unsupported format string passed to {}.__format__",
-            ctx.type_name(value)
-        )));
-    }
-    if let Some(storage) = ctx.string_storage(value)
-        && let Some(width) = crate::objects::format_index(spec.strip_suffix('s').unwrap_or(spec))?
-    {
-        if width == 0 {
-            // An unpadded empty str subclass formats to its base string.
-            return Ok(if ctx.truth(storage)? { value } else { storage });
+    if let Some(storage) = ctx.string_storage(value) {
+        let (field, precision) = crate::objects::scalar_format::string_field(
+            spec,
+            surrogate_fill.is_none(),
+            ctx.type_name(value),
+        )?;
+        if surrogate_fill.is_none()
+            && let Value::Str(text) = ctx.heap.get(storage)
+        {
+            return Ok(
+                match crate::objects::scalar_format::utf8_field(text, &field, precision)? {
+                    Some(text) => ctx.alloc(Value::Str(text)),
+                    None if text.is_empty() => storage,
+                    None => value,
+                },
+            );
         }
-        let fill = if spec.starts_with('0') { '0' } else { ' ' };
-        let padded = justify_string(ctx, storage, width, u32::from(fill), "ljust")?;
-        return Ok(if padded == storage { value } else { padded });
-    }
-    if let Some(field) = FixedFloatSpec::parse(spec)? {
-        let number = float_operand(ctx, value)?
-            .ok_or_else(|| type_error(format!("unsupported format string {spec:?}")))?;
-        return Ok(ctx.text(field.render(number)?));
+        let alignment = match field.align {
+            Some('>') => "rjust",
+            Some('^') => "format-center",
+            _ => "ljust",
+        };
+        let width = field.width;
+        let fill = surrogate_fill.unwrap_or(u32::from(field.fill));
+        let mut text = storage;
+        if let Some(limit) = precision
+            && limit < ctx.instance_len(storage)?.unwrap()
+        {
+            let stop = ctx.int(limit as i64);
+            let slice = ctx.alloc(Value::Slice([NONE, stop, NONE]));
+            text = ctx.get_item(storage, slice)?;
+        }
+        let padded = if width == 0 {
+            text
+        } else {
+            justify_string(ctx, text, width, fill, alignment)?
+        };
+        // An unchanged nonempty string subclass keeps its identity.
+        return Ok(if padded == storage && ctx.truth(storage)? {
+            value
+        } else {
+            padded
+        });
     }
     if let Value::Float(number) = ctx.heap.get(ctx.scalar_value(value)) {
-        let text = crate::objects::brace_float_field(spec, *number, ctx.type_name(value))?;
+        let text = crate::objects::scalar_format::float_field(spec, *number, ctx.type_name(value))?;
         return Ok(ctx.text(text));
     }
     if matches!(
         ctx.heap.get(ctx.scalar_value(value)),
         Value::Bool(_) | Value::Int(_)
     ) {
-        let text =
-            crate::objects::brace_integer_field(spec, ctx.as_int(value)?, ctx.type_name(value))?;
+        let text = crate::objects::scalar_format::integer_field(
+            spec,
+            ctx.as_int(value)?,
+            ctx.type_name(value),
+        )?;
         return Ok(ctx.text(text));
     }
     Err(type_error(format!("unsupported format string {spec:?}")))
@@ -820,25 +1027,20 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
         indices: &mut Indices,
         nested: bool,
     ) -> Result<Id> {
-        let parsed =
-            FormatString::from_raw_str(s).map_err(|e| Error::new("ValueError", e.to_string()))?;
-        let single = parsed.format_parts.len() == 1;
+        use crate::format_grammar::{Key, field, first, markup};
+
+        let invalid = |message| Error::new("ValueError", message);
+        let mut pos = 0;
         let mut output = String::new();
         let mut codepoints = Vec::new();
-        for part in parsed.format_parts {
-            let FormatPart::Field {
-                field_name,
-                conversion_spec,
-                format_spec,
-            } = part
-            else {
-                if let FormatPart::Literal(text) = part {
-                    append_rendered_text(&mut output, &text)?;
-                }
+        while let Some(row) = markup(s, &mut pos).map_err(invalid)? {
+            let single = row.literal == (0..0) && pos == s.len();
+            append_rendered_text(&mut output, &s[row.literal])?;
+            let Some(span) = row.field else {
                 continue;
             };
-            let field = FieldName::parse(&field_name)
-                .map_err(|e| Error::new("ValueError", e.to_string()))?;
+            let field_name = &s[span];
+            let (head, mut tail) = first(field_name).map_err(invalid)?;
             let positional = |index| {
                 let FormatSource::Arguments(args, _) = fields else {
                     return Err(Error::new(
@@ -849,73 +1051,70 @@ fn format_string(ctx: &mut Context, source: &str, fields: FormatSource<'_>) -> R
                 args.get(index).copied().ok_or_else(|| {
                     Error::new(
                         "IndexError",
-                        format!("replacement index {index} out of range"),
+                        format!("Replacement index {index} out of range for positional args tuple"),
                     )
                 })
             };
-            let mixed = || {
-                Error::new(
-                    "ValueError",
-                    "cannot mix automatic and manual field numbering",
-                )
-            };
-            let mut value = match field.field_type {
-                FieldType::Auto => {
+            let mut value = match head {
+                Key::Text(span) if span.is_empty() => {
                     if indices.manual {
-                        return Err(mixed());
+                        return Err(invalid(
+                            "cannot switch from manual field specification to automatic field numbering",
+                        ));
                     }
                     let index = indices.next;
                     indices.next += 1;
                     positional(index)?
                 }
-                FieldType::Index(index) => {
+                Key::Integer(index) => {
                     if indices.next != 0 {
-                        return Err(mixed());
+                        return Err(invalid(
+                            "cannot switch from automatic field numbering to manual field specification",
+                        ));
                     }
                     indices.manual = true;
                     positional(index)?
                 }
-                FieldType::Keyword(key) => match fields {
-                    FormatSource::Arguments(_, kwargs) => kwargs
-                        .iter()
-                        .find(|(k, _)| k == &key)
-                        .map(|(_, id)| *id)
-                        .ok_or_else(|| {
-                            let key = ctx.text(key);
-                            ctx.lookup_error("KeyError", key)
-                        })?,
-                    FormatSource::Mapping(mapping) => {
-                        let key = ctx.text(key);
-                        ctx.get_item(mapping, key)?
+                Key::Text(span) => {
+                    let name = &field_name[span];
+                    match fields {
+                        FormatSource::Arguments(_, kwargs) => kwargs
+                            .iter()
+                            .find(|(key, _)| key == name)
+                            .map(|(_, id)| *id)
+                            .ok_or_else(|| {
+                                let key = ctx.text(name);
+                                ctx.lookup_error("KeyError", key)
+                            })?,
+                        FormatSource::Mapping(mapping) => {
+                            let key = ctx.text(name);
+                            ctx.get_item(mapping, key)?
+                        }
                     }
-                },
+                }
             };
-            for access in field.parts {
-                value = match access {
-                    FieldNamePart::Attribute(name) => ctx.lookup_attr(value, &name)?,
-                    FieldNamePart::Index(index) => {
-                        let index = i64::try_from(index)
-                            .map_err(|_| Error::new("IndexError", "index too large"))?;
-                        let index = ctx.int(index);
+            while let Some((attribute, key)) = field(field_name, &mut tail).map_err(invalid)? {
+                value = match key {
+                    Key::Text(span) if attribute => ctx.lookup_attr(value, &field_name[span])?,
+                    Key::Integer(index) => {
+                        let index = ctx.int(index as i64);
                         ctx.get_item(value, index)?
                     }
-                    FieldNamePart::StringIndex(key) => {
-                        let key = ctx.text(key);
+                    Key::Text(span) => {
+                        let key = ctx.text(&field_name[span]);
                         ctx.get_item(value, key)?
                     }
                 }
             }
-            if let Some(conv) = conversion_spec {
-                value = format_conversion(ctx, value, conv)?;
+            if let Some(span) = row.conversion {
+                value = format_conversion(ctx, value, s[span].chars().next().unwrap())?;
             }
+            let format_spec = row.spec.map_or("", |span| &s[span]);
             let spec = if format_spec.contains(['{', '}']) {
                 if nested {
-                    return Err(Error::new(
-                        "ValueError",
-                        "format specifier nested too deeply",
-                    ));
+                    return Err(invalid("Max string recursion exceeded"));
                 }
-                Some(render(ctx, &format_spec, fields, indices, true)?)
+                Some(render(ctx, format_spec, fields, indices, true)?)
             } else {
                 (!format_spec.is_empty()).then(|| ctx.text(format_spec))
             };
@@ -1002,7 +1201,8 @@ fn render_percent_number(
         .into_iter()
         .chain(star_precision.map(crate::Int::from_usize));
     if matches!(spec.format_type, CFormatType::Float(_)) {
-        let number = float_operand(ctx, value)?.ok_or_else(|| {
+        let scalar = ctx.scalar_value(value);
+        let number = ctx.real_component(scalar)?.ok_or_else(|| {
             type_error(format!("must be real number, not {}", ctx.type_name(value)))
         })?;
         return Ok(crate::objects::percent_float_field(field, stars, number)?);
@@ -1431,6 +1631,69 @@ pub(in super::super) fn percent(ctx: &mut Context, format: &str, rhs: Id) -> Res
     Ok(ctx.text_codepoints(codepoints))
 }
 
+/// Search a contiguous needle while a mutable receiver keeps its buffer exported.
+/// Slice bounds have already run their Python index conversions.
+fn search_binary(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    needle: Id,
+    bounds: std::ops::Range<usize>,
+) -> Result<Id> {
+    let search = |ctx: &Context, needle: &[u8]| {
+        let window = ctx.bytes_like(receiver)?.get(bounds.clone());
+        if name == "count" {
+            let count = window.map_or(0, |v| match needle {
+                [] => v.len() + 1,
+                [byte] => memchr::memchr_iter(*byte, v).count(),
+                _ => memchr::memmem::find_iter(v, needle).count(),
+            });
+            return Ok(count as i64);
+        }
+        let offset = window.and_then(|v| {
+            if matches!(name, "rfind" | "rindex") {
+                memchr::memmem::rfind(v, needle)
+            } else {
+                memchr::memmem::find(v, needle)
+            }
+        });
+        if matches!(name, "index" | "rindex") && offset.is_none() {
+            return Err(Error::new("ValueError", "subsection not found"));
+        }
+        Ok(offset.map_or(-1, |at| (bounds.start + at) as i64))
+    };
+    let result = ctx.with_buffer_export(receiver, |ctx| {
+        let has_buffer = match ctx.heap.get(ctx.scalar_value(needle)) {
+            Value::Bytes(_)
+            | Value::ByteArray(_)
+            | Value::MemoryView { .. }
+            | Value::BytesIoBuffer { .. }
+            | Value::Array(_) => true,
+            #[cfg(target_os = "linux")]
+            Value::Mmap { .. } => true,
+            _ => ctx.buffer_slot(needle, "__buffer__").is_some(),
+        };
+        if has_buffer {
+            return ctx.with_read_buffer(needle, |ctx, buffer| {
+                let bytes = buffer.storage(ctx)?;
+                search(ctx, &bytes.read(0..bytes.len())?)
+            });
+        }
+        let index = ctx.index_value(needle)?.ok_or_else(|| {
+            type_error(format!(
+                "argument should be integer or bytes-like object, not '{}'",
+                ctx.type_name(needle)
+            ))
+        })?;
+        let byte = index
+            .to_i64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
+        search(ctx, &[byte])
+    })?;
+    Ok(ctx.int(result))
+}
+
 /// Convert the optional start and end in argument order, honoring the index protocol.
 fn search_bounds(
     ctx: &mut Context,
@@ -1521,6 +1784,62 @@ fn split_codepoints(
     }
 }
 
+/// Work in UTF-8 bytes for scalar strings and Python code points for surrogate strings.
+fn remove_affix(ctx: &mut Context, receiver: Id, name: &str, affix: Id) -> Result<Id> {
+    fn remainder<T: PartialEq>(
+        source: &[T],
+        affix: &[T],
+        prefix: bool,
+    ) -> Option<std::ops::Range<usize>> {
+        if affix.is_empty() {
+            return None;
+        }
+        if prefix {
+            source
+                .starts_with(affix)
+                .then_some(affix.len()..source.len())
+        } else {
+            source
+                .ends_with(affix)
+                .then(|| 0..source.len() - affix.len())
+        }
+    }
+
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated str receiver");
+    let needle = ctx.string_storage(affix).ok_or_else(|| {
+        let kind = if affix == NONE {
+            "None"
+        } else {
+            ctx.type_name(affix)
+        };
+        let kind = &kind[..kind.floor_char_boundary(50)];
+        type_error(format!("{name}() argument must be str, not {kind}"))
+    })?;
+    let prefix = name == "removeprefix";
+    match (ctx.heap.get(storage), ctx.heap.get(needle)) {
+        (Value::Str(source), Value::Str(affix)) => {
+            if let Some(range) = remainder(source.as_bytes(), affix.as_bytes(), prefix) {
+                let part = crate::Str::try_new(&source[range])
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                return Ok(ctx.text(part));
+            }
+        }
+        (Value::SurrogateStr(source), _) => {
+            let affix = ctx.string_codepoints(needle)?;
+            if let Some(range) = remainder(source, &affix, prefix) {
+                let points = super::super::copy_ids(&source[range])?;
+                return Ok(ctx.text_codepoints(points));
+            }
+        }
+        // A string with a surrogate cannot be contained in a scalar string.
+        (Value::Str(_), Value::SurrogateStr(_)) => {}
+        _ => unreachable!("validated str operands"),
+    }
+    ctx.unchanged_string(receiver, storage)
+}
+
 /// Strip matching Python code points while keeping scalar strings in UTF-8.
 fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) -> Result<Id> {
     let chars = chars
@@ -1548,11 +1867,7 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
                 _ => source.trim_matches(matches),
             };
             if part.len() == source.len() {
-                if receiver == storage || source.is_empty() {
-                    return Ok(storage);
-                }
-                // An unchanged nonempty str subclass produces a fresh exact str.
-                return ctx.heap.fresh_string(Value::Str(part.to_owned()));
+                return ctx.unchanged_string(receiver, storage);
             }
             Ok(ctx.text(part.to_owned()))
         }
@@ -1565,8 +1880,8 @@ fn strip_string(ctx: &mut Context, receiver: Id, name: &str, chars: Option<Id>) 
             while name != "lstrip" && start < end && remove(points[end - 1]) {
                 end -= 1;
             }
-            if receiver == storage && start == 0 && end == points.len() {
-                return Ok(storage);
+            if start == 0 && end == points.len() {
+                return ctx.unchanged_string(receiver, storage);
             }
             Ok(ctx.text_codepoints(points[start..end].to_vec()))
         }
@@ -1584,28 +1899,16 @@ fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id>
         let mut start = 0;
         loop {
             let points = ctx.string_codepoints(storage)?;
-            let rest = &points[start..];
-            if rest.is_empty() {
+            let Some(field) = codepoint_line(&points, &mut start, keep) else {
                 break;
-            }
-            let boundary = rest
-                .iter()
-                .position(|&point| is_line_boundary(point))
-                .unwrap_or(rest.len());
-            let ending = match &rest[boundary..] {
-                [0x0d, 0x0a, ..] => 2,
-                [] => 0,
-                _ => 1,
             };
-            let end = if keep { boundary + ending } else { boundary };
-            let line = if receiver == storage && end == points.len() {
+            let line = if receiver == storage && field.len() == points.len() {
                 storage
             } else {
-                let field = super::super::copy_ids(&rest[..end])?;
+                let field = super::super::copy_ids(field)?;
                 ctx.text_codepoints(field)
             };
             values.push(line);
-            start += boundary + ending;
         }
     } else {
         let source = ctx.str_value(storage)?.to_owned();
@@ -1618,6 +1921,47 @@ fn split_string_lines(ctx: &mut Context, receiver: Id, keep: bool) -> Result<Id>
         });
     }
     Ok(ctx.alloc(Value::List(values)))
+}
+
+/// Partition at a Python character boundary, retaining the separator object on a hit.
+fn partition_string(ctx: &mut Context, receiver: Id, separator: Id, reverse: bool) -> Result<Id> {
+    let storage = ctx
+        .string_storage(receiver)
+        .expect("validated string receiver");
+    let needle = ctx
+        .string_storage(separator)
+        .ok_or_else(|| type_error(format!("must be str, not {}", ctx.type_name(separator))))?;
+    let scalar = |id| matches!(ctx.heap.get(id), Value::Str(_));
+    let halves = if scalar(storage) && scalar(needle) {
+        crate::objects::partition_text(ctx.str_value(storage)?, ctx.str_value(needle)?, reverse)?
+            .map(|(left, right)| (left.to_owned(), right.to_owned()))
+            .map(|(left, right)| (ctx.text(left), ctx.text(right)))
+    } else {
+        let source = ctx.string_codepoints(storage)?;
+        let sep = ctx.string_codepoints(needle)?;
+        if sep.is_empty() {
+            return Err(Error::new("ValueError", "empty separator"));
+        }
+        let mut windows = source.windows(sep.len());
+        let found = if reverse {
+            windows.rposition(|w| w == sep.as_ref())
+        } else {
+            windows.position(|w| w == sep.as_ref())
+        };
+        let halves = found.map(|i| (source[..i].to_vec(), source[i + sep.len()..].to_vec()));
+        halves.map(|(left, right)| (ctx.text_codepoints(left), ctx.text_codepoints(right)))
+    };
+    let fields = if let Some((left, right)) = halves {
+        vec![left, separator, right]
+    } else {
+        let empty = ctx.text("");
+        if reverse {
+            vec![empty, empty, receiver]
+        } else {
+            vec![receiver, empty, empty]
+        }
+    };
+    Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
 fn split_string(
@@ -1732,16 +2076,13 @@ fn bytes_join(ctx: &mut Context, receiver: Id, iterable: Id) -> Result<Id> {
         .map_err(|_| crate::Error::memory_error())?;
     for (i, &item) in items.iter().enumerate() {
         ctx.check_buffer_exporter(item)?;
-        let buffer = match ctx.heap.get(ctx.scalar_value(item)) {
-            Value::Array(array) => array.as_bytes(),
-            _ => ctx.bytes_like(item).map_err(|_| {
-                let name = ctx.type_name(item);
-                type_error(format!(
-                    "sequence item {i}: expected a bytes-like object, {} found",
-                    &name[..name.floor_char_boundary(80)]
-                ))
-            })?,
-        };
+        let buffer = ctx.native_buffer_bytes(item).map_err(|_| {
+            let name = ctx.type_name(item);
+            type_error(format!(
+                "sequence item {i}: expected a bytes-like object, {} found",
+                &name[..name.floor_char_boundary(80)]
+            ))
+        })?;
         size = size.checked_add(buffer.len()).ok_or_else(too_long)?;
         buffers.push(buffer);
     }
@@ -1873,11 +2214,12 @@ fn binary_replace(
     ))
 }
 
-/// Left-justify a binary sequence after converting the width, which may mutate either argument.
-fn binary_ljust(
+/// Justify a binary sequence after converting the width, which may mutate either argument.
+fn binary_justify(
     ctx: &mut Context,
     owner: &str,
     receiver: Id,
+    name: &str,
     width: usize,
     fill: Option<Id>,
 ) -> Result<Id> {
@@ -1888,7 +2230,7 @@ fn binary_ljust(
                 [byte] => *byte,
                 _ => {
                     return Err(type_error(format!(
-                        "ljust(): argument 2 must be a byte string of length 1, not a {} object of length {}",
+                        "{name}(): argument 2 must be a byte string of length 1, not a {} object of length {}",
                         ctx.type_name(storage),
                         bytes.len()
                     )));
@@ -1901,7 +2243,7 @@ fn binary_ljust(
                     ctx.type_name(id)
                 };
                 return Err(type_error(format!(
-                    "ljust() argument 2 must be a byte string of length 1, not {kind:.50}"
+                    "{name}() argument 2 must be a byte string of length 1, not {kind:.50}"
                 )));
             }
         }
@@ -1921,6 +2263,9 @@ fn binary_ljust(
     padded
         .try_reserve_exact(len)
         .map_err(|_| crate::Error::allocation())?;
+    if name == "rjust" {
+        padded.resize(len - source.len(), fill);
+    }
     padded.extend_from_slice(source);
     padded.resize(len, fill);
     Ok(ctx.alloc(if owner == "bytes" {
@@ -1957,7 +2302,7 @@ fn justify(
     }
     let width = crate::objects::zfill::width(&ctx.index_integer(width)?)?;
     if owner != "str" {
-        return binary_ljust(ctx, owner, receiver, width, extra.first().copied());
+        return binary_justify(ctx, owner, receiver, name, width, extra.first().copied());
     }
     let fill = if let Some(&id) = extra.first() {
         match ctx.heap.get(ctx.scalar_value(id)) {
@@ -2005,6 +2350,7 @@ fn justify_string(
     let left = match name {
         "ljust" => 0,
         "rjust" => margin,
+        "format-center" => margin / 2,
         // CPython assigns the extra character on the left only for an odd target width.
         _ => margin / 2 + (margin & width & 1),
     };
@@ -2012,16 +2358,12 @@ fn justify_string(
     let result = if let Value::Str(s) = source
         && let Some(ch) = char::from_u32(fill).or((margin == 0).then_some(' '))
     {
-        let size = margin
-            .checked_mul(ch.len_utf8())
-            .and_then(|bytes| bytes.checked_add(s.len()))
-            .ok_or_else(memory_error)?;
-        let mut padded = String::new();
-        padded.try_reserve_exact(size).map_err(|_| memory_error())?;
-        padded.extend(std::iter::repeat_n(ch, left));
-        padded.push_str(s);
-        padded.extend(std::iter::repeat_n(ch, margin - left));
-        Value::Str(padded)
+        Value::Str(crate::objects::scalar_format::padded_text(
+            s,
+            ch,
+            left,
+            margin - left,
+        )?)
     } else {
         let mut points = Vec::new();
         points
@@ -2077,6 +2419,161 @@ fn partition_bytes(ctx: &mut Context, receiver: Id, separator: Id) -> Result<Id>
     Ok(ctx.alloc(Value::Tuple(fields)))
 }
 
+/// Decode a boxed replacement, borrowing its text when lookup cannot run Python.
+fn translation_value<'a, T>(
+    ctx: &'a Context,
+    item: Id,
+    text: impl FnOnce(&'a str) -> Result<T>,
+) -> Result<translate::Piece<T>> {
+    match ctx.heap.get(ctx.scalar_value(item)) {
+        Value::None => Ok(translate::Piece::Delete),
+        Value::Str(value) => text(value).map(translate::Piece::Text),
+        Value::Int(value) => translate::Piece::ordinal(value).map_err(Error::from),
+        Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
+        _ => Err(type_error(translate::INVALID_VALUE)),
+    }
+}
+
+/// Subscribe with the integer ordinal, releasing each callback's result before the next lookup.
+fn translation_item(ctx: &mut Context, table: Id, ch: char) -> Result<translate::Piece<String>> {
+    let mark = ctx.heap.temporary_mark();
+    let key = ctx.int(i64::from(u32::from(ch)));
+    let item = if matches!(ctx.heap.get(table), Value::Dict(_)) {
+        // A missing exact-dict key needs no Python exception or argument tuple.
+        ctx.find_dictionary_key(table, key, None)
+            .map(|(_, index)| index.map(|i| ctx.stored_entries(table)[i].1))
+    } else {
+        ctx.get_item(table, key).map(Some)
+    };
+    let item = match item {
+        Ok(Some(item)) => Ok(item),
+        Err(error) if !ctx.is_builtin_error(&error, "LookupError") => Err(error),
+        Ok(None) | Err(_) => {
+            ctx.discard_temporaries(mark, None);
+            return Ok(translate::Piece::Character(ch));
+        }
+    };
+    let item = ctx.release_with_result(mark, item)?;
+    let piece = translation_value(ctx, item, super::super::copy_label);
+    ctx.discard_temporaries(mark, None);
+    piece
+}
+
+/// Try the shared loop with borrowed strings before resorting to Python subscription.
+fn translate_str(ctx: &mut Context, receiver: Id, table: Id) -> Result<Id> {
+    enum BorrowedError {
+        Subscription,
+        Error(Error),
+    }
+    impl From<crate::Error> for BorrowedError {
+        fn from(error: crate::Error) -> Self {
+            Self::Error(error.into())
+        }
+    }
+    if let Value::Dict(entries) = ctx.heap.get(table) {
+        let output = translate::borrowed_text(ctx.str_value(receiver)?, |ch| {
+            match entries.lookup_ordinal(ctx, ch) {
+                std::ops::ControlFlow::Continue(Some(item)) => {
+                    translation_value(ctx, item, Ok).map_err(BorrowedError::Error)
+                }
+                std::ops::ControlFlow::Continue(None) => Ok(translate::Piece::Character(ch)),
+                std::ops::ControlFlow::Break(()) => Err(BorrowedError::Subscription),
+            }
+        });
+        match output {
+            Ok(text) => return Ok(ctx.text(text.into_string())),
+            Err(BorrowedError::Error(error)) => return Err(error),
+            // The borrowed prefix made no Python calls. Restart before invoking any hook.
+            Err(BorrowedError::Subscription) => {}
+        }
+    }
+    let source = super::super::copy_label(ctx.str_value(receiver)?)?;
+    let mut limit = ctx.heap.streaming_collection_limit();
+    let text = translate::text(&source, |ch| {
+        ctx.collect_streaming_garbage(&mut limit);
+        translation_item(ctx, table, ch)
+    })?;
+    Ok(ctx.text(text.into_string()))
+}
+
+enum JoinInput<'a> {
+    Iterable(Id),
+    Formatted(&'a [Id]),
+}
+
+impl Context {
+    /// Join the already formatted f-string fields without invoking string subclasses' addition.
+    pub(in super::super) fn join_formatted(&mut self, values: &[Id]) -> Result<Id> {
+        let empty = self.text("");
+        join_strings(self, empty, JoinInput::Formatted(values))
+    }
+}
+
+fn join_strings(ctx: &mut Context, receiver: Id, values: JoinInput<'_>) -> Result<Id> {
+    let collected;
+    let values = match values {
+        JoinInput::Formatted(values) => values,
+        JoinInput::Iterable(id) => match ctx.heap.get(id) {
+            Value::List(items) | Value::Tuple(items) => items.as_slice(),
+            _ => {
+                collected = ctx.items(id)?;
+                &collected
+            }
+        },
+    };
+    let mut content_bytes = Some(0usize);
+    let mut surrogate = matches!(
+        ctx.heap.get(ctx.scalar_value(receiver)),
+        Value::SurrogateStr(_)
+    );
+    for (index, &item) in values.iter().enumerate() {
+        let Some(storage) = ctx.string_storage(item) else {
+            let class = ctx.exact_type(item)?;
+            let name = ctx.class_name(class);
+            return Err(type_error(format!(
+                "sequence item {index}: expected str instance, {} found",
+                &name[..name.floor_char_boundary(80)]
+            )));
+        };
+        if values.len() == 1 {
+            return Ok(storage);
+        }
+        if let Value::Str(text) = ctx.heap.get(storage) {
+            content_bytes = content_bytes.and_then(|length| length.checked_add(text.len()));
+        } else {
+            surrogate = true;
+        }
+    }
+    if surrogate {
+        let sep = ctx.string_codepoints(receiver)?;
+        let mut output = Vec::new();
+        for (index, &item) in values.iter().enumerate() {
+            let points = ctx.string_codepoints(item)?;
+            if index != 0 {
+                output
+                    .try_reserve(sep.len())
+                    .map_err(|_| crate::Error::memory_error())?;
+                output.extend_from_slice(&sep);
+            }
+            output
+                .try_reserve(points.len())
+                .map_err(|_| crate::Error::memory_error())?;
+            output.extend_from_slice(&points);
+        }
+        return Ok(ctx.text_codepoints(output));
+    }
+    let sep = ctx.str_value(receiver)?;
+    if content_bytes == Some(0) && sep.is_empty() {
+        return Ok(ctx.string_storage(receiver).unwrap());
+    }
+    let parts = values
+        .iter()
+        .map(|&item| ctx.str_value(item).expect("validated UTF-8 string"));
+    let output = crate::objects::join_utf8(sep, content_bytes, parts)
+        .ok_or_else(crate::Error::memory_error)?;
+    Ok(ctx.text(output))
+}
+
 pub(super) fn method(
     ctx: &mut Context,
     owner: &str,
@@ -2089,7 +2586,17 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "__eq__" | "__hash__" | "__mod__" | "__rmod__") | ("bytes", "__mod__")
+        (
+            "str",
+            "__add__"
+                | "__contains__"
+                | "__eq__"
+                | "__ne__"
+                | "__getitem__"
+                | "__hash__"
+                | "__mod__"
+                | "__rmod__"
+        ) | ("bytes", "__mod__")
     ) {
         let (&receiver, args) = args.split_first().ok_or_else(|| {
             type_error(format!(
@@ -2123,9 +2630,20 @@ pub(super) fn method(
                 args.len()
             )));
         };
-        if name == "__eq__" {
+        if name == "__getitem__" {
+            return ctx.sequence_subscript(receiver, other);
+        }
+        if name == "__contains__" {
+            return ctx.contains(other, ctx.scalar_value(receiver)).map(boolean);
+        }
+        if name == "__add__" {
+            return ctx.concat_str(receiver, other);
+        }
+        if matches!(name, "__eq__" | "__ne__") {
             return Ok(match ctx.string_storage(other) {
-                Some(other) => boolean(ctx.equal(ctx.scalar_value(receiver), other)),
+                Some(other) => {
+                    boolean(ctx.equal(ctx.scalar_value(receiver), other) == (name == "__eq__"))
+                }
                 None => NOT_IMPLEMENTED,
             });
         }
@@ -2149,20 +2667,7 @@ pub(super) fn method(
         )));
     };
     let original_receiver = receiver;
-    let receiver = if owner == "bytes"
-        || (owner == "bytearray"
-            && matches!(
-                name,
-                "endswith"
-                    | "ljust"
-                    | "lstrip"
-                    | "replace"
-                    | "rstrip"
-                    | "split"
-                    | "splitlines"
-                    | "startswith"
-                    | "strip"
-            )) {
+    let receiver = if matches!(owner, "bytes" | "bytearray") {
         let storage = ctx.scalar_value(receiver);
         if !matches!(
             (owner, ctx.heap.get(storage)),
@@ -2193,7 +2698,9 @@ pub(super) fn method(
     }
     if matches!(
         (owner, name),
-        ("str", "center" | "ljust" | "rjust") | ("bytes" | "bytearray", "ljust")
+        ("str", "center" | "ljust" | "rjust")
+            | ("bytes", "ljust" | "rjust")
+            | ("bytearray", "ljust")
     ) {
         return justify(ctx, owner, original_receiver, name, args, kwargs);
     }
@@ -2203,7 +2710,8 @@ pub(super) fn method(
         let storage = ctx.string_storage(receiver).unwrap();
         let copy = storage != receiver;
         let result = match ctx.heap.get(storage) {
-            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?.map(Value::Str),
+            Value::Str(text) => crate::objects::zfill::text(text, width, copy)?
+                .map(|padded| Value::Str(padded.into())),
             Value::SurrogateStr(points) => {
                 crate::objects::zfill::units(points, points.len(), width, copy)?
                     .map(Value::SurrogateStr)
@@ -2244,7 +2752,9 @@ pub(super) fn method(
     if matches!(
         (owner, name),
         ("str", "find" | "rfind" | "index" | "rindex" | "count")
-            | ("bytes", "count" | "find" | "index" | "rfind")
+            | ("bytes", "count" | "index" | "rfind")
+            | ("bytearray", "rindex")
+            | ("bytes" | "bytearray", "find")
             | ("bytes" | "bytearray", "startswith" | "endswith")
     ) {
         if !kwargs.is_empty() {
@@ -2321,48 +2831,7 @@ pub(super) fn method(
                 }
                 return Ok(FALSE);
             }
-            ctx.check_buffer_exporter(needle)?;
-            let byte;
-            let needle = match ctx.heap.get(ctx.scalar_value(needle)) {
-                Value::Bytes(_)
-                | Value::ByteArray(_)
-                | Value::MemoryView { .. }
-                | Value::BytesIoBuffer { .. }
-                | Value::Array(_) => ctx.native_buffer_bytes(needle)?,
-                _ => {
-                    let index = ctx.index_value(needle)?.ok_or_else(|| {
-                        type_error(format!(
-                            "argument should be integer or bytes-like object, not '{}'",
-                            ctx.type_name(needle)
-                        ))
-                    })?;
-                    byte = index
-                        .to_i64()
-                        .and_then(|n| u8::try_from(n).ok())
-                        .ok_or_else(|| Error::new("ValueError", "byte must be in range(0, 256)"))?;
-                    std::slice::from_ref(&byte)
-                }
-            };
-            let window = ctx.bytes_like(receiver)?.get(start..end);
-            if name == "count" {
-                let count = window.map_or(0, |v| match needle {
-                    [] => v.len() + 1,
-                    [byte] => memchr::memchr_iter(*byte, v).count(),
-                    _ => memchr::memmem::find_iter(v, needle).count(),
-                });
-                return Ok(ctx.int(count as i64));
-            }
-            let offset = window.and_then(|v| {
-                if name == "rfind" {
-                    memchr::memmem::rfind(v, needle)
-                } else {
-                    memchr::memmem::find(v, needle)
-                }
-            });
-            if name == "index" && offset.is_none() {
-                return Err(Error::new("ValueError", "subsection not found"));
-            }
-            return Ok(ctx.int(offset.map_or(-1, |at| (start + at) as i64)));
+            return search_binary(ctx, receiver, name, needle, start..end);
         }
         if name == "count" {
             let value = match (
@@ -2542,9 +3011,12 @@ pub(super) fn method(
         "isalnum" => Some(crate::objects::python_alnum),
         "isascii" => Some(str::is_ascii),
         "isalpha" => Some(crate::objects::python_isalpha),
+        "isdecimal" => Some(crate::objects::python_isdecimal),
         "isdigit" => Some(crate::objects::python_isdigit),
         "isidentifier" => Some(crate::objects::python_isidentifier),
         "islower" => Some(|text| crate::objects::python_islower(text.chars())),
+        "isnumeric" => Some(crate::objects::python_isnumeric),
+        "isprintable" => Some(crate::objects::python_isprintable),
         "isspace" => Some(crate::objects::python_isspace),
         "istitle" => Some(|text| crate::objects::python_istitle(text.chars())),
         "isupper" => Some(|text| crate::objects::python_isupper(text.chars())),
@@ -2552,6 +3024,8 @@ pub(super) fn method(
     };
     let mapping = match name {
         "lower" if owner == "str" => Some(Case::Lower),
+        "casefold" if owner == "str" => Some(Case::Fold),
+        "capitalize" if owner == "str" => Some(Case::Capitalize),
         "title" => Some(Case::Title),
         "swapcase" => Some(Case::Swap),
         _ => None,
@@ -2584,7 +3058,15 @@ pub(super) fn method(
     if let Some(predicate) = predicate {
         if matches!(
             name,
-            "isalnum" | "isascii" | "isalpha" | "isdigit" | "isidentifier" | "isspace"
+            "isalnum"
+                | "isascii"
+                | "isalpha"
+                | "isdecimal"
+                | "isdigit"
+                | "isidentifier"
+                | "isnumeric"
+                | "isprintable"
+                | "isspace"
         ) && matches!(
             ctx.heap.get(ctx.scalar_value(receiver)),
             Value::SurrogateStr(_)
@@ -2616,33 +3098,7 @@ pub(super) fn method(
     if name == "translate" {
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
-        let Value::Dict(table) = ctx.heap.get(args[0]) else {
-            return Err(type_error("str.translate requires a plain dictionary"));
-        };
-        let text = translate::text(ctx.str_value(receiver)?, |ch| {
-            let ordinal = i64::from(u32::from(ch));
-            let entry = table
-                .iter()
-                .find(|&&(key, _)| match ctx.heap.get(ctx.scalar_value(key)) {
-                    Value::Int(key) => key.to_i64() == Some(ordinal),
-                    Value::Bool(key) => i64::from(*key) == ordinal,
-                    _ => false,
-                });
-            let Some(&(_, id)) = entry else {
-                return Ok(translate::Piece::Character(ch));
-            };
-            match ctx.heap.get(ctx.scalar_value(id)) {
-                Value::None => Ok(translate::Piece::Text("")),
-                Value::Str(value) => Ok(translate::Piece::Text(value)),
-                Value::Int(value) => translate::Piece::ordinal(value),
-                Value::Bool(value) => Ok(translate::Piece::Character(char::from(u8::from(*value)))),
-                _ => Err(crate::Error::new(
-                    crate::Kind::TypeError,
-                    translate::INVALID_VALUE,
-                )),
-            }
-        })?;
-        return Ok(ctx.text(text.into_string()));
+        return translate_str(ctx, receiver, args[0]);
     }
     if name == "join" {
         if owner == "bytes" {
@@ -2654,74 +3110,7 @@ pub(super) fn method(
         }
         positional(name, kwargs)?;
         arity(name, args, 1, 1)?;
-        let collected;
-        let values = match ctx.heap.get(args[0]) {
-            Value::List(items) | Value::Tuple(items) => items.as_slice(),
-            _ => {
-                collected = ctx.items(args[0])?;
-                &collected
-            }
-        };
-        let mut surrogate = matches!(
-            ctx.heap.get(ctx.scalar_value(receiver)),
-            Value::SurrogateStr(_)
-        );
-        for (index, &item) in values.iter().enumerate() {
-            let Some(storage) = ctx.string_storage(item) else {
-                let class = ctx.exact_type(item)?;
-                let name = ctx.class_name(class);
-                return Err(type_error(format!(
-                    "sequence item {index}: expected str instance, {} found",
-                    &name[..name.floor_char_boundary(80)]
-                )));
-            };
-            if values.len() == 1 {
-                return Ok(storage);
-            }
-            surrogate |= matches!(ctx.heap.get(storage), Value::SurrogateStr(_));
-        }
-        if surrogate {
-            let sep = ctx.string_codepoints(receiver)?;
-            let mut output = Vec::new();
-            for (index, &item) in values.iter().enumerate() {
-                let points = ctx.string_codepoints(item)?;
-                if index != 0 {
-                    output
-                        .try_reserve(sep.len())
-                        .map_err(|_| crate::Error::memory_error())?;
-                    output.extend_from_slice(&sep);
-                }
-                output
-                    .try_reserve(points.len())
-                    .map_err(|_| crate::Error::memory_error())?;
-                output.extend_from_slice(&points);
-            }
-            return Ok(ctx.text_codepoints(output));
-        }
-        let sep = ctx.str_value(receiver)?;
-        let mut length = sep
-            .len()
-            .checked_mul(values.len().saturating_sub(1))
-            .ok_or_else(crate::Error::memory_error)?;
-        for &item in values {
-            length = length
-                .checked_add(ctx.str_value(item)?.len())
-                .ok_or_else(crate::Error::memory_error)?;
-        }
-        if length == 0 && sep.is_empty() {
-            return Ok(ctx.string_storage(receiver).unwrap());
-        }
-        let mut output = String::new();
-        output
-            .try_reserve_exact(length)
-            .map_err(|_| crate::Error::memory_error())?;
-        for (index, &item) in values.iter().enumerate() {
-            if index != 0 {
-                output.push_str(sep);
-            }
-            output.push_str(ctx.str_value(item)?);
-        }
-        return Ok(ctx.text(output));
+        return join_strings(ctx, receiver, JoinInput::Iterable(args[0]));
     }
     if matches!(name, "startswith" | "endswith") {
         positional(name, kwargs)?;
@@ -2733,7 +3122,12 @@ pub(super) fn method(
         }
         let start = start.as_ref();
         let end = end.as_ref();
-        let part = match ctx.heap.get(ctx.scalar_value(receiver)) {
+        let storage = ctx.scalar_value(receiver);
+        let part = match ctx.heap.get(storage) {
+            Value::Str(text) if ctx.heap.is_ascii_str(storage) => {
+                crate::objects::indexed_search_bounds(text.len(), start, end)
+                    .map(|bounds| Window::Utf8(&text[bounds]))
+            }
             Value::Str(text) => {
                 crate::objects::search_window(text, start, end).map(|(part, _)| Window::Utf8(part))
             }
@@ -2759,8 +3153,8 @@ pub(super) fn method(
                 continue;
             };
             let matched = match (part, ctx.heap.get(storage), prefix) {
-                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle),
-                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle),
+                (Window::Utf8(text), Value::Str(needle), true) => text.starts_with(needle.as_str()),
+                (Window::Utf8(text), Value::Str(needle), false) => text.ends_with(needle.as_str()),
                 // SurrogateStr storage always contains at least one surrogate.
                 (Window::Utf8(_), Value::SurrogateStr(_), _) => false,
                 (Window::Points(points), Value::SurrogateStr(needle), true) => {
@@ -2855,16 +3249,16 @@ pub(super) fn method(
             ctx.str_value(args[1])?,
             limit,
             args[0] == args[1],
-            |length| {
-                let mut text = String::new();
-                text.try_reserve_exact(length).ok()?;
-                Some(text)
-            },
         )?;
         return Ok(match value {
             Some(text) => ctx.text(text),
             None => ctx.string_storage(receiver).unwrap(),
         });
+    }
+    if owner == "str" && matches!(name, "removeprefix" | "removesuffix") {
+        let method = format!("{}.{name}", ctx.type_name(receiver));
+        let affix = one_positional_arg(&method, args, kwargs)?;
+        return remove_affix(ctx, receiver, name, affix);
     }
     if owner == "str" && matches!(name, "split" | "rsplit") {
         return split_string(ctx, receiver, name, args, kwargs);
@@ -2873,6 +3267,20 @@ pub(super) fn method(
         let [keep] = bind_method_arguments(name, args, kwargs, ["keepends"], 1)?;
         let keep = ctx.optional_truth(keep, false)?;
         return split_string_lines(ctx, receiver, keep);
+    }
+    if owner == "str" && matches!(name, "partition" | "rpartition") {
+        if !kwargs.is_empty() {
+            return Err(type_error(format!(
+                "str.{name}() takes no keyword arguments"
+            )));
+        }
+        let [separator] = args else {
+            return Err(type_error(format!(
+                "str.{name}() takes exactly one argument ({} given)",
+                args.len()
+            )));
+        };
+        return partition_string(ctx, receiver, *separator, name == "rpartition");
     }
     let source = ctx.str_value(receiver)?.to_owned();
     match name {
@@ -2889,55 +3297,72 @@ pub(super) fn method(
             };
             format_string(ctx, &source, FormatSource::Mapping(*mapping))
         }
-        "partition" | "rpartition" => {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!(
-                    "str.{name}() takes no keyword arguments"
-                )));
-            }
-            let [separator] = args else {
-                return Err(type_error(format!(
-                    "str.{name}() takes exactly one argument ({} given)",
-                    args.len()
-                )));
-            };
-            let sep = ctx.str_value(*separator).map_err(|_| {
-                type_error(format!("must be str, not {}", ctx.type_name(*separator)))
-            })?;
-            let reverse = name == "rpartition";
-            let fields = if let Some((before, after)) =
-                crate::objects::partition_text(&source, sep, reverse)?
-            {
-                vec![ctx.text(before), *separator, ctx.text(after)]
-            } else {
-                let empty = ctx.text("");
-                if reverse {
-                    vec![empty, empty, receiver]
-                } else {
-                    vec![receiver, empty, empty]
-                }
-            };
-            Ok(ctx.alloc(Value::Tuple(fields)))
-        }
-        "capitalize" | "upper" => {
+        "upper" => {
             positional(name, kwargs)?;
             arity(name, args, 0, 0)?;
-            Ok(ctx.text(match name {
-                "capitalize" => crate::objects::capitalize(&source)?.into_string(),
-                _ => source.to_uppercase(),
-            }))
-        }
-        "removeprefix" | "removesuffix" => {
-            positional(name, kwargs)?;
-            arity(name, args, 1, 1)?;
-            let affix = ctx.str_value(args[0])?;
-            let stripped = if name == "removeprefix" {
-                source.strip_prefix(affix)
-            } else {
-                source.strip_suffix(affix)
-            };
-            Ok(ctx.text(stripped.unwrap_or(&source)))
+            Ok(ctx.text(source.to_uppercase()))
         }
         _ => Err(type_error(format!("unsupported string method {name}"))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dynamic::ffi::new_context;
+
+    #[test]
+    fn unchanged_affixes_preserve_exact_strings_and_copy_subclasses() {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let base = ctx.builtin("str");
+        let scope = ctx.scope("Text", None);
+        let class = ctx
+            .allocate_class("Text".into(), scope, vec![base])
+            .unwrap();
+        let empty = ctx.text("");
+        let missing = ctx.text("absent");
+        let exact = ctx.text("αβ".repeat(171));
+        let single = ctx.text("a");
+        let surrogate = ctx.text_codepoints(vec![0xd800, u32::from('β')]);
+
+        for source in [empty, exact, single, surrogate] {
+            let child = ctx.call(class, vec![source], Vec::new()).unwrap();
+            for name in ["removeprefix", "removesuffix"] {
+                for affix in [empty, missing] {
+                    assert_eq!(
+                        method(&mut ctx, "str", name, &[source, affix], &[]).unwrap(),
+                        source
+                    );
+                    let copy = method(&mut ctx, "str", name, &[child, affix], &[]).unwrap();
+                    assert_eq!(ctx.type_name(copy), "str");
+                    assert_eq!(
+                        ctx.string_codepoints(copy).unwrap(),
+                        ctx.string_codepoints(source).unwrap()
+                    );
+                    assert_ne!(copy, child);
+                    if source != empty {
+                        assert_ne!(copy, source);
+                        assert_ne!(
+                            copy,
+                            method(&mut ctx, "str", name, &[child, affix], &[]).unwrap()
+                        );
+                    } else {
+                        assert_eq!(copy, empty);
+                    }
+                }
+            }
+        }
+        let prefix = ctx.text_codepoints(vec![0xd800]);
+        let suffix = ctx.text("β");
+        let rest = method(&mut ctx, "str", "removeprefix", &[surrogate, prefix], &[]).unwrap();
+        assert_eq!(ctx.str_value(rest).unwrap(), "β");
+        let rest = method(&mut ctx, "str", "removesuffix", &[surrogate, suffix], &[]).unwrap();
+        assert_eq!(&*ctx.string_codepoints(rest).unwrap(), &[0xd800]);
+        let number = ctx.int(17);
+        let error = method(&mut ctx, "str", "removeprefix", &[exact, number], &[]).unwrap_err();
+        assert_eq!(
+            error.message,
+            "removeprefix() argument must be str, not int"
+        );
     }
 }

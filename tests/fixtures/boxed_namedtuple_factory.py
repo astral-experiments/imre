@@ -31,6 +31,7 @@ def layout_read_allocation():
 
 
 def current():
+    import collections
     from annotationlib import Format
     from typing import NamedTuple
 
@@ -50,6 +51,35 @@ def current():
     assert Declared.__replace__ is Declared._replace
     updated = Declared("kept")._replace(label="new")
     assert type(updated) is Declared and updated.label == "new"
+
+    alternate = namedtuple("Alternate", ["kept"])
+    calls = []
+
+    def replacement(name, fields, **kwargs):
+        calls.append((name, fields, list(kwargs.items())))
+        if name == "Stopped":
+            raise LookupError("from factory")
+        return alternate
+
+    collections.namedtuple = replacement
+    try:
+        class Written(NamedTuple):
+            value: int = 2
+
+        assert Written is alternate and Written._fields == ("kept",)
+        assert Written.__annotations__ == {"value": int}
+        try:
+            NamedTuple("Stopped", [("tag", str)])
+        except LookupError as error:
+            assert str(error) == "from factory"
+        else:
+            raise AssertionError("factory exception suppressed")
+    finally:
+        collections.namedtuple = namedtuple
+    assert calls == [
+        ("Written", ["value"], [("defaults", [2]), ("module", __name__)]),
+        ("Stopped", ["tag"], [("defaults", ()), ("module", __name__)]),
+    ]
 
     Point = namedtuple('Point', 'self y')
     class Pixel(Point):
@@ -85,6 +115,35 @@ def current():
     assert ">>> Point =" in namedtuple.__doc__
     assert ">>> c = Counter(" in Counter.__doc__ and ">>> Counter(" in Counter.most_common.__doc__
     Fields = namedtuple("Fields", "left right")
+    new = Fields.__new__
+    names = new.__code__.co_varnames
+    assert names == ("_cls", "left", "right")
+    assert names is new.__code__.co_varnames and names[1] is Fields._fields[0]
+    assert new.__code__.co_nlocals == len(names)
+    try:
+        new(list, 1, 2)
+    except TypeError as error:
+        trace = error.__traceback__.tb_next
+        assert trace.tb_frame.f_code is new.__code__ and trace.tb_lineno == 1
+    else:
+        raise AssertionError("tuple allocator accepted list")
+
+    Column = namedtuple("Column", ["K"])
+    assert Column._fields == ("K",) and Column(K=4)[0] == 4
+    try:
+        namedtuple("Collision", ["K", "K"])
+    except SyntaxError as error:
+        assert error.msg == "duplicate argument 'K' in function definition"
+        assert (error.lineno, error.offset, error.end_offset) == (1, 17, 20)
+    else:
+        raise AssertionError("duplicate constructor parameter accepted")
+    try:
+        namedtuple("Constant", ["K", "K", "Ｔｒｕｅ"])
+    except ValueError as error:
+        assert str(error) == "identifier field can't represent 'True' constant"
+    else:
+        raise AssertionError("constant constructor parameter accepted")
+
     getter = Fields.right
     assert getter.__get__((2, 3), tuple) == 3
     assert getter.__get__(Fields(4, 5)) == 5

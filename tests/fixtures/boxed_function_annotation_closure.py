@@ -15,6 +15,9 @@ class Owner:
     def constant(self, x: 7):
         pass
 
+    def generic[T](self, x: T):
+        pass
+
     def class_reference(self, x: __class__):
         return super()
 
@@ -52,7 +55,7 @@ def nested_expressions(External):
     class Local:
         External = "class"
 
-        def method(x: [External for _ in (1,)], y: [x for x in [External]]):
+        def method[T: External](x: [External for _ in (1,)], y: [x for x in [External]]):
             pass
 
     class Global:
@@ -61,6 +64,12 @@ def nested_expressions(External):
         def method(x: External, y: (lambda: External)):
             pass
 
+    bound = Local.method.__type_params__[0].evaluate_bound
+    assert bound.__code__.co_freevars == ("__classdict__",)
+    annotation = Local.method.__annotate__
+    classdict = annotation.__code__.co_freevars.index("__classdict__")
+    assert bound.__closure__[0] is annotation.__closure__[classdict]
+    assert bound() == "class"
     Global.External = "shadow"
     return Local.method.__annotate__, Global.method.__annotate__
 
@@ -81,6 +90,8 @@ def make_cell(value):
 
 
 def current():
+    assert Owner.generic.__code__.co_flags == 19
+    assert Owner.generic.__annotate__.__code__.co_flags == 19
     during = DuringDefinition.method.__annotate__
     assert DuringDefinition.seen == DuringDefinition.before == 4
     assert during(1) == {"x": 3}
@@ -173,6 +184,17 @@ def current():
     assert local(2) == {"x": ["outer"], "y": ["class"]}
     values = declared_global(2)
     assert values["x"] is bytes and values["y"]() == "outer"
+    callback = values["y"]
+    assert callback.__qualname__ == "nested_expressions.<locals>.Global.<lambda>"
+    assert callback.__code__.co_qualname == callback.__qualname__
+    assert callback.__code__.co_flags & 0x10  # CO_NESTED
+    class Variadic:
+        options = (float,)
+
+        def select(self, *items: *(lambda values=[v for v in options]: values)()):
+            pass
+
+    assert Variadic.select.__annotations__ == {"items": float}
     print("annotation closures", names, copied(2)["x"].__name__, replaced(2)["y"].__name__)
 
 

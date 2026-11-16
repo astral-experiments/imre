@@ -408,15 +408,7 @@ pub(super) fn descriptor_get(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (&descriptor, rest) = args
-        .split_first()
-        .ok_or_else(|| Error::new("TypeError", "expected a getset descriptor"))?;
-    let Value::GetSetDescriptor {
-        get, owner, name, ..
-    } = *ctx.heap.get(descriptor)
-    else {
-        return Err(Error::new("TypeError", "expected a getset descriptor"));
-    };
+    let (descriptor, rest) = ctx.getset_receiver("__get__", args)?;
     if !kwargs.is_empty() {
         return Err(Error::new(
             "TypeError",
@@ -442,6 +434,15 @@ pub(super) fn descriptor_get(
         }
         return Ok(descriptor);
     }
+    if let Value::LayoutDescriptor(owner, field) = *ctx.heap.get(descriptor) {
+        return ctx.read_layout_descriptor(owner, field, receiver);
+    }
+    let Value::GetSetDescriptor {
+        get, owner, name, ..
+    } = *ctx.heap.get(descriptor)
+    else {
+        unreachable!("validated getset descriptor")
+    };
     if HashState::is_provider_class(owner) && ctx.type_name(receiver) != owner {
         return Err(Error::new(
             "TypeError",

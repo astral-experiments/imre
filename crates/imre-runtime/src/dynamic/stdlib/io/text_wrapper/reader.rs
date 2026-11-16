@@ -96,8 +96,12 @@ impl Reader {
 
     pub(super) fn flags(&self, codec: StreamCodec, newline: Option<&str>) -> i32 {
         let flags = match codec {
-            StreamCodec::Wide { bom: true, .. } if self.beginning => 2,
-            StreamCodec::Wide { bom: true, .. } => i32::from(self.order == -NATIVE_ORDER),
+            StreamCodec::Wide {
+                signature: true, ..
+            } if self.beginning => 2,
+            StreamCodec::Wide {
+                signature: true, ..
+            } => i32::from(self.order == -NATIVE_ORDER),
             StreamCodec::Registered(Codec::Utf8 { signature: true }) => i32::from(self.beginning),
             _ => 0,
         };
@@ -118,7 +122,9 @@ impl Reader {
         self.tail.clear();
         self.cr = universal && cookie.flags & 1 != 0;
         self.beginning = match codec {
-            StreamCodec::Wide { bom: true, .. } => !matches!(flags, 0 | 1),
+            StreamCodec::Wide {
+                signature: true, ..
+            } => !matches!(flags, 0 | 1),
             StreamCodec::Registered(Codec::Utf8 { signature: true }) => flags != 0,
             _ => false,
         };
@@ -240,67 +246,27 @@ impl Reader {
         Ok(())
     }
 
-    pub(super) fn chunk(
-        &mut self,
-        bytes: &[u8],
-        codec: StreamCodec,
-        end: bool,
-    ) -> Result<(StreamCodec, Vec<u8>)> {
-        if let StreamCodec::Wide { format, bom } = codec {
-            let mut raw = Vec::new();
-            raw.try_reserve(
-                self.tail
-                    .len()
-                    .checked_add(bytes.len())
-                    .ok_or_else(crate::Error::allocation)?,
-            )
-            .map_err(|_| crate::Error::allocation())?;
-            raw.extend_from_slice(&self.tail);
-            raw.extend_from_slice(bytes);
-            let codec = if bom && !self.beginning {
-                StreamCodec::Wide {
-                    format: format.with_order(self.order),
-                    bom: false,
-                }
-            } else {
-                codec
-            };
-            return Ok((codec, raw));
-        }
-        let mut raw = std::mem::take(&mut self.tail);
-        raw.try_reserve(bytes.len())
-            .map_err(|_| crate::Error::allocation())?;
+    pub(super) fn chunk(&self, bytes: &[u8], codec: StreamCodec) -> Result<(StreamCodec, Vec<u8>)> {
+        let mut raw = Vec::new();
+        raw.try_reserve(
+            self.tail
+                .len()
+                .checked_add(bytes.len())
+                .ok_or_else(crate::Error::allocation)?,
+        )
+        .map_err(|_| crate::Error::allocation())?;
+        raw.extend_from_slice(&self.tail);
         raw.extend_from_slice(bytes);
-        let utf8 = matches!(codec, StreamCodec::Registered(Codec::Utf8 { .. }));
-        let signature = matches!(
-            codec,
-            StreamCodec::Registered(Codec::Utf8 { signature: true })
-        );
-        // UTF-8-SIG defers even final input while it is still a proper prefix of the BOM.
-        if signature && self.beginning && raw.len() < 3 && b"\xef\xbb\xbf".starts_with(&raw) {
-            self.tail = raw;
-            return Ok((codec, Vec::new()));
-        }
-        let first = self.beginning;
-        if !raw.is_empty() {
-            self.beginning = false;
-        }
-        if utf8
-            && !end
-            && !raw.is_empty()
-            && let Some(start) = (raw.len().saturating_sub(3)..raw.len())
-                .rev()
-                .find(|&i| raw[i] & 0xc0 != 0x80)
-            && std::str::from_utf8(&raw[start..]).is_err_and(|e| e.error_len().is_none())
+        let codec = if let StreamCodec::Wide {
+            format,
+            signature: true,
+        } = codec
+            && !self.beginning
         {
-            self.tail = raw.split_off(start);
-        }
-        let codec = if !first
-            && matches!(
-                codec,
-                StreamCodec::Registered(Codec::Utf8 { signature: true })
-            ) {
-            StreamCodec::Registered(Codec::Utf8 { signature: false })
+            StreamCodec::Wide {
+                format: format.with_order(self.order),
+                signature: false,
+            }
         } else {
             codec
         };
@@ -375,8 +341,18 @@ impl Reader {
         match decoded {
             Value::Str(s) if !universal => self.text.push_str(s),
             Value::Str(s) => {
-                for c in s.chars() {
-                    self.push_translated(c, translate);
+                let mut rest: &str = s;
+                while !rest.is_empty() {
+                    if self.cr || matches!(rest.as_bytes()[0], b'\r' | b'\n') {
+                        let c = rest.chars().next().expect("nonempty decoded text");
+                        self.push_translated(c, translate);
+                        rest = &rest[c.len_utf8()..];
+                    } else {
+                        let n =
+                            memchr::memchr2(b'\r', b'\n', rest.as_bytes()).unwrap_or(rest.len());
+                        self.text.push_str(&rest[..n]);
+                        rest = &rest[n..];
+                    }
                 }
             }
             Value::SurrogateStr(points) => {
@@ -446,7 +422,7 @@ impl Reader {
             part.try_reserve_exact(n)
                 .map_err(|_| crate::Error::allocation())?;
             part.push_str(text);
-            Value::Str(part)
+            Value::Str(part.into())
         } else {
             let mut points = Vec::new();
             points

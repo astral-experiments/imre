@@ -3,7 +3,7 @@ use super::*;
 
 pub(in crate::objects) fn clock_parts(clock: &Object) -> [i64; 5] {
     with(clock, |v| match v {
-        Value::Time { local, fold, .. } => time_fields(*local, *fold).map(|n| n as i64),
+        Value::Time { local, fold, .. } => time_fields(i128::from(*local), *fold).map(|n| n as i64),
         _ => unreachable!(),
     })
 }
@@ -15,7 +15,7 @@ pub(super) fn order(left: &Value, right: &Value) -> Option<std::cmp::Ordering> {
             let off = zone
                 .as_ref()
                 .map(|z| offset(z).div_euclid(1_000_000) * 1_000_000);
-            (local - off.unwrap_or(0), off.is_some())
+            (i128::from(*local) - off.unwrap_or(0), off.is_some())
         }
         _ => unreachable!(),
     };

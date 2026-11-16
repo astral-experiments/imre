@@ -71,6 +71,26 @@ fn truncate_file(ctx: &mut Context, buffer: Id, size: Option<Id>) -> Result<Id> 
     Ok(ctx.int(size))
 }
 
+/// A native bound method can outlive a change to the writer's instance dictionary.
+pub(in crate::dynamic::stdlib) fn overridden_close(
+    ctx: &mut Context,
+    receiver: Id,
+    name: &str,
+    closed: bool,
+    close_raw: impl FnOnce(&mut Context) -> Result<Id>,
+) -> Option<Result<Id>> {
+    ctx.heap.get(receiver).native_file_dict()?;
+    if name == "__exit__" {
+        return Some(super::text_wrapper::invoke(ctx, receiver, "close", vec![]));
+    }
+    if closed {
+        return None;
+    }
+    Some(super::buffered_io::flush_and_close(
+        ctx, receiver, close_raw,
+    ))
+}
+
 pub(super) fn call(
     ctx: &mut Context,
     owner: &str,
@@ -183,6 +203,9 @@ pub(super) fn call(
         return fd.active.run(|| match name {
             "raw" => Ok(fd.raw),
             "name" | "mode" => ctx.lookup_attr(fd.raw, name),
+            "truncate" if fd.retired_write_offset().is_some() => {
+                Err(Error::new("ValueError", "truncate of closed file"))
+            }
             "truncate" if owner == "BufferedRandom" => fd.call(ctx, receiver, name, args),
             "truncate" => {
                 fd.call(ctx, receiver, "flush", &[])?;
@@ -191,22 +214,13 @@ pub(super) fn call(
             }
             "close" if buffer != receiver && !fd.closed() => {
                 fd.warn_on_close(ctx, receiver)?;
-                let flushed = ctx
-                    .lookup_attr(receiver, "flush")
-                    .and_then(|flush| ctx.call(flush, vec![], Vec::new()));
-                if let Err(error) = &flushed {
-                    for id in error.roots() {
-                        ctx.heap.keep(id);
-                    }
+                if owner == "BufferedRandom"
+                    && descriptor_buffer::backing(ctx, receiver) == Some(buffer)
+                    && !fd.closed()
+                {
+                    fd.prepare_random_close(ctx, receiver)?;
                 }
-                match (flushed, fd.close_after_flush(ctx, receiver)) {
-                    (Err(flush), Err(mut close)) => {
-                        close.context = ctx.raised_instance(flush);
-                        Err(close)
-                    }
-                    (Err(flush), _) => Err(flush),
-                    (_, closed) => closed.map(|()| NONE),
-                }
+                super::buffered_io::close(ctx, receiver)
             }
             _ => fd.call(ctx, receiver, name, args),
         });

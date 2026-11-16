@@ -2,6 +2,7 @@
 
 use crate::StrOwner;
 mod expandtabs;
+pub(crate) mod legacy;
 mod lowercase;
 mod normalization;
 pub(crate) mod translate;
@@ -10,11 +11,9 @@ pub(crate) mod urlsplit;
 pub(crate) mod zfill;
 
 pub(crate) use expandtabs::expand_tabs;
-pub(crate) use lowercase::{
-    Case, capitalize, case_map, case_map_points, python_islower, python_istitle,
-};
-pub(super) use lowercase::{lowercase, lowercase_chars};
-pub(crate) use normalization::normalize_unicode;
+pub(super) use lowercase::lowercase_chars;
+pub(crate) use lowercase::{Case, case_map, case_map_points, python_islower, python_istitle};
+pub(crate) use normalization::{Form, normalize_unicode};
 
 use num_traits::{Signed, ToPrimitive};
 use std::fmt::Write;
@@ -47,10 +46,7 @@ impl<'a> UrlInput<'a> {
             Self::Text(s) => Ok(s),
             Self::Bytes(b) => {
                 if let Some(i) = b.iter().position(|c| !c.is_ascii()) {
-                    return Err(super::bytes::ascii_decode_error(
-                        super::bytes::owned_input(b)?,
-                        i,
-                    ));
+                    return Err(super::bytes::ascii_decode_error(b, i));
                 }
                 Ok(std::str::from_utf8(b).expect("ASCII is UTF-8"))
             }
@@ -119,12 +115,17 @@ pub(super) fn ascii_escape(text: &str) -> Result<String> {
 
 /// Converts a Python character ordinal within the native string domain.
 pub(crate) fn chr_scalar(value: &Int) -> Result<char> {
-    match value.as_small() {
-        Some(0xd800..=0xdfff) => Err(Error::new(
+    char::from_u32(chr_codepoint(value)?).ok_or_else(|| {
+        Error::new(
             Kind::ValueError,
             "surrogates are outside the native string domain",
-        )),
-        Some(code @ 0..=0x10ffff) => Ok(char::from_u32(code as u32).expect("Unicode scalar")),
+        )
+    })
+}
+
+fn chr_codepoint(value: &Int) -> Result<u32> {
+    match value.as_small() {
+        Some(code @ 0..=0x10ffff) => Ok(code as u32),
         _ => Err(Error::new(
             Kind::ValueError,
             "chr() arg not in range(0x110000)",
@@ -140,6 +141,126 @@ pub unsafe extern "C" fn imre_chr(value: usize) -> *const Str {
     let value = unsafe { Int::borrow(value) };
     let result =
         chr_scalar(&value).map(|c| StrOwner::into_raw(owned_string(c.encode_utf8(&mut [0; 4]))));
+    finish(result, std::ptr::null())
+}
+
+/// Unicode 16 East_Asian_Width, including its defaults for unassigned code points.
+pub(crate) fn east_asian_width(point: u32) -> &'static str {
+    use icu_properties::{
+        CodePointMapData,
+        props::{EastAsianWidth, NamedEnumeratedProperty},
+    };
+
+    let width = if char::from_u32(point).is_some_and(crate::integer_text::newer_printable) {
+        // ICU 78 includes later assignments. EastAsianWidth-16.0.0.txt gives
+        // unassigned CJK ideographs and undesignated code points in planes 2/3
+        // width W. The default elsewhere is N.
+        match point {
+            0x3400..=0x4dbf
+            | 0x4e00..=0x9fff
+            | 0xf900..=0xfaff
+            | 0x20000..=0x2fffd
+            | 0x30000..=0x3fffd => EastAsianWidth::Wide,
+            _ => EastAsianWidth::Neutral,
+        }
+    } else {
+        CodePointMapData::<EastAsianWidth>::new().get32(point)
+    };
+    width.short_name()
+}
+
+/// Unicode 16.0 General_Category for a Python code point, including surrogates.
+pub(crate) fn general_category(point: u32) -> &'static str {
+    const TABLE: (&[&str], &[(u32, u8)]) =
+        include!(concat!(env!("OUT_DIR"), "/unicode_general_categories.rs"));
+    let (names, runs) = TABLE;
+    let end = runs.partition_point(|&(start, _)| start <= point);
+    names[usize::from(runs[end - 1].1)]
+}
+
+/// CPython leaves Bidi_Class empty for unassigned code points, including those
+/// for which ICU supplies a default direction or a post-Unicode-16 assignment.
+pub(crate) fn bidirectional(point: u32) -> &'static str {
+    use icu_properties::{
+        CodePointMapData,
+        props::{BidiClass, NamedEnumeratedProperty},
+    };
+    if general_category(point) == "Cn" {
+        ""
+    } else {
+        CodePointMapData::<BidiClass>::new()
+            .get32(point)
+            .short_name()
+    }
+}
+
+/// Argument Clinic's character converter counts Python code points, including surrogates.
+pub(crate) fn ucd_character(name: &str, mut points: impl Iterator<Item = u32>) -> Result<u32> {
+    let first = points.next();
+    let rest = points.count();
+    if let (Some(point), 0) = (first, rest) {
+        return Ok(point);
+    }
+    let length = usize::from(first.is_some()) + rest;
+    Err(Error::new(
+        Kind::TypeError,
+        format!("{name}(): argument must be a unicode character, not a string of length {length}"),
+    ))
+}
+
+/// # Safety
+/// The caller retains the input string until the result is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_east_asian_width(text: *const Str) -> *const Str {
+    // SAFETY: the checked caller provides a rooted UTF-8 string.
+    unicode_property(unsafe { &*text }, "east_asian_width", east_asian_width)
+}
+
+/// # Safety
+/// The checked caller provides a rooted UTF-8 string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_bidirectional(text: *const Str) -> *const Str {
+    // SAFETY: the caller retains the string.
+    unicode_property(unsafe { &*text }, "bidirectional", bidirectional)
+}
+
+/// # Safety
+/// The caller retains the input string until the result is returned.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_category(text: *const Str) -> *const Str {
+    // SAFETY: the checked caller provides a rooted UTF-8 string.
+    unicode_property(unsafe { &*text }, "category", general_category)
+}
+
+/// # Safety
+/// The integer operand of the checked chr call is rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_category_of_ordinal(value: usize) -> *const Str {
+    // SAFETY: the generated caller retains the integer.
+    let value = unsafe { Int::borrow(value) };
+    unicode_property_of_ordinal(&value, general_category)
+}
+
+/// # Safety
+/// The integer operand of the checked chr call is rooted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_unicode_bidirectional_of_ordinal(value: usize) -> *const Str {
+    // SAFETY: the generated caller retains the integer.
+    let value = unsafe { Int::borrow(value) };
+    unicode_property_of_ordinal(&value, bidirectional)
+}
+
+fn unicode_property_of_ordinal(value: &Int, property: fn(u32) -> &'static str) -> *const Str {
+    let result = chr_codepoint(value)
+        .and_then(|point| try_owned_string(property(point)))
+        .map(StrOwner::into_raw);
+    finish(result, std::ptr::null())
+}
+
+fn unicode_property(text: &Str, name: &str, property: fn(u32) -> &'static str) -> *const Str {
+    let result = ucd_character(name, text.chars().map(u32::from))
+        .and_then(|point| try_owned_string(property(point)))
+        .map(StrOwner::into_raw);
     finish(result, std::ptr::null())
 }
 
@@ -169,7 +290,7 @@ pub(crate) fn ord_byte(bytes: &[u8]) -> Result<u32> {
 /// Returns the scalar value of one character or the unsigned value of one byte.
 ///
 /// # Safety
-/// The caller roots a concrete string, bytes, or their checked nullable union.
+/// The caller roots a string, bytes, bytearray, or a checked nullable union of them.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
     let result = (|| {
@@ -189,6 +310,15 @@ pub unsafe extern "C" fn imre_ord(mut word: usize, mut kind: u32) -> usize {
             3 => {
                 // SAFETY: the representation identifies a rooted UTF-8 string.
                 ord_char(unsafe { &*(word as *const Str) })?
+            }
+            5 => {
+                // SAFETY: the checked object is a rooted bytearray. Reading its
+                // length and byte cannot reenter Python or return a storage borrow.
+                unsafe {
+                    super::object(word as *const Object)
+                        .0
+                        .with(|storage| ord_byte(storage.bytearray()))
+                }?
             }
             8 => {
                 // SAFETY: the representation identifies an immutable rooted bytes value.
@@ -263,11 +393,39 @@ pub(crate) fn python_isidentifier(text: &str) -> bool {
     chars.next().is_some_and(|ch| in_ranges(ch, START)) && chars.all(|ch| in_ranges(ch, CONTINUE))
 }
 
-pub(crate) fn python_isdigit(text: &str) -> bool {
+/// Matches CPython 3.14's printable characters using its Unicode 16 repertoire.
+pub(crate) fn python_isprintable(text: &str) -> bool {
+    use icu_properties::props::{EnumeratedProperty, GeneralCategory, GeneralCategoryGroup};
+
+    const NONPRINTABLE: GeneralCategoryGroup =
+        GeneralCategoryGroup::Other.union(GeneralCategoryGroup::Separator);
+    text.chars().all(|ch| {
+        if ch.is_ascii() {
+            (' '..='~').contains(&ch)
+        } else {
+            !NONPRINTABLE.contains(GeneralCategory::for_char(ch))
+                && !crate::integer_text::newer_printable(ch)
+        }
+    })
+}
+
+fn numeric_characters(text: &str, predicate: impl Fn(char) -> bool) -> bool {
     if text.is_ascii() {
         return !text.is_empty() && text.bytes().all(|b| b.is_ascii_digit());
     }
-    text.chars().all(crate::integer_text::is_digit)
+    text.chars().all(predicate)
+}
+
+pub(crate) fn python_isdecimal(text: &str) -> bool {
+    numeric_characters(text, |c| crate::integer_text::decimal_digit(c).is_some())
+}
+
+pub(crate) fn python_isdigit(text: &str) -> bool {
+    numeric_characters(text, crate::integer_text::is_digit)
+}
+
+pub(crate) fn python_isnumeric(text: &str) -> bool {
+    numeric_characters(text, crate::integer_text::is_numeric)
 }
 
 /// Tests for a nonempty string of Unicode 16 letters.
@@ -280,6 +438,16 @@ pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
     u32::from(python_isalpha(unsafe { &*value }))
 }
 
+/// Tests for a nonempty string of Unicode 16 Decimal characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isdecimal(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isdecimal(unsafe { &*value }))
+}
+
 /// Tests for a nonempty string of Unicode 16 Decimal or Digit characters.
 ///
 /// # Safety
@@ -288,6 +456,16 @@ pub unsafe extern "C" fn imre_str_isalpha(value: *const Str) -> u32 {
 pub unsafe extern "C" fn imre_str_isdigit(value: *const Str) -> u32 {
     // SAFETY: the receiver stays alive for this call.
     u32::from(python_isdigit(unsafe { &*value }))
+}
+
+/// Tests for a nonempty string of Unicode numeric characters.
+///
+/// # Safety
+/// The caller roots the immutable string for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_isnumeric(value: *const Str) -> u32 {
+    // SAFETY: the receiver stays alive for this call.
+    u32::from(python_isnumeric(unsafe { &*value }))
 }
 
 /// Tests a native string with Python's alphanumeric predicate.
@@ -382,48 +560,6 @@ pub unsafe extern "C" fn imre_str_is_upper(value: *const Str) -> u32 {
     u32::from(python_isupper(unsafe { &*value }.chars()))
 }
 
-/// Removes the common space/tab prefix after the caller has evaluated its text.
-/// Python 3.14 normalizes whitespace-only lines, including Unicode whitespace.
-///
-/// # Safety
-/// The caller roots the immutable string until this independently owned result returns.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_str_dedent(text: *const Str) -> *const Str {
-    // SAFETY: the input stays live and no user code runs while it is borrowed.
-    let text = unsafe { &*text };
-    StrOwner::into_raw(StrOwner::new(dedent(text)))
-}
-
-/// Remove common indentation with the same whitespace rules in both runtimes.
-pub(crate) fn dedent(text: &str) -> Str {
-    let blank = |line: &str| line.chars().all(python_whitespace);
-    let mut lines = text.split('\n').filter(|line| !blank(line));
-    let first = lines.next().unwrap_or("");
-    let mut margin = &first.as_bytes()[..first.len() - first.trim_start_matches([' ', '\t']).len()];
-    for line in lines {
-        if margin.is_empty() {
-            break;
-        }
-        let common = margin
-            .iter()
-            .zip(line.as_bytes())
-            .take_while(|(a, b)| a == b)
-            .count();
-        margin = &margin[..common];
-    }
-    // Indentation and blank lines can account for nearly the entire input.
-    let mut result = Str::default();
-    for (index, line) in text.split('\n').enumerate() {
-        if index != 0 {
-            result.push('\n');
-        }
-        if !blank(line) {
-            result.push_str(&line[margin.len()..]);
-        }
-    }
-    result
-}
-
 thread_local! {
     static SHORT_STRINGS: std::cell::RefCell<[Option<StrOwner>; 257]> =
         const { std::cell::RefCell::new([const { None }; 257]) };
@@ -454,7 +590,7 @@ fn owned_string_with<E>(
     cached_short(value, index, new)
 }
 
-fn short_index(value: &str) -> Option<usize> {
+pub(crate) fn short_index(value: &str) -> Option<usize> {
     Some(match value.as_bytes() {
         [] => 256,
         [byte] => usize::from(*byte),
@@ -964,6 +1100,20 @@ pub unsafe extern "C" fn imre_str_affix_ascii(
     u32::from(mask & (1_u64 << (byte % 64)) != 0)
 }
 
+/// Reject a prefix outside a literal set whose keys start with three ASCII bytes.
+///
+/// # Safety
+/// The caller roots the immutable native string during the lookup.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_excludes_ascii_prefix3(value: *const Str, mask: u64) -> u32 {
+    // SAFETY: the input stays rooted and immutable.
+    let bytes = unsafe { &*value }.as_bytes();
+    u32::from(match imre_ast::strings::ascii_case_prefix_bit(bytes) {
+        Some(bit) => mask & bit == 0,
+        None => bytes.len() < 3 && bytes.is_ascii(),
+    })
+}
+
 /// Negative search bounds count from the end. Keep positive bounds unclamped so
 /// an empty needle still fails to match when the start exceeds the string length.
 fn search_offset(start: Option<&Int>, length: impl FnOnce() -> usize) -> Option<usize> {
@@ -1062,13 +1212,23 @@ pub(crate) fn codepoint_search_window<'a>(
     start: Option<&Int>,
     end: Option<&Int>,
 ) -> Option<(&'a [u32], usize)> {
-    let length = || source.len();
+    let bounds = indexed_search_bounds(source.len(), start, end)?;
+    let begin = bounds.start;
+    Some((&source[bounds], begin))
+}
+
+/// Resolve search bounds for strings whose stored elements each represent one code point.
+pub(crate) fn indexed_search_bounds(
+    length: usize,
+    start: Option<&Int>,
+    end: Option<&Int>,
+) -> Option<std::ops::Range<usize>> {
     let end = end
-        .and_then(|n| search_offset(Some(n), length))
-        .unwrap_or(source.len())
-        .min(source.len());
-    let start = search_offset(start, length)?;
-    Some((source.get(start..end)?, start))
+        .and_then(|n| search_offset(Some(n), || length))
+        .unwrap_or(length)
+        .min(length);
+    let start = search_offset(start, || length)?;
+    (start <= end).then_some(start..end)
 }
 
 /// Find the first or last match when either string contains surrogate code points.
@@ -1342,35 +1502,6 @@ mod tests {
         let owner = try_owned_string("é").ok().unwrap();
         let cached = owned_string_with("é", |_| Err(())).unwrap();
         assert!(StrOwner::ptr_eq(&owner, &cached));
-    }
-
-    #[test]
-    fn dedent_preserves_content_and_normalizes_whitespace_only_lines() {
-        for (source, expected) in [
-            ("  x\r\n \t\u{a0}\u{1c}\r\n   y\r\n", "x\r\n\n y\r\n"),
-            ("\tx\n \ty\n\u{2003}\n", "\tx\n \ty\n\n"),
-            ("\t\u{a0}x\n\t x", "\u{a0}x\n x"),
-            ("\n\u{2002}\n\u{85}", "\n\n"),
-        ] {
-            let source = Str::from(source);
-            // SAFETY: the input lives through the call and the result transfers one owner.
-            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
-            assert_eq!(result.as_str(), expected);
-        }
-    }
-
-    #[test]
-    fn dedent_keeps_small_results_inline_after_removing_large_prefixes() {
-        for (text, expected) in [
-            (format!("{}x", " ".repeat(65_536)), "x"),
-            (format!("{}\n", "\u{2003}".repeat(21_000)), "\n"),
-        ] {
-            let source = Str::from(text);
-            // SAFETY: the source lives through the call and the result transfers one owner.
-            let result = unsafe { StrOwner::from_raw(imre_str_dedent(&source)) };
-            assert_eq!(result.as_str(), expected);
-            assert!(!result.is_heap_allocated());
-        }
     }
 
     #[test]

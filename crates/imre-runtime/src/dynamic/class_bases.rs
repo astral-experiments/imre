@@ -2,27 +2,51 @@
 
 use super::{Context, Error, HashMap, Id, Result, Value};
 
+struct ProposedMro {
+    layout: Vec<Id>,
+    published: Option<Vec<Id>>,
+}
+
 impl Context {
-    /// Only slot-free Python classes over object or dict share the layouts modeled here.
-    fn supports_rebase(&self, class: Id) -> bool {
+    /// Check the published layouts before replacing any bases or descendant MROs.
+    fn supports_rebase(&self, class: Id, tuple_layout: bool) -> bool {
         self.find_in_mro(class, |owner| {
             let supported = match self.heap.get(owner) {
-                Value::Native(name) => matches!(name.as_str(), "object" | "dict"),
+                Value::Native(name) => {
+                    matches!(name.as_str(), "object" | "dict")
+                        || (tuple_layout && name == "tuple")
+                        || super::builtins::is_exception(name)
+                }
                 Value::Class {
                     scope,
                     metaclass,
-                    namedtuple_fields: None,
+                    namedtuple_fields,
                     io_kind: None,
                     heap_type: None,
                     ..
-                } if metaclass.is_none() || *metaclass == self.builtins.get("type").copied() => {
+                } => {
                     let frame = self.scope_data(*scope);
-                    frame.class_cell.is_some()
-                        && frame.class_namespace.as_ref().is_some_and(|ns| {
-                            !ns.immutable_type
-                                && ns.slot_names.is_none()
-                                && ns.itertools_layout.is_none()
-                        })
+                    let default_meta =
+                        metaclass.is_none() || *metaclass == self.builtins.get("type").copied();
+                    frame.class_namespace.as_ref().is_some_and(|ns| {
+                        if ns.immutable_type || ns.itertools_layout.is_some() {
+                            return false;
+                        }
+                        if default_meta
+                            && frame.class_cell.is_some()
+                            && namedtuple_fields.is_none()
+                            && ns.slot_names.is_none()
+                        {
+                            return true;
+                        }
+                        tuple_layout
+                            && ns.slot_names.as_deref().is_none_or(<[_]>::is_empty)
+                            && (namedtuple_fields.is_some() || !self.owns_allocation(owner))
+                            && metaclass.is_none_or(|meta| {
+                                self.class_attr(meta, "mro")
+                                    .is_none_or(|mro| Some(&mro) == self.builtins.get("type.mro"))
+                            })
+                    })
                 }
                 _ => false,
             };
@@ -82,7 +106,7 @@ impl Context {
         let unsupported = || {
             Error::new(
                 "NotImplementedError",
-                "__bases__ assignment requires ordinary slot-free classes over object or dict",
+                "__bases__ assignment requires supported slot-free Python classes",
             )
         };
         let old_bases = self.class_bases_tuple(class).ok_or_else(unsupported)?;
@@ -107,15 +131,27 @@ impl Context {
                 ),
             ));
         }
-        if !new_bases.iter().all(|&base| self.supports_rebase(base)) {
+        // A tuple class may add or remove mixins that contribute no instance storage.
+        let object = self.builtins.get("object").copied();
+        let contributes_layout = |&&base: &&Id| layout(base) != (true, object, false, false, false);
+        let tuple_layout = old_base == new_base
+            && self.builtins.get("tuple") == Some(&old_base)
+            && old_bases
+                .iter()
+                .filter(contributes_layout)
+                .eq(new_bases.iter().filter(contributes_layout));
+        if !new_bases
+            .iter()
+            .all(|&base| self.supports_rebase(base, tuple_layout))
+        {
             return Err(unsupported());
         }
 
         // An inconsistent MRO in any descendant must leave every original tuple intact.
         let affected = self.heap.class_hierarchy(class);
-        let mut proposed: HashMap<Id, Vec<Id>> = HashMap::new();
+        let mut proposed: HashMap<Id, ProposedMro> = HashMap::new();
         for &owner in &affected {
-            if !self.supports_rebase(owner) {
+            if !self.supports_rebase(owner, tuple_layout) {
                 return Err(unsupported());
             }
             let bases = if owner == class {
@@ -126,18 +162,45 @@ impl Context {
             let ancestors = self.linearize_with(bases, |ctx, base| {
                 proposed
                     .get(&base)
-                    .cloned()
+                    .map(|mro| mro.layout.clone())
                     .unwrap_or_else(|| ctx.lineage(base))
             })?;
-            let mut mro = vec![owner];
-            mro.extend(ancestors);
-            proposed.insert(owner, mro);
+            // Changing a mixin must not silently replace the native storage of any descendant.
+            if let Some(old) = self.allocation_base(owner)
+                && std::iter::once(owner)
+                    .chain(ancestors.iter().copied())
+                    .find(|&base| self.owns_allocation(base))
+                    != Some(old)
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__bases__ assignment: '{}' object layout differs from '{}'",
+                        self.class_name(new_base),
+                        self.class_name(old_base)
+                    ),
+                ));
+            }
+            let public = self.exception_mro(bases, &ancestors, |ctx, base| {
+                proposed.get(&base).map_or_else(
+                    || ctx.base_lineage(base, true),
+                    |mro| mro.published.as_ref().unwrap_or(&mro.layout).clone(),
+                )
+            })?;
+            let with_owner = |bases: Vec<Id>| std::iter::once(owner).chain(bases).collect();
+            proposed.insert(
+                owner,
+                ProposedMro {
+                    layout: with_owner(ancestors),
+                    published: public.map(with_owner),
+                },
+            );
         }
         let mut finalizers = false;
         for owner in affected {
-            let mro = proposed.remove(&owner).unwrap();
-            let ancestors = mro[1..].to_vec();
-            let mro = self.alloc(Value::Tuple(mro));
+            let ProposedMro { layout, published } = proposed.remove(&owner).unwrap();
+            let ancestors = layout[1..].to_vec();
+            let mro = self.alloc(Value::Tuple(published.unwrap_or(layout)));
             let Value::Class {
                 scope,
                 ancestors: old,
@@ -167,13 +230,40 @@ impl Context {
             self.heap.weak_edge_removed(old_mro);
             finalizers |= self.class_attr(owner, "__del__").is_some();
         }
+        // A successful assignment reattaches every direct base, including retained bases.
+        self.heap.reattach_class(class);
         if finalizers {
             self.register_class_finalizers();
         }
         Ok(())
     }
 
-    fn class_bases_tuple(&self, class: Id) -> Option<Vec<Id>> {
+    pub(super) fn type_subclasses(&mut self, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+        let class =
+            super::builtins::noargs_method_receiver(self, "type", "__subclasses__", args, kwargs)?;
+        if matches!(self.heap.get(class), Value::Class { .. }) {
+            let children = self.heap.immediate_subclasses(class);
+            return Ok(self.alloc(Value::List(children)));
+        }
+        let mut children = Vec::new();
+        for child in self.heap.registered_types().to_vec() {
+            let bases = if matches!(self.heap.get(child), Value::Native(_)) {
+                let tuple = self.builtin_hierarchy_tuple(child, "__bases__");
+                let Value::Tuple(bases) = self.heap.get(tuple) else {
+                    unreachable!()
+                };
+                bases.as_slice()
+            } else {
+                self.heap.immediate_bases(child)
+            };
+            if bases.contains(&class) {
+                children.push(child);
+            }
+        }
+        Ok(self.alloc(Value::List(children)))
+    }
+
+    pub(super) fn class_bases_tuple(&self, class: Id) -> Option<Vec<Id>> {
         let Value::Class { scope, .. } = self.heap.get(class) else {
             return None;
         };

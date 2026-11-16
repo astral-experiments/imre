@@ -2,6 +2,10 @@
 use super::calls::parameter;
 use super::*;
 use ir::{CalendarOp as Op, CalendarType as C};
+pub(super) enum ParserBinding<'a> {
+    Local(&'a [ast::Stmt]),
+    Global(DefinitionId),
+}
 pub(super) fn op(operation: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
@@ -24,10 +28,7 @@ pub(super) fn equality(types: &Types, values: &mut Vec<Expr>, ops: &[ast::CmpOp]
     }
     let equal = op(Op::NullableEqual, Type::Bool, std::mem::take(values));
     Some(if *cmp == ast::CmpOp::NotEq {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(equal)),
-        }
+        Expr::not(equal)
     } else {
         equal
     })
@@ -61,7 +62,7 @@ pub(super) fn binary(
     right: Expr,
     node: &ast::ExprBinOp,
     source: &str,
-) -> Result<Expr, String> {
+) -> std::result::Result<Expr, String> {
     use ast::Operator::{Add, Sub};
     let (kind, reverse, subtract) = match (a, b, node.op) {
         (kind @ (C::Date | C::DateTime | C::Delta), C::Delta, Add | Sub) => {
@@ -69,7 +70,7 @@ pub(super) fn binary(
         }
         (C::Delta, date @ (C::Date | C::DateTime), Add) => (date, true, false),
         _ => {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 node,
                 "unsupported arithmetic between these datetime values",
@@ -140,11 +141,46 @@ pub(super) fn boxed_member(receiver: Type, name: &str) -> bool {
 }
 
 impl Checker<'_> {
+    pub(super) fn month_grid_call(
+        &mut self,
+        name: &str,
+        call: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let (op, names, returns): (_, &[&str], _) = match name {
+            "imre._calendar.month_grid" => (
+                Op::InstanceMonthGrid,
+                &["year", "month", "firstweekday"],
+                self.types.list(self.types.list(Type::Int)),
+            ),
+            "calendar.monthcalendar" => (
+                Op::MonthGrid,
+                &["year", "month"],
+                self.types.list(self.types.list(Type::Int)),
+            ),
+            "calendar.setfirstweekday" => (Op::SetFirstWeekday, &["firstweekday"], Type::None),
+            _ => (Op::FirstWeekday, &[], Type::Int),
+        };
+        let params = names
+            .iter()
+            .map(|name| parameter(name, Type::Int, None))
+            .collect::<Vec<_>>();
+        let args = self
+            .arguments_with(call, &params, None, |checker, _, source| {
+                let value = checker.expr(source)?;
+                if value.ty != Type::Int {
+                    return Err(checker.object_runtime_export(name, source));
+                }
+                Ok(value)
+            })
+            .map_err(|_| self.object_runtime_export(name, call))?;
+        Ok(self.ordered_builtin(Builtin::Calendar(op), returns, args))
+    }
+
     pub(super) fn calendar_class_attribute(
         &self,
         a: &ast::ExprAttribute,
+        base: Option<Binding>,
     ) -> Result<Option<Expr>, String> {
-        let base = self.resolve(&a.value);
         let kind = match base {
             Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => Type::Calendar(kind),
             Some(Binding::Intrinsic(Intrinsic::ClockTime)) => Type::ClockTime,
@@ -176,8 +212,8 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         max_positional: usize,
-        error: String,
-    ) -> String {
+        error: Failure,
+    ) -> Failure {
         if let [state, ..] = call.arguments.args.as_ref()
             && call.arguments.args.len() <= max_positional
             && self.expr(state).is_ok_and(|value| {
@@ -328,6 +364,84 @@ impl Checker<'_> {
         };
         Ok(self.ordered_builtin(Builtin::Calendar(op), ty, args))
     }
+    /// Recognize a saved built-in parser only when every reference calls it directly.
+    pub(super) fn saved_datetime_parser<'a>(
+        &mut self,
+        statement: &'a ast::Stmt,
+        binding: ParserBinding<'_>,
+    ) -> Option<(&'a ast::Expr, Expr)> {
+        let assignment = statement.as_assign_stmt()?;
+        let [target @ ast::Expr::Name(name)] = assignment.targets.as_slice() else {
+            return None;
+        };
+        let attr = assignment.value.as_attribute_expr()?;
+        if attr.attr.as_str() != "fromisoformat"
+            || self.resolve(&attr.value)
+                != Some(Binding::Intrinsic(Intrinsic::Calendar(C::DateTime)))
+        {
+            return None;
+        }
+        let positional = |call: &ast::ExprCall| {
+            call.arguments.keywords.is_empty()
+                && matches!(call.arguments.args.as_slice(), [arg] if !arg.is_starred_expr())
+        };
+        let observed = match binding {
+            ParserBinding::Local(suite) => local_functions::reads_function_value(
+                suite,
+                |expr| matches!(expr, ast::Expr::Name(n) if n.id == name.id),
+                Some(target.range()),
+                positional,
+            ),
+            ParserBinding::Global(definition) => {
+                self.graph
+                    .modules
+                    .iter()
+                    .enumerate()
+                    .any(|(module, source)| {
+                        local_functions::reads_function_value(
+                            &source.parsed.syntax().body,
+                            |expr| {
+                                matches!(expr, ast::Expr::Name(_) | ast::Expr::Attribute(_))
+                                    && self.graph.resolve(module, expr)
+                                        == Some(Binding::Value(definition))
+                            },
+                            (module == definition.module).then_some(target.range()),
+                            positional,
+                        )
+                    })
+            }
+        };
+        if observed {
+            return None;
+        }
+        self.graph.needs_object_runtime.set(true);
+        let parser = self.builtin_callable(
+            None,
+            Builtin::Calendar(Op::FromIsoFormat),
+            vec![Type::Str],
+            Type::Calendar(C::DateTime),
+        );
+        Some((target, parser))
+    }
+    pub(super) fn datetime_fromisoformat(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        // A later operation on the result may need the full datetime protocol.
+        self.graph.needs_object_runtime.set(true);
+        if let [arg] = call.arguments.args.as_slice()
+            && !arg.is_starred_expr()
+            && call.arguments.keywords.is_empty()
+        {
+            let text = self.expr(arg)?;
+            if matches!(text.ty, Type::Str | Type::StrLiteral(_)) {
+                return Ok(op(
+                    Op::FromIsoFormat,
+                    Type::Calendar(C::DateTime),
+                    vec![text],
+                ));
+            }
+        }
+        Err(self.object_runtime_export("datetime.fromisoformat", call))
+    }
+
     pub(super) fn calendar_now(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         let zone = self.types.optional(Type::Calendar(C::Zone));
         let args = self.arguments(

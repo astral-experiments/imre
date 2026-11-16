@@ -88,37 +88,21 @@ impl SliceIndices {
 
     /// Normalizes rooted optional integer bounds with a known nonzero step.
     unsafe fn with_step(length: usize, start: usize, stop: usize, step: isize) -> Self {
-        let reverse = step < 0;
-        let length = length as isize;
-        let (lower, upper) = if reverse {
-            (-1, length - 1)
-        } else {
-            (0, length)
-        };
-        let normalize = |value: isize| {
-            let value = if value < 0 { value + length } else { value };
-            value.clamp(lower, upper)
-        };
-        // SAFETY: each bound remains rooted; conversion cannot call user code.
-        let start = unsafe { slice_component(start) }
-            .map(normalize)
-            .unwrap_or(if reverse { upper } else { lower });
-        // SAFETY: the stop has the same nullable integer representation.
-        let stop = unsafe { slice_component(stop) }
-            .map(normalize)
-            .unwrap_or(if reverse { lower } else { upper });
-        let distance = if reverse { start - stop } else { stop - start };
-        let stride = step.unsigned_abs();
-        let remaining = if distance > 0 {
-            (distance as usize - 1) / stride + 1
-        } else {
-            0
-        };
+        // SAFETY: both optional integer bounds remain rooted throughout normalization.
+        let (first, last) = unsafe { (slice_component(start), slice_component(stop)) };
+        Self::from_bounds(length, first, last, step)
+    }
+
+    /// Normalizes already decoded bounds against the current sequence length.
+    fn from_bounds(length: usize, start: Option<isize>, stop: Option<isize>, step: isize) -> Self {
+        let [start, stop, _] =
+            crate::dynamic::normalize_slice_bounds([start, stop, Some(step)], length as isize);
+        let remaining = crate::dynamic::slice_count(start as i64, stop as i64, step as i64);
         Self {
             at: if remaining == 0 { 0 } else { start as usize },
-            stride,
+            stride: step.unsigned_abs(),
             remaining,
-            reverse,
+            reverse: step < 0,
         }
     }
 }
@@ -261,6 +245,28 @@ fn contiguous_slice<'a>(text: &'a str, length: usize, slice: &SliceIndices) -> &
     }
 }
 
+/// Clips nonnegative code-point bounds without first counting the whole string.
+fn forward_region(text: &str, start: usize, stop: usize) -> &str {
+    let stop = stop.min(text.len());
+    if start >= stop {
+        return "";
+    }
+    if text.as_bytes()[..stop].is_ascii() {
+        // Every offset up to the stop is already a UTF-8 boundary.
+        return &text[start..stop];
+    }
+    let mut offsets = text.char_indices().map(|(offset, _)| offset);
+    let Some(first) = offsets.nth(start) else {
+        return "";
+    };
+    let last = if stop == text.len() {
+        text.len()
+    } else {
+        offsets.nth(stop - start - 1).unwrap_or(text.len())
+    };
+    &text[first..last]
+}
+
 /// Compares contiguous slices without constructing either Python string.
 ///
 /// # Safety
@@ -279,9 +285,16 @@ pub unsafe extern "C" fn imre_str_slice_equal(
         if start == 0 && stop == 0 {
             return text;
         }
+        // SAFETY: the caller roots both bounds for the comparison.
+        let (first, last) = unsafe { (slice_component(start), slice_component(stop)) };
+        if let (Ok(first), Ok(last)) = (
+            usize::try_from(first.unwrap_or(0)),
+            usize::try_from(last.unwrap_or(isize::MAX)),
+        ) {
+            return forward_region(text, first, last);
+        }
         let length = text.chars().count();
-        // SAFETY: both bounds stay rooted and the stride is one.
-        let slice = unsafe { SliceIndices::with_step(length, start, stop, 1) };
+        let slice = SliceIndices::from_bounds(length, first, last, 1);
         contiguous_slice(text, length, &slice)
     }
     // SAFETY: the caller roots both immutable strings and their bounds.
@@ -510,10 +523,25 @@ pub unsafe extern "C" fn imre_str_iter_next_codepoint(cursor: *const Object) -> 
     }
 }
 
+/// Borrows the UTF-8 bounds of a rooted string without allocating an iterator.
+///
+/// # Safety
+/// The caller keeps the string alive and immutable through the final read and
+/// supplies a writable end pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_bounds(value: *const Str, end: *mut *const u8) -> *const u8 {
+    // SAFETY: the rooted source owns the buffer and the caller supplied the output pointer.
+    unsafe {
+        let bytes = (&*value).as_bytes().as_ptr_range();
+        end.write(bytes.end);
+        bytes.start
+    }
+}
+
 /// Borrows the complete UTF-8 buffer of a freshly constructed forward cursor.
 ///
 /// # Safety
-/// Root the exact forward string iterator until the final read from the view.
+/// Root the exact forward iterator for the call and it or its source string through the final read.
 /// The caller supplies a writable end pointer and tracks its own byte position.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_iter_bounds(
@@ -527,9 +555,7 @@ pub unsafe extern "C" fn imre_str_iter_bounds(
                 unreachable!("exact string iterator")
             };
             debug_assert!(!iter.reverse);
-            let bytes = iter.owner.as_bytes().as_ptr_range();
-            end.write(bytes.end);
-            bytes.start
+            imre_str_bounds(StrOwner::as_ptr(&iter.owner), end)
         })
     }
 }
@@ -622,6 +648,14 @@ pub unsafe extern "C" fn imre_str_reverse_iter(value: *const Str) -> *const Obje
 pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // SAFETY: the caller keeps this immutable string rooted throughout conversion.
     let text = unsafe { &*value };
+    let list = string_integer_values(text)
+        .map_err(|(_, error)| error)
+        .and_then(|values| crate::try_new_list(values).map_err(|_| Error::allocation()));
+    finish(list.map(crate::ListOwner::into_raw), std::ptr::null())
+}
+
+/// Convert an exact string, reporting the consumed UTF-8 bytes on failure.
+pub(crate) fn string_integer_values(text: &str) -> std::result::Result<Vec<Int>, (usize, Error)> {
     let ascii = text.is_ascii();
     let length = if ascii {
         text.len()
@@ -629,37 +663,38 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
         text.chars().count()
     };
     let mut values = crate::take_list_buffer(length);
-    if values.try_reserve_exact(length).is_err() {
-        return Error::allocation().returning(std::ptr::null());
-    }
+    values
+        .try_reserve_exact(length)
+        .map_err(|_| (0, Error::allocation()))?;
+    let slots = &mut values.spare_capacity_mut()[..length];
     if ascii {
-        let mut invalid = false;
-        for (slot, &byte) in values.spare_capacity_mut()[..length]
-            .iter_mut()
-            .zip(text.as_bytes())
+        for (chunk, (slots, bytes)) in slots
+            .chunks_mut(32)
+            .zip(text.as_bytes().chunks(32))
+            .enumerate()
         {
-            let digit = byte.wrapping_sub(b'0');
-            invalid |= digit > 9;
-            slot.write(Int::small(i64::from(digit)).unwrap());
-        }
-        if invalid {
-            let index = text
-                .as_bytes()
-                .iter()
-                .position(|byte| !byte.is_ascii_digit())
-                .unwrap();
-            return crate::integer_text::invalid_literal(&text[index..index + 1])
-                .returning(std::ptr::null());
+            let mut invalid = false;
+            for (slot, &byte) in slots.iter_mut().zip(bytes) {
+                let digit = byte.wrapping_sub(b'0');
+                invalid |= digit > 9;
+                slot.write(Int::small(i64::from(digit)).unwrap());
+            }
+            if invalid {
+                let index = chunk * 32 + bytes.iter().position(|b| !b.is_ascii_digit()).unwrap();
+                return Err((
+                    index + 1,
+                    crate::integer_text::invalid_literal(&text[index..index + 1]),
+                ));
+            }
         }
     } else {
-        for (slot, character) in values.spare_capacity_mut()[..length]
-            .iter_mut()
-            .zip(text.chars())
-        {
+        for (slot, (offset, character)) in slots.iter_mut().zip(text.char_indices()) {
+            let end = offset + character.len_utf8();
             let Some(digit) = crate::integer_text::decimal_digit(character) else {
-                let mut encoded = [0; 4];
-                return crate::integer_text::invalid_literal(character.encode_utf8(&mut encoded))
-                    .returning(std::ptr::null());
+                return Err((
+                    end,
+                    crate::integer_text::invalid_literal(&text[offset..end]),
+                ));
             };
             slot.write(Int::small(i64::from(digit)).unwrap());
         }
@@ -668,10 +703,7 @@ pub unsafe extern "C" fn imre_str_int_list(value: *const Str) -> *const List {
     // including an invalid ASCII byte's unpublished conversion, fit immediate
     // Int storage and own no allocation. Errors leave length zero for cleanup.
     unsafe { values.set_len(length) };
-    match crate::try_new_list(values) {
-        Ok(list) => crate::ListOwner::into_raw(list),
-        Err(_) => Error::allocation().returning(std::ptr::null()),
-    }
+    Ok(values)
 }
 
 #[cfg(test)]
@@ -687,6 +719,23 @@ mod tests {
         imre_list_append, imre_list_get_index, imre_list_len, imre_list_new, imre_list_set_index,
     };
     use num_bigint::BigInt;
+
+    #[test]
+    fn forward_string_regions_clip_code_point_bounds() {
+        for text in ["", "abcd", "éabc", "abcé", "a🙂éz"] {
+            let bounds = (0..=text.len() + 1).chain([usize::MAX]);
+            for start in bounds.clone() {
+                for stop in bounds.clone() {
+                    let expected: String = text
+                        .chars()
+                        .skip(start)
+                        .take(stop.saturating_sub(start))
+                        .collect();
+                    assert_eq!(forward_region(text, start, stop), expected);
+                }
+            }
+        }
+    }
 
     fn integer(value: i64) -> usize {
         Int::small(value).unwrap().into_raw()
@@ -1035,7 +1084,7 @@ mod tests {
 
     #[test]
     fn integer_list_slices_own_selected_values_after_source_mutation() {
-        let big = Shared::new(BigInt::from(1_u8) << 400_u32);
+        let big = crate::wide_owner(BigInt::from(1_u8) << 400_u32);
         let weak = Shared::downgrade(&big);
         // SAFETY: source and slice are distinct owned lists. Every selected
         // BigInt gains an independent reference, as does each successful read.

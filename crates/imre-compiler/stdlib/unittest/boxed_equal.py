@@ -1,25 +1,7 @@
-# Fixed-layout programs specialize assertEqual in the frontend. Runtime-loaded
-# test classes compare the actual objects, including reflected __eq__.
-def _safe_repr(value):
-    try:
-        return repr(value)
-    except Exception:
-        return object.__repr__(value)
-
-
-def _baseAssertEqual(self, first, second, msg=None):
-    if not first == second:
-        difference = _inequality_message(_safe_repr(first), _safe_repr(second))
-        raise self.failureException(self._formatMessage(msg, difference))
-
-
-_text_equal = TestCase.assertMultiLineEqual
-
-
-def assertMultiLineEqual(self, first, second, msg=None):
-    self.assertIsInstance(first, str, "First argument is not a string")
-    self.assertIsInstance(second, str, "Second argument is not a string")
-    return _text_equal(self, first, second, msg)
+_baseAssertEqual.__annotations__ = {}
+assertMultiLineEqual = TestCase.assertMultiLineEqual
+# Keep the public Python signature while fixed callers use the class declaration.
+assertMultiLineEqual.__annotations__ = {}
 
 
 def addTypeEqualityFunc(self, typeobj, function):
@@ -227,7 +209,6 @@ addTypeEqualityFunc.__qualname__ = "TestCase.addTypeEqualityFunc"
 TestCase.addTypeEqualityFunc = addTypeEqualityFunc
 TestCase._getAssertEqualityFunc = _getAssertEqualityFunc
 TestCase._baseAssertEqual = _baseAssertEqual
-TestCase.assertMultiLineEqual = assertMultiLineEqual
 TestCase.assertEqual = assertEqual
 assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
 TestCase.assertDictEqual = assertDictEqual
@@ -383,59 +364,7 @@ TestCase.assertListEqual = assertListEqual
 TestCase.assertTupleEqual = assertTupleEqual
 
 
-# Multiset comparison and diagnostics follow CPython 3.14.5 unittest.util and unittest.case.
-def _count_diff_all_purpose(actual, expected):
-    'Returns list of (cnt_act, cnt_exp, elem) triples where the counts differ'
-    # elements need not be hashable
-    s, t = list(actual), list(expected)
-    m, n = len(s), len(t)
-    NULL = object()
-    result = []
-    for i, elem in enumerate(s):
-        if elem is NULL:
-            continue
-        cnt_s = cnt_t = 0
-        for j in range(i, m):
-            if s[j] == elem:
-                cnt_s += 1
-                s[j] = NULL
-        for j, other_elem in enumerate(t):
-            if other_elem == elem:
-                cnt_t += 1
-                t[j] = NULL
-        if cnt_s != cnt_t:
-            diff = (cnt_s, cnt_t, elem)
-            result.append(diff)
-
-    for i, elem in enumerate(t):
-        if elem is NULL:
-            continue
-        cnt_t = 0
-        for j in range(i, n):
-            if t[j] == elem:
-                cnt_t += 1
-                t[j] = NULL
-        diff = (0, cnt_t, elem)
-        result.append(diff)
-    return result
-
-
-def _count_diff_hashable(actual, expected):
-    'Returns list of (cnt_act, cnt_exp, elem) triples where the counts differ'
-    # elements must be hashable
-    from collections import Counter
-    s, t = Counter(actual), Counter(expected)
-    result = []
-    for elem, cnt_s in s.items():
-        cnt_t = t.get(elem, 0)
-        if cnt_s != cnt_t:
-            diff = (cnt_s, cnt_t, elem)
-            result.append(diff)
-    for elem, cnt_t in t.items():
-        if elem not in s:
-            diff = (0, cnt_t, elem)
-            result.append(diff)
-    return result
+from unittest.util import _count_diff_all_purpose, _count_diff_hashable
 
 
 def assertCountEqual(self, first, second, msg=None):

@@ -1,3 +1,4 @@
+from inspect import signature
 from typing import get_type_hints
 
 
@@ -78,3 +79,29 @@ for args in [(), (type,), (int, "Bad", (), {}), (type, "Bad", [], {}), (type, "B
         pass
     else:
         raise AssertionError("accepted an invalid type.__new__ call")
+
+
+class RegistryFactory(type):
+    def __new__(meta, name, bases, namespace):
+        return super().__new__(meta, name, bases, namespace)
+
+    def __call__(meta, name, bases, namespace, *, group):
+        entry = type(name, bases, namespace)
+        entry.group = group
+        return entry
+
+
+class Publish(type, metaclass=RegistryFactory):
+    pass
+
+
+class Endpoint(metaclass=Publish, group="network"):
+    def __init__(self, host, /, *, port=80):
+        self.address = (host, port)
+
+
+assert type(Publish) is RegistryFactory
+assert type(Endpoint) is type and Endpoint.group == "network"
+assert str(signature(Publish)) == "(name, bases, namespace, *, group)"
+address = signature(Endpoint).bind("localhost", port=8080)
+assert Endpoint(*address.args, **address.kwargs).address == ("localhost", 8080)

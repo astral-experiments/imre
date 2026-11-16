@@ -15,6 +15,8 @@ pub(crate) enum UnpackedField {
     Integer(u64),
     Signed(i64),
     Float(f64),
+    Complex(f64, f64),
+    Byte(u8),
     Bytes(Vec<u8>),
 }
 
@@ -80,13 +82,15 @@ impl StructFormat {
                 ),
                 b'L' | b'l' => (4, 1),
                 b'c' | b'b' | b'B' | b'?' => (1, 1),
-                b'h' | b'H' => (2, align_of::<u16>()),
+                b'h' | b'H' | b'e' => (2, align_of::<u16>()),
                 b'i' | b'I' => (4, align_of::<u32>()),
                 b'f' => (4, align_of::<f32>()),
                 b'd' => (8, align_of::<f64>()),
+                b'F' => (8, align_of::<f32>()),
+                b'D' => (16, align_of::<f64>()),
                 b'q' | b'Q' => (8, align_of::<u64>()),
                 b'x' => (1, 1),
-                b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
+                b'n' | b'N' | b'P' if result.native => (size_of::<usize>(), align_of::<usize>()),
                 _ => return Err("bad char in struct format".into()),
             };
             let offset = if result.native {
@@ -131,6 +135,17 @@ impl StructFormat {
                 (field.code, start..start + field.width)
             })
         })
+    }
+
+    fn read_integer(&self, field: &[u8]) -> u64 {
+        let mut word = [0; 8];
+        if self.little_endian {
+            word[..field.len()].copy_from_slice(field);
+            u64::from_le_bytes(word)
+        } else {
+            word[8 - field.len()..].copy_from_slice(field);
+            u64::from_be_bytes(word)
+        }
     }
 
     pub(crate) fn write_integer(&self, target: &mut [u8], value: u64) {
@@ -188,6 +203,19 @@ impl StructFormat {
         Ok(start..end)
     }
 
+    fn unpack_half(bits: u16) -> f64 {
+        let sign = u64::from(bits >> 15) << 63;
+        let exponent = (bits >> 10) & 0x1f;
+        let fraction = u64::from(bits & 0x03ff);
+        let magnitude = match exponent {
+            0 => ((fraction as f64) * 2f64.powi(-24)).to_bits(),
+            31 => f64::INFINITY.to_bits() | (fraction << 42),
+            // Rebase the exponent from bias 15 to 1023 and widen the significand.
+            _ => (u64::from(exponent + (1023 - 15)) << 52) | (fraction << 42),
+        };
+        f64::from_bits(sign | magnitude)
+    }
+
     fn unpack_single(&self, bits: u32) -> f64 {
         let single = f32::from_bits(bits);
         if !self.native && single.is_nan() {
@@ -211,24 +239,36 @@ impl StructFormat {
                     (b'p', [length, data @ ..]) => &data[..usize::from(*length).min(data.len())],
                     _ => field,
                 };
-                result.push(UnpackedField::Bytes(data.to_vec()));
+                result.push(match data {
+                    [byte] => UnpackedField::Byte(*byte),
+                    _ => UnpackedField::Bytes(data.to_vec()),
+                });
                 continue;
             }
-            let mut word = [0u8; 8];
-            let value = if self.little_endian {
-                word[..field.len()].copy_from_slice(field);
-                u64::from_le_bytes(word)
-            } else {
-                word[8 - field.len()..].copy_from_slice(field);
-                u64::from_be_bytes(word)
-            };
+            if matches!(code, b'F' | b'D') {
+                let component = |bytes| {
+                    let word = self.read_integer(bytes);
+                    if code == b'D' {
+                        f64::from_bits(word)
+                    } else if self.little_endian == cfg!(target_endian = "little") {
+                        f64::from(f32::from_bits(word as u32))
+                    } else {
+                        self.unpack_single(word as u32)
+                    }
+                };
+                let (real, imag) = field.split_at(field.len() / 2);
+                result.push(UnpackedField::Complex(component(real), component(imag)));
+                continue;
+            }
+            let value = self.read_integer(field);
             result.push(match code {
                 b'?' => UnpackedField::Bool(value != 0),
-                b'b' | b'h' | b'i' | b'l' | b'q' => {
+                b'b' | b'h' | b'i' | b'l' | b'q' | b'n' => {
                     // Move the field's sign bit into bit 63 before the arithmetic shift.
                     let shift = (8 - field.len()) * 8;
                     UnpackedField::Signed(((value << shift) as i64) >> shift)
                 }
+                b'e' => UnpackedField::Float(Self::unpack_half(value as u16)),
                 b'f' => UnpackedField::Float(self.unpack_single(value as u32)),
                 b'd' => UnpackedField::Float(f64::from_bits(value)),
                 _ => UnpackedField::Integer(value),

@@ -45,3 +45,14 @@ except TypeError as error:
 assert str.title(CaseMember.MEMBER) == "ǲß"
 assert str.swapcase(CaseMember.MEMBER) == "Ǳß"
 assert CaseMember.MEMBER.swapcase() == "Ǳß"
+
+capitalize = str.capitalize
+assert capitalize.__qualname__ == "str.capitalize"
+assert list(map(capitalize, ["élAN", "a-b", ""])) == ["Élan", "A-b", ""]
+assert capitalize(CaseMember.MEMBER) == "ǲß"
+try:
+    capitalize("word", extra=1)
+except TypeError as error:
+    assert str(error) == "str.capitalize() takes no keyword arguments"
+else:
+    assert False

@@ -27,6 +27,7 @@ def check() -> None:
     for policy in ["ignore", "replace", "backslashreplace", "xmlcharrefreplace", "strict", "unknown-handler"]:
         file_policy(path, "ascii", policy, "Å🙂a")
     file_policy(path, "latin-1", None, "àö")
+    file_policy(path, "iso.ir.101", "strict", "ĄŁ")
     file_policy(path, "1251", "strict", "до свидания")
     with path.open("w", errors=option("errors", "strict"), newline=option("newline", "\r\n"),
                    encoding=option("encoding", "utf8")) as writer:

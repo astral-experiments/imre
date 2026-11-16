@@ -1,5 +1,43 @@
 use super::*;
-use crate::dynamic::complex::Complex;
+use crate::dynamic::{IteratorSlice, complex::Complex};
+
+/// Apply a native integral method to the stored float without calling subtype hooks.
+pub(in crate::dynamic) fn round_float_to_integer(
+    ctx: &mut Context,
+    value: f64,
+    method: &str,
+) -> Result<Id> {
+    let rounded = match method {
+        "__ceil__" => value.ceil(),
+        "__floor__" => value.floor(),
+        "__trunc__" => value,
+        _ => unreachable!("float integral method"),
+    };
+    let integer = crate::floats::float_to_integer(rounded)?;
+    Ok(ctx.alloc(Value::Int(crate::Int::new(integer))))
+}
+
+/// Format the receiver's stored binary64 using Python's hexadecimal spelling.
+pub(super) fn hex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let receiver = noargs_method_receiver(ctx, "float", "hex", args, kwargs)?;
+    let Value::Float(value) = *ctx.heap.get(ctx.scalar_value(receiver)) else {
+        unreachable!("validated float receiver")
+    };
+    if !value.is_finite() {
+        return Ok(ctx.text(crate::floats::render(value)));
+    }
+    let sign = if value.is_sign_negative() { "-" } else { "" };
+    if value == 0.0 {
+        return Ok(ctx.text(format!("{sign}0x0.0p+0")));
+    }
+    let bits = value.to_bits();
+    let biased_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1 << 52) - 1);
+    // Subnormals use the minimum normal exponent with no implicit leading one.
+    let leading = u8::from(biased_exponent != 0);
+    let exponent = biased_exponent.max(1) - 1023;
+    Ok(ctx.text(format!("{sign}0x{leading}.{fraction:013x}p{exponent:+}")))
+}
 
 /// Parse the string payload, then let a float subclass construct its result.
 pub(super) fn fromhex(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -102,16 +140,22 @@ pub(super) fn component(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     let receiver = noargs_method_receiver(ctx, "float", field, args, kwargs)?;
-    let storage = ctx.scalar_value(receiver);
-    let Value::Float(value) = *ctx.heap.get(storage) else {
-        unreachable!("validated float receiver")
-    };
     match field {
-        "real" if receiver == storage => Ok(receiver),
-        "real" => Ok(ctx.alloc(Value::Float(value))),
+        "real" => Ok(exact_value(ctx, receiver, ctx.scalar_value(receiver))),
         "imag" => Ok(ctx.alloc(Value::Float(0.0))),
         _ => unreachable!("registered float component"),
     }
+}
+
+/// An unchanged float result retains an exact receiver and copies a subclass's value.
+pub(super) fn exact_value(ctx: &mut Context, receiver: Id, storage: Id) -> Id {
+    if receiver == storage {
+        return receiver;
+    }
+    let Value::Float(value) = *ctx.heap.get(storage) else {
+        unreachable!("validated float receiver")
+    };
+    ctx.alloc(Value::Float(value))
 }
 
 /// Return the reduced integer ratio of the receiver's stored binary64 value.
@@ -166,30 +210,72 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
             )));
         }
     };
-    if let Some(number) = from_numeric(ctx, value)? {
+    if let Some(number) = from_numeric_slots(ctx, value)? {
         return Ok(number);
     }
-    let parsed = if let Ok(text) = ctx.str_value(value) {
-        crate::floats::parse(text)
-    } else if let Value::Bytes(bytes) | Value::ByteArray(bytes) = ctx.heap.get(value) {
-        crate::floats::parse_bytes(bytes)
-    } else {
-        return Err(type_error(format!(
-            "float() argument must be a string or a real number, not '{}'",
-            ctx.type_name(value)
-        )));
-    };
-    let number = parsed.ok_or_else(|| {
-        Error::new(
-            "ValueError",
-            format!("could not convert string to float: {}", ctx.repr(value)),
-        )
-    })?;
+    let number = parse_input(ctx, value)?;
     Ok(ctx.alloc(Value::Float(number)))
 }
 
-/// Return the float supplied by the numeric protocol, preserving callback results and errors.
+/// Read native strings directly, then request a contiguous buffer from other inputs.
+fn parse_input(ctx: &mut Context, value: Id) -> Result<f64> {
+    let scalar = ctx.scalar_value(value);
+    let parsed = match ctx.heap.get(scalar) {
+        Value::Str(text) if value == scalar => return Ok(crate::floats::parse_str(text)?),
+        Value::Str(text) => crate::floats::parse(text),
+        Value::SurrogateStr(_) => None,
+        Value::Bytes(bytes) | Value::ByteArray(bytes) => crate::floats::parse_bytes(bytes),
+        _ => {
+            let invalid_input = |ctx: &Context| {
+                let name = ctx.type_name(value);
+                type_error(format!(
+                    "float() argument must be a string or a real number, not '{}'",
+                    &name[..name.floor_char_boundary(200)]
+                ))
+            };
+            if let Some(method) = ctx.buffer_slot(value, "__buffer__").flatten() {
+                // Only acquisition errors are replaced. Format invalid input while the
+                // export is live, so exceptions raised by __repr__ survive release.
+                let view = ctx
+                    .acquire_python_buffer(value, method, 0)
+                    .and_then(|view| ctx.view_bytes(view).map(|_| view))
+                    .map_err(|_| invalid_input(ctx))?;
+                return ctx.with_python_buffer_export(value, view, |ctx| {
+                    let parsed = crate::floats::parse_bytes(ctx.view_bytes(view)?);
+                    parsed_number(ctx, value, parsed)
+                });
+            }
+            let bytes = ctx
+                .native_buffer_bytes(value)
+                .map_err(|_| invalid_input(ctx))?;
+            let parsed = crate::floats::parse_bytes(bytes);
+            return ctx.with_native_bytes_export(value, |ctx, _| parsed_number(ctx, value, parsed));
+        }
+    };
+    parsed_number(ctx, value, parsed)
+}
+
+fn parsed_number(ctx: &mut Context, value: Id, parsed: Option<f64>) -> Result<f64> {
+    if let Some(number) = parsed {
+        return Ok(number);
+    }
+    let repr = super::call(ctx, "repr", &[value], &[])?;
+    let prefix = ctx.text(crate::floats::INVALID_STRING_PREFIX);
+    let message = ctx.concat_strings(prefix, repr)?;
+    Err(ctx.exception("ValueError", &[message]))
+}
+
+/// Read the stored double of any float before consulting other numeric objects' slots.
 pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
+    let scalar = ctx.scalar_value(value);
+    if matches!(ctx.heap.get(scalar), Value::Float(_)) {
+        return Ok(Some(scalar));
+    }
+    from_numeric_slots(ctx, value)
+}
+
+/// float() and explicit complex components honor a float subclass's __float__ override.
+pub(in crate::dynamic) fn from_numeric_slots(ctx: &mut Context, value: Id) -> Result<Option<Id>> {
     if matches!(ctx.heap.get(value), Value::Float(_)) {
         return Ok(Some(value));
     }
@@ -197,7 +283,22 @@ pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<O
         let result = ctx.call(method, Vec::new(), Vec::new())?;
         let scalar = ctx.scalar_value(result);
         if matches!(ctx.heap.get(scalar), Value::Float(_)) {
-            return Ok(Some(scalar));
+            if result != scalar {
+                ctx.heap.reserve_temporaries(1)?;
+                ctx.heap.keep(result);
+                let owner = ctx.type_name(value);
+                let returned = ctx.type_name(result);
+                ctx.emit_builtin_warning(
+                    crate::objects::exceptions::Kind::DeprecationWarning,
+                    &format!(
+                        "{}.__float__ returned non-float (type {}).  The ability to return an instance of a strict subclass of float is deprecated, and may be removed in a future version of Python.",
+                        &owner[..owner.floor_char_boundary(50)],
+                        &returned[..returned.floor_char_boundary(50)],
+                    ),
+                    1,
+                )?;
+            }
+            return Ok(Some(exact_value(ctx, result, scalar)));
         }
         return Err(type_error(format!(
             "{}.__float__ returned non-float (type {})",
@@ -214,6 +315,76 @@ pub(in crate::dynamic) fn from_numeric(ctx: &mut Context, value: Id) -> Result<O
         return Ok(Some(ctx.alloc(Value::Float(number))));
     }
     Ok(None)
+}
+
+/// Read only exact integer and boolean operands that fit the native accumulator.
+fn small_integer(value: &Value) -> Option<i64> {
+    match value {
+        Value::Int(value) => value.to_i64(),
+        Value::Bool(value) => Some(i64::from(*value)),
+        _ => None,
+    }
+}
+
+/// A completed reduction or the exact prefix preceding the first Python addition.
+enum IntegerSliceSum {
+    Complete(crate::Int),
+    Prefix { sum: i64, consumed: usize },
+}
+
+/// The iterator has already yielded the first item. Count only subsequent exact additions.
+fn integer_prefix<'a>(
+    ctx: &Context,
+    mut sum: i64,
+    items: impl Iterator<Item = &'a Id>,
+) -> IntegerSliceSum {
+    for (consumed, &item) in items.enumerate() {
+        let Some(next) = small_integer(ctx.heap.get(item)).and_then(|value| sum.checked_add(value))
+        else {
+            return IntegerSliceSum::Prefix { sum, consumed };
+        };
+        sum = next;
+    }
+    IntegerSliceSum::Complete(sum.into())
+}
+
+/// Reduce as much of the native iterator as possible without invoking Python code.
+#[inline(never)]
+fn integer_slice_sum(
+    ctx: &Context,
+    initial: &crate::Int,
+    first: Id,
+    items: IteratorSlice<'_>,
+) -> Option<IntegerSliceSum> {
+    let first_sum = || {
+        initial
+            .to_i64()?
+            .checked_add(small_integer(ctx.heap.get(first))?)
+    };
+    match items {
+        IteratorSlice::Values(items) => Some(integer_prefix(ctx, first_sum()?, items.iter())),
+        IteratorSlice::Reversed(items) => {
+            Some(integer_prefix(ctx, first_sum()?, items.iter().rev()))
+        }
+        IteratorSlice::Bytes(bytes) | IteratorSlice::ReversedBytes(bytes) => {
+            // Each chunk vectorizes in a machine word. Even the largest byte slice fits in i128.
+            let mut subtotal = i128::from(small_integer(ctx.heap.get(first))?);
+            for chunk in bytes.chunks(1 << 16) {
+                subtotal += i128::from(chunk.iter().copied().map(i64::from).sum::<i64>());
+            }
+            if let Some(start) = initial.to_i64() {
+                let result = i128::from(start) + subtotal;
+                return Some(IntegerSliceSum::Complete(match i64::try_from(result) {
+                    Ok(value) => crate::Int::from(value),
+                    Err(_) => crate::Int::new(result.into()),
+                }));
+            }
+            Some(IntegerSliceSum::Complete(crate::Int::new(
+                initial.big().as_ref() + subtotal,
+            )))
+        }
+        _ => None,
+    }
 }
 
 /// Sum a boxed iterable, retaining low-order bits independently on each numerical axis.
@@ -243,15 +414,47 @@ pub(super) fn sum(ctx: &mut Context, source: Id, start: Option<Id>) -> Result<Id
     };
 
     if let Value::Int(initial) = ctx.heap.get(total)
+        && matches!(ctx.heap.get(iterator), Value::Iterator { .. })
+        && let Some(sum) = integer_slice_sum(ctx, initial, item, ctx.iterator_remaining(iterator)?)
+    {
+        let Value::Iterator {
+            sequence,
+            offset,
+            reverse,
+            ..
+        } = ctx.heap.get_mut(iterator)
+        else {
+            unreachable!()
+        };
+        match sum {
+            IntegerSliceSum::Complete(value) => {
+                *sequence = None;
+                ctx.heap.release_temporaries_since(mark);
+                return Ok(ctx.alloc(Value::Int(value)));
+            }
+            IntegerSliceSum::Prefix { sum, consumed } => {
+                if *reverse {
+                    *offset -= consumed;
+                } else {
+                    *offset += consumed;
+                }
+                ctx.heap.release_temporaries_since(mark);
+                let Some(next) = next_item(ctx)? else {
+                    return Ok(ctx.int(sum));
+                };
+                item = next;
+                total = ctx.int(sum);
+            }
+        }
+    }
+
+    if let Value::Int(initial) = ctx.heap.get(total)
         && let Some(mut integer) = initial.to_i64()
     {
         loop {
-            let value = match ctx.heap.get(item) {
-                Value::Int(value) => value.to_i64(),
-                Value::Bool(value) => Some(i64::from(*value)),
-                _ => None,
-            };
-            let Some(next) = value.and_then(|value| integer.checked_add(value)) else {
+            let Some(next) =
+                small_integer(ctx.heap.get(item)).and_then(|value| integer.checked_add(value))
+            else {
                 let accumulated = ctx.int(integer);
                 total = ctx.binary("+", accumulated, item)?;
                 break;

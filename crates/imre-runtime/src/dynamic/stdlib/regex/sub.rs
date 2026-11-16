@@ -82,12 +82,14 @@ fn substitute(
     }
     let text = subject_bytes(ctx, string, pattern.bytes)?;
     let mut output = Vec::new();
-    let mut caps = pattern.regex.create_captures();
+    let caps = pattern.regex.capture_buffer(&pattern.captures);
     let mut previous = None;
     let mut cursor = 0;
     let mut substitutions = 0;
     while limit == 0 || substitutions < limit {
-        let span = match split::next_span(&pattern, text, 0, previous, &mut caps) {
+        // Release the match scratch before error construction can re-enter Python.
+        let next = split::next_span(&pattern, text, 0, previous, &mut caps.borrow_mut());
+        let span = match next {
             Ok(Some(span)) => span,
             Ok(None) => break,
             Err(message) => return Err(pattern.match_error(ctx, message)),
@@ -183,7 +185,7 @@ pub(in crate::dynamic::stdlib) fn match_expand(
 
 struct Template {
     parts: Vec<ReplacementPart<Id>>,
-    join: Id,
+    bytes_join: Option<Id>,
 }
 
 /// Compile a replacement once, before searching or expanding an existing match.
@@ -277,13 +279,13 @@ fn compile_template(
             }
         })
         .collect();
-    let empty = if replacement_is_bytes {
-        ctx.alloc(Value::Bytes(Vec::new()))
+    let bytes_join = if replacement_is_bytes {
+        let empty = ctx.alloc(Value::Bytes(Vec::new()));
+        Some(ctx.lookup_attr(empty, "join")?)
     } else {
-        ctx.text("")
+        None
     };
-    let join = ctx.lookup_attr(empty, "join")?;
-    Ok(Template { parts, join })
+    Ok(Template { parts, bytes_join })
 }
 
 impl Template {
@@ -300,8 +302,12 @@ impl Template {
                 }
             }
         }
-        let pieces = ctx.alloc(Value::List(pieces));
-        ctx.call(self.join, vec![pieces], Vec::new())
+        if let Some(join) = self.bytes_join {
+            let pieces = ctx.alloc(Value::List(pieces));
+            ctx.call(join, vec![pieces], Vec::new())
+        } else {
+            ctx.join_formatted(&pieces)
+        }
     }
 }
 
@@ -316,8 +322,7 @@ fn expanded_sub(
     exposes_match: bool,
     mut expand: impl FnMut(&mut Context, Match) -> Result<Id>,
 ) -> Result<(Id, isize)> {
-    let pattern = pattern.for_subject(ctx, string);
-    let subject = SearchSubject::new(ctx, pattern, string, "sub")?;
+    let (pattern, subject) = SearchSubject::for_pattern(ctx, pattern, string, "sub")?;
     let length = subject.bytes(ctx)?.len();
     let window = subject.original(Span::from(0..length));
     let mut pieces = Vec::new();
@@ -380,20 +385,6 @@ fn expanded_sub(
         add(subject.slice(ctx, Span::from(cursor..length))?)?;
     }
 
-    let invalid = |ctx: &Context, i: usize, item: Id| {
-        let expected = if pattern.bytes {
-            "a bytes-like object"
-        } else {
-            "str instance"
-        };
-        Error::new(
-            "TypeError",
-            format!(
-                "sequence item {i}: expected {expected}, {} found",
-                ctx.type_name(item)
-            ),
-        )
-    };
     if pattern.bytes {
         if let [item] = pieces.as_slice()
             && matches!(ctx.heap.get(*item), Value::Bytes(_))
@@ -405,21 +396,21 @@ fn expanded_sub(
             ctx.check_buffer_exporter(item)?;
             let data = match ctx.heap.get(ctx.scalar_value(item)) {
                 Value::Array(array) => array.as_bytes(),
-                _ => ctx.bytes_like(item).map_err(|_| invalid(ctx, i, item))?,
+                _ => ctx.bytes_like(item).map_err(|_| {
+                    Error::new(
+                        "TypeError",
+                        format!(
+                            "sequence item {i}: expected a bytes-like object, {} found",
+                            ctx.type_name(item)
+                        ),
+                    )
+                })?,
             };
             append(&mut output, data)?;
         }
         return Ok((ctx.alloc(Value::Bytes(output)), count));
     }
-    for (i, &item) in pieces.iter().enumerate() {
-        if ctx.string_storage(item).is_none() {
-            return Err(invalid(ctx, i, item));
-        }
-    }
-    let parts = ctx.alloc(Value::List(pieces));
-    let empty = ctx.text("");
-    let join = ctx.lookup_attr(empty, "join")?;
-    let value = ctx.call(join, vec![parts], Vec::new())?;
+    let value = ctx.join_formatted(&pieces)?;
     Ok((value, count))
 }
 

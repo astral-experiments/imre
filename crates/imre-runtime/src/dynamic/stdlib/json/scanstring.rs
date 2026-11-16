@@ -44,11 +44,9 @@ fn scan_string(ctx: &mut Context, input: Id, storage: Id, start: i64, strict: bo
     let unterminated = "Unterminated string starting at";
     let (body, after) = match ctx.heap.get(storage) {
         Value::Str(text) => {
-            let byte = text
-                .char_indices()
-                .map(|(i, _)| i)
-                .chain([text.len()])
-                .nth(at)
+            let byte = ctx
+                .heap
+                .string_byte_offset(storage, at)
                 .ok_or_else(out_of_bounds)?;
             let end = match crate::objects::json_string_end(
                 text.as_bytes(),
@@ -148,11 +146,7 @@ pub(super) fn scan_error(ctx: &mut Context, input: Id, pos: i64, message: &str) 
     })();
     match result {
         Ok(id) => match ctx.heap.get(id) {
-            Value::Raised(error) => {
-                let mut error = error.clone();
-                error.tracing().instance = Some(id);
-                error
-            }
+            Value::Raised(_) => ctx.error_from_instance(id),
             _ => Error::new("TypeError", "exceptions must derive from BaseException"),
         },
         Err(error) => error,

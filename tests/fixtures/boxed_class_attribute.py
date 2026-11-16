@@ -150,6 +150,31 @@ def ordinary_slot_members():
         raise AssertionError("uninitialized slot fell through to instance dictionary")
     assert obj.__dict__["field"] == 3 and root.__get__(obj, Child) == 1
 
+    class Right:
+        def __radd__(self, left):
+            return "reflected"
+
+    Child.__add__ = child
+    right = Right()
+    assert obj + right == "reflected"
+    child.__set__(obj, lambda other: 7)
+    assert obj + right == 7
+    child.__delete__(obj)
+    assert obj + right == "reflected"
+
+    missing = AttributeError("missing operand")
+
+    class Absent:
+        def __get__(self, instance, owner):
+            raise missing
+
+    Child.__add__ = Absent()
+    try:
+        raise RuntimeError("outer")
+    except RuntimeError as outer:
+        assert obj + right == "reflected"
+        assert missing.__context__ is outer
+
 
 def reported_instance_checks():
     class Child(Loud):
@@ -166,6 +191,10 @@ def reported_instance_checks():
 
     class Reported(metaclass=Reject):
         pass
+
+    named_like_str = Reject("str", (), {})
+    assert isinstance("text", str)
+    assert not isinstance("text", named_like_str)
 
     class Proxy:
         __class__ = Reported
@@ -249,6 +278,27 @@ def class_reassignment():
     slotted = ClassSlot()
     slotted.__class__ = 42
     assert type(slotted) is ClassSlot and slotted.__class__ == 42
+    assert object.__getattribute__(slotted, "__class__") == 42
+    member = ClassSlot.__dict__["__class__"]
+    assert ClassSlot.__class__ is type and member.__objclass__ is ClassSlot
+    assert member.__get__(None, ClassSlot) is member
+    assert member.__get__(slotted, ClassSlot) == 42
+    member.__set__(slotted, 43)
+    assert object.__getattribute__(slotted, "__class__") == 43
+    member.__delete__(slotted)
+    assert not hasattr(slotted, "__class__")
+
+    class CollidingKey:
+        def __hash__(self):
+            return hash("__class__")
+
+        def __eq__(self, other):
+            raise AssertionError("looked in the instance dictionary for object.__class__")
+
+    ordinary = Owner()
+    ordinary.__dict__[CollidingKey()] = 42
+    assert ordinary.__class__ is Owner
+    assert object.__getattribute__(ordinary, "__class__") is Owner
 
     finalized = []
 
@@ -333,3 +383,23 @@ def current():
             call()
         except (TypeError, AttributeError) as exc:
             print(exc.args)
+
+
+class ReboundFallback:
+    def __getattr__(self, name):
+        return name
+
+    @property
+    def field(self):
+        type(self).__getattr__ = lambda self, name: "replacement"
+        raise AttributeError("field")
+
+
+class FieldName(str):
+    pass
+
+
+obj = ReboundFallback()
+field_name = FieldName("field")
+assert getattr(obj, field_name) is field_name
+assert obj.field == "replacement"

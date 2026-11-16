@@ -1,5 +1,7 @@
 //! Immutable byte values with exact ownership, Python repr, and strict UTF-8.
 
+mod output_window;
+
 use crate::StrOwner;
 
 use num_traits::ToPrimitive;
@@ -28,7 +30,7 @@ pub extern "C" fn imre_bytearray_new() -> *const Object {
 }
 
 impl Storage {
-    fn bytearray(&self) -> &[u8] {
+    pub(super) fn bytearray(&self) -> &[u8] {
         let Self::ByteArray(bytes) = self else {
             unreachable!()
         };
@@ -216,7 +218,9 @@ impl ByteOutput {
     fn append_reserved<const N: usize>(&mut self, words: [usize; N]) {
         let len = self.bytes.len();
         let invalid_bits = words.into_iter().fold(0, |bits, word| bits | (word ^ 1));
-        self.invalid |= invalid_bits & !0x1fe != 0;
+        if invalid_bits & !0x1fe != 0 {
+            self.invalid = true;
+        }
         for (slot, word) in self.bytes.spare_capacity_mut()[..N].iter_mut().zip(words) {
             slot.write((word >> 1) as u8);
         }
@@ -308,6 +312,26 @@ pub unsafe extern "C" fn imre_byte_output_finish(output: *const Object) -> *cons
         })
     };
     finish(result, std::ptr::null())
+}
+
+/// Decode the bytes after argument conversion in either calling convention.
+pub(crate) fn integer_from_bytes(bytes: &[u8], little: bool, signed: bool) -> Int {
+    use num_bigint::{BigInt, Sign};
+    let number = match (little, signed) {
+        (true, true) => BigInt::from_signed_bytes_le(bytes),
+        (false, true) => BigInt::from_signed_bytes_be(bytes),
+        (true, false) => BigInt::from_bytes_le(Sign::Plus, bytes),
+        (false, false) => BigInt::from_bytes_be(Sign::Plus, bytes),
+    };
+    Int::new(number)
+}
+
+/// # Safety
+/// The caller roots the exact immutable byte string through the conversion.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_from_bytes(bytes: *const Bytes) -> usize {
+    // SAFETY: the immutable, rooted bytes are borrowed only during conversion.
+    integer_from_bytes(unsafe { &*bytes }, false, false).into_raw()
 }
 
 /// Encode an integer at a fixed width after Python argument conversion.
@@ -447,16 +471,35 @@ pub(super) fn write_quoted_repr(
     output.write_char(quote)
 }
 
+/// CPython gives the empty bytes literal and every possible one-byte slice a
+/// fixed identity. Build the complete alphabet together so all copies can use it.
+pub(super) fn copied_bytes(data: &[u8]) -> crate::BytesOwner {
+    static ALPHABET: std::sync::LazyLock<[crate::BytesOwner; 257]> =
+        std::sync::LazyLock::new(|| {
+            std::array::from_fn(|i| {
+                crate::BytesOwner::new(if i == 256 { Vec::new() } else { vec![i as u8] })
+            })
+        });
+    let index = match data {
+        [] => 256,
+        [byte] => usize::from(*byte),
+        _ => {
+            let mut value = allocate(data.len())
+                .unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
+            value.extend_from_slice(data);
+            return crate::BytesOwner::new(value);
+        }
+    };
+    crate::BytesOwner::clone(&ALPHABET[index])
+}
+
 /// # Safety
 /// `data` points to `length` initialized bytes for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_bytes_literal(data: *const u8, length: usize) -> *const Bytes {
     // SAFETY: the compiler passes a live constant byte array, including for length zero.
     let data = unsafe { std::slice::from_raw_parts(data, length) };
-    let mut value =
-        allocate(length).unwrap_or_else(|_| fail("MemoryError", "bytes allocation failed"));
-    value.extend_from_slice(data);
-    crate::BytesOwner::into_raw(crate::BytesOwner::new(value))
+    crate::BytesOwner::into_raw(copied_bytes(data))
 }
 
 /// # Safety
@@ -948,16 +991,18 @@ pub(super) fn decode_error(value: &[u8], error: std::str::Utf8Error) -> Error {
     }
 }
 
-pub(super) fn ascii_decode_error(bytes: crate::BytesOwner, index: usize) -> Error {
-    let byte = bytes[index];
-    let reason = "ordinal not in range(128)";
-    Error::unicode_decode(
-        "ascii",
-        bytes,
-        index..index + 1,
-        reason,
-        format!("'ascii' codec can't decode byte 0x{byte:02x} in position {index}: {reason}"),
-    )
+pub(super) fn ascii_decode_error(data: &[u8], index: usize) -> Error {
+    let issue = DecodeIssue {
+        encoding: "ascii",
+        start: index,
+        end: index + 1,
+        reason: "ordinal not in range(128)",
+    };
+    if data.len() == 1 {
+        issue.owned_error(copied_bytes(data))
+    } else {
+        issue.error(data)
+    }
 }
 
 /// Most decoders already own the immutable input. Retain it only on the failing path.
@@ -1060,11 +1105,7 @@ pub unsafe extern "C" fn imre_bytes_decode_ascii(value: *const Bytes) -> *const 
     // SAFETY: the exact bytes remain owned by the caller.
     let data = unsafe { &*value };
     let result = if let Some(index) = data.iter().position(|b| !b.is_ascii()) {
-        // SAFETY: the original immutable bytes are still owned by this caller.
-        Err(ascii_decode_error(
-            unsafe { crate::acquire_bytes(value as usize) },
-            index,
-        ))
+        Err(ascii_decode_error(data, index))
     } else {
         let text = std::str::from_utf8(data).expect("ASCII is valid UTF-8");
         Str::try_new(text)
@@ -1248,11 +1289,11 @@ mod tests {
     }
 
     #[test]
-    fn ascii_decode_error_retains_its_input_and_offsets() {
+    fn ascii_decode_error_owns_copied_bytes_and_offsets() {
         let input = crate::BytesOwner::new(b"a\xffb".to_vec());
-        let observer = input.clone();
         // SAFETY: input roots the bytes until the decoder returns.
         assert!(unsafe { imre_bytes_decode_ascii(crate::BytesOwner::as_ptr(&input)) }.is_null());
+        assert_eq!(crate::BytesOwner::strong_count(&input), 1);
         drop(input);
         // SAFETY: taking the pending error transfers its owner.
         let error = unsafe { crate::ObjectOwner::from_raw(imre_error_take()) };
@@ -1266,9 +1307,14 @@ mod tests {
             repr.as_str(),
             r"UnicodeDecodeError('ascii', b'a\xffb', 1, 2, 'ordinal not in range(128)')"
         );
-        assert_eq!(crate::BytesOwner::strong_count(&observer), 2);
-        drop(error);
-        assert_eq!(crate::BytesOwner::strong_count(&observer), 1);
+        let singleton = copied_bytes(b"\xff");
+        let distinct = crate::BytesOwner::new(vec![0xff]);
+        let error = ascii_decode_error(&distinct, 0);
+        assert_eq!(crate::BytesOwner::strong_count(&distinct), 1);
+        assert!(std::ptr::eq(
+            error.decode_args().unwrap().object,
+            singleton.as_slice()
+        ));
     }
 
     #[test]

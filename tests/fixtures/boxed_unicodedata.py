@@ -1,4 +1,8 @@
 import sys
+import io
+import itertools
+import random
+import struct
 import unicodedata
 from unicodedata import normalize
 
@@ -8,6 +12,42 @@ class Text(str):
 
 
 def current():
+    assert unicodedata.unidata_version == "16.0.0"
+    for ch in (Text("x"), "界", "！", "ｶ", "Ω", "\x00", "\ud800", "\udfff",
+               "\U0001fa8a", "\U000323b0", "\U0002fffe"):
+        print(unicodedata.east_asian_width(ch))
+        print(unicodedata.category(ch))
+    assert unicodedata.category.__self__ is unicodedata
+    assert unicodedata.category(Text("x")) is not unicodedata.category("x")
+    for value in (itertools.count(), itertools.chain(), io.BytesIO(), struct.Struct("I"), random.Random(1)):
+        try:
+            unicodedata.east_asian_width(value)
+        except TypeError as error:
+            print(str(error))
+        else:
+            raise AssertionError("non-character accepted")
+    bidi = unicodedata.bidirectional
+    for value, expected in ((Text("א"), "R"), ("\u2801", "L"), ("\udfff", "L"), ("\u0378", "")):
+        assert bidi(value) == expected
+    assert bidi.__self__ is unicodedata
+    legacy = unicodedata.ucd_3_2_0
+    assert type(legacy) is unicodedata.UCD
+    assert legacy.unidata_version == "3.2.0"
+    for ch, category in [(Text("a"), "Ll"), ("\u0221", "Cn"), ("\u00ad", "Pd"), ("\udfff", "Cs")]:
+        assert legacy.category(ch) == category
+    # These three cases distinguish CPython's historical decomposition,
+    # current ordering and current composition data.
+    for form, source, expected in (
+        ("NFC", "\U0002f868", "\U0002136a"),
+        ("NFKC", "\u1d2c", "\u1d2c"),
+        ("NFD", "a\u0315\u1ab0", "a\u1ab0\u0315"),
+        ("NFC", "\u1b05\u1b35", "\u1b06"),
+        ("NFKD", "\ud800\u212b", "\ud800A\u030a"),
+    ):
+        assert legacy.normalize(form, source) == expected
+        assert legacy.is_normalized(form, source) == (source == expected)
+    assert legacy.bidirectional("\u2801") == "ON"
+    assert legacy.bidirectional("\u1885") == "L"
     assert sys.maxunicode == 0x10FFFF
     for value in (Text("\u01FA"), "\u2100", "\uAC00", "\uAC01", "\ud800", chr(sys.maxunicode)):
         print(unicodedata.decomposition(value))

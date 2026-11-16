@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional as Maybe, Union
 
 
 def text(value: Union[str, None, bytes]) -> str:
@@ -9,7 +9,7 @@ def text(value: Union[str, None, bytes]) -> str:
     return value.decode()
 
 
-def copied(value: bytes | None) -> str | bytes | None:
+def copied(value: Maybe[bytes]) -> Maybe[str | bytes]:
     return value
 
 

@@ -27,20 +27,20 @@ pub(super) fn wrapper_attributes(fields: ir::WrapperAttributes, types: &Types) -
 }
 
 fn type_error(message: &str) -> Statement {
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("TypeError").unwrap(),
             message: Some(Box::new(unpacking::string(message))),
         },
-    }))
+    })
 }
 
 impl Checker<'_> {
-    pub(super) fn runtime_attrgetter(&self, node: &impl Ranged) -> String {
+    pub(super) fn runtime_attrgetter(&self, node: &impl Ranged) -> Failure {
         self.graph.needs_object_runtime.set(true);
         self.classified_error(
-            FailureKind::ObjectOperation,
+            Kind::Object,
             node,
             "operator.attrgetter requires native runtime attribute lookup",
         )
@@ -110,21 +110,22 @@ impl Checker<'_> {
                 .filter(|slot| slot.is_none())
                 .ok_or_else(|| error(self.source, node, "invalid wrapper argument binding"))?;
             let value = self.expr(node)?;
-            if index >= N - 2 && value.ty != self.types.tuple(Vec::new()) {
-                return Err(error(
-                    self.source,
-                    node,
-                    "native wrapper updates require empty assigned and updated tuples",
-                ));
-            }
             *slot = Some(scope.hold(self, value));
         }
-        if fields.iter().any(Option::is_none) {
+        if fields[..N - 2].iter().any(Option::is_none) {
             return Err(error(
                 self.source,
                 call,
                 "native wrapper updates require explicit assigned and updated tuples",
             ));
+        }
+        // Only two empty metadata tuples reduce to setting __wrapped__ alone.
+        let empty = self.types.tuple(Vec::new());
+        if fields[N - 2..]
+            .iter()
+            .any(|field| field.as_ref().is_none_or(|value| value.ty != empty))
+        {
+            return Err(self.scoped_builtin_error("copying wrapper metadata", call));
         }
         Ok((scope, fields.map(Option::unwrap)))
     }
@@ -135,13 +136,23 @@ impl Checker<'_> {
         wrapped: Expr,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        if !matches!(wrapper.ty, Type::Callable(_)) || wrapper.ty != wrapped.ty {
+        if self
+            .types
+            .source_method_site(wrapper.ty)
+            .is_some_and(|(_, _, receiver)| receiver == Some(Type::BuiltinClass))
+        {
+            return Err(self.scoped_builtin_error("updating a bound classmethod", node));
+        }
+        if !matches!(wrapper.ty, Type::Callable(_))
+            || self.types.wrapped_link_type(wrapper.ty) != self.types.wrapped_link_type(wrapped.ty)
+        {
             return Err(error(
                 self.source,
                 node,
                 "native wrapper links require two functions with the same callable signature",
             ));
         }
+        self.wrapper_link.set(true);
         Ok(Expr {
             ty: wrapper.ty,
             kind: ExprKind::Builtin(Builtin::FunctionWrappedSet, vec![wrapper, wrapped]),

@@ -1,11 +1,5 @@
 # Exception classes and callable arguments use the boxed Python object protocol.
-def _boxed_format_message(self, msg, standardMsg):
-    # In short-message mode the original message object becomes the exception argument.
-    if not self.longMessage:
-        return msg or standardMsg
-    if msg is None:
-        return standardMsg
-    return standardMsg + " : " + str(msg)
+import traceback as _traceback
 
 
 def _is_subtype(expected, basetype):
@@ -42,8 +36,7 @@ class _BoxedRaisesContext(_BoxedAssertionContext):
             if self.callable_name:
                 message += " by " + self.callable_name
             self._raiseFailure(message)
-        import traceback
-        traceback.clear_frames(tb)
+        _traceback.clear_frames(tb)
         if not issubclass(exc_type, self.expected):
             return False
         exc.__traceback__ = None
@@ -197,7 +190,6 @@ def assertNotRegex(self, text, unexpected_regex, msg=None):
 TestCase.assertRegex = assertRegex
 TestCase.assertNotRegex = assertNotRegex
 TestCase.assertRaisesRegex = assertRaisesRegex
-TestCase._formatMessage = _boxed_format_message
 TestCase.assertRaises = assertRaises
 TestCase._assertNotWarns = _assertNotWarns
 TestCase.assertWarns = assertWarns

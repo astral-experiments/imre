@@ -5,11 +5,11 @@
 //! addition per iteration. Its accumulator identity carries the resulting
 //! induction proof; ordinary interval widening is never treated as that proof.
 
-use crate::ir::{
-    Binary, Builtin, Compare, Expr, ExprKind, Module, Statement, Type, walk_expressions,
-};
+use crate::ir::{Binary, Builtin, Expr, ExprKind, Module, Statement, Type, walk_expressions};
 use crate::list_bounds::block_readonly;
 use crate::ranges::{IntRange, IntegerFacts};
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 const MIN_SMALL: i128 = -(1_i128 << 62);
 const MAX_SMALL: i128 = (1_i128 << 62) - 1;
@@ -36,7 +36,7 @@ impl Initial {
 pub(crate) fn specialize(module: &mut Module) {
     let ranges = crate::ranges::analyze(module).into_original_integers();
     for function in module.functions.iter_mut().chain([&mut module.entry]) {
-        if function.expression_rebound().into_iter().any(|value| value) {
+        if function.has_expression_bindings() {
             continue;
         }
         rewrite(
@@ -88,7 +88,7 @@ fn rewrite(body: &mut [Statement], initial: &mut [Initial], ranges: &IntegerFact
                     invalidate(std::slice::from_ref(statement), initial);
                 }
                 if let Some((guard, fast)) = replacement {
-                    let fallback = std::mem::replace(statement, Statement::Break);
+                    let fallback = std::mem::replace(statement, Statement::Break(None));
                     *statement = Statement::If(guard, vec![fast], vec![fallback]);
                 } else {
                     crate::ir::statement_children_mut(statement, |child| {
@@ -196,7 +196,7 @@ fn version(
             ty: Type::Bool,
             kind: ExprKind::Compare(
                 vec![length(source), Expr::integer(budget)],
-                vec![Compare::LessEqual],
+                vec![CmpOp::LtE],
             ),
         },
         fast,
@@ -212,7 +212,7 @@ fn version(
 fn prove_prefix_reads(body: &mut [Statement], source: usize, cursor: usize) {
     fn expression(value: &mut Expr, source: usize, cursor: usize) {
         if let ExprKind::Builtin(operation, args) = &mut value.kind
-            && let Builtin::ListGetBounded { min, max } = *operation
+            && let Builtin::ListGetBounded { min, max, .. } = *operation
             && let [receiver, index] = args.as_slice()
             && matches!(receiver.kind, ExprKind::Local(slot) if slot == source)
             && matches!(index.kind, ExprKind::Local(slot) if slot == cursor)
@@ -249,10 +249,10 @@ fn loop_source(test: &Expr, initial: &[Initial]) -> Option<(usize, usize, bool)>
         return None;
     };
     match operations.as_slice() {
-        [Compare::Less] if initial[cursor] == Initial::Zero => {
+        [CmpOp::Lt] if initial[cursor] == Initial::Zero => {
             Some((cursor, list_length(right)?, false))
         }
-        [Compare::GreaterEqual] if literal(right) == Some(0) => {
+        [CmpOp::GtE] if literal(right) == Some(0) => {
             let Initial::Reverse { source, .. } = initial[cursor] else {
                 return None;
             };
@@ -360,7 +360,7 @@ pub(crate) fn count_writes(body: &[Statement], writes: &mut [usize]) {
 pub(crate) fn contains_continue(body: &[Statement]) -> bool {
     fn statements(body: &[Statement]) -> bool {
         body.iter().any(|statement| match statement {
-            Statement::Continue => true,
+            Statement::Continue(_) => true,
             Statement::Scope { body, .. } => statements(body),
             Statement::If(_, yes, no) => statements(yes) || statements(no),
             _ => false,
@@ -393,7 +393,7 @@ fn list_length(value: &Expr) -> Option<usize> {
 pub(super) fn literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse().ok()?,
-        ExprKind::Negate(value) => literal(value)?.checked_neg()?,
+        ExprKind::Unary(UnaryOp::USub, value) => literal(value)?.checked_neg()?,
         _ => return None,
     };
     (MIN_SMALL..=MAX_SMALL)

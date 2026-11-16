@@ -1,0 +1,224 @@
+upstream_id	stock_FILE	stock_named	stock_launcher	O0_FILE	O3_FILE	O0_whole_named	O3_whole_named	O0_saved_withdrawn	O3_saved_withdrawn
+test.test_shutil.PublicAPITests.test_module_all_attribute	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_archive	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_archive_cwd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_archive_cwd_default	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_archive_cwd_supports_root_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_archive_owner_group	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_tarfile	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_tarfile_in_curdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_tarfile_rootdir_nodir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_tarfile_with_explicit_curdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_tarfile_without_rootdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_zipfile	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_zipfile_in_curdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_zipfile_rootdir_nodir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_zipfile_with_explicit_curdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_make_zipfile_without_rootdir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_register_archive_format	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_tarfile_root_owner	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_tarfile_vs_tar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_bztar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_gztar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_tar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_xztar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_zip	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_zip_badpaths	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_archive_zstdtar	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unpack_registry	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_unzip_zipfile	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestArchives.test_zipfile_vs_zip	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy2	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy2_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy2_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy2_xattr	skip	skip	skip	unreached	unreached	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'
+test.test_shutil.TestCopy.test_copy_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy_return_value	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copy_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_copy_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_named_pipe	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_nonexistent_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_return_value	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_same_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyfile_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copymode_follow_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copymode_symlink_to_symlink	skip	skip	skip	unreached	unreached	skipped 'requires os.lchmod'	skipped 'requires os.lchmod'	skipped 'requires os.lchmod'	skipped 'requires os.lchmod'
+test.test_shutil.TestCopy.test_copymode_symlink_to_symlink_wo_lchmod	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copystat_handles_harmless_chflags_errors	skip	skip	skip	unreached	unreached	skipped 'requires os.chflags, EOPNOTSUPP & ENOTSUP'	skipped 'requires os.chflags, EOPNOTSUPP & ENOTSUP'	skipped 'requires os.chflags, EOPNOTSUPP & ENOTSUP'	skipped 'requires os.chflags, EOPNOTSUPP & ENOTSUP'
+test.test_shutil.TestCopy.test_copystat_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_copyxattr	skip	skip	skip	unreached	unreached	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'
+test.test_shutil.TestCopy.test_copyxattr_symlinks	skip	skip	skip	unreached	unreached	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'	skipped 'no non-broken extended attribute support'
+test.test_shutil.TestCopy.test_dont_copy_file_onto_link_to_itself	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopy.test_dont_copy_file_onto_symlink_to_itself	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFile.test_w_dest_close_fails	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFile.test_w_dest_open_fails	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFile.test_w_source_close_fails	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFile.test_w_source_open_fails	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFileObj.test_content	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFileObj.test_file_not_closed	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFileObj.test_file_offset	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyFileObj.test_win_impl	skip	skip	skip	unreached	unreached	skipped 'Windows only'	skipped 'Windows only'	skipped 'Windows only'	skipped 'Windows only'
+test.test_shutil.TestCopyTree.test_copytree_arg_types_of_ignore	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_custom_copy_function	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_dangling_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_dirs_exist_ok	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_named_pipe	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_retains_permissions	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_return_value	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_simple	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_special_func	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_subdirectory	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_symlink_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_winerror	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestCopyTree.test_copytree_with_exclude	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestGetTerminalSize.test_bad_environ	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestGetTerminalSize.test_does_not_crash	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestGetTerminalSize.test_fallback	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestGetTerminalSize.test_os_environ_first	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestGetTerminalSize.test_stty_match	skip	skip	skip	unreached	unreached	skipped 'not on tty'	skipped 'not on tty'	skipped 'not on tty'	skipped 'not on tty'
+test.test_shutil.TestMisc.test_chown	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMisc.test_disk_usage	pass	pass	pass	unreached	unreached	pass	pass	error	error
+test.test_shutil.TestMove.test_destinsrc_false_negative	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_destinsrc_false_positive	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_dont_move_dir_in_itself	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_existing_file_inside_dest_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_as_rename_return_value	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dangling_symlink	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_altsep_to_dir	skip	skip	skip	unreached	unreached	skipped 'requires os.path.altsep'	skipped 'requires os.path.altsep'	skipped 'requires os.path.altsep'	skipped 'requires os.path.altsep'
+test.test_shutil.TestMove.test_move_dir_caseinsensitive	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_other_fs	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_permission_denied	skip	skip	skip	unreached	unreached	skipped 'requires CAP_DAC_OVERRIDE'	skipped 'requires CAP_DAC_OVERRIDE'	skipped 'requires CAP_DAC_OVERRIDE'	skipped 'requires CAP_DAC_OVERRIDE'
+test.test_shutil.TestMove.test_move_dir_sep_to_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_special_function	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_symlink	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_to_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_dir_to_dir_other_fs	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_other_fs	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_special_function	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_symlink	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_symlink_to_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_to_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_to_dir_other_fs	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_to_dir_pathlike_dst	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_file_to_dir_pathlike_src	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_return_value	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_symlink_to_dir_into_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestMove.test_move_symlink_to_dir_into_symlink_to_dir	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_both_onerror_and_onexc	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_on_error	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_on_exc	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_above_recursion_limit	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_deleted_race_condition	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_does_not_choke_on_failing_lstat	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_dont_delete_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_errors	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_errors_onerror	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_errors_onexc	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_fails_on_close	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onerror	skip	skip	skip	unreached	unreached	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'
+test.test_shutil.TestRmTree.test_rmtree_fails_on_junctions_onexc	skip	skip	skip	unreached	unreached	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'
+test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onerror	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_fails_on_symlink_onexc	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_on_junction	skip	skip	skip	unreached	unreached	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'
+test.test_shutil.TestRmTree.test_rmtree_on_named_pipe	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_on_symlink	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_uses_safe_fd_version_if_available	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_with_dir_fd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_with_dir_fd_unsupported	skip	skip	skip	unreached	unreached	skipped 'dir_fd is supported'	skipped 'dir_fd is supported'	skipped 'dir_fd is supported'	skipped 'dir_fd is supported'
+test.test_shutil.TestRmTree.test_rmtree_works_on_bytes	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestRmTree.test_rmtree_works_on_junctions	skip	skip	skip	unreached	unreached	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'	skipped 'only relevant on Windows'
+test.test_shutil.TestRmTree.test_rmtree_works_on_symlinks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_absolute_cmd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_basic	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_cwd_non_win32	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_cwd_win32	skip	skip	skip	unreached	unreached	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'
+test.test_shutil.TestWhich.test_cwd_win32_added_before_all_other_path	skip	skip	skip	unreached	unreached	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'
+test.test_shutil.TestWhich.test_dir_order_with_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_dir_order_without_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_empty_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_empty_path_no_PATH	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_environ_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_environ_path_cwd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_environ_path_empty	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_environ_path_missing	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_non_matching_mode	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_nonexistent_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_pathext	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_pathext_applied_on_files_in_path	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_pathext_checking	skip	skip	skip	unreached	unreached	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'
+test.test_shutil.TestWhich.test_pathext_extension_ends_with_dot	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_pathext_with_empty_str	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_pathext_with_multidot_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_pathext_with_null_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_relative_cmd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_relative_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhich.test_same_dir_with_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_same_dir_without_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhich.test_win_path_needs_curdir	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_absolute_cmd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_basic	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_cwd_non_win32	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_cwd_win32	skip	skip	skip	unreached	unreached	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'
+test.test_shutil.TestWhichBytes.test_cwd_win32_added_before_all_other_path	skip	skip	skip	unreached	unreached	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'	skipped 'test is for win32'
+test.test_shutil.TestWhichBytes.test_dir_order_with_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_dir_order_without_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_empty_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_empty_path_no_PATH	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_environ_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_environ_path_cwd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_environ_path_empty	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_environ_path_missing	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_non_matching_mode	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_nonexistent_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_pathext	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_pathext_applied_on_files_in_path	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_pathext_checking	skip	skip	skip	unreached	unreached	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'	skipped 'pathext check is Windows-only'
+test.test_shutil.TestWhichBytes.test_pathext_extension_ends_with_dot	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_pathext_with_empty_str	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_pathext_with_multidot_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_pathext_with_null_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_relative_cmd	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_relative_path	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestWhichBytes.test_same_dir_with_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_same_dir_without_pathext_extension	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestWhichBytes.test_win_path_needs_curdir	skip	skip	skip	unreached	unreached	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'	skipped 'test specific to Windows'
+test.test_shutil.TestZeroCopyCopyFileRange.test_big_chunk	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_blocksize_arg	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_cant_get_size	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_empty_file	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_first_call	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_exception_on_second_call	skip	skip	skip	unreached	unreached	error	error	error	error
+test.test_shutil.TestZeroCopyCopyFileRange.test_filesystem_full	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_non_existent_src	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_dst	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_non_regular_file_src	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_regular_copy	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_same_file	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_small_chunks	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyCopyFileRange.test_unhandled_exception	skip	skip	skip	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopyMACOS.test_empty_file	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_exception_on_first_call	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_filesystem_full	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_non_existent_src	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_regular_copy	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_same_file	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopyMACOS.test_unhandled_exception	skip	skip	skip	unreached	unreached	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'	skipped 'macOS only'
+test.test_shutil.TestZeroCopySendfile.test_big_chunk	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_blocksize_arg	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_cant_get_size	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_empty_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_exception_on_first_call	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_exception_on_second_call	pass	pass	pass	unreached	unreached	error	error	error	error
+test.test_shutil.TestZeroCopySendfile.test_file2file_not_supported	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_filesystem_full	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_non_existent_src	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_non_regular_file_dst	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_non_regular_file_src	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_regular_copy	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_same_file	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_small_chunks	pass	pass	pass	unreached	unreached	pass	pass	pass	pass
+test.test_shutil.TestZeroCopySendfile.test_unhandled_exception	pass	pass	pass	unreached	unreached	pass	pass	pass	pass

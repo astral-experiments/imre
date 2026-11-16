@@ -13,6 +13,9 @@ class InvalidIndex:
 
 
 def current():
+    for limit in (resource.RLIMIT_AS, resource.RLIMIT_FSIZE):
+        soft, hard = getrlimit(limit)
+        assert isinstance(soft, int) and isinstance(hard, int)
     assert getrlimit is resource.getrlimit
     assert getrlimit.__doc__ is None
     assert getrlimit.__self__ is resource

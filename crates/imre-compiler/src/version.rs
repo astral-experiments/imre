@@ -1,8 +1,7 @@
 //! Language and implementation releases are independently versioned.
 use crate::ir::{Expr, ExprKind, Type};
-use ruff_python_ast::PythonVersion;
+pub(crate) use imre_ast::PYTHON_VERSION as LANGUAGE;
 
-pub(crate) const LANGUAGE: PythonVersion = PythonVersion::PY314;
 pub(crate) const FIELDS: &[&str] = &["major", "minor", "micro", "releaselevel", "serial"];
 
 pub(crate) fn components(implementation: bool) -> [u32; 3] {

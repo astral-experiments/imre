@@ -1,10 +1,7 @@
 //! Linux scatter reads and gather writes over exported buffers.
 
 use super::{Context, Error, Id, Result, Value};
-use std::{
-    collections::{HashMap, TryReserveError, hash_map::Entry},
-    ops::Range,
-};
+use std::{collections::TryReserveError, ops::Range};
 
 fn no_memory(_: TryReserveError) -> Error {
     Error::new("MemoryError", "")
@@ -88,52 +85,27 @@ fn transfer_exported(
     transfer: Transfer,
     write: bool,
 ) -> Result<Id> {
-    let mut vectors = Vec::new();
-    vectors.try_reserve_exact(spans.len()).map_err(no_memory)?;
-    let mut bases = HashMap::new();
-    bases.try_reserve(spans.len()).map_err(no_memory)?;
+    let mut scratch = crate::dynamic::raw_read_window::IoVectors::new(spans.len())?;
     loop {
-        // Get one pointer per allocation; multiple iovecs may overlap in that storage.
-        // A signal handler can mutate buffers between attempts, so reacquire the bases.
-        bases.clear();
-        vectors.clear();
-        for (storage, range) in spans {
-            let (base, length) = match bases.entry(*storage) {
-                Entry::Occupied(entry) => *entry.get(),
-                Entry::Vacant(entry) => {
-                    let backing = if write {
-                        let bytes = ctx.owner_bytes(*storage)?;
-                        (bytes.as_ptr().cast_mut(), bytes.len())
-                    } else {
-                        let bytes = ctx.writable_storage_bytes(*storage)?;
-                        (bytes.as_mut_ptr(), bytes.len())
-                    };
-                    *entry.insert(backing)
-                }
+        let n = {
+            let mut loan = if write {
+                scratch.readable(ctx, spans)?
+            } else {
+                scratch.writable(ctx, spans)?
             };
-            if range.end > length {
-                return Err(Error::new(
-                    "BufferError",
-                    "underlying buffer has changed size",
-                ));
-            }
-            vectors.push(libc::iovec {
-                iov_base: base.wrapping_add(range.start).cast(),
-                iov_len: range.len(),
-            });
-        }
-        let iov = vectors.as_ptr();
-        let count = vectors.len() as libc::c_int;
-        // SAFETY: each iovec addresses live exported storage until the syscall returns.
-        // No Rust slice into those buffers or Python callback is live during the call.
-        let n = unsafe {
-            match transfer {
-                Transfer::Read => libc::readv(fd, iov, count),
-                // Gather writes only read iov_base, including for immutable bytes.
-                Transfer::Write => libc::writev(fd, iov, count),
-                Transfer::Positioned(call, offset) => call(fd, iov, count, offset),
-                Transfer::PositionedWithFlags(call, offset, flags) => {
-                    call(fd, iov, count, offset, flags)
+            // SAFETY: the synchronous syscall consumes the vectors before the context
+            // loan ends. Only the scatter-read variants write to the backing storage.
+            unsafe {
+                let vectors = loan.as_raw();
+                let iov = vectors.as_ptr();
+                let count = vectors.len() as libc::c_int;
+                match transfer {
+                    Transfer::Read => libc::readv(fd, iov, count),
+                    Transfer::Write => libc::writev(fd, iov, count),
+                    Transfer::Positioned(call, offset) => call(fd, iov, count, offset),
+                    Transfer::PositionedWithFlags(call, offset, flags) => {
+                        call(fd, iov, count, offset, flags)
+                    }
                 }
             }
         };
@@ -188,19 +160,23 @@ pub(super) fn transfer(
     };
     let mut spans = Vec::new();
     spans.try_reserve_exact(count).map_err(no_memory)?;
-    let mark = ctx.buffer_exports.len();
+    let mark = ctx.heap.execution.buffer_exports.len();
     let result = (|| {
         for index in 0..count {
             let key = ctx.int(index as i64);
             let item = ctx.get_item(buffers, key)?;
             let (storage, range) = buffer_span(ctx, item, !write)?;
             // Pin this view and backing before the next __getitem__ runs Python.
-            ctx.buffer_exports.try_reserve(2).map_err(no_memory)?;
-            ctx.buffer_exports.extend([item, storage]);
+            ctx.heap
+                .execution
+                .buffer_exports
+                .try_reserve(2)
+                .map_err(no_memory)?;
+            ctx.heap.execution.buffer_exports.extend([item, storage]);
             spans.push((storage, range));
         }
         transfer_exported(ctx, fd, &spans, transfer, write)
     })();
-    ctx.buffer_exports.truncate(mark);
+    ctx.heap.execution.buffer_exports.truncate(mark);
     result
 }

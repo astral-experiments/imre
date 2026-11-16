@@ -2,23 +2,50 @@
 
 use std::io::{self, Write};
 
+pub(crate) const MAX_DEFAULT_BUFFER_SIZE: usize = 8 * 1024 * 1024;
+
 /// Bound the descriptor's preferred block size as CPython does for buffered files.
 pub(crate) fn binary_capacity(block_size: i128) -> usize {
-    block_size.clamp(128 * 1024, 8 * 1024 * 1024) as usize
+    block_size.clamp(128 * 1024, MAX_DEFAULT_BUFFER_SIZE as i128) as usize
 }
 
 /// TextIOWrapper groups small encoded writes and forwards a large write separately.
 #[derive(Default)]
 pub(crate) struct PendingText(Vec<u8>);
 
+const CHUNK_SIZE: usize = 8192;
 impl PendingText {
+    /// Append a whole fragmented write only if it fits without allocation or a flush.
+    pub(crate) fn try_append_parts<'a>(&mut self, parts: impl Iterator<Item = &'a [u8]>) -> bool {
+        let initial = self.0.len();
+        let Some(room) = self.0.capacity().min(CHUNK_SIZE - 1).checked_sub(initial) else {
+            return false;
+        };
+        let mut remaining = &mut self.0.spare_capacity_mut()[..room];
+        for part in parts {
+            let Some((destination, rest)) = remaining.split_at_mut_checked(part.len()) else {
+                return false;
+            };
+            if let [byte] = part {
+                destination[0].write(*byte);
+            } else {
+                destination.write_copy_of_slice(part);
+            }
+            remaining = rest;
+        }
+        let written = room - remaining.len();
+        // SAFETY: every fragment initialized its consecutive spare slots. Failed writes
+        // leave the original length visible and never publish a partial fragment.
+        unsafe { self.0.set_len(initial + written) };
+        true
+    }
+
     pub(crate) fn write<W: Write>(
         &mut self,
         raw: &mut W,
         bytes: &[u8],
         flush_line: bool,
     ) -> io::Result<()> {
-        const CHUNK_SIZE: usize = 8192;
         if bytes.len() >= CHUNK_SIZE {
             self.drain(raw)?;
             raw.write_all(bytes)?;
@@ -47,5 +74,25 @@ impl PendingText {
     pub(crate) fn flush<W: Write>(&mut self, raw: &mut W) -> io::Result<()> {
         self.drain(raw)?;
         raw.flush()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fragmented_writes_require_space_for_every_part() {
+        let mut pending = PendingText(Vec::with_capacity(12));
+        assert!(pending.try_append_parts([b"abc".as_slice(), b"def"].into_iter()));
+        assert!(!pending.try_append_parts([b"ghi".as_slice(), b"too long"].into_iter()));
+        assert_eq!(pending.0, b"abcdef");
+
+        let mut pending = PendingText(Vec::with_capacity(CHUNK_SIZE));
+        pending.0.resize(CHUNK_SIZE - 2, b'x');
+        assert!(pending.try_append_parts([b"y".as_slice()].into_iter()));
+        assert!(!pending.try_append_parts([b"z".as_slice()].into_iter()));
+        assert_eq!(pending.0.len(), CHUNK_SIZE - 1);
+        assert_eq!(pending.0.last(), Some(&b'y'));
     }
 }

@@ -4,6 +4,14 @@ use super::{Error, Int, Kind};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+/// An ordinary wait can poll for Python signals without starting another acquisition.
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub(crate) enum WaitPhase {
+    Initial,
+    Parked,
+    Interrupted,
+}
+
 /// The unsigned pthread identifier exposed by Python's get_ident.
 pub(crate) fn thread_ident() -> usize {
     // SAFETY: pthread_self identifies the caller and takes no arguments.

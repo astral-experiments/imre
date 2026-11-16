@@ -6,6 +6,8 @@
 //! bound, but no relationship to a container's later length is retained. Indexed
 //! accesses must keep checking current bounds, including after alias mutation.
 
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 
@@ -32,13 +34,14 @@ impl IntRange {
     }
 }
 
-/// Expression identities remain valid while this immutable module borrow lives.
+/// Expression identities remain valid while the analyzed functions are borrowed.
 /// Missing facts, including unreachable or arbitrary-precision expressions, must
 /// use the ordinary checked lowering path.
 pub(crate) struct RangeFacts<'ir> {
     intervals: IntegerFacts,
     cursors: HashMap<*const Statement, Interval>,
-    module: PhantomData<&'ir Module>,
+    guarded_entries: HashMap<*const Statement, Vec<bool>>,
+    ir: PhantomData<&'ir Function>,
 }
 
 pub(crate) struct IntegerFacts(HashMap<*const Expr, Interval>);
@@ -51,6 +54,13 @@ impl IntegerFacts {
 }
 
 impl RangeFacts<'_> {
+    /// Records old owners known to be immediate on every incoming edge.
+    pub(crate) fn starts_small(&self, statement: &Statement, slot: usize) -> bool {
+        self.guarded_entries
+            .get(&std::ptr::from_ref(statement))
+            .is_some_and(|values| values[slot])
+    }
+
     pub(crate) fn integer(&self, expression: &Expr) -> Option<IntRange> {
         self.intervals.get(expression)
     }
@@ -82,11 +92,7 @@ impl RangeFacts<'_> {
     /// eligibility. Move edges propagate unknown ownership through temporary
     /// chains, while Clear and a Move's source reset only introduce zero.
     pub(crate) fn small_locals(&self, function: &Function) -> Vec<bool> {
-        if function
-            .expression_rebound()
-            .into_iter()
-            .any(|written| written)
-        {
+        if function.has_expression_bindings() {
             return vec![false; function.locals.len()];
         }
         let mut small = function
@@ -97,8 +103,28 @@ impl RangeFacts<'_> {
         for &parameter in &function.params {
             small[parameter] = false;
         }
+        self.small_replacements(&function.body, small)
+    }
+
+    /// Finds integer slots that stay small after checking their incoming owners.
+    pub(crate) fn checked_small_slots(
+        &self,
+        body: &[Statement],
+        locals: &[Type],
+        existing: &[bool],
+    ) -> Vec<usize> {
+        let mut small = existing.to_vec();
+        crate::ir::walk_writes(body, |slot, _| small[slot] |= locals[slot] == Type::Int);
+        self.small_replacements(body, small)
+            .into_iter()
+            .enumerate()
+            .filter_map(|(slot, proven)| (proven && !existing[slot]).then_some(slot))
+            .collect()
+    }
+
+    fn small_replacements(&self, body: &[Statement], mut small: Vec<bool>) -> Vec<bool> {
         let mut moves = Vec::new();
-        crate::ir::walk_statements(&function.body, &mut |statement| match statement {
+        crate::ir::walk_statements(body, &mut |statement| match statement {
             Statement::Assign(slot, value) => small[*slot] &= self.integer(value).is_some(),
             Statement::Move(target, source) => moves.push((*source, *target)),
             Statement::IterNext {
@@ -133,18 +159,7 @@ impl RangeFacts<'_> {
             }
             _ => {}
         });
-        loop {
-            let mut changed = false;
-            for &(source, target) in &moves {
-                if !small[source] && small[target] {
-                    small[target] = false;
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
+        crate::ir::propagate_copy_facts(&mut small, &moves);
         small
     }
 }
@@ -152,19 +167,29 @@ impl RangeFacts<'_> {
 /// Computes facts after ownership-preserving IR rewrites have finished. Loop
 /// bodies are recorded only after their entry invariant reaches a fixed point.
 pub(crate) fn analyze(module: &Module) -> RangeFacts<'_> {
-    let mut analyzer = Analyzer {
-        intervals: HashMap::new(),
-        cursors: HashMap::new(),
-        cleared: Vec::new(),
-    };
-    for function in module.functions.iter().chain([&module.entry]) {
+    analyze_functions(module.functions.iter().chain([&module.entry]))
+}
+
+pub(crate) fn analyze_functions<'ir>(
+    functions: impl Iterator<Item = &'ir Function>,
+) -> RangeFacts<'ir> {
+    let mut analyzer = Analyzer::default();
+    for function in functions {
         analyzer.function(function);
     }
     RangeFacts {
         intervals: IntegerFacts(analyzer.intervals),
         cursors: analyzer.cursors,
-        module: PhantomData,
+        guarded_entries: analyzer.guarded_entries,
+        ir: PhantomData,
     }
+}
+
+/// A rewrite can query these bounds until it moves or replaces the original expressions.
+pub(crate) fn integer_bounds(function: &Function) -> IntegerFacts {
+    let mut analyzer = Analyzer::default();
+    analyzer.function(function);
+    IntegerFacts(analyzer.intervals)
 }
 
 /// An absent endpoint denotes infinity. Checked i128 arithmetic discards bounds
@@ -375,7 +400,7 @@ impl Interval {
                     max: self.max.map(|value| value >> shift.min(127)),
                 }
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => Self::UNKNOWN,
+            Binary::Power | Binary::MatrixMultiply | Binary::Divide => Self::UNKNOWN,
         }
     }
 }
@@ -458,9 +483,11 @@ impl Flow {
     }
 }
 
+#[derive(Default)]
 struct Analyzer {
     intervals: HashMap<*const Expr, Interval>,
     cursors: HashMap<*const Statement, Interval>,
+    guarded_entries: HashMap<*const Statement, Vec<bool>>,
     cleared: Vec<Interval>,
 }
 
@@ -469,11 +496,7 @@ impl Analyzer {
         // Named bindings can change source locals during comparison operands.
         // Compiler-owned scopes use explicit state transfers, but user binding
         // expressions retain the conservative generic integer path.
-        if function
-            .expression_rebound()
-            .into_iter()
-            .any(|written| written)
-        {
+        if function.has_expression_bindings() {
             return;
         }
         // Match the emitter's cleanup-safe initial values. Exact integers use
@@ -489,10 +512,19 @@ impl Analyzer {
                 }
             })
             .collect();
-        self.block(&function.body, State::unknown(function.locals.len()), true);
+        let mut entry = State(self.cleared.clone());
+        for &slot in &function.params {
+            entry.0[slot] = Interval::UNKNOWN;
+        }
+        self.block(&function.body, entry, true);
     }
 
-    fn block(&mut self, statements: &[Statement], state: State, record: bool) -> Flow {
+    fn block<'s>(
+        &mut self,
+        statements: impl IntoIterator<Item = &'s Statement>,
+        state: State,
+        record: bool,
+    ) -> Flow {
         let mut flow = Flow::next(state);
         for statement in statements {
             let Some(state) = flow.next.take() else { break };
@@ -506,7 +538,26 @@ impl Analyzer {
     }
 
     fn statement(&mut self, statement: &Statement, mut state: State, record: bool) -> Flow {
+        if record
+            && let Statement::If(test, _, _) = statement
+            && crate::list_specialization::is_window_range_guard(test)
+        {
+            let small = state
+                .0
+                .iter()
+                .map(|value| value.small().is_some())
+                .collect::<Vec<_>>();
+            self.guarded_entries
+                .entry(std::ptr::from_ref(statement))
+                .and_modify(|entry| {
+                    for (old, new) in entry.iter_mut().zip(&small) {
+                        *old &= *new;
+                    }
+                })
+                .or_insert(small);
+        }
         match statement {
+            Statement::Position(..) => {}
             Statement::Assign(slot, value) => {
                 state.0[*slot] = self.expression(value, &mut state, record)
             }
@@ -516,6 +567,17 @@ impl Analyzer {
                 state.0[*target] = value;
             }
             Statement::Clear(slot) => state.0[*slot] = self.cleared[*slot],
+            Statement::Match(_, cases) => {
+                let unknown = State::unknown(state.0.len());
+                statement.operands(|value| {
+                    self.expression(value, &mut unknown.clone(), record);
+                });
+                let mut flow = Flow::next(unknown.clone());
+                for case in cases {
+                    flow = flow.join(self.block(&case.body, unknown.clone(), record));
+                }
+                return flow;
+            }
             Statement::Scope { body, clear } => {
                 let mut flow = self.block(body, state, record);
                 for state in [
@@ -531,6 +593,19 @@ impl Analyzer {
                         state.0[slot] = self.cleared[slot];
                     }
                 }
+                return flow;
+            }
+            Statement::With {
+                manager,
+                binding,
+                body,
+                ..
+            } => {
+                self.expression(manager, &mut state, record);
+                let unknown = State::unknown(state.0.len());
+                let protected = binding.iter().flat_map(|binding| &binding.body).chain(body);
+                let mut flow = self.block(protected, unknown.clone(), record);
+                flow.next = Some(unknown);
                 return flow;
             }
             Statement::Try {
@@ -602,10 +677,10 @@ impl Analyzer {
                 }
                 state.0[*ready] = Interval::bounded(0, 1);
             }
-            Statement::SetItem(list, index, value) => {
-                self.expression(value, &mut state, record);
-                self.expression(list, &mut state, record);
-                self.expression(index, &mut state, record);
+            Statement::SetItem(order, list, index, value) => {
+                order.evaluate(list, index, value, |expr| {
+                    self.expression(expr, &mut state, record)
+                });
             }
             Statement::AugmentItem(list, index, _, value) => {
                 self.expression(list, &mut state, record);
@@ -629,16 +704,12 @@ impl Analyzer {
             }
             Statement::Raise(value) => {
                 if let Some(value) = value {
-                    self.expression(value, &mut state, record);
+                    self.expression(&value.exception, &mut state, record);
+                    if let Some(cause) = &value.cause {
+                        self.expression(cause, &mut state, record);
+                    }
                 }
                 return Flow::default();
-            }
-            Statement::Assert(test) => {
-                self.expression(test, &mut state, record);
-                return Flow {
-                    next: self.assume(test, true, state),
-                    ..Flow::default()
-                };
             }
             Statement::If(test, yes, no) => {
                 self.expression(test, &mut state, record);
@@ -675,13 +746,13 @@ impl Analyzer {
                 }
                 return self.for_loop(*target, &args, body, orelse, state, record);
             }
-            Statement::Break => {
+            Statement::Break(_) => {
                 return Flow {
                     breaks: Some(state),
                     ..Flow::default()
                 };
             }
-            Statement::Continue => {
+            Statement::Continue(_) => {
                 return Flow {
                     continues: Some(state),
                     ..Flow::default()
@@ -824,9 +895,21 @@ impl Analyzer {
             ExprKind::Binary(op, left, right) => {
                 let left = self.expression(left, state, record);
                 let right = self.expression(right, state, record);
-                left.binary(*op, right)
+                if expression.ty == Type::Int {
+                    left.binary(*op, right)
+                } else {
+                    Interval::UNKNOWN
+                }
             }
-            ExprKind::Negate(value) => self.expression(value, state, record).negate(),
+            ExprKind::Unary(_, operand) if expression.uses_python_unary_protocol() => {
+                self.expression(operand, state, record);
+                Interval::UNKNOWN
+            }
+            ExprKind::Unary(UnaryOp::UAdd, operand) => self.expression(operand, state, record),
+            ExprKind::Unary(UnaryOp::Invert, operand) => self
+                .expression(operand, state, record)
+                .binary(Binary::BitXor, Interval::exact(-1)),
+            ExprKind::Unary(UnaryOp::USub, value) => self.expression(value, state, record).negate(),
             ExprKind::Boolean(and, values) => {
                 let mut current = Some(state.clone());
                 let mut exits = None;
@@ -845,10 +928,19 @@ impl Analyzer {
                 *state = merge(exits, current).unwrap_or_else(|| State::unknown(state.0.len()));
                 Interval::bounded(0, 1)
             }
-            ExprKind::BooleanValue(and, left, right) => {
+            ExprKind::BooleanValue(and, left, right, predicate) => {
                 let left_range = self.expression(left, state, record);
-                let stopped = self.assume(left, !and, state.clone());
-                let right_state = self.assume(left, *and, state.clone());
+                let (stopped, right_state) = if let Some(predicate) = predicate {
+                    state.0[predicate.receiver] = left_range;
+                    self.expression(&predicate.condition, state, record);
+                    state.0[predicate.receiver] = self.cleared[predicate.receiver];
+                    (Some(state.clone()), Some(state.clone()))
+                } else {
+                    (
+                        self.assume(left, !and, state.clone()),
+                        self.assume(left, *and, state.clone()),
+                    )
+                };
                 if let Some(mut right_state) = right_state {
                     let right_range = self.expression(right, &mut right_state, record);
                     let result = if stopped.is_some() {
@@ -883,6 +975,12 @@ impl Analyzer {
                 *state = merge(yes.map(|(_, state)| state), no.map(|(_, state)| state))
                     .unwrap_or_else(|| State::unknown(state.0.len()));
                 result
+            }
+            ExprKind::Compare(values, ops) if Compare::uses_python_protocol(expression.ty, ops) => {
+                for value in values {
+                    self.expression(value, state, record);
+                }
+                Interval::UNKNOWN
             }
             ExprKind::Compare(values, ops) => {
                 self.expression(&values[0], state, record);
@@ -926,18 +1024,34 @@ impl Analyzer {
                         },
                         _ => Interval::UNKNOWN,
                     },
+                    Builtin::IntBitCount | Builtin::IntBitLength if values[0].small().is_some() => {
+                        Interval::bounded(0, 63)
+                    }
                     Builtin::BytesGet => Interval::bounded(0, 255),
                     Builtin::TryDigitSums(_) => Interval::bounded(-1, MAX_SMALL),
-                    Builtin::ListGetI32 => {
+                    Builtin::ListGetI32(_) => {
                         Interval::bounded(i128::from(i32::MIN), i128::from(i32::MAX))
                     }
-                    Builtin::ListGetBounded { min, max }
+                    Builtin::IntExtremum { minimum } => values
+                        .into_iter()
+                        .reduce(|x, y| {
+                            let select =
+                                |(a, b): (i128, i128)| if *minimum { a.min(b) } else { a.max(b) };
+                            Interval {
+                                min: x.min.zip(y.min).map(select),
+                                max: x.max.zip(y.max).map(select),
+                            }
+                        })
+                        .unwrap_or(Interval::UNKNOWN),
+                    Builtin::GetBoundedInAppendWindow { min, max, .. }
+                    | Builtin::ListGetBounded { min, max, .. }
                     | Builtin::ListGetBoundedInBounds { min, max }
+                    | Builtin::BoundedCursorValue { min, max }
                     | Builtin::IntBounded { min, max } => {
                         Interval::bounded(i128::from(*min), i128::from(*max))
                     }
-                    Builtin::Int if args[0].ty == Type::Int => values[0],
-                    Builtin::Int if args[0].ty == Type::Bool => Interval::bounded(0, 1),
+                    Builtin::Int(_) if args[0].ty == Type::Int => values[0],
+                    Builtin::Int(_) if args[0].ty == Type::Bool => Interval::bounded(0, 1),
                     _ => Interval::UNKNOWN,
                 }
             }
@@ -966,9 +1080,11 @@ impl Analyzer {
                 }
                 Interval::UNKNOWN
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    self.expression(key, state, record);
+            ExprKind::Dict(entries) => {
+                for crate::ir::DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        self.expression(key, state, record);
+                    }
                     self.expression(value, state, record);
                 }
                 Interval::UNKNOWN
@@ -976,7 +1092,7 @@ impl Analyzer {
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
+            | ExprKind::Unary(UnaryOp::Not, value)
             | ExprKind::Field(value, _) => {
                 self.expression(value, state, record);
                 Interval::UNKNOWN
@@ -1008,9 +1124,9 @@ impl Analyzer {
         }
         match &test.kind {
             ExprKind::Bool(value) => (*value == truth).then_some(state),
-            ExprKind::Not(value) => self.assume(value, !truth, state),
+            ExprKind::Unary(UnaryOp::Not, value) => self.assume(value, !truth, state),
             ExprKind::Builtin(Builtin::Bool, values) => self.assume(&values[0], truth, state),
-            ExprKind::BooleanValue(and, left, right) => {
+            ExprKind::BooleanValue(and, left, right, None) => {
                 if *and == truth {
                     self.assume(left, truth, state)
                         .and_then(|state| self.assume(right, truth, state))
@@ -1039,7 +1155,7 @@ impl Analyzer {
                     alternatives
                 }
             }
-            ExprKind::Compare(values, ops) => {
+            ExprKind::Compare(values, ops) if !Compare::uses_python_protocol(test.ty, ops) => {
                 let mut alternatives = None;
                 let mut current = Some(state);
                 for (index, &op) in ops.iter().enumerate() {
@@ -1071,7 +1187,7 @@ impl Analyzer {
         &mut self,
         left: &Expr,
         right: &Expr,
-        op: Compare,
+        op: CmpOp,
         truth: bool,
         state: State,
     ) -> Option<State> {
@@ -1082,6 +1198,9 @@ impl Analyzer {
         {
             return Some(state);
         }
+        let Some(op) = Compare::from_operator(op) else {
+            return Some(state);
+        };
         let op = if truth {
             op
         } else {
@@ -1155,18 +1274,18 @@ fn contains_scope(expression: &Expr) -> bool {
         ExprKind::Invoke { callable, args } => {
             contains_scope(callable) || args.values.iter().any(contains_scope)
         }
-        ExprKind::Dict { entries, .. } => entries
-            .iter()
-            .any(|(key, value)| contains_scope(key) || contains_scope(value)),
+        ExprKind::Dict(entries) => entries.iter().any(|entry| {
+            entry.key.as_ref().is_some_and(contains_scope) || contains_scope(&entry.value)
+        }),
         ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => contains_scope(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            contains_scope(left) || contains_scope(right)
+        ExprKind::BooleanValue(_, left, right, predicate) => {
+            predicate.is_some() || contains_scope(left) || contains_scope(right)
         }
+        ExprKind::Binary(_, left, right) => contains_scope(left) || contains_scope(right),
         ExprKind::Conditional(test, yes, no) => {
             contains_scope(test) || contains_scope(yes) || contains_scope(no)
         }
@@ -1259,7 +1378,7 @@ fn affine(expression: &Expr) -> Option<Affine> {
             scale: 0,
             offset: value.parse().ok()?,
         }),
-        ExprKind::Negate(value) => {
+        ExprKind::Unary(UnaryOp::USub, value) => {
             let value = affine(value)?;
             Some(Affine {
                 slot: value.slot,
@@ -1379,7 +1498,7 @@ mod tests {
             let access = expressions(&module.functions[0])
                 .into_iter()
                 .find_map(|expression| match &expression.kind {
-                    ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                    ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
                     _ => None,
                 })
                 .unwrap();
@@ -1396,7 +1515,7 @@ mod tests {
         let accesses = expressions(&module.functions[0])
             .into_iter()
             .filter_map(|value| match &value.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => Some(&args[1]),
+                ExprKind::Builtin(Builtin::ListGet(_), args) => Some(&args[1]),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -1512,7 +1631,7 @@ mod tests {
             let facts = analyze(&module);
             let mut accesses = 0;
             for value in expressions(&module.functions[0]) {
-                if let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind {
+                if let ExprKind::Builtin(Builtin::ListGet(_), args) = &value.kind {
                     accesses += 1;
                     assert_eq!(
                         facts.integer(&args[1]),
@@ -1532,8 +1651,8 @@ mod tests {
     fn scoped_cleanup_restores_integers_on_every_loop_exit() {
         for exit in [
             None,
-            Some(Statement::Break),
-            Some(Statement::Continue),
+            Some(Statement::Break(None)),
+            Some(Statement::Continue(Default::default())),
             Some(Statement::Exhaust),
         ] {
             let mut module = module("def scoped(again: bool) -> int:\n    return 0\n");
@@ -1597,7 +1716,7 @@ mod tests {
                     }),
                 ),
                 1 => ExprKind::Boolean(true, vec![flag, write]),
-                _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write)),
+                _ => ExprKind::BooleanValue(false, Box::new(flag), Box::new(write), None),
             };
             function.body = vec![
                 Statement::Assign(1, Expr::integer(0)),
@@ -1637,7 +1756,7 @@ mod tests {
                         },
                     },
                 ],
-                vec![Compare::Less],
+                vec![CmpOp::Lt],
             ),
         };
         function.body = vec![
@@ -1751,7 +1870,7 @@ def pop_ready(ready: list[int]) -> int:
         let mut arithmetic = 0;
         for expression in expressions(&module.functions[0]) {
             match &expression.kind {
-                ExprKind::Builtin(Builtin::ListGet, args) => {
+                ExprKind::Builtin(Builtin::ListGet(_), args) => {
                     accesses += 1;
                     assert!(facts.integer(&args[1]).is_some_and(|range| range.min >= 0));
                     assert_eq!(
@@ -1802,7 +1921,7 @@ def chained(value: int, values: list[int]) -> int:
             let mut accesses = 0;
             for expression in expressions(function) {
                 match &expression.kind {
-                    ExprKind::Builtin(Builtin::ListGet, args) => {
+                    ExprKind::Builtin(Builtin::ListGet(_), args) => {
                         accesses += 1;
                         assert_eq!(
                             facts.integer(&args[1]),
@@ -2118,7 +2237,7 @@ def snapshot(values: list[int]) -> int:
         let mut reads = 0;
         for expression in expressions(&module.functions[1]) {
             match &expression.kind {
-                ExprKind::Builtin(Builtin::ListGet, _) => {
+                ExprKind::Builtin(Builtin::ListGet(_), _) => {
                     reads += 1;
                     assert_eq!(facts.integer(expression), None);
                 }

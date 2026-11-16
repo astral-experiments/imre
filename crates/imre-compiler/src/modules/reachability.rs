@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use imre_ast::literal_tuple_element as literal;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -228,9 +229,25 @@ impl<'a> Visitor<'a> for References<'_> {
         }
         if let Some(Binding::Definition(id)) = self.graph.resolve_type(self.module, expr)
             && self.found.definitions.insert(id)
-            && self.graph.is_unittest_main(id)
         {
-            self.found.root_unittest_main(self.graph, id.module);
+            if self.graph.is_unittest_main(id) {
+                self.found.root_unittest_main(self.graph, id.module);
+            }
+            let module = &self.graph.modules[id.module];
+            if module.is_bundled(super::FRACTION_CLASS) {
+                // Constructor conversion depends on the checked argument types.
+                self.found
+                    .definitions
+                    .extend(
+                        module
+                            .bindings
+                            .values()
+                            .filter_map(|binding| match binding {
+                                Binding::Definition(def) => Some(*def),
+                                _ => None,
+                            }),
+                    );
+            }
         }
         if let ast::Expr::Call(call) = expr
             && let Some(method) = call.func.as_attribute_expr()
@@ -439,6 +456,29 @@ impl<'a> Visitor<'a> for References<'_> {
     }
 }
 
+impl SourceGraph {
+    /// A type-only method declaration can have a different runtime signature.
+    pub(crate) fn runtime_class_item<'a>(
+        &self,
+        module: ModuleId,
+        item: &'a ast::Stmt,
+    ) -> &'a ast::Stmt {
+        if let ast::Stmt::If(guard) = item
+            && guard.test.is_name_expr()
+            && self.resolve(module, &guard.test)
+                == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
+            && self.session.reads_outer_name(module, &guard.test)
+            && let [otherwise] = guard.elif_else_clauses.as_slice()
+            && otherwise.test.is_none()
+            && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice()
+        {
+            method
+        } else {
+            item
+        }
+    }
+}
+
 impl Reachable {
     /// Default unittest discovery observes all TestCase class bindings in the entry module,
     /// including imported aliases; their test methods have no source call sites.
@@ -531,6 +571,14 @@ impl Reachable {
             || self.class_attributes.contains(&(owner, name.to_owned()))
     }
     pub(super) fn collect(graph: &SourceGraph, strict_callers: bool) -> Self {
+        Self::collect_with_reprs(graph, strict_callers, &HashSet::new())
+    }
+
+    pub(super) fn collect_with_reprs(
+        graph: &SourceGraph,
+        strict_callers: bool,
+        key_reprs: &HashSet<DefinitionId>,
+    ) -> Self {
         let mut found = Self::default();
         for (module, source) in graph.modules.iter().enumerate() {
             for (statement, node) in source.parsed.syntax().body.iter().enumerate() {
@@ -545,7 +593,9 @@ impl Reachable {
                 }
                 match node {
                     ast::Stmt::FunctionDef(f) => {
-                        if definition_effect(graph, module, f) {
+                        if source.function_binding(module, f).is_some()
+                            || definition_effect(graph, module, f)
+                        {
                             found.definitions.insert(id);
                         }
                     }
@@ -564,11 +614,7 @@ impl Reachable {
                 }
             }
         }
-        let case_base = graph
-            .modules
-            .iter()
-            .find(|m| m.is_bundled("unittest"))
-            .and_then(|m| m.bindings.get("TestCase"));
+        let case_base = graph.bundled_definition("unittest", "TestCase");
         let mut inspected_cases = HashSet::new();
         let mut expanded = HashSet::new();
         loop {
@@ -581,6 +627,13 @@ impl Reachable {
                 found.uses_logger,
                 found.instance_attributes.len(),
             );
+            if case_base.is_some_and(|base| found.definitions.contains(&base))
+                && found.attributes.contains("_bound_assertEqual")
+            {
+                found
+                    .definitions
+                    .extend(graph.bundled_definition("unittest", "_baseAssertEqual"));
+            }
             // Logger and adapter methods lower to bundled functions without a Python call site.
             let adapter = graph
                 .logging_definition("LoggerAdapter")
@@ -608,10 +661,10 @@ impl Reachable {
                 // callbacks. A reachable suite run must also retain these methods.
                 if found.attributes.contains("_runRegistered")
                     && node.is_class_def_stmt()
-                    && let Some(Binding::Definition(base)) = case_base
+                    && let Some(base) = case_base
                     && inspected_cases.insert(id)
                 {
-                    found.root_unittest_class(graph, *base, id);
+                    found.root_unittest_class(graph, base, id);
                 }
                 let mut refs = References {
                     graph,
@@ -619,6 +672,12 @@ impl Reachable {
                     found: &mut found,
                 };
                 if let ast::Stmt::ClassDef(class) = node {
+                    let items = || {
+                        class
+                            .body
+                            .iter()
+                            .map(|item| graph.runtime_class_item(id.module, item))
+                    };
                     if expanded.insert(id) {
                         if source.is_bundled(super::LOGGING_CLASSES)
                             && class.name.as_str() == "Handler"
@@ -633,7 +692,7 @@ impl Reachable {
                         for decorator in &class.decorator_list {
                             refs.visit_decorator(decorator);
                         }
-                        for field in &class.body {
+                        for field in items() {
                             if !matches!(field, ast::Stmt::FunctionDef(_)) {
                                 refs.visit_stmt(field);
                             }
@@ -642,7 +701,7 @@ impl Reachable {
                     // A property(get, set) declaration reads its local methods while
                     // constructing the descriptor, even when no method is explicitly called.
                     let mut accessors = HashSet::new();
-                    for item in &class.body {
+                    for item in items() {
                         // Binding a setter reads the preceding property, even when
                         // no later code reads the descriptor through an instance.
                         if let ast::Stmt::FunctionDef(method) = item
@@ -655,14 +714,15 @@ impl Reachable {
                             accessors.insert(method.name.as_str());
                         }
                         if let ast::Stmt::Assign(assign) = item
-                            && let Some((get, set)) =
+                            && let Some(operands) =
                                 crate::classes::property_accessors(graph, id.module, &assign.value)
                         {
-                            accessors.insert(get);
-                            accessors.extend(set);
+                            accessors.extend(operands.iter().filter_map(|operand| {
+                                operand.as_name_expr().map(|name| name.id.as_str())
+                            }));
                         }
                     }
-                    for item in &class.body {
+                    for item in items() {
                         if let ast::Stmt::FunctionDef(method) = item {
                             let name = method.name.as_str();
                             // These protocols have implicit call sites in the supported language.
@@ -676,10 +736,6 @@ impl Reachable {
                             let assertion_helper = source.bundled
                                 && source.name == "unittest"
                                 && match class.name.as_str() {
-                                    "TestCase" => {
-                                        name == "_assertBytesEqual"
-                                            && refs.found.attributes.contains("_bound_assertEqual")
-                                    }
                                     "_AssertRaisesContext" => {
                                         matches!(name, "_missing" | "_check_regex")
                                     }
@@ -718,7 +774,6 @@ impl Reachable {
                                             | "_assert_called_with"
                                             | "_assert_called_once_with"
                                     ),
-                                    "_Call" => matches!(name, "_represent" | "_represent_list"),
                                     "_PatchFactory" => name == "_dictionary",
                                     "_DictionaryPatch" => matches!(name, "_enter" | "_exit"),
                                     _ => false,
@@ -732,7 +787,14 @@ impl Reachable {
                                 || (refs.found.http_commands
                                     && (name.starts_with("do_") || name == "__getattr__")
                                     && graph.is_http_handler(id))
-                                || refs.found.attributes.contains(name)
+                                || (if name == "__repr__" && !key_reprs.is_empty() {
+                                    // Preserve the existing graph. When a newly discovered
+                                    // formatter uses an f-string, its field types determine
+                                    // any further repr methods during checked lowering.
+                                    graph.includes_method(id.module, method)
+                                } else {
+                                    refs.found.attributes.contains(name)
+                                })
                                 || matches!(
                                     name,
                                     "__init__"
@@ -748,7 +810,8 @@ impl Reachable {
                                     && has_base(graph, id, |module, base| {
                                         crate::classes::mapping_base(graph, module, base)
                                     }))
-                                || (name == "__repr__" && exception_base(graph, id))
+                                || (name == "__repr__"
+                                    && (exception_base(graph, id) || key_reprs.contains(&id)))
                                 || definition_effect(graph, id.module, method))
                                 && refs.found.methods.insert((id.module, method.start()))
                             {
@@ -798,7 +861,8 @@ impl Reachable {
                         skipped.push(node.range())
                     }
                     ast::Stmt::ClassDef(class) => {
-                        for item in &class.body {
+                        for node in &class.body {
+                            let item = graph.runtime_class_item(module, node);
                             if let ast::Stmt::FunctionDef(method) = item
                                 && !found.methods.contains(&(module, method.start()))
                             {
@@ -817,7 +881,7 @@ impl Reachable {
 
 /// Building these literals only allocates builtin storage. A dict or set still
 /// hashes every key at import time: a nested list/dict/set there must not be elided.
-fn inert_literal(expr: &ast::Expr) -> bool {
+pub(crate) fn inert_literal(expr: &ast::Expr) -> bool {
     match expr {
         ast::Expr::Tuple(t) => t.elts.iter().all(inert_literal),
         ast::Expr::List(l) => l.elts.iter().all(inert_literal),
@@ -849,46 +913,20 @@ fn known_decorator(graph: &SourceGraph, module: ModuleId, expr: &ast::Expr) -> b
     ) || matches!(expr, ast::Expr::Name(name) if matches!(name.id.as_str(), "property" | "classmethod" | "staticmethod") && graph.resolve(module, expr).is_none())
 }
 
-pub(crate) fn definition_effect(
-    graph: &SourceGraph,
-    module: ModuleId,
-    func: &ast::StmtFunctionDef,
-) -> bool {
+fn definition_effect(graph: &SourceGraph, module: ModuleId, func: &ast::StmtFunctionDef) -> bool {
     func.decorator_list
         .iter()
         .any(|d| !known_decorator(graph, module, &d.expression))
-        || func
-            .parameters
-            .iter_non_variadic_params()
-            .any(|p| p.default.as_deref().is_some_and(|d| !inert_default(d)))
+        || !inert_defaults(&func.parameters)
 }
 
 /// Creating a lambda does not execute its body, but its own parameter defaults
 /// still run immediately, even on a function that is never called.
-fn inert_default(expr: &ast::Expr) -> bool {
-    if let ast::Expr::Lambda(lambda) = expr {
-        return lambda
-            .parameters
-            .iter()
-            .flat_map(|p| p.iter_non_variadic_params())
-            .all(|p| p.default.as_deref().is_none_or(inert_default));
-    }
-    literal(expr)
-}
-
-fn literal(expr: &ast::Expr) -> bool {
-    if let ast::Expr::Tuple(tuple) = expr {
-        return tuple.elts.iter().all(literal);
-    }
-    matches!(
-        expr,
-        ast::Expr::StringLiteral(_)
-            | ast::Expr::NumberLiteral(_)
-            | ast::Expr::BooleanLiteral(_)
-            | ast::Expr::BytesLiteral(_)
-            | ast::Expr::NoneLiteral(_)
-            | ast::Expr::EllipsisLiteral(_)
-    )
+pub(crate) fn inert_defaults(parameters: &ast::Parameters) -> bool {
+    imre_ast::parameter_defaults(parameters).all(|default| match default {
+        ast::Expr::Lambda(lambda) => lambda.parameters.as_deref().is_none_or(inert_defaults),
+        _ => literal(default),
+    })
 }
 
 /// A bare dataclass with ordinary marker bases can create its fields without
@@ -1002,7 +1040,7 @@ fn empty_field(
     };
     let mut options = HashSet::new();
     root.is_some_and(|name| !shadowed.contains(name))
-        && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::DataclassField))
+        && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::DATACLASS_FIELD))
         && call.arguments.args.is_empty()
         && call.arguments.keywords.iter().all(|kw| {
             kw.arg.as_ref().is_some_and(|arg| {
@@ -1042,7 +1080,7 @@ fn class_effect(graph: &SourceGraph, module: ModuleId, class: &ast::StmtClassDef
                             ast::Stmt::ClassDef(parent) if id.module != module || parent.start() < class.start()))
                 })
         })
-        || class.body.iter().any(|s| match s {
+        || class.body.iter().any(|s| match graph.runtime_class_item(module, s) {
             ast::Stmt::Pass(_) => false,
             ast::Stmt::Expr(s) => !matches!(&*s.value, ast::Expr::StringLiteral(_)),
             ast::Stmt::Assign(s) => !literal(&s.value),
@@ -1071,7 +1109,7 @@ fn inert_platform_methods(graph: &SourceGraph, module: ModuleId, branch: &ast::S
     };
     let methods_only = |body: &[ast::Stmt]| {
         body.iter().all(|stmt| {
-        matches!(stmt, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty() && !definition_effect(graph, module, f))
+        matches!(stmt, ast::Stmt::FunctionDef(f) if f.decorator_list.is_empty() && inert_defaults(&f.parameters))
     })
     };
     matches!(test.ops.as_ref(), [ast::CmpOp::Eq | ast::CmpOp::NotEq])
@@ -1167,6 +1205,45 @@ mod tests {
     }
 
     #[test]
+    fn missing_record_key_roots_only_its_display_methods() {
+        let source = r#"from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Detail:
+    n: int
+    def __repr__(self) -> str:
+        return f"detail-{self.n}"
+
+@dataclass(frozen=True)
+class Part:
+    n: int
+    def __repr__(self) -> str:
+        return repr(Detail(self.n))
+
+@dataclass(frozen=True)
+class Key:
+    part: Part
+
+@dataclass(frozen=True)
+class Other:
+    n: int
+    def __repr__(self) -> str:
+        return "unrelated-key"
+
+other = Other(1)
+records = {Key(Part(1)): 0}
+records[Key(Part(2))]
+"#;
+        let ir = reachable(source).unwrap();
+        let callbacks = ir
+            .lines()
+            .filter(|line| line.starts_with("@semantics_class_") && line.contains(", ptr @fn_"));
+        assert_eq!(callbacks.count(), 2);
+        let invalid = source.replace(r#"return f"detail-{self.n}""#, "return 3");
+        assert!(reachable(&invalid).unwrap_err().contains("expected str"));
+    }
+
+    #[test]
     fn unused_platform_methods_have_no_definition_time_effects() {
         let source = r#"import sys
 class Unused:
@@ -1178,11 +1255,24 @@ class Unused:
             pass
 print(42)
 "#;
-        reachable(source).unwrap();
-        // Reading an attribute on a shadowed name or evaluating a default
-        // may raise while defining the class, even when it is never used.
-        assert!(reachable(&source.replace("    if", "    sys = 1\n    if")).is_err());
-        assert!(reachable(&source.replace("method(self)", "method(self, x=globals())")).is_err());
+        // A shadowed attribute lookup and a method default both run while the
+        // module defines the class, even when nothing instantiates it.
+        for (source, retained) in [
+            (source.to_owned(), false),
+            (source.replace("    if", "    sys = 1\n    if"), true),
+            (
+                source.replace("method(self)", "method(self, x=globals())"),
+                true,
+            ),
+        ] {
+            let graph = super::SourceGraph::single_with_mode(&source, true).unwrap();
+            let class = super::DefinitionId {
+                module: graph.entry,
+                statement: 1,
+            };
+            assert_eq!(graph.includes(class), retained, "{source}");
+            reachable(&source).unwrap();
+        }
     }
 
     #[test]
@@ -1432,16 +1522,18 @@ print(Token().clean())
     }
 
     #[test]
-    fn sealed_imports_without_lowering_stay_confined_to_cold_bodies() {
+    fn reachable_only_defers_sealed_imports_until_their_use() {
         let source = "from configparser import ConfigParser as parser\ndef cold():\n    return parser()\nprint(42)\n";
         reachable(source).unwrap();
-        assert!(compile(source, &CompileOptions::default()).is_err());
-        assert!(
-            reachable(&source.replace("print(42)", "print(cold())"))
-                .unwrap_err()
-                .contains("configparser.ConfigParser")
-        );
+        crate::check(source).unwrap();
+        reachable(&source.replace("print(42)", "print(cold())")).unwrap();
         assert!(reachable(&source.replace("ConfigParser", "Missing")).is_err());
+
+        let missing =
+            "import configparser\n\ndef cold():\n    return configparser.Missing()\n\nprint(42)\n";
+        reachable(missing).unwrap();
+        let error = reachable(&missing.replace("print(42)", "print(cold())"));
+        assert!(matches!(error, Err(message) if message.contains("4:12:")));
         assert!(reachable("import this\nprint(42)\n").is_err());
     }
 
@@ -1454,6 +1546,40 @@ print(Token().clean())
                 .is_err()
         );
         assert!(reachable(&cold.replace("repr=False", "repr=globals()")).is_err());
+    }
+
+    #[test]
+    fn conditional_class_method_roots_its_runtime_callee_when_used() {
+        let source = r#"from typing import TYPE_CHECKING
+def helper(value: int) -> int:
+    return value
+class Owner:
+    if TYPE_CHECKING:
+        def read(self) -> int: ...
+    else:
+        def read(self):
+            return helper(7)
+owner = Owner()
+"#;
+        for (call, reached) in [("", false), ("read = owner.read\nprint(read())", true)] {
+            let graph =
+                super::SourceGraph::single_with_mode(&format!("{source}{call}\n"), true).unwrap();
+            let module = graph.entry;
+            let body = &graph.modules[module].parsed.syntax().body;
+            let class = body[2].as_class_def_stmt().unwrap();
+            let method = graph
+                .runtime_class_item(module, &class.body[0])
+                .as_function_def_stmt()
+                .unwrap();
+            assert_eq!(
+                graph.includes(super::DefinitionId {
+                    module,
+                    statement: 1
+                }),
+                reached
+            );
+            assert_eq!(graph.includes_method(module, method), reached);
+        }
     }
 
     #[test]

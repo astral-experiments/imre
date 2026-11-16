@@ -1,0 +1,789 @@
+//! Lexical bindings and code-object metadata for prepared Python functions.
+
+mod annotations;
+pub(crate) use annotations::ClassAnnotations;
+pub(super) use annotations::ParameterReads;
+mod callable;
+pub(crate) use callable::{CallableMetadata, NamedFunction};
+mod class_metadata;
+pub(super) use class_metadata::{
+    display_bindings, expression_bindings, expression_reads, parameter_reads,
+};
+pub(crate) mod classes;
+mod type_parameters;
+
+pub(crate) use type_parameters::{TypeParameterScope, check_nonlocals, type_parameter_scope};
+
+use imre_ast::comprehension::Plan;
+use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{self, Visitor};
+use ruff_text_size::{Ranged, TextRange, TextSize};
+use serde_json::json;
+use std::collections::{BTreeSet, HashMap, HashSet};
+
+#[derive(Default)]
+struct ClosureNames {
+    locals: indexmap::IndexSet<String>,
+    reads: BTreeSet<String>,
+    globals: BTreeSet<String>,
+    nonlocals: BTreeSet<String>,
+    include_nested_reads: bool,
+    implicit_class: bool,
+    // The enclosing statement contains a lexical site or a subtree the binder skips.
+    needs_discovery: bool,
+    discover_attribute_stores: bool,
+    cell_reads: BTreeSet<String>,
+    local_annotations: Option<Box<class_metadata::Uses>>,
+    string_annotations: bool,
+    incomplete: bool,
+    locals_incomplete: bool,
+}
+
+struct LocalNames<'a>(&'a indexmap::IndexSet<String>);
+
+impl serde::Serialize for LocalNames<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.0)
+    }
+}
+
+pub(crate) struct ClassBindings {
+    pub(crate) locals: indexmap::IndexSet<String>,
+    pub(crate) globals: BTreeSet<String>,
+}
+
+impl ClosureNames {
+    fn class_declarations(body: &[ast::Stmt]) -> Self {
+        let mut names = Self::default();
+        names.visit_body(body);
+        for name in names.globals.iter().chain(&names.nonlocals) {
+            // Class namespace lookups only need membership, so removal can reorder names.
+            names.locals.swap_remove(name);
+        }
+        names
+    }
+
+    fn finish_scope(&mut self) {
+        if let Some(annotations) = self.local_annotations.take() {
+            annotations.finish_annotation(self);
+        }
+        for name in self.globals.iter().chain(&self.nonlocals) {
+            self.locals.shift_remove(name);
+        }
+        self.reads
+            .retain(|name| !self.locals.contains(name) && !self.globals.contains(name));
+        self.reads.extend(self.nonlocals.iter().cloned());
+    }
+
+    /// Propagate a completed child's free names, including its lazy annotation scope.
+    fn read_child_function(
+        &mut self,
+        f: &ast::StmtFunctionDef,
+        child: ClosureNames,
+        annotations: Option<&ParameterReads>,
+    ) {
+        self.incomplete |= child.incomplete;
+        let mut reads = child.reads;
+        if let Some(annotations) = annotations {
+            reads.extend(
+                annotations
+                    .direct_reads()
+                    .chain(annotations.nested_reads())
+                    .cloned(),
+            );
+        }
+        if let Some(params) = &f.type_params {
+            let fields: Vec<_> = params
+                .iter()
+                .flat_map(imre_ast::TypeParameterField::expressions)
+                .map(|(_, expr)| ("", expr))
+                .collect();
+            reads.extend(class_metadata::annotation_reads(&fields, None, false));
+            for param in params.iter() {
+                reads.remove(param.name().as_str());
+            }
+        }
+        self.cell_reads.extend(reads.iter().cloned());
+        self.reads.extend(reads);
+    }
+
+    fn child_reads(
+        &mut self,
+        parameters: Option<&ast::Parameters>,
+        visit: impl FnOnce(&mut Self),
+    ) -> std::collections::BTreeSet<String> {
+        let mut child = Self {
+            include_nested_reads: true,
+            implicit_class: self.implicit_class,
+            string_annotations: self.string_annotations,
+            ..Self::default()
+        };
+        visit(&mut child);
+        self.incomplete |= child.incomplete;
+        if let Some(parameters) = parameters {
+            child
+                .locals
+                .extend(parameters.iter().map(|p| p.name().to_string()));
+        }
+        child.finish_scope();
+        child.reads
+    }
+}
+
+impl<'a> Visitor<'a> for ClosureNames {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        match stmt {
+            ast::Stmt::FunctionDef(f) => {
+                self.needs_discovery = true;
+                self.locals.insert(f.name.to_string());
+                // The declaration collector has already propagated this child's reads.
+                if !self.include_nested_reads {
+                    self.incomplete = true;
+                }
+                for expr in imre_ast::function_definition_expressions(f) {
+                    self.visit_expr(expr);
+                }
+            }
+            // Local variable annotations never evaluate in a function's scope.
+            ast::Stmt::AnnAssign(a) if self.include_nested_reads => {
+                self.needs_discovery = true;
+                if !self.string_annotations {
+                    self.local_annotations
+                        .get_or_insert_with(class_metadata::Uses::unevaluated)
+                        .visit_expr(&a.annotation);
+                }
+                // A bare parenthesized name with no value has no binding effect.
+                if imre_ast::annotation_visits_target(a) {
+                    self.visit_expr(&a.target);
+                }
+                if let Some(value) = &a.value {
+                    self.visit_expr(value);
+                }
+            }
+            ast::Stmt::ClassDef(c) => {
+                self.needs_discovery = true;
+                self.locals.insert(c.name.to_string());
+                // The declaration collector supplies free reads from the completed class body.
+                self.incomplete |= !self.include_nested_reads;
+                if self.include_nested_reads
+                    && let Some(params) = &c.type_params
+                {
+                    let mut reads = self.child_reads(None, |child| {
+                        child.visit_type_params(params);
+                        if let Some(args) = &c.arguments {
+                            child.visit_arguments(args);
+                        }
+                    });
+                    for param in params.iter() {
+                        reads.remove(param.name().as_str());
+                    }
+                    self.cell_reads.extend(reads.iter().cloned());
+                    self.reads.extend(reads);
+                }
+                for expr in imre_ast::class_definition_expressions(c) {
+                    self.visit_expr(expr);
+                }
+            }
+            ast::Stmt::Global(g) => {
+                self.globals.extend(g.names.iter().map(ToString::to_string));
+            }
+            ast::Stmt::Nonlocal(n) => {
+                self.nonlocals
+                    .extend(n.names.iter().map(ToString::to_string));
+            }
+            ast::Stmt::Import(i) => {
+                for name in &i.names {
+                    self.locals.insert(name.asname.as_ref().map_or_else(
+                        || name.name.as_str().split('.').next().unwrap().to_string(),
+                        ToString::to_string,
+                    ));
+                }
+            }
+            ast::Stmt::ImportFrom(i) => {
+                for name in &i.names {
+                    if name.name.as_str() == "*" {
+                        self.incomplete = true;
+                        self.locals_incomplete = true;
+                    } else {
+                        self.locals
+                            .insert(name.asname.as_ref().unwrap_or(&name.name).to_string());
+                    }
+                }
+            }
+            ast::Stmt::TypeAlias(alias) => {
+                self.needs_discovery = true;
+                self.visit_expr(&alias.name);
+                if self.include_nested_reads {
+                    // The delayed callable closes over its own parameters before this frame.
+                    let mut reads = self.child_reads(None, |child| {
+                        child.visit_expr(&alias.value);
+                        if let Some(params) = &alias.type_params {
+                            child.visit_type_params(params);
+                        }
+                    });
+                    if let Some(params) = &alias.type_params {
+                        for param in params.iter() {
+                            reads.remove(param.name().as_str());
+                        }
+                    }
+                    self.cell_reads.extend(reads.iter().cloned());
+                    self.reads.extend(reads);
+                } else {
+                    self.incomplete = true;
+                }
+            }
+            _ => visitor::walk_stmt(self, stmt),
+        }
+    }
+    fn visit_pattern(&mut self, pattern: &'a ast::Pattern) {
+        visitor::walk_pattern(self, pattern);
+        if let Some(name) = imre_ast::executable::capture_name(pattern) {
+            self.locals.insert(name.to_string());
+        }
+    }
+
+    fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
+        let ast::ExceptHandler::ExceptHandler(handler_data) = handler;
+        if let Some(name) = &handler_data.name {
+            self.locals.insert(name.to_string());
+        }
+        visitor::walk_except_handler(self, handler);
+    }
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        match expr {
+            ast::Expr::Name(n) => match n.ctx {
+                ast::ExprContext::Load => {
+                    self.reads.insert(n.id.to_string());
+                    if self.implicit_class && n.id.as_str() == "super" {
+                        self.reads.insert("__class__".to_string());
+                    }
+                }
+                ast::ExprContext::Store | ast::ExprContext::Del => {
+                    self.locals.insert(n.id.to_string());
+                }
+                _ => {}
+            },
+            ast::Expr::Attribute(attr)
+                if self.discover_attribute_stores && attr.ctx == ast::ExprContext::Store =>
+            {
+                self.needs_discovery = true;
+                self.visit_expr(&attr.value);
+            }
+            ast::Expr::Lambda(lambda) => {
+                self.needs_discovery = true;
+                if self.include_nested_reads {
+                    let reads = self.child_reads(lambda.parameters.as_deref(), |child| {
+                        child.visit_expr(&lambda.body)
+                    });
+                    self.cell_reads.extend(reads.iter().cloned());
+                    self.reads.extend(reads);
+                } else {
+                    self.incomplete = true;
+                }
+                if let Some(parameters) = &lambda.parameters {
+                    for default in imre_ast::parameter_defaults(parameters) {
+                        self.visit_expr(default);
+                    }
+                }
+            }
+            ast::Expr::ListComp(_)
+            | ast::Expr::SetComp(_)
+            | ast::Expr::DictComp(_)
+            | ast::Expr::Generator(_) => {
+                self.needs_discovery = true;
+                let (reads, bindings, captured) = class_metadata::comprehension_scope(
+                    expr,
+                    self.string_annotations,
+                    self.implicit_class,
+                );
+                self.reads.extend(reads);
+                self.cell_reads.extend(captured);
+                self.locals.extend(bindings);
+                if !self.include_nested_reads {
+                    self.incomplete = true;
+                    self.locals_incomplete = true;
+                }
+            }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                self.needs_discovery = true;
+                visitor::walk_expr(self, expr);
+            }
+            _ => visitor::walk_expr(self, expr),
+        }
+    }
+}
+
+/// Resolved lexical layout shared by function, lambda and namespace entries.
+pub(crate) struct FunctionScope {
+    names: ClosureNames,
+    pub(crate) captures_class: bool,
+}
+
+impl FunctionScope {
+    pub(super) fn parameter(reads: ParameterReads, class: Option<&ClassBindings>) -> Self {
+        let mut names = ClosureNames {
+            reads: reads.resolve(class),
+            ..ClosureNames::default()
+        };
+        if class.is_some() {
+            names.reads.insert("__classdict__".into());
+        }
+        names.locals.insert(".format".into());
+        Self::new(names)
+    }
+
+    fn new(mut names: ClosureNames) -> Self {
+        names.finish_scope();
+        names.cell_reads.retain(|name| names.locals.contains(name));
+        Self {
+            names,
+            captures_class: false,
+        }
+    }
+
+    pub(crate) fn write_signature(&self, signature: &mut serde_json::Value) {
+        let names = &self.names;
+        signature["scope_cellvars"] = if names.incomplete {
+            serde_json::Value::Null
+        } else {
+            json!(names.cell_reads)
+        };
+        if !names.locals.is_empty() {
+            signature["scope_locals"] = json!(LocalNames(&names.locals));
+        }
+        if !names.reads.is_empty() {
+            signature["scope_reads"] = json!(names.reads);
+        }
+        if !names.nonlocals.is_empty() {
+            signature["scope_nonlocals"] = json!(names.nonlocals);
+        }
+        signature["scope_complete"] = json!(!names.incomplete);
+        signature["scope_locals_complete"] = json!(!names.locals_incomplete);
+    }
+}
+
+/// Function-local declarations in lexical source order. These borrows end before emission.
+pub(crate) type FunctionChildren<'a> = Vec<&'a ast::Stmt>;
+
+#[derive(Default)]
+pub(crate) struct ScopeFacts<'p> {
+    pub(crate) module_annotations: bool,
+    pub(crate) functions: HashMap<TextSize, NamedFunction<'p>>,
+    pub(crate) classes: HashMap<TextSize, classes::ClassScope>,
+    pub(crate) module_globals: BTreeSet<String>,
+}
+
+impl<'p> ScopeFacts<'p> {
+    pub(crate) fn function(&self, def: &ast::StmtFunctionDef) -> &NamedFunction<'p> {
+        &self.functions[&def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start)]
+    }
+
+    pub(in crate::frontend) fn annotation_scope(
+        &mut self,
+        def: &ast::StmtFunctionDef,
+        owners: &[&ast::Stmt],
+    ) -> FunctionScope {
+        let start = def
+            .decorator_list
+            .first()
+            .map_or(def.start(), Ranged::start);
+        let reads = self
+            .functions
+            .get_mut(&start)
+            .unwrap()
+            .annotation_reads
+            .take()
+            .unwrap_or_default();
+        let class = match owners.last() {
+            Some(ast::Stmt::ClassDef(class)) => Some(&self.classes[&classes::site(class)].bindings),
+            _ => None,
+        };
+        let parameter = |params: Option<&ast::TypeParams>, name: &str| {
+            params.is_some_and(|params| params.iter().any(|p| p.name().as_str() == name))
+        };
+        reads.provider(class, |name| {
+            if parameter(def.type_params.as_deref(), name) {
+                return true;
+            }
+            for owner in owners.iter().rev() {
+                let params = match owner {
+                    ast::Stmt::FunctionDef(f) => {
+                        let f_scope = self.function(f);
+                        if f_scope.globals.contains(name) {
+                            return false;
+                        }
+                        if f_scope.metadata.locals.contains(name) {
+                            return true;
+                        }
+                        f.type_params.as_deref()
+                    }
+                    ast::Stmt::ClassDef(c) => {
+                        if self.classes[&classes::site(c)]
+                            .cells
+                            .supplied_only()
+                            .any(|n| n == name)
+                        {
+                            return true;
+                        }
+                        c.type_params.as_deref()
+                    }
+                    _ => unreachable!("declaration owner"),
+                };
+                if parameter(params, name) {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
+    pub(crate) fn type_alias_scope(
+        &self,
+        value: &ast::Expr,
+        enclosing_class: Option<TextSize>,
+        string_annotations: bool,
+    ) -> FunctionScope {
+        let mut names = ClosureNames {
+            string_annotations,
+            ..Default::default()
+        };
+        if let Some(site) = enclosing_class {
+            let class = &self.classes[&site].bindings;
+            names.reads = class_metadata::annotation_reads(&[("", value)], Some(class), false);
+        } else {
+            names.visit_expr(value);
+        }
+        names.locals.insert(".format".into());
+        FunctionScope::new(names)
+    }
+
+    pub(crate) fn prepare<'a>(
+        body: &'a [ast::Stmt],
+        names: &imre_ast::Names,
+        alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+        expression: impl FnMut(LexicalSite<'a, '_>),
+    ) -> (Self, FunctionChildren<'a>) {
+        Self::collect(
+            |visitor| visitor.visit_body(body),
+            names,
+            alias_site,
+            expression,
+        )
+    }
+
+    pub(crate) fn collect<'a>(
+        visit_root: impl FnOnce(&mut dyn Visitor<'a>),
+        names: &imre_ast::Names,
+        mut alias_site: impl FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+        mut expression: impl FnMut(LexicalSite<'a, '_>),
+    ) -> (Self, FunctionChildren<'a>) {
+        let mut scopes = Self::default();
+        let mut children = Vec::new();
+        visit_root(&mut Collector {
+            children: &mut children,
+            function_names: ClosureNames::default(),
+            scopes: &mut scopes,
+            names,
+            scope: Scope::Module,
+            suite_scope: None,
+            method_cells: HashSet::new(),
+            attribute_class: None,
+            yields: false,
+            body_yields: false,
+            alias_site: &mut alias_site,
+            expression: &mut expression,
+        });
+        (scopes, children)
+    }
+}
+
+/// A lexical operand is ready after the scopes of its children have closed.
+pub(crate) enum LexicalSite<'a, 's> {
+    Lambda(&'a ast::ExprLambda, super::RegisteredScope, bool),
+    Generator(TextRange, &'s Plan<'a>, bool, &'s mut FunctionScope),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+    Module,
+    Class(TextSize),
+    Function { is_async: bool },
+    Lambda,
+}
+
+impl Scope {
+    fn registered(self) -> super::RegisteredScope {
+        match self {
+            Self::Module => super::RegisteredScope::Module,
+            Self::Class(_) => super::RegisteredScope::Class,
+            Self::Function { is_async } => super::RegisteredScope::Function { is_async },
+            Self::Lambda => super::RegisteredScope::Lambda,
+        }
+    }
+}
+
+struct Collector<'s, 'p, 'a> {
+    children: &'s mut FunctionChildren<'a>,
+    // Nested declarations propagate their free reads before this frame is finalized.
+    function_names: ClosureNames,
+    scopes: &'s mut ScopeFacts<'p>,
+    names: &'s imre_ast::Names,
+    scope: Scope,
+    suite_scope: Option<Scope>,
+    // Consumed at the same method declaration while visiting the enclosing class.
+    method_cells: HashSet<TextSize>,
+    // The enclosing class whose nested code records self attribute stores.
+    attribute_class: Option<TextSize>,
+    yields: bool,
+    body_yields: bool,
+    alias_site: &'s mut dyn FnMut(&'a ast::StmtTypeAlias, Option<TextSize>),
+    expression: &'s mut dyn FnMut(LexicalSite<'a, '_>),
+}
+
+impl<'a> Visitor<'a> for Collector<'_, '_, 'a> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        let strings = self.names.string_annotations;
+        let parent_yields = self.yields;
+        if matches!(self.scope, Scope::Function { .. })
+            && matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_))
+        {
+            self.children.push(stmt);
+        }
+        match stmt {
+            ast::Stmt::FunctionDef(def) => {
+                let parent_names = std::mem::replace(
+                    &mut self.function_names,
+                    ClosureNames {
+                        include_nested_reads: true,
+                        string_annotations: strings,
+                        ..Default::default()
+                    },
+                );
+                self.suite_scope = Some(Scope::Function {
+                    is_async: def.is_async,
+                });
+                visitor::walk_stmt(self, stmt);
+                if self.yields && !parent_yields {
+                    // Only decorators and default values execute in the parent.
+                    self.yields = imre_ast::function_definition_expressions(def)
+                        .any(imre_ast::code_flags::yields_in_expression);
+                }
+                let start = def
+                    .decorator_list
+                    .first()
+                    .map_or(def.start(), Ranged::start);
+                use imre_ast::code_flags::{ASYNC_GENERATOR, COROUTINE, GENERATOR};
+                let suspension_flags = match (def.is_async, self.body_yields) {
+                    (false, false) => 0,
+                    (false, true) => GENERATOR,
+                    (true, false) => COROUTINE,
+                    (true, true) => ASYNC_GENERATOR,
+                };
+                // A module supplies globals. A generic function has its own type-parameter scope.
+                let captures_class = match self.scope {
+                    Scope::Class(_) => self.method_cells.remove(&def.start()),
+                    Scope::Module if def.type_params.is_none() => false,
+                    _ => imre_ast::class_cell::function_needed(
+                        &def.body,
+                        Some(&def.parameters),
+                        strings,
+                    ),
+                };
+                let names = std::mem::replace(&mut self.function_names, parent_names);
+                let mut annotations =
+                    crate::frontend::parameter_annotations(&def.parameters, def.returns.as_deref())
+                        .peekable();
+                let reads = (!strings && annotations.peek().is_some()).then(|| {
+                    Box::new(class_metadata::declaration_reads(
+                        annotations,
+                        false,
+                        !matches!(self.scope, Scope::Class(_)),
+                    ))
+                });
+                let (header, child) = NamedFunction::prepare(
+                    def,
+                    self.names,
+                    names,
+                    captures_class,
+                    suspension_flags,
+                    reads,
+                );
+                if matches!(self.scope, Scope::Function { .. }) {
+                    self.function_names.read_child_function(
+                        def,
+                        child,
+                        header.annotation_reads.as_deref(),
+                    );
+                }
+                self.scopes.functions.insert(start, header);
+                return;
+            }
+            ast::Stmt::ClassDef(class) => {
+                let start = classes::site(class);
+                let enclosing_class = match self.scope {
+                    Scope::Class(site) => Some(site),
+                    _ => None,
+                };
+                let classes = &mut self.scopes.classes;
+                if let Some(prepared) = classes.get_mut(&start) {
+                    prepared.enclosing_class = enclosing_class;
+                } else {
+                    let cells = imre_ast::class_cell::ClassCells::collect(
+                        &class.body,
+                        strings,
+                        &mut self.method_cells,
+                        &mut |child, cells| {
+                            classes.insert(
+                                classes::site(child),
+                                classes::ClassScope::prepare(child, None, cells),
+                            );
+                        },
+                    );
+                    classes.insert(
+                        start,
+                        classes::ClassScope::prepare(class, enclosing_class, cells),
+                    );
+                }
+                self.suite_scope = Some(Scope::Class(start));
+            }
+            ast::Stmt::TypeAlias(alias) => {
+                let enclosing_class = match self.scope {
+                    Scope::Class(site) => Some(site),
+                    _ => None,
+                };
+                (self.alias_site)(alias, enclosing_class);
+            }
+            ast::Stmt::Global(global) if self.scope == Scope::Module => {
+                self.scopes
+                    .module_globals
+                    .extend(global.names.iter().map(ToString::to_string));
+            }
+            ast::Stmt::AugAssign(update) => {
+                // Augmented attribute stores do not contribute to __static_attributes__.
+                self.visit_expr(&update.value);
+                visitor::walk_expr(self, &update.target);
+                return;
+            }
+            ast::Stmt::AnnAssign(update) => {
+                self.scopes.module_annotations |= self.scope == Scope::Module;
+                if let Some(value) = &update.value {
+                    self.visit_expr(value);
+                }
+                // Only a simple, deferred class annotation emits code owned by the class.
+                let owner = self.attribute_class;
+                self.attribute_class = match self.scope {
+                    Scope::Class(site) if update.simple && !strings => Some(site),
+                    _ => None,
+                };
+                self.visit_annotation(&update.annotation);
+                self.attribute_class = owner;
+
+                if update.value.is_some() {
+                    self.visit_expr(&update.target);
+                } else {
+                    // A bare target evaluates its operands without storing to the target.
+                    visitor::walk_expr(self, &update.target);
+                }
+                return;
+            }
+            _ => {}
+        }
+        visitor::walk_stmt(self, stmt);
+        if let ast::Stmt::ClassDef(class) = stmt {
+            // Methods and aliases need the bindings on entry. Nested class reads are ready on exit.
+            class_metadata::capture(
+                class,
+                strings,
+                self.scopes,
+                matches!(self.scope, Scope::Function { .. }).then_some(&mut self.function_names),
+            );
+            if self.yields && !parent_yields {
+                self.yields = imre_ast::class_definition_expressions(class)
+                    .any(imre_ast::code_flags::yields_in_expression);
+            }
+        }
+    }
+
+    fn visit_body(&mut self, body: &'a [ast::Stmt]) {
+        // Decorators, defaults, and bases are evaluated before entering the declaration's suite.
+        let Some(scope) = self.suite_scope.take() else {
+            visitor::walk_body(self, body);
+            return;
+        };
+        let parent = std::mem::replace(&mut self.scope, scope);
+        let outer_class = self.attribute_class;
+        if let Scope::Class(site) = parent {
+            self.attribute_class = Some(site);
+        }
+        let parent_yields = std::mem::take(&mut self.yields);
+        if matches!(scope, Scope::Function { .. }) {
+            self.function_names.discover_attribute_stores = self.attribute_class.is_some();
+            for stmt in body {
+                self.function_names.visit_stmt(stmt);
+                if std::mem::take(&mut self.function_names.needs_discovery) {
+                    self.visit_stmt(stmt);
+                }
+            }
+        } else {
+            visitor::walk_body(self, body);
+        }
+        self.body_yields = std::mem::replace(&mut self.yields, parent_yields);
+        self.scope = parent;
+        self.attribute_class = outer_class;
+    }
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match expr {
+            ast::Expr::Attribute(attr)
+                if attr.ctx == ast::ExprContext::Store
+                    && self.suite_scope.is_none()
+                    && let Some(site) = self.attribute_class
+                    && matches!(&*attr.value, ast::Expr::Name(n) if n.id == "self") =>
+            {
+                self.scopes
+                    .classes
+                    .get_mut(&site)
+                    .unwrap()
+                    .static_attributes
+                    .insert(self.names.definition(&attr.attr).to_owned());
+                self.visit_expr(&attr.value);
+            }
+            ast::Expr::Lambda(lambda) => {
+                if let Some(parameters) = &lambda.parameters {
+                    self.visit_parameters(parameters);
+                }
+                let parent = std::mem::replace(&mut self.scope, Scope::Lambda);
+                let parent_yields = std::mem::take(&mut self.yields);
+                self.visit_expr(&lambda.body);
+                let yields = std::mem::replace(&mut self.yields, parent_yields);
+                self.scope = parent;
+                (self.expression)(LexicalSite::Lambda(lambda, parent.registered(), yields));
+            }
+            ast::Expr::Generator(generator) => {
+                let plan = Plan::generator(generator);
+                self.visit_expr(plan.outer);
+                let is_async = plan.body_suspends();
+                let parent = std::mem::replace(&mut self.scope, Scope::Function { is_async });
+                let mut scope =
+                    FunctionScope::generator(&plan, self.names.string_annotations, |child| {
+                        self.visit_expr(child)
+                    });
+                self.scope = parent;
+                (self.expression)(LexicalSite::Generator(
+                    expr.range(),
+                    &plan,
+                    is_async,
+                    &mut scope,
+                ));
+            }
+            ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => {
+                self.yields = true;
+                visitor::walk_expr(self, expr);
+            }
+            _ => visitor::walk_expr(self, expr),
+        });
+    }
+}

@@ -15,34 +15,44 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
         let function = &emitter.module.functions[id];
         let target = units.function_name(id);
         let thunk = units.async_name(id);
-        let output = units.function(units.function_owner(id), &thunk, "i64", "ptr %frame", attrs);
-        let args = function
-            .params
-            .iter()
-            .enumerate()
-            .map(|(index, &slot)| {
-                let ty = function.locals[slot];
-                load_arg(output, frame, index, ty, resource_types.contains(&ty))
-            })
-            .collect();
-        invoke(output, format!("@{target}"), args, function.returns);
+        units.define_function(
+            units.function_owner(id),
+            &thunk,
+            "i64",
+            "ptr %frame",
+            attrs,
+            |output| {
+                let args = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .map(|(index, &slot)| {
+                        let ty = function.locals[slot];
+                        load_arg(output, frame, index, ty, resource_types.contains(&ty))
+                    })
+                    .collect();
+                invoke(output, format!("@{target}"), args, function.returns);
+            },
+        );
     }
     for (&id, (frame, result)) in &emitter.async_invoke_frames {
-        let output = units.function(
+        units.define_function(
             units.entry,
             &format!("async_invoke_{id}"),
             "i64",
             "ptr %frame",
             attrs,
+            |output| {
+                let callable = load_arg(output, frame, 0, Type::Callable(id), true);
+                writeln!(output, "  %target = load ptr, {callable}").unwrap();
+                let mut args = vec![callable];
+                let (params, _) = emitter.module.types.signature(Type::Callable(id)).unwrap();
+                args.extend(params.iter().enumerate().map(|(index, &ty)| {
+                    load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))
+                }));
+                invoke(output, "%target".to_owned(), args, *result);
+            },
         );
-        let callable = load_arg(output, frame, 0, Type::Callable(id), true);
-        writeln!(output, "  %target = load ptr, {callable}").unwrap();
-        let mut args = vec![callable];
-        let (params, _) = emitter.module.types.signature(Type::Callable(id)).unwrap();
-        args.extend(params.iter().enumerate().map(|(index, &ty)| {
-            load_arg(output, frame, index + 1, ty, resource_types.contains(&ty))
-        }));
-        invoke(output, "%target".to_owned(), args, *result);
     }
 }
 
@@ -85,7 +95,7 @@ fn invoke(output: &mut String, target: String, args: Vec<String>, result: Type) 
     )
     .unwrap();
     if ty == "i64" {
-        output.push_str("  ret i64 %result\n}\n");
+        output.push_str("  ret i64 %result\n");
     } else {
         let op = match ty {
             "ptr" => "ptrtoint",
@@ -94,7 +104,7 @@ fn invoke(output: &mut String, target: String, args: Vec<String>, result: Type) 
         };
         writeln!(
             output,
-            "  %word = {op} {ty} %result to i64\n  ret i64 %word\n}}"
+            "  %word = {op} {ty} %result to i64\n  ret i64 %word"
         )
         .unwrap();
     }

@@ -1,14 +1,13 @@
 //! POSIX readiness observes fd numbers without taking ownership.
 use super::exceptions::{Error, Kind, Result, finish};
 use super::records::{RecordDescriptor, allocate_record};
+use super::time::Deadline;
 use super::{Int, List, Object, Storage, StorageCell, Words, c_int, errno_error, object};
-use std::{
-    io, ptr,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, io, ptr, time::Duration};
 
 #[derive(Default)]
 pub(crate) struct Poll {
+    running: bool,
     slots: Vec<libc::pollfd>,
     positions: std::collections::HashMap<i32, usize>,
 }
@@ -49,30 +48,43 @@ impl Poll {
         true
     }
 
-    /// Waits on the live descriptors and returns only kernel-reported events.
-    pub(crate) fn ready(
-        &mut self,
+    /// An interrupted poll retries the entry snapshot. Handlers may edit subsequent
+    /// registrations, but only one wait may be active on this poll object.
+    pub(crate) fn ready<E: From<Error>>(
+        handle: &RefCell<Self>,
         timeout: Option<Duration>,
-    ) -> Result<(usize, impl Iterator<Item = (i32, u16)> + '_)> {
-        self.compact();
-        let fds = &mut self.slots;
-        let nfds = fds
+        check_signals: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<Vec<libc::pollfd>, E> {
+        let mut poll = handle.borrow_mut();
+        if poll.running {
+            return Err(Error::new(Kind::RuntimeError, "concurrent poll() invocation").into());
+        }
+        poll.compact();
+        let nfds = poll
+            .slots
             .len()
             .try_into()
             .map_err(|_| Error::new(Kind::OverflowError, "too many file descriptors"))?;
-        let count = wait(timeout, |remaining| {
+        let mut fds = Vec::new();
+        fds.try_reserve_exact(poll.slots.len())
+            .map_err(|_| Error::allocation())?;
+        fds.extend_from_slice(&poll.slots);
+        poll.running = true;
+        drop(poll);
+
+        let count = wait(timeout, check_signals, |remaining| {
             let ms = remaining.map_or(-1, |d| d.as_nanos().div_ceil(1_000_000) as i32);
-            // SAFETY: nfds is the length of this initialized, exclusively borrowed slice.
-            unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) }
-        })
-        .map_err(errno_error)? as usize;
-        Ok((
-            count,
-            fds.iter()
-                .filter(|p| p.revents != 0)
-                .take(count)
-                .map(|p| (p.fd, p.revents as u16)),
-        ))
+            // SAFETY: nfds is the length of this owned, initialized snapshot.
+            let count = unsafe { libc::poll(fds.as_mut_ptr(), nfds, ms) };
+            syscall_result(count)
+        });
+        handle.borrow_mut().running = false;
+        if count? == 0 {
+            fds.clear();
+        } else {
+            fds.retain(|p| p.revents != 0);
+        }
+        Ok(fds)
     }
 
     // Deletion leaves a tombstone so re-registering a number moves it to the end.
@@ -89,7 +101,7 @@ impl Poll {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_poll_new() -> *const Object {
     crate::ObjectOwner::into_raw(crate::ObjectOwner::new(Object(StorageCell::new(
-        Storage::Poll(Box::default()),
+        Storage::Poll(Default::default()),
     ))))
 }
 
@@ -120,6 +132,7 @@ pub unsafe extern "C" fn imre_poll_update(
                     let Storage::Poll(p) = state else {
                         unreachable!()
                     };
+                    let mut p = p.borrow_mut();
                     if mode == 2 {
                         if !p.remove(fd) {
                             return Err(Error::key(super::words::WordKind::new(2).acquire(word)));
@@ -169,25 +182,32 @@ pub(crate) fn checked_fd(fd: i32) -> Result<i32> {
     Ok(fd)
 }
 
+// Capture errno on the thread that made the syscall.
+fn syscall_result(count: i32) -> io::Result<i32> {
+    if count < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(count)
+    }
+}
+
 // Keep the original deadline across EINTR. A zero timeout still observes readiness.
-fn wait(
+fn wait<T: Default, E: From<Error>>(
     timeout: Option<Duration>,
-    mut call: impl FnMut(Option<Duration>) -> i32,
-) -> io::Result<i32> {
-    let start = Instant::now();
+    mut check_signals: impl FnMut() -> std::result::Result<(), E>,
+    mut call: impl FnMut(Option<Duration>) -> io::Result<T>,
+) -> std::result::Result<T, E> {
+    let deadline = timeout.map(Deadline::after);
     let mut remaining = timeout;
     loop {
-        let n = call(remaining);
-        if n >= 0 {
-            return Ok(n);
+        match call(remaining) {
+            Ok(ready) => return Ok(ready),
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => check_signals()?,
+            Err(e) => return Err(errno_error(e).into()),
         }
-        let err = io::Error::last_os_error();
-        if err.kind() != io::ErrorKind::Interrupted {
-            return Err(err);
-        }
-        remaining = timeout.map(|limit| limit.saturating_sub(start.elapsed()));
+        remaining = deadline.map(Deadline::remaining);
         if remaining == Some(Duration::ZERO) {
-            return Ok(0);
+            return Ok(T::default());
         }
     }
 }
@@ -280,37 +300,45 @@ pub unsafe extern "C" fn imre_poll_wait(
     word: usize,
     pair: *const RecordDescriptor,
 ) -> *const Object {
-    // SAFETY: rooted arguments and the single-threaded syscall have no user callbacks.
-    let result = unsafe {
-        object(owner).0.with_mut(|state| {
+    // SAFETY: the caller roots a poll object. Only the owned handle leaves storage.
+    let handle = unsafe {
+        object(owner).0.with(|state| {
             let Storage::Poll(p) = state else {
                 unreachable!()
             };
-            let timeout = timeout(tag, word, true)?;
-            let (count, events) = p.ready(timeout)?;
-            let mut out = Words::new(6); // owned records
-            out.values
-                .try_reserve(count)
-                .map_err(|_| Error::allocation())?;
-            for (fd, mask) in events {
-                // SAFETY: pair describes two writable tagged integer fields. The result
-                // sequence takes ownership of each fully initialized tuple.
+            p.clone()
+        })
+    };
+    let result = (|| {
+        // SAFETY: the caller roots the tagged timeout and tuple descriptor.
+        let timeout = unsafe { timeout(tag, word, true) }?;
+        let events = Poll::ready(&handle, timeout, super::stdlib::check_interrupt)?;
+        let mut out = Words::new(6); // owned records
+        out.values
+            .try_reserve(events.len())
+            .map_err(|_| Error::allocation())?;
+        for event in events {
+            // SAFETY: pair describes two writable integer fields. The list takes
+            // ownership of the freshly allocated and initialized record.
+            let tuple = unsafe {
                 let tuple = ptr::NonNull::new(allocate_record(pair))
                     .ok_or_else(Error::allocation)?
                     .as_ptr();
-                tuple.write(Int::from_usize(fd as usize).into_raw());
+                tuple.write(Int::from_usize(event.fd as usize).into_raw());
                 tuple
                     .add(1)
-                    .write(Int::from_usize(usize::from(mask)).into_raw());
-                out.values.push(tuple as usize);
-            }
-            Ok(crate::ObjectOwner::into_raw(out.into_object()))
-        })
-    };
+                    .write(Int::from_usize(usize::from(event.revents as u16)).into_raw());
+                tuple
+            };
+            out.values.push(tuple as usize);
+        }
+        Ok(crate::ObjectOwner::into_raw(out.into_object()))
+    })();
     finish(result, ptr::null())
 }
 
 /// The three checked descriptor sets used by one POSIX select call.
+#[derive(Clone, Copy)]
 pub(crate) struct SelectFds {
     sets: [libc::fd_set; 3],
     max: i32,
@@ -347,32 +375,39 @@ impl SelectFds {
     }
 
     /// Replace the interest sets with the kernel's readiness result, retrying interrupted waits.
-    pub(crate) fn wait(&mut self, timeout: Option<Duration>) -> Result<bool> {
-        let mut ready = self.sets;
-        let count = wait(timeout, |remaining| {
-            ready = self.sets;
-            let [r, w, x] = &mut ready;
-            let mut tv = remaining.map(|d| {
-                let us = d.as_nanos().div_ceil(1_000);
-                libc::timeval {
-                    tv_sec: (us / 1_000_000) as _,
-                    tv_usec: (us % 1_000_000) as _,
-                }
-            });
-            // SAFETY: all sets and optional timeval are writable for the syscall.
-            unsafe {
-                libc::select(
-                    self.max + 1,
-                    r,
-                    w,
-                    x,
-                    tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
-                )
+    pub(crate) fn wait<E: From<Error>>(
+        &mut self,
+        timeout: Option<Duration>,
+        check_signals: impl FnMut() -> std::result::Result<(), E>,
+    ) -> std::result::Result<bool, E> {
+        let ready = wait(timeout, check_signals, |remaining| {
+            self.wait_once(remaining)
+        })?;
+        *self = ready.unwrap_or_else(Self::new);
+        Ok(ready.is_some())
+    }
+
+    /// A single kernel wait owns only the descriptor bits. Preserve the input for retries.
+    pub(crate) fn wait_once(mut self, remaining: Option<Duration>) -> io::Result<Option<Self>> {
+        let [r, w, x] = &mut self.sets;
+        let mut tv = remaining.map(|d| {
+            let us = d.as_nanos().div_ceil(1_000);
+            libc::timeval {
+                tv_sec: (us / 1_000_000) as _,
+                tv_usec: (us % 1_000_000) as _,
             }
-        })
-        .map_err(errno_error)?;
-        self.sets = if count == 0 { Self::new().sets } else { ready };
-        Ok(count != 0)
+        });
+        // SAFETY: all sets and the optional timeval belong to this invocation.
+        let count = unsafe {
+            libc::select(
+                self.max + 1,
+                r,
+                w,
+                x,
+                tv.as_mut().map_or(ptr::null_mut(), ptr::from_mut),
+            )
+        };
+        Ok((syscall_result(count)? != 0).then_some(self))
     }
 
     /// Test an original descriptor against its ready set.
@@ -412,7 +447,7 @@ pub unsafe extern "C" fn imre_select_wait(
                     })
                 }?;
             }
-            let any_ready = sets.wait(timeout)?;
+            let any_ready = sets.wait(timeout, super::stdlib::check_interrupt)?;
             for (i, list) in lists.into_iter().enumerate() {
                 let mut result = Vec::new();
                 if any_ready {

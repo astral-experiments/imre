@@ -5,7 +5,7 @@ from typing import BinaryIO, TextIO
 
 def text_lines(stream: TextIO) -> None:
     alias = stream
-    first = stream.readline()
+    first = next(stream)
     print(len(first))
     print(first[-2:])
     for line in alias:
@@ -18,6 +18,10 @@ def text_lines(stream: TextIO) -> None:
     print(any(line == "\n" for line in stream))
     print(stream.read())
     print(len(alias.readline()))
+    try:
+        next(stream)
+    except StopIteration:
+        print("exhausted next")
     for line in stream:
         print("unexpected data")
     else:
@@ -29,7 +33,7 @@ def binary_lines(stream: BinaryIO) -> None:
     print(len(stream.read(0)))
     print(len(alias.read(8191)))
     print(stream.read(1) == b"\r")
-    print(alias.readline() == b"\n")
+    print(next(alias) == b"\n")
     for line in stream:
         print(len(line))
         print(line[-3:] == b"\rC\n")
@@ -41,6 +45,7 @@ def binary_lines(stream: BinaryIO) -> None:
     print(stream.readline() == b"\n")
     print(alias.read(-1) == b"D\0")
     print(len(stream.read(9)))
+    print(next(stream, b"done"))
     print(len(alias.readline()))
 
 

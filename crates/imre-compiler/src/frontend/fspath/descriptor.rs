@@ -36,7 +36,7 @@ impl Checker<'_> {
         syscall: Option<(&str, &str)>,
     ) -> Result<Expr, String> {
         let call = protocol_call(at, "__fspath__");
-        if signature.method.unwrap().kind(&self.classes.declarations) == MethodKind::Property {
+        if signature.method.unwrap().kind(self.classes.declarations) == MethodKind::Property {
             return self.call_fspath_property(class, receiver, &call, syscall);
         }
         self.call_path_method(&call, receiver, signature, Type::Str)
@@ -70,7 +70,7 @@ impl Checker<'_> {
             Some(receiver)
         } else {
             scope.hold(self, receiver);
-            None
+            (kind == MethodKind::Class).then(|| self.record_class_object(method.class))
         };
         let skip = usize::from(bound.is_some());
         Ok(scope.finish(self.source_call(call, signature, bound, skip)?))
@@ -101,7 +101,7 @@ impl Checker<'_> {
                     Statement::Try {
                         body: vec![Statement::Assign(slot, getter)],
                         handlers: vec![ir::ExceptHandler {
-                            kinds: vec![],
+                            matcher: crate::ir::ExceptionMatcher::Any,
                             name: None,
                             body: vec![Statement::Assign(failed, Expr::boolean(true))],
                         }],

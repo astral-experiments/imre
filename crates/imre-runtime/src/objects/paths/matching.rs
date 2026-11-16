@@ -57,6 +57,11 @@ fn literal(text: &str, sensitive: bool) -> Hir {
 fn component(pattern: &str, sensitive: bool, sep: char) -> Hir {
     match Pattern::component(pattern) {
         Pattern::Literal(text) => literal(&text, sensitive),
+        Pattern::Affixes { text, stars } => Hir::concat(vec![
+            literal(&text[..stars.start], sensitive),
+            repeat(Hir::dot(Dot::AnyCharExcept(sep)), 0, None),
+            literal(&text[stars.end..], sensitive),
+        ]),
         Pattern::Wildcard(tokens) => Hir::concat(
             tokens
                 .into_iter()
@@ -86,7 +91,103 @@ fn glob_matches(
     if sensitive && !pattern.contains(['*', '?', '[']) {
         return Ok(path == pattern);
     }
+    if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
+        return Ok(matched);
+    }
+    complex_glob_matches(path, pattern, sensitive, recursive, sep)
+}
+
+// Keep token and regex compilation out of the literal-component loop.
+#[inline(never)]
+fn complex_glob_matches(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Result<bool> {
+    if sensitive
+        && pattern.contains(['?', '['])
+        && !path.contains(sep)
+        && !pattern.contains(sep)
+        && let Pattern::Wildcard(tokens) = Pattern::component(pattern)
+        && let Some(matched) = match_token_component(path, &tokens)
+    {
+        return Ok(matched);
+    }
     Ok(glob_regex(pattern, sensitive, recursive, sep)?.is_match(path))
+}
+
+/// Question marks, literals, and character classes each consume one character.
+/// With one star, match the two fixed-width ends without retrying the suffix.
+fn match_token_component(path: &str, tokens: &[Token]) -> Option<bool> {
+    let mut chars = path.chars();
+    let mut tokens = tokens.iter();
+    while let Some(token) = tokens.next() {
+        if matches!(token, Token::Star) {
+            if tokens.as_slice().iter().any(|t| matches!(t, Token::Star)) {
+                return None;
+            }
+            return Some(
+                tokens
+                    .rev()
+                    .all(|t| chars.next_back().is_some_and(|c| t.matches(c))),
+            );
+        }
+        if !chars.next().is_some_and(|c| token.matches(c)) {
+            return Some(false);
+        }
+    }
+    Some(chars.next().is_none())
+}
+
+/// A single run of stars between literal affixes has only one possible match
+/// for each affix. Compare the borrowed components without compiling a regex.
+fn match_literal_components(
+    path: &str,
+    pattern: &str,
+    sensitive: bool,
+    recursive: bool,
+    sep: char,
+) -> Option<bool> {
+    // A bracket class can consume a separator. A recursive ** can consume
+    // several components, and non-ASCII case folding can change byte lengths.
+    if pattern.contains(['[', '?'])
+        || (!sensitive && !(path.is_ascii() && pattern.is_ascii()))
+        || (recursive && pattern.split(sep).any(|part| part == "**"))
+    {
+        return None;
+    }
+    let equal = |a: &[u8], b: &[u8]| {
+        if sensitive {
+            a == b
+        } else {
+            a.eq_ignore_ascii_case(b)
+        }
+    };
+    let mut names = path.split(sep);
+    for part in pattern.split(sep) {
+        let Some(name) = names.next() else {
+            return Some(false);
+        };
+        let name = name.as_bytes();
+        if let Some((prefix, tail)) = part.split_once('*') {
+            let suffix = tail.trim_start_matches('*');
+            if suffix.contains('*') {
+                return None;
+            }
+            if (part == "*" && name.is_empty())
+                || name.len() < prefix.len() + suffix.len()
+                || !equal(&name[..prefix.len()], prefix.as_bytes())
+                || !equal(&name[name.len() - suffix.len()..], suffix.as_bytes())
+            {
+                return Some(false);
+            }
+        } else if !equal(name, part.as_bytes()) {
+            return Some(false);
+        }
+    }
+    Some(names.next().is_none())
 }
 
 /// Compile once for a filesystem selector that checks many names against the same pattern.

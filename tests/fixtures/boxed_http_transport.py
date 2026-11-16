@@ -1,7 +1,32 @@
 def current():
+    import codecs
+    import errno
     import io
     import socket
     from http.client import HTTPConnection, HTTPMessage, parse_headers
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class RequestBytes(bytes):
+        def decode(self, *args):
+            raise AssertionError("handler invoked bytes subclass decode")
+
+    class HeaderStream(io.BytesIO):
+        def readline(self, size=-1):
+            return RequestBytes(super().readline(size))
+
+    def unexpected_lookup(encoding):
+        raise AssertionError(encoding)
+
+    handler = object.__new__(BaseHTTPRequestHandler)
+    handler.raw_requestline = RequestBytes(b"GET /caf\xe9 HTTP/1.0\r\n")
+    handler.rfile = HeaderStream(b"X-Note: caf\xe9\r\n\r\n")
+    original_lookup = codecs.lookup
+    try:
+        codecs.lookup = unexpected_lookup
+        assert handler.parse_request()
+        assert handler.path == "/café" and handler.headers["X-Note"] == "café"
+    finally:
+        codecs.lookup = original_lookup
 
     class RecordingMessage(HTTPMessage):
         def set_raw(self, name, value):
@@ -45,3 +70,30 @@ def current():
         pass
     else:
         raise AssertionError("connected to a closed port")
+
+    class IPv6HTTPServer(HTTPServer):
+        address_family = socket.AF_INET6
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response_only(204)
+            self.end_headers()
+
+    try:
+        server = IPv6HTTPServer(("::1", 0), Handler)
+    except OSError as exc:
+        if exc.errno in (errno.EAFNOSUPPORT, errno.EPROTONOSUPPORT, errno.EADDRNOTAVAIL):
+            return
+        raise
+    with server:
+        host, port, _, _ = server.socket.getsockname()
+        assert server.server_name == socket.getfqdn(host)
+        assert server.server_port == port > 0
+        conn = HTTPConnection(host, port, timeout=5)
+        try:
+            conn.request("GET", "/")
+            server.handle_request()
+            with conn.getresponse() as response:
+                assert response.status == 204
+        finally:
+            conn.close()

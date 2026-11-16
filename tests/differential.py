@@ -48,8 +48,7 @@ REJECTED = {
     "rebind_builtin": 'def f() -> None:\n    len = 1\nf()\n',
     "dead_dynamic_code": 'def f() -> None:\n    if False:\n        eval("1 + 2")\nf()\n',
     "unknown_module": 'import missing_imre_test_module\nprint(1)\n',
-    "recursive": 'def f(x: int) -> int:\n    return f(x)\nf(1)\n',
-    "global_read": 'def f() -> int:\n    return x\nx = 1\nf()\n',
+    "undefined_global": 'def f() -> int:\n    return x\nf()\n',
     "missing_return": 'def f(x: bool) -> int:\n    if x:\n        return 1\nf(False)\n',
     "inplace_list_repeat": 'def f() -> None:\n    x = [1]\n    x *= 2\nf()\n',
     "surrogate_literal": 'print("\\ud800")\n',
@@ -57,10 +56,11 @@ REJECTED = {
     "surrogate_after_crlf": 'x = 1\r\nprint("\\ud800")\r\n',
     "source_null_literal": 'print("abc\0def")\n',
     "source_null_comment": 'print(1)  # \0\n',
-    "latin1_cookie": '# coding: latin-1\nprint("é")\n',
-    "second_line_cookie": '# comment\n# coding=latin-1\nprint("é")\n',
     "ascii_cookie": '# coding: ascii\nprint("é")\n',
     "tab_indentation": 'if True:\n\tif True:\n   print(1)\n',
+    "ambiguous_tab": 'if True:\n        print(1)\n\tprint(2)\n',
+    "deep_join_indentation": 'if True:\n if True:\n  if True:\n\t\\\nprint(1)\n',
+    "malformed_join_after_mixed_suite": 'if True:\n  \tif True:\n \t  print(1)\npass\nif True:\n    \\print(2)\n',
     "form_feed_indentation": 'if True:\n \f print(1)\n',
     "normalized_none_binding": 'ℕone = 1\nprint(ℕone)\n',
     "normalized_true_binding": '𝑇rue = 1\nprint(𝑇rue)\n',
@@ -69,6 +69,10 @@ REJECTED = {
 }
 
 SOURCE_BOUNDARIES = {
+    "latin1_cookie": '# coding: latin-1\nprint("é")\n',
+    "second_line_cookie": '# comment\n# coding=latin-1\nprint("é")\n',
+    "mixed_suite": 'if True:\n  \tif True:\n \t  print(1)\n  \tprint(2)\n',
+    "joined_tab": 'if True:\n\t\\\n print(1)\n        print(2)\n',
     "crlf_literal": 'x = """a\r\nb"""\r\nprint(len(x))\r\nprint(x == "a\\nb")\r\n',
     "cr_literal": 'x = """a\rb"""\rprint(len(x))\rprint(x == "a\\nb")\r',
     "raw_crlf_literal": 'x = r"""a\r\nb"""\nprint(len(x))\nprint(x == "a\\nb")\n',
@@ -79,19 +83,15 @@ SOURCE_BOUNDARIES = {
     "literal_indentation_data": 'x = """a\n\tb\n\fc"""\nprint(x == "a\\n\\tb\\n\\fc")\n',
 }
 
-ERRORS = {
-    "division_zero": ("print(1 // 0)\n", "ZeroDivisionError"),
-    "modulo_zero": ("print(-1 % 0)\n", "ZeroDivisionError"),
-    "dynamic_division_zero": ('zero = int("0")\nprint(1 // zero)\n', "ZeroDivisionError"),
-    "dynamic_modulo_zero": ('zero = int("0")\nprint(-1 % zero)\n', "ZeroDivisionError"),
-    "modulo_zero_big": ("print(1000000000000000000000000 % 0)\n", "ZeroDivisionError"),
+# Compare every frame when the compiled operation retains its source location.
+TRACEBACK_ERRORS = {
+    "recursive": ('def f(x: int) -> int:\n    return f(x)\nf(1)\n', "RecursionError"),
     "bounds": ("x = [1]\nprint(x[1])\n", "IndexError"),
     "negative_bounds": ("x = [1]\nprint(x[-2])\n", "IndexError"),
     "empty_negative_bounds": ("x: list[int] = []\nprint(x[-1])\n", "IndexError"),
     "minimum_machine_index": ("x = [1]\nprint(x[-9223372036854775808])\n", "IndexError"),
     "negative_big_bounds": ("x = [1]\nprint(x[-1000000000000000000000000])\n", "IndexError"),
     "big_bounds": ("x = [1]\nprint(x[1000000000000000000000000])\n", "IndexError"),
-    "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "bad_integer": ('print(int("12__3"))\n', "ValueError"),
     "empty_integer": ('print(int(""))\n', "ValueError"),
     "sign_only_integer": ('print(int("+"))\n', "ValueError"),
@@ -104,6 +104,16 @@ ERRORS = {
         'print(int("999999999999999999999999999999999999999999999__1"))\n',
         "ValueError",
     ),
+}
+
+ERRORS = {
+    **TRACEBACK_ERRORS,
+    "division_zero": ("print(1 // 0)\n", "ZeroDivisionError"),
+    "modulo_zero": ("print(-1 % 0)\n", "ZeroDivisionError"),
+    "dynamic_division_zero": ('zero = int("0")\nprint(1 // zero)\n', "ZeroDivisionError"),
+    "dynamic_modulo_zero": ('zero = int("0")\nprint(-1 % zero)\n', "ZeroDivisionError"),
+    "modulo_zero_big": ("print(1000000000000000000000000 % 0)\n", "ZeroDivisionError"),
+    "empty_pop": ("x: list[int] = []\nprint(x.pop())\n", "IndexError"),
     "zero_step": ("for x in range(0, 1, 0):\n    print(x)\n", "ValueError"),
     "assertion": ("assert False\n", "AssertionError"),
     "repeat_overflow": ("x = [1] * -100000000000000000000000\n", "OverflowError"),
@@ -159,10 +169,10 @@ def main() -> None:
                 if expected_error:
                     assert reference.returncode > 0 and expected_error in reference.stderr, (name, reference)
                     assert actual.returncode > 0, (name, actual)
-                    if reference.stderr.splitlines()[-1] == expected_error:
-                        assert actual.stderr == f"{expected_error}\n", (name, actual)
-                    else:
-                        assert actual.stderr.startswith(expected_error + ":"), (name, actual)
+                    expected_stderr = [reference.stderr]
+                    if name not in TRACEBACK_ERRORS:
+                        expected_stderr.append(reference.stderr.splitlines(keepends=True)[-1])
+                    assert actual.stderr in expected_stderr, (name, actual.stderr, reference.stderr)
                 else:
                     assert reference.returncode == actual.returncode == 0, (name, reference.stderr, actual.stderr)
                     assert not actual.stderr, (name, actual.stderr)

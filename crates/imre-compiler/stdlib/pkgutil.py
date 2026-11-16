@@ -5,6 +5,10 @@ from itertools import count
 from pathlib import Path
 from typing import Iterator
 
+# Supplied by the checked import resolver.
+_filesystem_roots: tuple[str, ...]
+_module_suffixes: tuple[str, ...]
+
 ModuleInfo = namedtuple('ModuleInfo', ('module_finder', 'name', 'ispkg'))
 
 
@@ -35,27 +39,12 @@ def iter_modules(path: list[str] | str | None = None, prefix: str = '') -> Itera
     """Yield unique modules and regular packages in filesystem import order."""
     if isinstance(path, str):
         raise ValueError('path must be None or list of paths to look for modules in')
-    paths = _search_path if path is None else path
-    if not paths:
-        return
+    paths = list(_filesystem_roots) if path is None else path
     seen: set[str] = set()
-    root = 0
-    finder = FileFinder(paths[root])
-    names = _filenames(finder.path)
-    index = 0
-    for _ in count():
-        if index >= len(names):
-            root += 1
-            if root >= len(paths):
-                return
-            finder = FileFinder(paths[root])
-            names = _filenames(finder.path)
-            index = 0
-            continue
-        info = _module_info(finder, names[index], prefix, seen)
-        index += 1
-        if info is None:
-            continue
+    for info in (
+        item for directory in paths
+        for item in _iter_file_modules(FileFinder(directory), prefix, seen)
+    ):
         yield info
 
 
@@ -71,7 +60,7 @@ def get_data(package: str, resource: str) -> bytes | None:
     if package.startswith('.'):
         raise ImportError(f'no package specified for {package!r} (required for relative module names)')
     components = package.split('.')
-    roots = _search_path
+    roots = list(_filesystem_roots)
     for index, component in enumerate(components):
         namespaces: list[str] = []
         for root in roots:

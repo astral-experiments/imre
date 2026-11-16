@@ -10,29 +10,41 @@ pub(super) fn is_function(layout: &RecordDescriptor) -> bool {
 }
 
 /// # Safety
-/// The caller roots a function whose third field is its optional owned link.
+/// The caller roots a function with an owned link. A plain function has no
+/// receiver, while a cache retains its invocation context separately.
 unsafe fn link(function: *const usize) -> *mut *const usize {
     // SAFETY: only generated Python function layouts reach this accessor.
-    unsafe { function.add(2).cast::<*const usize>().cast_mut() }
+    unsafe {
+        let index = if descriptor(function).length == 2 {
+            1
+        } else {
+            2
+        };
+        function.add(index).cast::<*const usize>().cast_mut()
+    }
 }
 
 /// # Safety
-/// Both arguments borrow live Python functions with the same callable signature.
-/// The caller takes one reference to the returned wrapper.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_function_set_wrapped(
-    wrapper: *const usize,
-    wrapped: *const usize,
-) -> *const usize {
-    // SAFETY: retained before replacing the old owner, even on self-assignment.
+/// Both operands are rooted. The receiver has storage for an owned public link.
+pub(super) unsafe fn write_wrapped(wrapper: *const usize, value: *const usize) {
+    // SAFETY: initialization only writes the reserved field.
     unsafe {
-        debug_assert!(is_function(descriptor(wrapper)) && is_function(descriptor(wrapped)));
-        imre_record_retain(wrapped);
-        let previous = link(wrapper).replace(wrapped);
-        imre_record_release(previous);
-        imre_record_retain(wrapper);
+        debug_assert!(is_function(descriptor(wrapper)));
+        imre_record_retain(value);
+        link(wrapper).write(value);
     }
-    wrapper
+}
+
+/// # Safety
+/// Both operands are rooted. The receiver has an initialized, possibly null link.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_function_set_wrapped(wrapper: *const usize, value: *const usize) {
+    // SAFETY: publish the new owner before releasing the old one, including on self-assignment.
+    unsafe {
+        let old = link(wrapper).read();
+        write_wrapped(wrapper, value);
+        imre_record_release(old);
+    }
 }
 
 /// # Safety
@@ -66,7 +78,7 @@ pub(super) unsafe fn release_unowned_cycle(first: *const usize) {
     let mut function = first;
     loop {
         // SAFETY: the preceding rooted function owns this edge, and the
-        // compiler admits only plain native functions to a linked signature.
+        // descriptor check below stops at a target without a link field.
         unsafe {
             let next = link(function).read();
             if next.is_null() {
@@ -103,11 +115,15 @@ mod tests {
             qualified_name_len: 0,
             fields: std::ptr::null(),
         };
-        let function_kinds = [0, 6, 6];
+        let kinds = [0, 6, 6, 0, 0];
         let function = RecordDescriptor {
-            length: 3,
-            kinds: function_kinds.as_ptr(),
+            length: 2,
+            kinds: kinds.as_ptr(),
             semantics: &info,
+        };
+        let cache = RecordDescriptor {
+            length: 5,
+            ..function
         };
         let module_spec = RecordSemantics { kind: 2, ..info };
         assert!(!is_function(&RecordDescriptor {
@@ -125,7 +141,9 @@ mod tests {
             // SAFETY: the fixture owns every descriptor and initializes the
             // witness in the strong context slot before publishing a link.
             unsafe {
-                let records: Vec<_> = (0..size).map(|_| imre_record_new(&function)).collect();
+                let records: Vec<_> = (0..size)
+                    .map(|i| imre_record_new(if i == 0 { &cache } else { &function }))
+                    .collect();
                 let observer = crate::objects::records::weak::WeakRecord::new(records[0]);
                 let witness = imre_record_new(&leaf);
                 witness
@@ -133,10 +151,9 @@ mod tests {
                     .write(StrOwner::into_raw(text.clone()));
                 records[0].add(1).cast::<*mut usize>().write(witness);
                 for (index, &record) in records.iter().enumerate() {
-                    imre_record_release(imre_function_set_wrapped(
-                        record,
-                        records[(index + 1) % size],
-                    ));
+                    let next = records[(index + 1) % size];
+                    imre_record_retain(next);
+                    link(record).write(next);
                 }
                 let alias = imre_function_get_wrapped(records[size - 1]);
                 assert_eq!(alias, records[0].cast_const());
@@ -149,6 +166,57 @@ mod tests {
                 assert!(observer.upgrade().is_none());
                 assert_eq!(StrOwner::strong_count(&text), 1);
             }
+        }
+    }
+
+    #[test]
+    fn a_cache_owns_its_original_after_its_public_link_changes() {
+        use crate::objects::records::{imre_callable_init_cache, weak::WeakRecord};
+
+        let info = RecordSemantics {
+            kind: PYTHON_FUNCTION,
+            flags: 0,
+            name: std::ptr::null(),
+            name_len: 0,
+            qualified_name: std::ptr::null(),
+            qualified_name_len: 0,
+            fields: std::ptr::null(),
+        };
+        let cache_kinds = [0, 6, 6, 0, 0];
+        let cache_layout = RecordDescriptor {
+            length: 5,
+            kinds: cache_kinds.as_ptr(),
+            semantics: &info,
+        };
+        let function_layout = RecordDescriptor {
+            length: 2,
+            ..cache_layout
+        };
+        // SAFETY: the descriptors outlive all records. Each stored field owns one reference.
+        unsafe {
+            let original = imre_record_new(&function_layout);
+            let replacement = imre_record_new(&function_layout);
+            let cache = imre_record_new(&cache_layout);
+            let old = WeakRecord::new(original);
+            let new = WeakRecord::new(replacement);
+            cache.add(1).write(original as usize);
+            imre_callable_init_cache(cache, original, 4, 1);
+            let held = imre_function_get_wrapped(cache);
+            assert_eq!(held, original.cast_const());
+
+            imre_function_set_wrapped(cache, replacement);
+            imre_record_release(replacement);
+            // The link is now the replacement's only owner.
+            imre_function_set_wrapped(cache, replacement);
+            imre_record_release(held);
+            assert!(old.is_live());
+            let held = imre_function_get_wrapped(cache);
+            assert_eq!(held, replacement.cast_const());
+            imre_record_release(cache);
+            assert!(old.upgrade().is_none());
+            assert!(new.is_live());
+            imre_record_release(held);
+            assert!(new.upgrade().is_none());
         }
     }
 }

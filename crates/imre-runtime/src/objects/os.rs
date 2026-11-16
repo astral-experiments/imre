@@ -9,7 +9,7 @@ pub(crate) use credentials::{
     setreuid,
 };
 #[cfg(target_os = "linux")]
-pub(crate) use credentials::{getresgid, getresuid};
+pub(crate) use credentials::{getresgid, getresuid, setresgid, setresuid};
 
 use super::exceptions::{Error, Filename, Kind, Result, finish};
 use super::files::{errno_error, errno_with_filenames};
@@ -18,6 +18,7 @@ use crate::StrOwner;
 use num_traits::ToPrimitive;
 use std::ffi::{CStr, CString};
 use std::io;
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 
 pub(super) mod links;
 pub(crate) mod scandir;
@@ -156,10 +157,12 @@ macro_rules! descriptor_constants {
         $(#[unsafe(no_mangle)]
         pub static $name: usize = ((libc::$flag as usize) << 1) | 1;)*
     };
+    ($names:ident: $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
+        descriptor_constants! { $($name = $flag),* }
+        pub(crate) const $names: &[(&str, $ty)] = &[$((stringify!($flag), libc::$flag)),*];
+    };
     ($lookup:ident -> $ty:ty; $($name:ident = $flag:ident),* $(,)?) => {
         descriptor_constants! { $($name = $flag),* }
-
-        /// Look up the platform constant exported by the corresponding boxed module.
         pub(crate) fn $lookup(name: &str) -> Option<$ty> {
             match name {
                 $(stringify!($flag) => Some(libc::$flag),)*
@@ -168,15 +171,18 @@ macro_rules! descriptor_constants {
         }
     };
 }
-descriptor_constants! { descriptor_constant -> i32;
+descriptor_constants! { DESCRIPTOR_CONSTANTS: i32;
     imre_os_f_ok = F_OK, imre_os_r_ok = R_OK, imre_os_w_ok = W_OK, imre_os_x_ok = X_OK,
     imre_os_wnohang = WNOHANG,
     imre_os_o_rdonly = O_RDONLY, imre_os_o_wronly = O_WRONLY, imre_os_o_rdwr = O_RDWR,
     imre_os_o_append = O_APPEND, imre_os_o_creat = O_CREAT, imre_os_o_excl = O_EXCL,
     imre_os_o_trunc = O_TRUNC, imre_os_o_cloexec = O_CLOEXEC, imre_os_o_directory = O_DIRECTORY,
     imre_os_o_nofollow = O_NOFOLLOW, imre_os_o_nonblock = O_NONBLOCK,
-    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
     imre_os_seek_data = SEEK_DATA, imre_os_seek_hole = SEEK_HOLE,
+}
+// os defines the standard seek origins itself; POSIX only publishes the other flags.
+descriptor_constants! { SEEK_ORIGINS: i32;
+    imre_os_seek_set = SEEK_SET, imre_os_seek_cur = SEEK_CUR, imre_os_seek_end = SEEK_END,
 }
 // The Linux posix initializer installs these flags in the live module dictionary.
 #[cfg(target_os = "linux")]
@@ -241,25 +247,38 @@ pub unsafe extern "C" fn imre_os_open(
             let mode = c_int(mode)?;
             // SAFETY: dir_fd is a rooted optional integer according to the ABI.
             let dir_fd = unsafe { directory_fd(dir_fd) }?;
-            open_at(&name, flags, mode, dir_fd)
-                .map(|fd| Int::from_usize(fd as usize).into_raw())
+            open_at(&name, flags, mode, dir_fd, super::stdlib::check_interrupt)?
+                .map(|fd| Int::from_usize(fd.into_raw_fd() as usize).into_raw())
                 .map_err(|error| errno_with_filenames(error, Some(path), None))
         })(),
         0,
     )
 }
 
-/// Open relative to a directory descriptor and atomically mark the new descriptor close-on-exec.
-pub(crate) fn open_at(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<i32> {
+/// Open relative to a directory descriptor in a single syscall with atomic close-on-exec.
+pub(crate) fn open_at_once(path: &CStr, flags: i32, mode: i32, dir_fd: i32) -> io::Result<OwnedFd> {
+    // SAFETY: path is terminated and the variadic mode is promoted to int.
+    let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: a successful openat returns a new owned descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+}
+
+/// Let an interrupted caller run its signal handlers before retrying.
+/// Handler exceptions bypass the caller's filename decoration for syscall errors.
+pub(crate) fn open_at<E>(
+    path: &CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+    mut dispatch: impl FnMut() -> std::result::Result<(), E>,
+) -> std::result::Result<io::Result<OwnedFd>, E> {
     loop {
-        // SAFETY: path is terminated and the variadic mode is promoted to int.
-        let fd = unsafe { libc::openat(dir_fd, path.as_ptr(), flags | libc::O_CLOEXEC, mode) };
-        if fd >= 0 {
-            return Ok(fd);
-        }
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::Interrupted {
-            return Err(error);
+        match open_at_once(path, flags, mode, dir_fd) {
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => dispatch()?,
+            result => return Ok(result),
         }
     }
 }
@@ -396,6 +415,13 @@ pub extern "C" fn imre_os_close(fd: usize) {
     finish(c_int(fd).and_then(close), ());
 }
 
+/// Open a caller-owned process descriptor with the kernel's close-on-exec guarantee.
+#[cfg(target_os = "linux")]
+pub(crate) fn pidfd_open(pid: libc::pid_t, flags: u32) -> Result<libc::c_int> {
+    // SAFETY: pidfd_open takes only integer arguments and returns an fd or -1.
+    checked(unsafe { libc::syscall(libc::SYS_pidfd_open, pid, flags) } as libc::c_int)
+}
+
 /// Return the process group selected by the kernel for this PID.
 #[cfg(unix)]
 pub(crate) fn getpgid(pid: libc::pid_t) -> Result<libc::pid_t> {
@@ -420,6 +446,21 @@ pub(crate) fn getsid(pid: libc::pid_t) -> Result<libc::pid_t> {
 pub(crate) fn kill(pid: libc::pid_t, signal: libc::c_int) -> Result<()> {
     // SAFETY: kill takes only integers and reports failure through errno.
     checked(unsafe { libc::kill(pid, signal) }).map(|_| ())
+}
+
+/// Wait once, leaving a zero PID when WNOHANG finds no reportable state.
+pub(crate) fn waitid(
+    idtype: libc::idtype_t,
+    id: libc::id_t,
+    options: libc::c_int,
+) -> io::Result<libc::siginfo_t> {
+    let mut info = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
+    // SAFETY: waitid receives writable siginfo storage and retains no pointer.
+    if unsafe { libc::waitid(idtype, id, info.as_mut_ptr(), options) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: all bytes were initialized before the kernel wrote the child status.
+    Ok(unsafe { info.assume_init() })
 }
 
 /// Wait for a child independently of Popen and return its unmodified POSIX status.
@@ -528,7 +569,8 @@ pub unsafe extern "C" fn imre_os_write(fd: usize, bytes: *const crate::Bytes) ->
         c_int(fd)
             .and_then(|fd| {
                 transfer(
-                    || try_write(fd, bytes, None),
+                    // SAFETY: the rooted bytes remain live across the write.
+                    || unsafe { try_write(fd, bytes.as_ptr(), bytes.len(), None) },
                     super::stdlib::check_interrupt,
                 )
             })
@@ -605,8 +647,8 @@ impl RangeTransfer {
 
 /// Copy through the kernel, borrowing both descriptors and any explicit input offset.
 #[cfg(target_os = "linux")]
-pub(crate) fn sendfile<E: From<Error>>(
-    out_fd: i32,
+pub(crate) fn sendfile<E: From<Error>, F: std::os::fd::AsRawFd>(
+    mut out_fd: impl FnMut() -> Result<F>,
     in_fd: i32,
     mut offset: Option<libc::off_t>,
     count: isize,
@@ -619,7 +661,13 @@ pub(crate) fn sendfile<E: From<Error>>(
     // SAFETY: a non-null offset points to our live, writable off_t throughout the call.
     // The kernel validates the raw descriptors and receives the count as size_t.
     transfer(
-        || transferred(unsafe { libc::sendfile(out_fd, in_fd, offset, count as usize) }),
+        || {
+            let output = out_fd()?;
+            // SAFETY: output stays live for the syscall; offset is null or points to our off_t.
+            transferred(unsafe {
+                libc::sendfile(output.as_raw_fd(), in_fd, offset, count as usize)
+            })
+        },
         dispatch,
     )
 }
@@ -708,24 +756,28 @@ pub(crate) fn try_readinto(fd: i32, dst: &mut [u8]) -> Result<Option<usize>> {
 }
 
 /// Attempt one write, returning None if a pending signal must be dispatched.
-pub(crate) fn try_write(
+///
+/// # Safety
+/// The caller keeps the entire source range live until the syscall returns. The
+/// kernel reads the range directly, including file-backed pages that can change.
+pub(crate) unsafe fn try_write(
     fd: i32,
-    data: &[u8],
+    data: *const u8,
+    length: usize,
     offset: Option<libc::off_t>,
 ) -> Result<Option<usize>> {
     crate::initialize_io();
-    let length = data.len();
     #[cfg(target_os = "macos")]
     let length = if offset.is_none() {
         length.min(i32::MAX as usize)
     } else {
         length
     };
-    // SAFETY: both syscalls borrow fd and read at most length bytes from the live slice.
+    // SAFETY: both syscalls read at most length bytes and retain no pointer.
     let count = unsafe {
         match offset {
-            Some(offset) => libc::pwrite(fd, data.as_ptr().cast(), length, offset),
-            None => libc::write(fd, data.as_ptr().cast(), length),
+            Some(offset) => libc::pwrite(fd, data.cast(), length, offset),
+            None => libc::write(fd, data.cast(), length),
         }
     };
     transferred(count)

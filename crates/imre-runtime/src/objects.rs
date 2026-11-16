@@ -10,35 +10,42 @@ use crate::StrOwner;
 mod annotations;
 mod argparse;
 mod args;
+mod source_calls;
 pub(crate) use args::python_executable_text;
 mod asyncio;
 pub(crate) mod base32;
 mod base85;
 pub(crate) use base85::encode as base85_encode;
 mod binascii;
-pub(crate) use binascii::{adler32, binascii_decode, binascii_encode, crc32, unhexlify};
+pub(crate) use binascii::{
+    adler32, binascii_decode, binascii_encode, checksum_seed, crc32, decode_quoted_printable,
+    decode_uu, encode_quoted_printable, encode_uu, unhexlify,
+};
 pub(crate) use binascii::{base64_decode, urlsafe_encode};
 mod boxed_values;
+pub(crate) mod builtin_module_names;
 mod builtins;
 mod bytes;
 pub(crate) use bytes::DecodeIssue;
 pub(crate) use bytes::write_repr as write_bytes_repr;
 pub(crate) use bytes::{
-    bytes_contains, bytes_contains_int, concat_bytes, integer_bytes, repeat_bytes, split_bytes,
-    strip_bytes,
+    bytes_contains, bytes_contains_int, concat_bytes, integer_bytes, integer_from_bytes,
+    repeat_bytes, split_bytes, strip_bytes,
 };
 pub(crate) mod cache_paths;
 mod calendar;
 pub(crate) use calendar::boxed::{Calendar, CalendarNumber};
+pub(crate) use calendar::iso;
 mod chainmap;
 mod charmaps;
 mod codecs;
 pub(crate) use codecs::{
-    Codec, CodecInfo, FixedUnicode, StrEncoder, Utf16Order, decoding_error, idna,
-    normalize as normalize_codec, shift_jis, unknown_handler, utf8_prefix,
+    Codec, DoubleByte, FixedUnicode, StrEncoder, Utf16Order, decoding_error, idna,
+    normalize as normalize_codec, unknown_handler, utf8_prefix,
 };
 mod contexts;
 mod contextvars;
+pub(crate) use contextvars::{consume_context_token, replace_context_binding};
 mod copying;
 pub(crate) mod csv;
 mod deferred_diff;
@@ -46,17 +53,24 @@ mod deque;
 mod digit_sums;
 pub(crate) use deque::Ring as DequeRing;
 mod difflib;
+#[cfg(target_os = "linux")]
+pub(crate) mod epoll;
 mod errno;
 pub(crate) mod exceptions;
 mod files;
-pub(crate) use files::peek_bytes;
+#[cfg(test)]
+pub(crate) use files::open_file;
+pub(crate) use files::{append_read_ahead, append_read_bytes, peek_bytes};
 mod text_file;
 pub(crate) use text_file::{MemoryText, TextFile};
 pub(crate) mod fnmatch;
 mod format_cursors;
 mod functools;
 mod hashlib;
-pub(crate) use hashlib::{State as HashState, hex_text as hash_hex, hex_with_separator};
+pub(crate) mod scalar_format;
+pub(crate) use hashlib::{
+    State as HashState, hex_text as hash_hex, hex_with_separator, uppercase_hex_bytes,
+};
 pub(crate) mod hmac;
 mod inspect;
 pub(crate) mod interpreter_stdlib;
@@ -104,30 +118,37 @@ pub(crate) mod readiness;
 pub(crate) mod records;
 mod regexes;
 mod sequences;
+pub(crate) use sequences::string_integer_values;
 mod shutil;
 pub(crate) mod socket;
+mod sorted_split_fields;
 mod source_modules;
 pub(crate) mod stdio;
+use sorted_split_fields::SortedSplitFields;
 mod stdlib;
 pub(crate) use stdlib::comparator::sort_by_less;
-pub(crate) use stdlib::{format_fixed_float, format_index, replace_text};
+pub(crate) use stdlib::{format_fixed_float, join_utf8, replace_text};
 mod string_enums;
 mod structs;
+mod sumprod;
 pub(crate) mod tempdirs;
 mod text;
-pub(crate) use text::{codepoint_search_window, dedent, hexadecimal, search_window};
+pub(crate) use imre_ast::strings::{is_line_boundary, python_whitespace};
+pub(crate) use text::{codepoint_search_window, hexadecimal, indexed_search_bounds, search_window};
 pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
-pub(crate) use text::{Case, UrlInput, capitalize, case_map, case_map_points, urlquote, urlsplit};
+pub(crate) use text::{Case, UrlInput, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
-    count_codepoints, count_text, expand_tabs, find_codepoints, find_text, normalize_unicode,
-    ord_byte, ord_char, partition_text, python_alnum, python_isalpha, python_isdigit,
-    python_isidentifier, python_islower, python_isspace, python_istitle, python_isupper,
-    split_parts,
+    count_codepoints, count_text, east_asian_width, expand_tabs, find_codepoints, find_text,
+    normalize_unicode, ord_byte, ord_char, partition_text, python_alnum, python_isalpha,
+    python_isdecimal, python_isdigit, python_isidentifier, python_islower, python_isnumeric,
+    python_isprintable, python_isspace, python_istitle, python_isupper, split_parts,
 };
 mod typing;
-pub(crate) use text::{chr_scalar, short_string};
-pub(crate) use typing::{OVERLOAD_DUMMY_ERROR, register_overload};
+pub(crate) use text::{
+    Form, bidirectional, chr_scalar, general_category, legacy, short_index, short_string,
+    ucd_character,
+};
 mod unions;
 mod values;
 pub(crate) mod warnings;
@@ -138,8 +159,7 @@ pub(crate) use zipfile::Archive as ZipArchive;
 
 pub(crate) use errno::{DOC as ERRNO_DOC, platform_entries as errno_entries};
 pub(crate) use files::{
-    FileState, GzipDecoder, Memory, Random, errno_error, open_file, open_raw_file,
-    os_error as gzip_read_error,
+    FileState, GzipDecoder, Memory, Random, errno_error, file_flags, os_error as gzip_read_error,
 };
 
 use super::{
@@ -186,17 +206,9 @@ pub(crate) fn try_literal_string(text: &str) -> crate::Result<StrOwner> {
 }
 use words::{OwnedWord, Words};
 
-// All C ints fit in the immediate representation. Heap integers cannot fit.
 fn c_int(word: usize) -> exceptions::Result<libc::c_int> {
-    (word & 1 != 0)
-        .then_some((word as i64) >> 1)
-        .and_then(|n| libc::c_int::try_from(n).ok())
-        .ok_or_else(|| {
-            Error::new(
-                Kind::OverflowError,
-                "Python int too large to convert to C int",
-            )
-        })
+    // SAFETY: fixed integer operands are rooted for this conversion.
+    unsafe { Int::borrow(word) }.to_c_int()
 }
 
 /// An opaque allocation for runtime-managed containers and resource state.
@@ -213,7 +225,7 @@ enum Storage {
     ContextVar(Rc<contextvars::Variable>),
     ContextToken(Rc<contextvars::Token>),
     TokenMissing,
-    Socket(socket::Socket),
+    Socket(allocator_api2::boxed::Box<socket::Socket>),
     StrDescriptor(u32),
     Sequence(Words),
     JoinBuffer(allocator_api2::boxed::Box<join_buffer::JoinBuffer>),
@@ -227,6 +239,8 @@ enum Storage {
     StringIterator(sequences::StringIterator),
     RegexIterator(regexes::FindIter),
     Repeat(Repeat<OwnedWord>),
+    Accumulate(itertools::Accumulate),
+    IntegerAccumulate(itertools::IntegerAccumulate),
     IteratorAdapter(Rc<itertools::Adapter>),
     LineIterator(LineIterator),
     SplitFields(SplitFields),
@@ -241,7 +255,7 @@ enum Storage {
         filename: crate::StrOwner,
     },
     Hash(allocator_api2::boxed::Box<crate::dynamic::DigestState>),
-    Poll(Box<readiness::Poll>),
+    Poll(Rc<std::cell::RefCell<readiness::Poll>>),
     NativeModule(errno::Module),
     ModuleNamespace(Rc<errno::Registry>),
     ModuleMember(errno::Member),
@@ -280,10 +294,11 @@ enum Storage {
     LogManager(Option<logging::manager::Manager>),
     HandlerLock(std::sync::Arc<logging::locks::HandlerLock>),
     TimedFileHandler(Box<logging::timed::Handler>),
-    Calendar(allocator_api2::boxed::Box<calendar::Value>),
+    Calendar(calendar::Value),
     LogRecord(Box<logging::record::Record>),
     LogFormatter(Box<logging::formatter::Formatter>),
     RegexMatch(regexes::Match),
+    RegexBytesMatch(regexes::Match<crate::BytesOwner>),
     Json(json::readonly::View),
     JsonEncoder {
         ensure_ascii: bool,
@@ -292,6 +307,19 @@ enum Storage {
     },
     JsonDecoder(crate::ObjectOwner),
     PairTable(allocator_api2::boxed::Box<pair_tables::Table>),
+    SortedSplitFields(Box<SortedSplitFields>),
+    RegexPositionIterator(regexes::FindIter, usize),
+}
+
+/// Python identity for a rooted native object represented by its allocation address.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_pointer_identity(value: *const std::ffi::c_void) -> usize {
+    Int::from_usize(value.addr()).into_raw()
+}
+
+/// The base object descriptor displays the concrete class and the receiver's Python identity.
+pub(crate) fn base_object_repr(class_name: &str, identity: u64) -> impl std::fmt::Display {
+    std::fmt::from_fn(move |out| write!(out, "<{class_name} object at {identity:#x}>"))
 }
 
 /// Borrows a rooted object for one nonreentrant operation.
@@ -578,12 +606,12 @@ pub unsafe extern "C" fn imre_seq_set_index(
     finish(old.map(drop), ());
 }
 
-/// Append one list or tuple owner without taking a redundant reference. On
-/// failure, the caller still owns the word for ordinary exception cleanup.
+/// Transfer a word-backed list element on success. On failure, the caller
+/// retains the owner for ordinary exception cleanup.
 ///
 /// # Safety
-/// The receiver is a list of exact tuples or lists. The caller transfers a
-/// rooted element of that kind on success. Neither operation can reenter Python.
+/// The receiver must use ordinary word storage. The rooted element must match
+/// its kind and preserve acyclicity. Neither operation can reenter Python.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_seq_append_owned(
     value: *const Object,
@@ -593,26 +621,24 @@ pub unsafe extern "C" fn imre_seq_append_owned(
     // SAFETY: these element types have ordinary word storage; value-struct rows
     // would copy their argument and therefore cannot take this ownership path.
     let appended = unsafe {
-        object(value)
-            .0
-            .with_mut(|storage| append_sequence_word(storage.sequence_mut()?, word, kind, true))
+        object(value).0.with_mut(|storage| {
+            append_sequence_word::<true>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
+        })
     };
     finish(appended.map(|()| 1), 0)
 }
 
 /// Reserve before acquiring or transferring the argument on either entry path.
-unsafe fn append_sequence_word(
+#[inline]
+unsafe fn append_sequence_word<const OWNED: bool>(
     sequence: &mut Words,
     word: usize,
     kind: u32,
-    owned: bool,
-) -> Result<(), Error> {
+) -> Result<(), smallvec::CollectionAllocErr> {
     sequence.check_kind(kind);
-    sequence
-        .values
-        .try_reserve(1)
-        .map_err(|_| Error::allocation())?;
-    let word = if owned {
+    sequence.values.try_reserve(1)?;
+    let word = if OWNED {
         word
     } else {
         // SAFETY: word is rooted and agrees with the sequence's declared kind.
@@ -643,7 +669,8 @@ pub unsafe extern "C" fn imre_seq_append(value: *const Object, word: usize, kind
                 words.update_header();
                 return result;
             }
-            append_sequence_word(storage.sequence_mut()?, word, kind, false)
+            append_sequence_word::<false>(storage.sequence_mut()?, word, kind)
+                .map_err(|_| Error::allocation())
         })
     };
     finish(appended.map(|()| 1), 0)
@@ -773,26 +800,7 @@ pub unsafe extern "C" fn imre_seq_repeat(value: *const Object, count: usize) -> 
             if let Some(rows) = storage.sequence_storage().rows() {
                 return rows.repeat(count);
             }
-            let values = storage.sequence()?;
-            let length = values
-                .values
-                .len()
-                .checked_mul(count)
-                .filter(|&length| length <= MAX_LIST_LEN)
-                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
-            let mut result = Words::new(values.kind.raw());
-            result
-                .values
-                .try_reserve_exact(length)
-                .map_err(|_| Error::allocation())?;
-            if !values.values.is_empty() {
-                for _ in 0..count {
-                    for &word in &values.values {
-                        result.values.push(values.kind.acquire(word).into_word());
-                    }
-                }
-            }
-            Ok(result)
+            storage.sequence()?.repeated(count)
         })
     };
     finish(
@@ -1000,6 +1008,45 @@ pub unsafe extern "C" fn imre_int_str_part(
             });
         }
         result
+    }
+}
+
+/// Formats directly into the caller's scratch space. Returns null for borrowed
+/// digits, an owned string for boxed integers, or address one on a digit-limit error.
+///
+/// # Safety
+/// Root the canonical integer and supply 40 writable bytes and a disjoint writable
+/// descriptor. Keep the resulting span or string owner alive through concatenation.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_str_part_into(
+    value: usize,
+    buffer: *mut u8,
+    part: *mut StringPart,
+) -> *const Str {
+    const {
+        assert!(size_of::<itoa::Buffer>() <= 40 && align_of::<itoa::Buffer>() == 1);
+        assert!(!std::mem::needs_drop::<itoa::Buffer>() && align_of::<Str>() > 1);
+    }
+    // SAFETY: the caller roots the integer throughout the conversion.
+    if let Some(value) = unsafe { Int::borrow(value) }.as_small() {
+        // SAFETY: the scratch has the checked size and alignment. Its initialized
+        // digits remain in the caller's frame until the concatenation finishes.
+        unsafe {
+            let formatter = &mut *buffer.cast::<std::mem::MaybeUninit<itoa::Buffer>>();
+            let digits = formatter.write(itoa::Buffer::new()).format(value);
+            part.write(StringPart {
+                data: digits.as_ptr(),
+                length: digits.len(),
+            });
+        }
+        return std::ptr::null();
+    }
+    // SAFETY: the boxed conversion shares the original digit-limit and ownership contract.
+    let owner = unsafe { imre_int_str_part(value, buffer, part) };
+    if owner.is_null() {
+        std::ptr::without_provenance(1)
+    } else {
+        owner
     }
 }
 
@@ -1334,11 +1381,6 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
     StrOwner::try_new(result).map_err(|_| Error::allocation())
 }
 
-/// Python also treats the four ASCII information separators as whitespace.
-pub(crate) fn python_whitespace(value: char) -> bool {
-    value.is_whitespace() || matches!(value, '\u{001c}'..='\u{001f}')
-}
-
 /// Removes a trailing set of Unicode scalars, or Python whitespace for null.
 ///
 /// # Safety
@@ -1397,6 +1439,77 @@ pub unsafe extern "C" fn imre_str_split_whitespace(value: *const Str) -> *const 
     crate::ObjectOwner::into_raw(result.into_object())
 }
 
+/// Record a split's length and the byte spans of its first observed fields.
+///
+/// # Safety
+/// The caller roots the source and provides space for the tagged count followed
+/// by `fields` pairs of offsets and lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_spans(value: *const Str, output: *mut usize, fields: u32) {
+    // SAFETY: the source is rooted for this scan.
+    let source = unsafe { &*value };
+    let mut count = 0;
+    let mut visit = |field: &[u8]| {
+        if field.is_empty() {
+            return;
+        }
+        if count < fields as usize {
+            let start = field.as_ptr() as usize - source.as_ptr() as usize;
+            // SAFETY: the caller provides two words for each requested span.
+            unsafe {
+                output.add(1 + 2 * count).write(start);
+                output.add(2 + 2 * count).write(field.len());
+            }
+        }
+        count += 1;
+    };
+    if source.is_ascii() {
+        // Python includes the ASCII information separators and vertical tab.
+        for field in source
+            .as_bytes()
+            .split(|byte| matches!(byte, 9..=13 | 28..=32))
+        {
+            visit(field);
+        }
+    } else {
+        for field in source.split(python_whitespace) {
+            visit(field.as_bytes());
+        }
+    }
+    if count > MAX_LIST_LEN {
+        fail("MemoryError", "sequence allocation failed");
+    }
+    // SAFETY: the first word belongs to the count even for an empty split.
+    unsafe { output.write((count << 1) | 1) };
+}
+
+/// Materialize a split field at the original subscription, preserving its bounds error.
+///
+/// # Safety
+/// The caller roots the original source and passes its initialized span table.
+/// The index is below the number of spans requested at the split.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_field_at(
+    value: *const Str,
+    fields: *const usize,
+    index: u32,
+) -> *const Str {
+    let i = index as usize;
+    // SAFETY: the count and source remain live at this projection.
+    let (source, count) = unsafe { (&*value, fields.read() >> 1) };
+    if i >= count {
+        return Error::index().returning(std::ptr::null());
+    }
+    // SAFETY: a requested field below the actual count has an initialized span.
+    let (start, len) = unsafe { (fields.add(1 + 2 * i).read(), fields.add(2 + 2 * i).read()) };
+    if len == source.len() {
+        // SAFETY: a full slice shares the rooted input just as the split list does.
+        unsafe { StrOwner::increment_strong_count(value) };
+        return value;
+    }
+    StrOwner::into_raw(text::owned_string(&source[start..start + len]))
+}
+
 /// Bytes in 0x20..=0x7f contain no Python line break. Reducing fixed-size
 /// blocks lets LLVM check long ASCII lines without branching on each byte.
 fn plain_ascii_line(bytes: &[u8]) -> bool {
@@ -1410,9 +1523,28 @@ fn plain_ascii_line(bytes: &[u8]) -> bool {
     }) && tail.iter().all(|byte| (32..128).contains(byte))
 }
 
-/// Recognize the line boundaries used by Python's str.splitlines.
-pub(crate) fn is_line_boundary(point: u32) -> bool {
-    matches!(point, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029)
+/// Split the next field of a string retaining lone Python surrogates.
+pub(crate) fn codepoint_line<'a>(
+    points: &'a [u32],
+    start: &mut usize,
+    keep: bool,
+) -> Option<&'a [u32]> {
+    let points = &points[*start..];
+    if points.is_empty() {
+        return None;
+    }
+    let end = points
+        .iter()
+        .position(|&p| is_line_boundary(p))
+        .unwrap_or(points.len());
+    let next = end
+        + match &points[end..] {
+            [0x0d, 0x0a, ..] => 2,
+            [] => 0,
+            _ => 1,
+        };
+    *start += next;
+    Some(&points[..if keep { next } else { end }])
 }
 
 /// Python line offsets computed once per delimiter, with the common physical
@@ -1492,6 +1624,15 @@ struct LineIterator {
     offsets: LineOffsets,
 }
 
+/// Turns a range in a rooted split source into an independently owned string word.
+fn owned_split_field(source: &StrOwner, range: std::ops::Range<usize>) -> Result<OwnedWord, Error> {
+    let field = owned_line(source, range)?;
+    // SAFETY: the owned field transfers one string reference to the caller.
+    Ok(unsafe {
+        OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
+    })
+}
+
 struct SplitFields {
     source: StrOwner,
     separator: u8,
@@ -1506,13 +1647,9 @@ impl SplitFields {
         };
         let end = memchr::memchr(self.separator, remaining)
             .map_or(self.source.len(), |offset| start + offset);
-        let field = owned_line(&self.source, start..end)?;
+        let word = owned_split_field(&self.source, start..end)?;
         // A separator at the end leaves one final empty field to yield.
         self.start = end + 1;
-        // SAFETY: the field transfers its owned string reference to the caller.
-        let word = unsafe {
-            OwnedWord::from_owned(StrOwner::into_raw(field) as usize, words::WordKind::new(3))
-        };
         Ok(Some((word, None)))
     }
 }
@@ -1808,6 +1945,39 @@ mod tests {
     }
 
     #[test]
+    fn formats_small_integer_parts_in_the_callers_scratch() {
+        for value in [
+            crate::MIN_SMALL,
+            -1001,
+            -1,
+            0,
+            9,
+            10,
+            99,
+            1000,
+            crate::MAX_SMALL,
+        ] {
+            let integer = Int::small(value).unwrap();
+            let mut scratch = [0xcc; 42];
+            let mut part = std::mem::MaybeUninit::<StringPart>::uninit();
+            // SAFETY: the tagged integer is live and the 40 middle bytes and
+            // descriptor are disjoint and writable for the complete conversion.
+            let owner = unsafe {
+                imre_int_str_part_into(integer.0, scratch[1..41].as_mut_ptr(), part.as_mut_ptr())
+            };
+            assert!(owner.is_null());
+            assert_eq!((scratch[0], scratch[41]), (0xcc, 0xcc));
+            // SAFETY: a tagged integer always initializes the descriptor.
+            let part = unsafe { part.assume_init() };
+            let range = scratch[1..41].as_ptr_range();
+            assert!(range.contains(&part.data));
+            assert!(part.data.wrapping_add(part.length) <= range.end);
+            // SAFETY: the checked span remains live and immutable in scratch.
+            assert_eq!(unsafe { part.as_str() }, value.to_string());
+        }
+    }
+
+    #[test]
     fn integer_parts_outlive_inputs_and_preserve_fallback_ownership() {
         use num_bigint::BigInt;
         use std::mem::MaybeUninit;
@@ -1832,7 +2002,7 @@ mod tests {
             } else {
                 // SAFETY: the integer owns this exact BigInt allocation. The
                 // temporary acquired reference is released before formatting.
-                let owner = unsafe { Shared::<BigInt>::acquire_word(integer.0) };
+                let owner = unsafe { Shared::<crate::HeapInt>::acquire_word(integer.0) };
                 Some(Shared::downgrade(&owner))
             };
             let mut buffer = [0xcc_u8; 22];
@@ -2455,7 +2625,7 @@ mod tests {
         use num_bigint::BigInt;
 
         let text = StrOwner::new(Str::from("borrowed sequence word"));
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let float = Rc::new(-0.0_f64);
         let text_weak = StrOwner::downgrade(&text);
         let big_weak = Shared::downgrade(&big);
@@ -2603,7 +2773,7 @@ mod tests {
     #[test]
     fn optional_bigint_sequence_replacement_releases_only_displaced_owners() {
         use num_bigint::BigInt;
-        let integer = Shared::new(BigInt::from(1_u128 << 120));
+        let integer = crate::wide_owner(BigInt::from(1_u128 << 120));
         let weak = Shared::downgrade(&integer);
         let word = Shared::as_ptr(&integer) as usize;
         // SAFETY: nullable Int word0 and canonical nonzero words are distinct;

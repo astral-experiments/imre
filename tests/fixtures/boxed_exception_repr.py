@@ -180,3 +180,43 @@ dictionary = error.__dict__
 dictionary["alias"] = error.detail
 del error.detail
 print(error.alias is dictionary["alias"], hasattr(error, "detail"), error.args)
+
+base_members = vars(BaseException)
+assert "args" not in vars(Exception)
+assert "args" in dir(Exception) and "alias" in dir(error)
+assert Exception.__new__ is vars(Exception)["__new__"]
+assert Exception.args is base_members["args"]
+assert Exception.add_note is base_members["add_note"]
+assert Exception.with_traceback.__text_signature__ == "($self, tb, /)"
+assert vars(BaseExceptionGroup)["exceptions"] is ExceptionGroup.exceptions
+args_descriptor = base_members["args"]
+args_descriptor.__set__(error, [4, 8])
+assert error.args == (4, 8)
+assert args_descriptor.__get__(error) is error.args
+assert base_members["__dict__"].__get__(error) is dictionary
+cause = RuntimeError()
+base_members["__cause__"].__set__(error, cause)
+assert error.__cause__ is cause
+try:
+    base_members["__traceback__"].__delete__(error)
+except TypeError as exc:
+    assert "may not be deleted" in str(exc)
+else:
+    raise AssertionError("traceback deletion was accepted")
+
+
+# A native exception may inherit all of its descriptors from its base.
+import gc
+
+class MissingFile(FileNotFoundError):
+    pass
+
+for exception_type in (FileNotFoundError, PermissionError, MissingFile):
+    print("args" in dir(exception_type), "add_note" in dir(exception_type))
+    namespace = vars(exception_type)
+    gc.collect()
+    print(type(namespace).__name__, namespace == exception_type.__dict__)
+    try:
+        namespace["custom"] = 1
+    except TypeError:
+        print("read-only")

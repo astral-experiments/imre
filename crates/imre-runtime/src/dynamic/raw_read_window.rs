@@ -28,7 +28,7 @@ impl Context {
         match self.heap.get(id) {
             Value::ByteArray(bytes) => Some(bytes.len()),
             Value::Array(array) => Some(array.as_bytes().len()),
-            Value::BytesIoStorage(Some(file)) => Some(file.storage().len()),
+            Value::BytesIoStorage(state) => state.file.as_ref().map(|file| file.storage().len()),
             _ => None,
         }
     }
@@ -58,6 +58,7 @@ impl Context {
             owner: Some(owner),
             lease: None,
             anonymous: true,
+            restricted: false,
             layout: None,
             readonly,
             hash: None,
@@ -74,11 +75,6 @@ impl Context {
         } else {
             None
         }
-    }
-
-    pub(super) fn window_bytes(&self, w: Window) -> Result<&[u8]> {
-        let data = self.owner_bytes(w.backing)?;
-        Ok(&data[w.checked_range(data.len())?])
     }
 
     pub(super) fn writable_byte_span(&self, object: Id) -> Result<Option<(Id, Range<usize>)>> {
@@ -105,6 +101,13 @@ impl Context {
                 format!("{argument} must be read-write bytes-like object, not {kind}"),
             )
         };
+        let storage = self.scalar_value(object);
+        if let Value::ByteArray(bytes) = self.heap.get(storage)
+            && self.buffer_slot(object, "__buffer__") == Some(None)
+        {
+            let range = 0..bytes.len();
+            return self.with_native_bytes_export(object, |ctx, _| consume(ctx, storage, range));
+        }
         let method = self
             .python_buffer_method(object, true)
             .map_err(|_| invalid(self))?;
@@ -171,5 +174,134 @@ impl Context {
         }
         let storage = self.view_storage_id(owner);
         Ok(storage_len(storage).map(|_| (storage, start..start + len)))
+    }
+}
+
+/// Reusable scratch space for a single I/O caller's exported spans.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) struct IoVectors {
+    vectors: Vec<libc::iovec>,
+    bases: std::collections::HashMap<Id, (*mut u8, usize)>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl IoVectors {
+    pub(super) fn new(count: usize) -> Result<Self> {
+        let mut vectors = Vec::new();
+        let mut bases = std::collections::HashMap::new();
+        vectors
+            .try_reserve_exact(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        bases
+            .try_reserve(count)
+            .map_err(|_| crate::Error::memory_error())?;
+        Ok(Self { vectors, bases })
+    }
+
+    pub(super) fn readable<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
+        spans: &[(Id, Range<usize>)],
+    ) -> Result<BorrowedIoVectors<'a>> {
+        self.borrow(ctx, spans, false)
+    }
+
+    pub(super) fn writable<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
+        spans: &[(Id, Range<usize>)],
+    ) -> Result<BorrowedIoVectors<'a>> {
+        self.borrow(ctx, spans, true)
+    }
+
+    fn borrow<'a>(
+        &'a mut self,
+        ctx: &'a mut Context,
+        spans: &[(Id, Range<usize>)],
+        writable: bool,
+    ) -> Result<BorrowedIoVectors<'a>> {
+        use std::collections::hash_map::Entry;
+        // Safe callers can forget a loan. Always resolve this context's addresses afresh.
+        self.bases.clear();
+        self.vectors.clear();
+        let loan = BorrowedIoVectors { scratch: self, ctx };
+        for (storage, range) in spans {
+            let (base, length) = match loan.scratch.bases.entry(*storage) {
+                Entry::Occupied(entry) => *entry.get(),
+                Entry::Vacant(entry) => {
+                    let backing = if writable {
+                        let bytes = loan.ctx.writable_storage_bytes(*storage)?;
+                        (bytes.as_mut_ptr(), bytes.len())
+                    } else {
+                        let bytes = loan.ctx.owner_bytes(*storage)?;
+                        (bytes.as_ptr().cast_mut(), bytes.len())
+                    };
+                    *entry.insert(backing)
+                }
+            };
+            if range.start > range.end || range.end > length {
+                return Err(Error::new(
+                    "BufferError",
+                    "underlying buffer has changed size",
+                ));
+            }
+            loan.scratch.vectors.push(libc::iovec {
+                iov_base: base.wrapping_add(range.start).cast(),
+                iov_len: range.len(),
+            });
+        }
+        Ok(loan)
+    }
+}
+
+/// Export roots keep the Python objects alive. This loan also keeps their owning
+/// context exclusively borrowed until native code finishes with the addresses.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) struct BorrowedIoVectors<'a> {
+    scratch: &'a mut IoVectors,
+    ctx: &'a mut Context,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl BorrowedIoVectors<'_> {
+    /// # Safety
+    /// Use the vectors only for synchronous native I/O during this borrow. Do
+    /// not retain the addresses, reenter Python, or write through readable vectors.
+    pub(super) unsafe fn as_raw(&mut self) -> &mut [libc::iovec] {
+        &mut self.scratch.vectors
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl Drop for BorrowedIoVectors<'_> {
+    fn drop(&mut self) {
+        self.scratch.vectors.clear();
+        self.scratch.bases.clear();
+    }
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vector_scratch_releases_partial_and_completed_loans() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let id = ctx.alloc(Value::ByteArray(vec![1, 2, 3]));
+        let mut scratch = IoVectors::new(2).unwrap();
+        assert!(
+            scratch
+                .writable(&mut ctx, &[(id, 0..2), (id, 1..4)])
+                .is_err()
+        );
+        assert!(scratch.vectors.is_empty() && scratch.bases.is_empty());
+
+        let loan = scratch
+            .readable(&mut ctx, &[(id, 0..2), (id, 1..3)])
+            .unwrap();
+        assert_eq!(loan.scratch.bases.len(), 1);
+        assert_eq!(loan.scratch.vectors.len(), 2);
+        drop(loan);
+        assert!(scratch.vectors.is_empty() && scratch.bases.is_empty());
     }
 }

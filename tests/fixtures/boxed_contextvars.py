@@ -2,8 +2,10 @@
 
 import _contextvars
 import contextvars
+from collections.abc import Mapping
 from contextvars import Context, ContextVar, Token, copy_context
 from operator import length_hint
+from types import ClassMethodDescriptorType, GenericAlias
 
 
 class Request:
@@ -19,7 +21,34 @@ def current():
     assert _contextvars.Token is Token
     assert _contextvars.copy_context is copy_context
 
-    var = _contextvars.ContextVar("request", default=None)
+    hashes = []
+
+    class Name(str):
+        def __hash__(self):
+            hashes.append(self)
+            return 37
+
+    name = Name("request")
+    named = ContextVar(name)
+    assert named.name is name and hashes == [name]
+    assert hash(named) == hash(named) and hashes == [name]
+
+    for cls in (ContextVar, Token):
+        alias = cls[Request]
+        raw = vars(cls)["__class_getitem__"]
+        assert type(raw) is ClassMethodDescriptorType
+        assert type(alias) is GenericAlias
+        assert alias.__origin__ is cls and alias.__args__ == (Request,)
+        assert cls.__class_getitem__.__self__ is cls
+        assert raw(cls, Request) == alias == raw.__get__(None, cls)(Request)
+        try:
+            class InvalidBase(alias):
+                pass
+        except TypeError as error:
+            assert "not an acceptable base type" in str(error)
+        else:
+            raise AssertionError("subclassed a final context type")
+    var = _contextvars.ContextVar[Request]("request", default=None)
     assert type(var) is ContextVar and type(Context()) is Context
     assert type(ContextVar) is type and ContextVar.__module__ == "_contextvars"
     assert ContextVar.__qualname__ == "ContextVar"
@@ -28,6 +57,15 @@ def current():
     outer = var.set(req)
     assert type(outer) is Token
     saved = copy_context()
+    assert isinstance(saved, Mapping) and issubclass(Context, Mapping)
+    assert Context.__getitem__(saved, var) is saved.__getitem__(var) is req
+    assert saved.__eq__(saved.copy()) and saved.__ne__({}) is NotImplemented
+    try:
+        saved.run(saved.run)
+    except TypeError as error:
+        assert str(error) == "run() missing 1 required positional argument"
+    else:
+        raise AssertionError("entered a context without a callback")
     inner = var.set(None)
     print(var.name, isinstance(var, ContextVar), isinstance(inner, Token))
     print(outer.var is var, outer.old_value is Token.MISSING, inner.old_value is req)
@@ -46,6 +84,23 @@ def current():
     except ValueError:
         print("different context")
     var.reset(token)
+
+    class BadRepr:
+        def __repr__(self):
+            raise LookupError("token repr")
+
+    default = BadRepr()
+    key = ContextVar("request", default=default)
+    token = key.set(req)
+    for invalid in (token, default):
+        try:
+            var.reset(invalid)
+        except LookupError as error:
+            assert error.args == ("token repr",)
+        else:
+            raise AssertionError("reset skipped __repr__")
+    key.reset(token)
+
     missing = ContextVar("absent")
     try:
         missing.get()

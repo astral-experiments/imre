@@ -1,104 +1,34 @@
-//! Mapping ABC class identities, virtual dictionary registration, and inherited operations.
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value};
+//! Bootstrap the Callable ABC and maintain virtual ABC registrations.
+use super::{Context, Error, FALSE, Id, NONE, Result, Value};
 
-/// Return the raw methods used by each structural collection ABC.
-fn structural_methods(name: &str) -> Option<&'static [&'static str]> {
-    match name {
-        "Callable" => Some(&["__call__"]),
-        "Iterable" => Some(&["__iter__"]),
-        "Sized" => Some(&["__len__"]),
-        "Container" => Some(&["__contains__"]),
-        "Collection" => Some(&["__len__", "__iter__", "__contains__"]),
-        _ => None,
-    }
-}
-
-/// Class namespaces bootstrapped here provide ABC methods without native instance storage.
-pub(super) fn bootstrapped(name: &str) -> bool {
-    matches!(
-        name,
-        "Callable"
-            | "Sized"
-            | "Iterable"
-            | "Container"
-            | "Collection"
-            | "Mapping"
-            | "MutableMapping"
-    )
-}
-
-/// Allocate the real class objects with their CPython direct bases and C3 lineage.
-pub(super) fn class(ctx: &mut Context, name: &str) -> Result<Id> {
-    let key = format!("collections.abc.{name}");
-    if let Some(&class) = ctx.classes.get(&key) {
+/// Typing can request the Callable origin before the Python collections ABCs load.
+pub(super) fn callable(ctx: &mut Context) -> Result<Id> {
+    const KEY: &str = "collections.abc.Callable";
+    if let Some(&class) = ctx.classes.get(KEY) {
         return Ok(class);
-    }
-    let (parents, abstract_methods, methods): (&[&str], &[&str], &[&str]) = match name {
-        "Callable" => (&[], &["__call__"], &[]),
-        "Sized" => (&[], &["__len__"], &[]),
-        "Iterable" => (&[], &["__iter__"], &[]),
-        "Container" => (&[], &["__contains__"], &[]),
-        "Collection" => (&["Sized", "Iterable", "Container"], &[], &[]),
-        "Mapping" => (
-            &["Collection"],
-            &["__getitem__"],
-            &["__contains__", "__eq__", "get", "items", "keys", "values"],
-        ),
-        "MutableMapping" => (
-            &["Mapping"],
-            &["__setitem__", "__delitem__"],
-            &["pop", "popitem", "clear", "update", "setdefault"],
-        ),
-        _ => unreachable!("registered mapping ABC"),
-    };
-    let mut bases = Vec::with_capacity(parents.len());
-    for &parent in parents {
-        bases.push(class(ctx, parent)?);
     }
     let scope = ctx.scope("collections.abc", None);
     let module = ctx.text("collections.abc");
     ctx.bind(scope, "__module__", module);
-    let qualname = ctx.text(name);
+    let qualname = ctx.text("Callable");
     ctx.bind(scope, "__qualname__", qualname);
-    if name == "Callable" {
-        let slots = ctx.alloc(Value::Tuple(Vec::new()));
-        ctx.bind(scope, "__slots__", slots);
-    }
-    if name == "Mapping" {
-        ctx.bind(scope, "__reversed__", NONE);
-        // This native bootstrap supplies the marker from CPython's Mapping declaration.
-        let marker = ctx.int(super::collection_pattern::PatternFlags::MAPPING.marker());
-        ctx.bind(scope, "__abc_tpflags__", marker);
-    }
-    if matches!(name, "Callable" | "Iterable" | "Container") {
-        let alias = ctx.builtin(if name == "Callable" {
-            "collections.abc._CallableGenericAlias"
-        } else {
-            "types.GenericAlias"
-        });
-        let method = super::method_decorator::class_method(ctx, alias)?;
-        ctx.bind(scope, "__class_getitem__", method);
-    }
-    if structural_methods(name).is_some() {
-        let function = ctx.builtin(&format!("abc.hook.{name}.__subclasshook__"));
-        let hook = super::method_decorator::class_method(ctx, function)?;
-        ctx.bind(scope, "__subclasshook__", hook);
-    }
-    for &method in abstract_methods {
-        let function = ctx.builtin(&format!("abc.abstract.{name}.{method}"));
-        ctx.bind(scope, method, function);
-    }
-    for &method in methods {
-        let function = ctx.builtin(&format!("abc.mapping.{method}"));
-        ctx.bind(scope, method, function);
-    }
+    let slots = ctx.alloc(Value::Tuple(Vec::new()));
+    ctx.bind(scope, "__slots__", slots);
+    let alias = ctx.builtin("collections.abc._CallableGenericAlias");
+    let method = super::method_decorator::class_method(ctx, alias)?;
+    ctx.bind(scope, "__class_getitem__", method);
+    let function = ctx.builtin("abc.hook.Callable.__subclasshook__");
+    let hook = super::method_decorator::class_method(ctx, function)?;
+    ctx.bind(scope, "__subclasshook__", hook);
+    let method = ctx.builtin("abc.abstract.Callable.__call__");
+    ctx.bind(scope, "__call__", method);
     let meta = ctx.abc_meta();
-    let result = ctx.allocate_class(name.to_owned(), scope, bases)?;
+    let result = ctx.allocate_class("Callable".into(), scope, Vec::new())?;
     let Value::Class { metaclass, .. } = ctx.heap.get_mut(result) else {
         unreachable!()
     };
     *metaclass = Some(meta);
-    ctx.classes.insert(key, result);
+    ctx.classes.insert(KEY.into(), result);
     ctx.init_abstract_class(result, scope)?;
     Ok(result)
 }
@@ -237,10 +167,7 @@ pub(super) fn call(
     if name == "ABCMeta.__new__" {
         return ctx.abc_new(args, kwargs);
     }
-    if let Some(owner) = name
-        .strip_prefix("hook.")
-        .and_then(|n| n.strip_suffix(".__subclasshook__"))
-    {
+    if name == "hook.Callable.__subclasshook__" {
         let Some((&receiver, args)) = args.split_first() else {
             return Err(Error::new("TypeError", "unbound subclass hook"));
         };
@@ -250,19 +177,15 @@ pub(super) fn call(
             _ => {
                 return Err(Error::new(
                     "TypeError",
-                    format!("{owner}.__subclasshook__() expects one class"),
+                    "Callable.__subclasshook__() expects one class",
                 ));
             }
         };
-        if receiver != class(ctx, owner)? {
+        if receiver != callable(ctx)? {
             return Ok(super::value::NOT_IMPLEMENTED);
         }
-        let methods = structural_methods(owner).expect("registered structural hook");
-        let mut names = [NONE; 3];
-        for (slot, &method) in names.iter_mut().zip(methods) {
-            *slot = ctx.text(method);
-        }
-        return ctx.abc_check_methods(candidate, &names[..methods.len()]);
+        let method = ctx.text("__call__");
+        return ctx.abc_check_methods(candidate, &[method]);
     }
     if matches!(name, "_abc_registry_clear" | "_abc_caches_clear") {
         let [Some(owner)] = super::builtins::bind_builtin_arguments(
@@ -325,159 +248,19 @@ pub(super) fn call(
     if name == "register" {
         return register(ctx, args, kwargs);
     }
-    if let Some(name) = name.strip_prefix("abstract.") {
-        return match name {
-            "Callable.__call__" => {
-                let keyword_self = kwargs.iter().any(|(name, _)| name == "self");
-                if args.is_empty() && !keyword_self {
-                    Err(Error::new(
-                        "TypeError",
-                        "Callable.__call__() missing 1 required positional argument: 'self'",
-                    ))
-                } else if !args.is_empty() && keyword_self {
-                    Err(Error::new(
-                        "TypeError",
-                        "Callable.__call__() got multiple values for argument 'self'",
-                    ))
-                } else {
-                    Ok(FALSE)
-                }
-            }
-            "Sized.__len__" => Ok(ctx.int(0)),
-            "Container.__contains__" => Ok(FALSE),
-            "Iterable.__iter__" => {
-                let empty = ctx.alloc(Value::Tuple(Vec::new()));
-                ctx.iterator(empty)
-            }
-            _ => Err(Error::new("KeyError", "")),
-        };
-    }
-    if name == "mapping.__eq__" {
-        let [Some(left), Some(right)] = super::builtins::bind_builtin_arguments(
-            "Mapping.__eq__",
-            args,
-            kwargs,
-            ["self", "other"],
-            2,
-        )?
-        else {
-            unreachable!("required mapping operands were checked")
-        };
-        let mapping = class(ctx, "Mapping")?;
-        if !ctx.python_instance_check(right, mapping)? {
-            return Ok(super::value::NOT_IMPLEMENTED);
-        }
-        // Mapping compares the results of each operand's public items() method.
-        let snapshot = |ctx: &mut Context, obj| {
-            let items = ctx.lookup_attr(obj, "items")?;
-            let pairs = ctx.call(items, Vec::new(), Vec::new())?;
-            super::builtins::call(ctx, "dict", &[pairs], &[])
-        };
-        let left = snapshot(ctx, left)?;
-        let right = snapshot(ctx, right)?;
-        return Ok(if ctx.checked_equal(left, right)? {
-            TRUE
-        } else {
-            FALSE
-        });
-    }
-    let Some((&object, values)) = args.split_first() else {
-        return Err(Error::new("TypeError", "missing mapping receiver"));
-    };
-    let method = name
-        .strip_prefix("mapping.")
-        .expect("registered ABC method");
-    if !kwargs.is_empty() && method != "update" {
-        return Err(Error::new(
+    debug_assert_eq!(name, "abstract.Callable.__call__");
+    let keyword_self = kwargs.iter().any(|(name, _)| name == "self");
+    if args.is_empty() && !keyword_self {
+        Err(Error::new(
             "TypeError",
-            format!("{method}() takes no keyword arguments"),
-        ));
-    }
-    match (method, values) {
-        ("keys" | "items" | "values", []) => {
-            let name = match method {
-                "keys" => "KeysView",
-                "items" => "ItemsView",
-                _ => "ValuesView",
-            };
-            let abc = ctx.module("_collections_abc")?;
-            let class = ctx.lookup_attr(abc, name)?;
-            ctx.call(class, vec![object], Vec::new())
-        }
-        ("get" | "__contains__" | "setdefault" | "pop", [key] | [key, _]) => {
-            match ctx.get_item(object, *key) {
-                Ok(value) => {
-                    if method == "pop" {
-                        ctx.delete_item(object, *key)?;
-                    }
-                    Ok(if method == "__contains__" {
-                        TRUE
-                    } else {
-                        value
-                    })
-                }
-                Err(e) if e.kind == "KeyError" => {
-                    let default = values.get(1).copied();
-                    match method {
-                        "__contains__" => Ok(FALSE),
-                        "pop" => default.ok_or(e),
-                        "setdefault" => {
-                            let value = default.unwrap_or(NONE);
-                            ctx.put_item(object, *key, value)?;
-                            Ok(value)
-                        }
-                        _ => Ok(default.unwrap_or(NONE)),
-                    }
-                }
-                Err(error) => Err(error),
-            }
-        }
-        ("popitem", []) => {
-            let iter = ctx.op("iter", object, NONE, NONE)?;
-            if ctx.op("more", iter, NONE, NONE)? == FALSE {
-                return Err(Error::new("KeyError", ""));
-            }
-            let key = ctx.op("next", iter, NONE, NONE)?;
-            let value = ctx.get_item(object, key)?;
-            ctx.delete_item(object, key)?;
-            Ok(ctx.alloc(Value::Tuple(vec![key, value])))
-        }
-        ("clear", []) => {
-            let pop = ctx.lookup_attr(object, "popitem")?;
-            loop {
-                match ctx.call(pop, Vec::new(), Vec::new()) {
-                    Ok(_) => (),
-                    Err(e) if e.kind == "KeyError" => return Ok(NONE),
-                    Err(e) => return Err(e),
-                }
-            }
-        }
-        ("update", [] | [_]) => {
-            if let [input] = values
-                && !ctx.for_each_mapping_item(
-                    *input,
-                    object,
-                    super::calls::MappingOperation::Update,
-                    |ctx, key, value, _hash| ctx.put_item(object, key, value),
-                )?
-            {
-                for row in ctx.items(*input)? {
-                    let fields = ctx.items(row)?;
-                    let [key, value] = fields.as_slice() else {
-                        return Err(Error::new("ValueError", "expected a key-value pair"));
-                    };
-                    ctx.put_item(object, *key, *value)?;
-                }
-            }
-            for (key, value) in kwargs {
-                let key = ctx.text(key);
-                ctx.put_item(object, key, *value)?;
-            }
-            Ok(NONE)
-        }
-        _ => Err(Error::new(
+            "Callable.__call__() missing 1 required positional argument: 'self'",
+        ))
+    } else if !args.is_empty() && keyword_self {
+        Err(Error::new(
             "TypeError",
-            format!("invalid arguments to {method}()"),
-        )),
+            "Callable.__call__() got multiple values for argument 'self'",
+        ))
+    } else {
+        Ok(FALSE)
     }
 }

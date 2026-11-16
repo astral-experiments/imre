@@ -58,4 +58,24 @@ assert mock([1, 2]) == 2
 items = []
 mock.side_effect = items.append
 assert mock("item") is None and items == ["item"]
+deliveries = []
+
+def deliver(message):
+    deliveries.append(message)
+    if message == "lost":
+        raise error
+    return "sent:" + message
+
+spy = Mock(wraps=deliver, side_effect=[DEFAULT, "override", DEFAULT])
+assert spy.return_value is DEFAULT
+assert spy("first") == "sent:first"
+spy.return_value = None
+assert spy("second") == "override" and spy("third") is None
+assert deliveries == ["first"]
+spy.side_effect = None
+spy.return_value = DEFAULT
+with check.assertRaises(ValueError) as raised:
+    spy("lost")
+assert raised.exception is error and deliveries == ["first", "lost"]
+spy.assert_called_with("lost")
 print("side effects checked")

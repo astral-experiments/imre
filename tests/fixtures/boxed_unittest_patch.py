@@ -1,6 +1,7 @@
 import sys
+from inspect import iscoroutinefunction
 from unittest import TestCase
-from unittest.mock import DEFAULT, InvalidSpecError, Mock, call, patch, sentinel
+from unittest.mock import DEFAULT, AsyncMock, InvalidSpecError, MagicMock, Mock, call, patch, sentinel
 
 assert DEFAULT is sentinel.DEFAULT
 assert sentinel.value is sentinel.value and sentinel.value is not DEFAULT
@@ -15,6 +16,20 @@ class Owner:
     value = original_exit
 
 
+state = {'mode': 'original'}
+with patch.object(Owner, 'value', None):
+    patch.dict(state, mode='outer').start()
+    patch.object(Owner, 'value', 7).start()
+    patch.dict(state, mode='inner').start()
+    patch.stopall()
+    assert state == {'mode': 'original'} and Owner.value is None
+assert Owner.value is original_exit
+
+with patch('__main__:Owner.value', None):
+    assert Owner.value is None
+assert Owner.value is original_exit
+
+
 owner = Owner()
 first = owner
 pending = patch('__main__.owner.value', None)
@@ -22,6 +37,23 @@ owner = Owner()
 with pending:
     assert owner.value is None and first.value is original_exit
 assert 'value' not in owner.__dict__
+
+
+class BackendRegistry:
+    @property
+    def current(self):
+        return next(backends)
+
+
+primary = Owner()
+primary.value = 1
+secondary = Owner()
+secondary.value = 2
+backends = iter((primary, secondary))
+registry = BackendRegistry()
+with patch('__main__.registry.current.value', 3):
+    assert primary.value == 3 and secondary.value == 2
+assert primary.value == 2
 
 
 @patch('sys.exit')
@@ -150,6 +182,12 @@ assert "value" not in owner.__dict__
 with patch.object(owner, "additional", create=True) as created:
     assert owner.additional is created
 assert not hasattr(owner, "additional")
+
+owner.additional = DEFAULT
+with patch.object(owner, "additional", 3, create=True):
+    assert owner.additional == 3
+assert "additional" not in vars(owner)
+
 
 class PatchBase:
     def test_inherited(self):
@@ -280,5 +318,98 @@ class ReaderTests:
 
 ReaderTests().test_spec()
 assert Service.resource is Owner
+
+
+class Group:
+    first = property(lambda self: 1)
+    second = 2
+
+
+first_descriptor = Group.__dict__['first']
+with patch.multiple('__main__.Group', first=DEFAULT, second=3) as replacements:
+    assert list(replacements) == ['first']
+    assert replacements['first'] is Group.first and Group.second == 3
+assert Group.first is first_descriptor and Group.second == 2
+
+with check.assertRaises(AttributeError):
+    patch.multiple(Group, first=0, second=0, missing=0).start()
+assert Group.first is first_descriptor and Group.second == 2
+
+@patch.multiple(Group, first=DEFAULT, second=DEFAULT)
+class GroupTests:
+    @patch('sys.exit')
+    def test_call(self, exit_mock, first, second):
+        assert sys.exit is exit_mock and Group.first is first and Group.second is second
+        assert first is not second
+
+
+GroupTests().test_call()
+assert sys.exit is original_exit and Group.first is first_descriptor and Group.second == 2
+
+
+def lookup(parcel, /, *, depot):
+    return (parcel, depot)
+
+
+with patch('__main__.lookup', autospec=True, return_value="queued") as replacement:
+    with check.assertRaises(TypeError):
+        main_module.lookup("A17")
+    replacement.assert_not_called()
+    assert main_module.lookup("A17", depot="west") == "queued"
+    replacement.assert_called_once_with("A17", depot="west")
+assert lookup("A17", depot="west") == ("A17", "west")
+
+class Pause:
+    def __await__(self):
+        yield "paused"
+
+
+@patch('__main__.lookup', autospec=True, return_value="queued")
+async def dispatch(replacement):
+    assert main_module.lookup is replacement
+    await Pause()
+    return main_module.lookup("A17", depot="west")
+
+
+original_lookup = lookup
+assert iscoroutinefunction(dispatch)
+pending = dispatch()
+assert main_module.lookup is original_lookup
+assert pending.send(None) == "paused"
+installed = main_module.lookup
+assert installed is not original_lookup
+with check.assertRaises(StopIteration) as completed:
+    pending.send(None)
+assert completed.exception.value == "queued"
+installed.assert_called_once_with("A17", depot="west")
+assert main_module.lookup is original_lookup
+
+async def authorize(parcel):
+    return parcel
+
+
+with patch('__main__.authorize', return_value='approved') as request:
+    with check.assertRaises(StopIteration) as completed:
+        authorize('A17').send(None)
+    assert completed.exception.value == 'approved'
+    request.assert_awaited_once_with('A17')
+
+with patch('__main__.lookup', spec_set=authorize) as request:
+    assert isinstance(request, AsyncMock)
+
+
+class ChangingMethod:
+    def __init__(self, selected):
+        self.functions = iter((lookup, selected))
+
+    @property
+    def __func__(self):
+        return next(self.functions)
+
+
+for selected, expected in ((authorize, AsyncMock), (sys.exit, MagicMock)):
+    owner.method = ChangingMethod(selected)
+    with patch.object(owner, 'method') as request:
+        assert isinstance(request, expected)
 
 print("patch restored")

@@ -63,7 +63,6 @@ class Toolchain:
     level: int
     reachable_only: bool = False
     module_root: Path | None = None
-    runtime_imports: bool = False
 
     def build(self, source, directory):
         directory = directory.resolve()
@@ -75,8 +74,6 @@ class Toolchain:
                    "--clang", self.clang.resolve()]
         if self.module_root is not None:
             command.extend(["--module-root", self.module_root.resolve()])
-        if self.runtime_imports:
-            command.append("--runtime-imports")
         if self.reachable_only:
             command.append("--reachable-only")
         try:
@@ -503,11 +500,11 @@ def run_evidence(suite, executions, reference, level, *, preflight=None, excepti
     return build_report(reference, level, discovered, observations, exceptions=exceptions)
 
 
-def testcase_fixture(equality=None):
+def testcase_fixture(equality=None, *, setup=""):
     """Use the native TestCase, including for the former bool-specific fixture."""
     if equality not in (None, "bool"):
         raise ValueError(f"unsupported equality fixture: {equality}")
-    return "import unittest\n\nclass NativeCase(unittest.TestCase):\n"
+    return f"import unittest\n\n{setup}class NativeCase(unittest.TestCase):\n"
 
 
 def native_method(toolchain, directory, path, owner, case_id, fixture=None, *, operation=None,

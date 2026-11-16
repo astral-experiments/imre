@@ -1,5 +1,13 @@
 from annotationlib import Format, ForwardRef
+from collections.abc import Callable
+from dataclasses import dataclass
+from types import GenericAlias
 from typing import Annotated, ReadOnly, Unpack, get_args, get_origin, get_type_hints
+
+
+@dataclass
+class Handler:
+    callback: Callable[[Annotated["Target", "input"], int], "Target"]
 
 
 class Target:
@@ -49,6 +57,12 @@ def current():
 
     assert get_type_hints(Parent) == {"item": Target, "values": list[Target]}
     assert get_type_hints(Child) == {"item": bytes, "values": list[Target]}
+    plain = get_type_hints(Handler)["callback"]
+    extra = get_type_hints(Handler, include_extras=True)["callback"]
+    assert type(plain) is type(extra) is GenericAlias
+    assert get_origin(plain) is get_origin(extra) is Callable
+    assert get_args(plain) == ([Target, int], Target)
+    assert get_args(extra) == ([Annotated[Target, "input"], int], Target)
     assert get_type_hints(fn) == {"a": Target, "return": type(None)}
     assert get_type_hints(fn, {"Target": int}, {"Target": str})["a"] is str
     assert fn.__annotations__["a"] == "Target"

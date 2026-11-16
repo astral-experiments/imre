@@ -72,20 +72,24 @@ fn join(parts: &[&str]) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
-fn absolute_head(head: &str) -> Result<String, Error> {
+pub(crate) const PYCACHE: &str = "__pycache__";
+
+pub(crate) fn cache_relative_head(head: &str) -> Result<String, Error> {
     if head.starts_with('/') {
-        return Ok(head.to_owned());
+        return Ok(head.trim_start_matches('/').to_owned());
     }
     let cwd = std::env::current_dir().map_err(files::errno_error)?;
     let cwd = super::paths::path_utf8(cwd.into_os_string())?;
-    Ok(join(&[&cwd, head.strip_prefix("./").unwrap_or(head)]))
+    let mut head = join(&[&cwd, head.strip_prefix("./").unwrap_or(head)]);
+    let root_len = head.len() - head.trim_start_matches('/').len();
+    head.drain(..root_len);
+    Ok(head)
 }
-pub(crate) fn cache_name(
-    path: &str,
+pub(crate) fn cache_stem<'a>(
+    path: &'a str,
     tag: &str,
     optimization: &str,
-    prefix: Option<&str>,
-) -> Result<Str, Error> {
+) -> Result<(&'a str, String), Error> {
     let (head, tail) = split(path);
     let (base, sep, rest) = tail
         .rsplit_once('.')
@@ -101,17 +105,30 @@ pub(crate) fn cache_name(
         name.push_str(".opt-");
         name.push_str(optimization);
     }
-    name.push_str(".pyc");
+    Ok((head, name))
+}
+
+pub(crate) fn cache_location(head: &str, name: &str, prefix: Option<&str>) -> Result<Str, Error> {
     match prefix {
-        None => Ok(Str::from(join(&[head, "__pycache__", &name]))),
-        Some(p) => Ok(Str::from(join(&[
-            p,
-            absolute_head(head)?.trim_start_matches('/'),
-            &name,
-        ]))),
+        None => Ok(Str::from(join(&[head, PYCACHE, name]))),
+        Some(p) => Ok(Str::from(join(&[p, &cache_relative_head(head)?, name]))),
     }
 }
-pub(crate) fn source_name(path: &str, prefix: Option<&str>) -> Result<Str, Error> {
+fn cache_name(
+    path: &str,
+    tag: &str,
+    optimization: &str,
+    prefix: Option<&str>,
+) -> Result<Str, Error> {
+    let (head, mut name) = cache_stem(path, tag, optimization)?;
+    name.push_str(".pyc");
+    cache_location(head, &name, prefix)
+}
+
+pub(crate) fn source_parts<'a>(
+    path: &'a str,
+    prefix: Option<&str>,
+) -> Result<(&'a str, &'a str), Error> {
     let (head, name) = split(path);
     let inside = prefix.and_then(|p| {
         head.strip_prefix(p.trim_end_matches('/'))
@@ -160,11 +177,18 @@ pub(crate) fn source_name(path: &str, prefix: Option<&str>) -> Result<Str, Error
             ));
         }
     }
-    Ok(Str::from(join(&[
-        dir,
-        &format!("{}.py", name.split('.').next().unwrap_or("")),
-    ])))
+    Ok((dir, name.split('.').next().unwrap_or("")))
 }
+
+pub(crate) fn source_location(dir: &str, name: &str) -> Str {
+    Str::from(join(&[dir, name]))
+}
+
+fn source_name(path: &str, prefix: Option<&str>) -> Result<Str, Error> {
+    let (dir, stem) = source_parts(path, prefix)?;
+    Ok(source_location(dir, &format!("{stem}.py")))
+}
+
 /// # Safety
 /// The generated caller roots the path, previously read tag, and optimization string.
 #[unsafe(no_mangle)]

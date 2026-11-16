@@ -4,6 +4,25 @@
 use super::*;
 use crate::objects::{Error, Int, Kind, OwnedWord};
 
+/// Membership in a variable-length tuple of exact strings.
+///
+/// # Safety
+/// The caller roots the needle and an initialized tuple whose fields are exact strings.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_str_tuple_contains(
+    needle: *const crate::Str,
+    tuple: *const usize,
+) -> bool {
+    // SAFETY: the static element type guarantees a live string pointer in every field.
+    unsafe {
+        let fields =
+            std::slice::from_raw_parts(tuple.cast::<*const crate::Str>(), descriptor(tuple).length);
+        fields
+            .iter()
+            .any(|&field| (*field).as_str() == (*needle).as_str())
+    }
+}
+
 /// Start an unpublished display; its element kinds can differ and its length may grow.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_tuple_buffer_new() -> *const Object {

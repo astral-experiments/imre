@@ -5,6 +5,7 @@ use super::builtins::bind;
 use super::value::{Error, Id, Result, Value};
 
 pub(super) const METHODS: &[&str] = &[
+    "__bool__",
     "__complex__",
     "__mul__",
     "__rmul__",
@@ -250,15 +251,7 @@ impl Complex {
     }
 
     pub(super) fn repr(self) -> String {
-        let imag = crate::floats::render(self.imag);
-        let imag = imag.strip_suffix(".0").unwrap_or(&imag);
-        if self.real.to_bits() == 0 {
-            return format!("{imag}j");
-        }
-        let real = crate::floats::render(self.real);
-        let real = real.strip_suffix(".0").unwrap_or(&real);
-        let sign = if imag.starts_with('-') { "" } else { "+" };
-        format!("({real}{sign}{imag}j)")
+        imre_ast::numbers::complex_repr(self.real, self.imag)
     }
 }
 
@@ -286,9 +279,8 @@ impl Context {
     pub(super) fn real_component(&self, value: Id) -> Result<Option<f64>> {
         match self.heap.get(value) {
             Value::Float(f) => Ok(Some(*f)),
-            Value::Int(_) | Value::Bool(_) => {
-                Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
-            }
+            Value::Int(n) => Ok(Some(crate::floats::int_to_float(n)?)),
+            Value::Bool(b) => Ok(Some(f64::from(u8::from(*b)))),
             _ => Ok(None),
         }
     }
@@ -369,6 +361,12 @@ impl Context {
                 return Err(Error::new("TypeError", message));
             }
         }
+        // Only the single positional form reads the stored double of a float subclass.
+        let convert = if single {
+            super::builtins::from_numeric
+        } else {
+            super::builtins::from_numeric_slots
+        };
         let mut component = |argument: Option<Id>| -> Result<f64> {
             let Some(value) = argument else {
                 return Ok(0.0);
@@ -376,7 +374,7 @@ impl Context {
             if let Some(number) = self.real_component(value)? {
                 return Ok(number);
             }
-            let Some(number) = super::builtins::from_numeric(self, value)? else {
+            let Some(number) = convert(self, value)? else {
                 return Err(Error::new(
                     "TypeError",
                     format!("must be real number, not {}", self.type_name(value)),

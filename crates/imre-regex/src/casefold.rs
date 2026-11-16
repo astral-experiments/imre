@@ -105,7 +105,10 @@ fn fold(ast: &Ast, source: &str, modes: &[(usize, Alphabet)]) -> String {
 /// A case-insensitive VM reference compares a fixed number of bytes. CPython compares
 /// characters by their simple lowercase mapping; these comparisons agree on an ASCII
 /// capture without the non-ASCII equivalences of I/i, K/k, or S/s in Unicode mode.
-pub(super) fn backrefs(source: &str, modes: &[(usize, Alphabet)]) -> Result<String, String> {
+pub(super) fn backrefs(
+    source: &str,
+    modes: &[(usize, Alphabet)],
+) -> Result<(String, bool), String> {
     let [(0, alphabet)] = modes else {
         return Err("scoped case modes with group references are unsupported".into());
     };
@@ -124,20 +127,16 @@ pub(super) fn backrefs(source: &str, modes: &[(usize, Alphabet)]) -> Result<Stri
         masked.push_str(prefix);
         // ASCII ignorecase on str expands the literals explicitly. Enable the VM's
         // case comparison only around the reference, leaving other text atoms alone.
-        if *alphabet == Alphabet::AsciiIgnoreCase {
-            pattern.push_str("(?i:");
-            masked.push_str("(?i:");
-        }
+        pattern.push_str("(?i:");
+        masked.push_str("(?i:");
         write!(pattern, r"\k<{group}>").unwrap();
         // One opaque atom of the same source length. A referenced capture containing
         // another reference therefore cannot accidentally be proved ASCII-only.
         masked.push_str("(?:");
         masked.extend(std::iter::repeat_n('.', digits.len()));
         masked.push(')');
-        if *alphabet == Alphabet::AsciiIgnoreCase {
-            pattern.push(')');
-            masked.push(')');
-        }
+        pattern.push(')');
+        masked.push(')');
         rest = tail;
     }
     pattern.push_str(rest);
@@ -149,20 +148,32 @@ pub(super) fn backrefs(source: &str, modes: &[(usize, Alphabet)]) -> Result<Stri
     let hir = Translator::new()
         .translate(&masked, &ast)
         .map_err(|e| e.to_string())?;
+    let mut fold_subject = false;
     let mut pending = vec![&hir];
     while let Some(node) = pending.pop() {
         if let HirKind::Capture(capture) = node.kind()
             && referenced.remove(&capture.index)
             && !ascii_capture(&capture.sub, *alphabet == Alphabet::UnicodeIgnoreCase)
         {
-            return Err("case-insensitive group reference can capture non-ASCII text".into());
+            if *alphabet != Alphabet::UnicodeIgnoreCase || !ascii_capture(&capture.sub, false) {
+                return Err("case-insensitive group reference can capture non-ASCII text".into());
+            }
+            // These ASCII atoms can also capture İ, ı, ſ and K under Python's
+            // Unicode ignorecase. Compare their simple lowercase spellings.
+            fold_subject = true;
         }
         pending.extend(node.kind().subs());
     }
     if !referenced.is_empty() {
         return Err("cannot verify case-insensitive group reference".into());
     }
-    Ok(fold(&ast, &pattern, modes))
+    let mut pattern = fold(&ast, &pattern, modes);
+    if fold_subject {
+        // Only the tokenizer's real references have this spelling. Ordinary
+        // atoms retain their Python case classes on the folded subject.
+        pattern = pattern.replace(r"(?i:\k<", r"(?-i:\k<");
+    }
+    Ok((pattern, fold_subject))
 }
 
 fn ascii_capture(hir: &Hir, unicode: bool) -> bool {

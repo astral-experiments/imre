@@ -1,4 +1,5 @@
 //! Boxed signal handlers are heap roots and are called only by the main interpreter thread.
+use super::calls::RegisteredCall;
 use super::{Context, Error, Id, NONE, Result, Value, stdlib};
 use crate::signals::{self, Disposition};
 
@@ -37,42 +38,86 @@ impl Context {
     }
 
     pub(super) fn dispatch_signals(&mut self) -> Result<()> {
-        if !signals::begin_dispatch() {
+        // SAFETY: synchronous delivery returns to the thread that owns this context.
+        unsafe { Self::dispatch_pending_signals(self) }
+    }
+
+    /// # Safety
+    /// The caller owns this context and its active frame throughout the checkpoint.
+    pub(super) unsafe fn dispatch_pending_calls(context: *mut Self) -> Result<()> {
+        if signals::begin_dispatch() {
+            // SAFETY: a registered handler returns to the interrupted caller on this thread.
+            unsafe { Self::dispatch_pending_signals(context)? };
+            // SAFETY: delivery has completed, including any nested callbacks.
+            unsafe { &mut *context }.report_wakeup_errors();
+        }
+        Ok(())
+    }
+
+    fn report_wakeup_errors(&mut self) {
+        if !self.reporting_wakeup_errors && signals::has_wakeup_errors() {
+            self.reporting_wakeup_errors = true;
+            for error in signals::wakeup_errors() {
+                super::unraisable::report(
+                    self,
+                    stdlib::os_error(error),
+                    true,
+                    None,
+                    "Exception ignored while trying to write to the signal wakeup fd",
+                );
+            }
+            self.reporting_wakeup_errors = false;
+            if signals::has_wakeup_errors() {
+                signals::resume_dispatch();
+            }
+        }
+    }
+
+    /// # Safety
+    /// The caller owns the context on this thread with the interrupted frame still active.
+    pub(super) unsafe fn dispatch_pending_signals(context: *mut Self) -> Result<()> {
+        if !signals::begin_signal_dispatch() {
             return Ok(());
         }
-        self.initialize_signal_handlers();
-        for number in 1..signals::nsig() {
-            if signals::take(number) {
-                let handler = self.signal_handlers[number as usize];
-                if self.callable(handler) {
-                    let result = self.call_signal_handler(number, handler);
-                    if result.is_err() {
-                        // A raising handler leaves later pending signals for the next checkpoint.
-                        signals::resume_dispatch();
-                    }
-                    result?;
-                } else {
-                    super::unraisable::report(
-                        self,
-                        Error::new(
-                            "OSError",
-                            format!("Signal {number} ignored due to race condition"),
-                        ),
-                        true,
-                        None,
-                        "Exception ignored while calling signal handler",
-                    );
+        // A queued wakeup-fd report belongs to the next Python checkpoint, even inside a handler.
+        if signals::has_wakeup_errors() {
+            signals::resume_dispatch();
+        }
+        // SAFETY: the thread owns its handler table and initialization finishes before delivery.
+        let ctx = unsafe { &mut *context };
+        ctx.initialize_signal_handlers();
+        for number in (1..signals::nsig()).filter(|&number| signals::take(number)) {
+            // SAFETY: the preceding delivery has returned to this thread.
+            let ctx = unsafe { &mut *context };
+            let handler = ctx.signal_handlers[number as usize];
+            if ctx.callable(handler) {
+                let call = ctx.prepare_signal_handler(number, handler);
+                // SAFETY: preparation has returned and the interrupted caller stays on the heap.
+                if let Err(error) = call.and_then(|call| unsafe { call.run(context) }) {
+                    // A raising handler leaves later pending signals for the next checkpoint.
+                    signals::resume_signals();
+                    return Err(error);
                 }
+            } else {
+                super::unraisable::report(
+                    ctx,
+                    Error::new(
+                        "OSError",
+                        format!("Signal {number} ignored due to race condition"),
+                    ),
+                    true,
+                    None,
+                    "Exception ignored while calling signal handler",
+                );
             }
         }
         Ok(())
     }
 
-    fn call_signal_handler(&mut self, number: i32, handler: Id) -> Result<()> {
+    fn prepare_signal_handler(&mut self, number: i32, handler: Id) -> Result<RegisteredCall> {
         let number = self.int(i64::from(number));
         let frame = self.active_frame(0)?.map_or(NONE, |(_, frame)| frame);
-        self.call(handler, vec![number, frame], vec![])?;
-        Ok(())
+        self.prepare_call(handler, vec![number, frame].into(), vec![])
     }
 
     pub(super) fn signal_call(

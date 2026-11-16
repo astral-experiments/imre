@@ -40,6 +40,23 @@ else:
 assert partial.cert_store_stats()["x509"] == 1
 
 
+class DerExport:
+    def __buffer__(self, flags):
+        events.append(("get", flags))
+        self.view = memoryview(der)
+        return self.view
+
+    def __release_buffer__(self, view):
+        events.append(("release", view is self.view, exported.cert_store_stats()["x509"]))
+
+
+exported = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+events = []
+exported.load_verify_locations(cafile=cafile, cadata=DerExport())
+assert events == [("get", 0), ("release", True, 1)]
+assert exported.get_ca_certs(binary_form=True) == [ca_der]
+
+
 class LoadAuthority:
     def __bool__(self):
         partial.load_verify_locations(cafile=cafile)
@@ -47,3 +64,19 @@ class LoadAuthority:
 
 
 assert partial.get_ca_certs(LoadAuthority()) == [ca_der]
+
+factory = ssl._create_unverified_context
+assert ssl._create_stdlib_context is factory
+unverified = factory()
+assert unverified.protocol == ssl.PROTOCOL_TLS_CLIENT
+assert not unverified.check_hostname and unverified.verify_mode == ssl.CERT_NONE
+verified = factory(cert_reqs=ssl.CERT_REQUIRED, check_hostname=True, cafile=cafile)
+assert verified.check_hostname and verified.verify_mode == ssl.CERT_REQUIRED
+assert verified.get_ca_certs(binary_form=True) == [ca_der]
+assert factory(purpose=ssl.Purpose.CLIENT_AUTH).protocol == ssl.PROTOCOL_TLS_SERVER
+try:
+    factory(cert_reqs=ssl.CERT_NONE, check_hostname=True)
+except ValueError:
+    pass
+else:
+    raise AssertionError("accepted CERT_NONE with hostname checking")

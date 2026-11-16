@@ -136,11 +136,16 @@ impl Checker<'_> {
             .then_some(id)
     }
 
-    fn checked_mapping_size(&self, size: Expr, at: &impl Ranged) -> Result<Expr, String> {
+    fn checked_mapping_size(
+        &self,
+        size: Expr,
+        at: &impl Ranged,
+        origin: ir::FixedOrigin,
+    ) -> Result<Expr, String> {
         let size = if size.ty == Type::Bool {
             Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![size]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![size]),
             }
         } else {
             self.expect(Type::Int, size.ty, at)?;
@@ -148,38 +153,45 @@ impl Checker<'_> {
         };
         Ok(Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::LengthResult, vec![size]),
+            kind: ExprKind::Builtin(Builtin::LengthResult(Box::new(origin)), vec![size]),
         })
     }
 
     pub(super) fn mapping_length(
         &mut self,
         receiver: Expr,
-        at: &impl Ranged,
+        call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let size = self.record_primitive(receiver, "__len__", &[], at)?;
-        self.checked_mapping_size(size, at)
+        let size = self.record_primitive(receiver, "__len__", &[], call)?;
+        let origin = self.call_origin(call);
+        self.checked_mapping_size(size, call, origin)
     }
 
     /// Truth uses the concrete class's __bool__ when present, otherwise __len__.
-    pub(super) fn mapping_truth(
+    pub(super) fn record_truth(
         &mut self,
         class: usize,
         value: Expr,
         at: &impl Ranged,
+        site: Option<ast::ExprRef<'_>>,
     ) -> Result<Expr, String> {
         let direct = |checker: &mut Self, class: usize, receiver: Expr| {
             if checker.classes.methods[class].contains_key("__bool__") {
-                checker.record_slot(class, receiver, "__bool__", &[], at)
-            } else {
+                let site = checker.truth_call_site(site);
+                checker.record_slot_at(class, receiver, "__bool__", &[], at, site)
+            } else if checker.classes.declarations.definitions[class].mapping {
                 let size = checker.record_slot(class, receiver, "__len__", &[], at)?;
+                let origin = checker.fixed_origin(at.range(), None);
                 Ok(Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(
                         Builtin::Bool,
-                        vec![checker.checked_mapping_size(size, at)?],
+                        vec![checker.checked_mapping_size(size, at, origin)?],
                     ),
                 })
+            } else {
+                // The dispatch has already evaluated this ordinary instance.
+                Ok(Expr::boolean(true))
             }
         };
         if self.classes.has_concrete_subclasses(class) {
@@ -228,7 +240,9 @@ impl Checker<'_> {
         let attempt = Statement::Try {
             body: found,
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![exception_kind("KeyError").unwrap()],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                    exception_kind("KeyError").unwrap(),
+                ]),
                 name: None,
                 body: vec![Statement::Assign(result, missing)],
             }],

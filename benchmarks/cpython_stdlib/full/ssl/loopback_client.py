@@ -32,6 +32,8 @@ def main():
     assert ctx.check_hostname and ctx.verify_mode == ssl.CERT_REQUIRED
     ctx.load_verify_locations(cafile=cafile)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as raw:
+        if mode == ["https"]:
+            raw.settimeout(1.0)
         raw.connect((host, int(port)))
         try:
             peer = ctx.wrap_socket(raw, server_hostname=hostname)
@@ -59,6 +61,21 @@ def main():
             assert data == b"local tls\n"
             assert peer.recv(0) == b""
             assert peer.send(b"") == 0
+            if mode == ["https"]:
+                # The echo server waits for our next request.
+                with peer.makefile("rb") as idle:
+                    try:
+                        idle.read(1)
+                    except TimeoutError:
+                        pass
+                    else:
+                        raise AssertionError("silent TLS peer did not time out")
+                    try:
+                        idle.read(1)
+                    except OSError as exc:
+                        assert str(exc) == "cannot read from timed out object"
+                    else:
+                        raise AssertionError("timed-out TLS reader accepted another read")
             binding = peer.get_channel_binding()
             assert isinstance(binding, bytes) and binding
             assert peer.get_channel_binding(cb_type="tls-unique") == binding
@@ -69,19 +86,30 @@ def main():
                 assert chunk
                 response += chunk
             assert response.strip() == repr(binding).encode("ascii")
+            fd = peer.fileno()
+            assert fd >= 0
             with peer.makefile("rb") as reader:
                 with peer.makefile("rb", buffering=0) as raw_reader:
+                    assert raw_reader.fileno() == reader.fileno() == fd
                     assert peer.send(memoryview(b"X\n")) == 2
                     buf = bytearray(b"??")
                     assert raw_reader.readinto(memoryview(buf)[1:]) == 1
                     assert buf == b"?x" and raw_reader.read(1) == b"\n"
                 peer.sendall(b"LAST LINE\n")
                 peer.close()
+                assert reader.fileno() == fd
                 assert reader.read(2) == b"la"
                 assert reader.readline() == b"st line\n"
                 peer.sendall(b"over\n")
                 assert reader.read() == b""
             assert reader.closed
+            for stream in (raw_reader, reader):
+                try:
+                    stream.fileno()
+                except ValueError as exc:
+                    assert type(exc) is ValueError
+                else:
+                    raise AssertionError("closed TLS reader returned a descriptor")
             print("VERIFIED_ECHO", hostname)
         peer.close()
         assert peer.get_channel_binding() is None

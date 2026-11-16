@@ -1,11 +1,20 @@
-//! Sealed text patterns are validated while checking the source, including dead code.
+//! Sealed literal patterns are validated while checking the source, including dead code.
 
 use super::*;
+use imre_regex::flags::{
+    ASCII as ASCII_FLAG, MULTILINE as MULTILINE_FLAG, UNICODE as UNICODE_FLAG,
+    VERBOSE as VERBOSE_FLAG,
+};
+use ruff_python_ast::UnaryOp;
 
 /// A sealed literal must still be valid when checked in unreachable code.
-fn boxed_lookahead(spelling: &str, verbose: bool) -> bool {
-    let Ok((source, names)) =
-        imre_regex::lookahead_source(spelling, verbose, imre_regex::Alphabet::Unicode, false)
+fn boxed_lookahead(spelling: &str, verbose: bool, ascii: bool) -> bool {
+    let alphabet = if ascii {
+        imre_regex::Alphabet::Ascii
+    } else {
+        imre_regex::Alphabet::Unicode
+    };
+    let Ok((source, names)) = imre_regex::lookahead_source(spelling, verbose, alphabet, false)
     else {
         return false;
     };
@@ -19,15 +28,12 @@ fn boxed_lookahead(spelling: &str, verbose: bool) -> bool {
 }
 
 #[derive(Clone)]
-pub(super) struct CaptureLayout {
-    groups: std::rc::Rc<[crate::fixed_regex::Capture]>,
-    nonempty_match: bool,
-}
+pub(super) struct CaptureLayout(pub(super) std::sync::Arc<crate::fixed_regex::FixedPattern>);
 
 impl std::ops::Deref for CaptureLayout {
     type Target = [crate::fixed_regex::Capture];
     fn deref(&self) -> &Self::Target {
-        &self.groups
+        &self.0.groups
     }
 }
 
@@ -67,15 +73,19 @@ impl Checker<'_> {
 
     /// Resolve only a selector whose membership is proved. Unknown names,
     /// negative indices and out-of-range requests still go through IndexError.
-    fn capture_index(layout: Option<&CaptureLayout>, selector: &Expr) -> Option<usize> {
+    fn capture_index(layout: Option<&CaptureLayout>, selector: &mut Expr) -> Option<usize> {
         if matches!(&selector.kind, ExprKind::Int(n) if n == "0") {
             return Some(0);
         }
         let groups = layout?;
         match &selector.kind {
-            ExprKind::Str(name) => groups
-                .iter()
-                .position(|group| group.name.as_deref() == Some(name)),
+            ExprKind::Str(name) => {
+                let index = groups
+                    .iter()
+                    .position(|group| group.name.as_deref() == Some(name))?;
+                *selector = Expr::integer(index);
+                Some(index)
+            }
             ExprKind::Int(index) => index.parse::<usize>().ok().filter(|n| *n < groups.len()),
             _ => None,
         }
@@ -104,18 +114,19 @@ impl Checker<'_> {
     pub(super) fn remember_regex_assignment(
         &mut self,
         stmt: &ast::Stmt,
-        lowered: &mut Vec<Statement>,
+        body: &mut Vec<Statement>,
+        start: usize,
         later: &[ast::Stmt],
     ) {
         if self.block_depth != 1 || self.module_scope {
             return;
         }
-        let [Statement::Assign(slot, value)] = lowered.as_slice() else {
+        let [Statement::Assign(slot, value)] = &body[start..] else {
             return;
         };
         let dictionary = matches!(value.kind, ExprKind::Builtin(Builtin::RegexGroupDict, _));
         if !dictionary
-            && value.ty != Type::RegexPattern
+            && !matches!(value.ty, Type::RegexPattern | Type::RegexBytesPattern)
             && !matches!(
                 value.kind,
                 ExprKind::Builtin(
@@ -172,9 +183,13 @@ impl Checker<'_> {
         let ExprKind::Builtin(Builtin::RegexGroupDict, args) = &value.kind else {
             unreachable!()
         };
-        let matched = self.hidden(Type::RegexMatch);
+        let matched = self.hidden(args[0].ty);
         let mut captures = vec![Statement::Assign(matched, args[0].clone())];
-        let optional = self.types.optional(Type::Str);
+        let optional = self.types.optional(if args[0].ty == Type::RegexBytesMatch {
+            Type::Bytes
+        } else {
+            Type::Str
+        });
         let mut fields = HashMap::new();
         for (index, group) in groups.iter().enumerate() {
             let Some(name) = group.name.as_ref().filter(|name| keys.contains(*name)) else {
@@ -199,7 +214,8 @@ impl Checker<'_> {
         // Repeated reads observe the same captured string. The original match
         // local may be rebound, and this assignment may displace a previous dict.
         captures.extend([Statement::Clear(matched), Statement::Clear(slot)]);
-        *lowered = captures;
+        body.truncate(start);
+        statements::append_block(body, captures);
         self.regex_fields.insert(slot, fields);
     }
 
@@ -223,7 +239,7 @@ impl Checker<'_> {
     }
 
     /// Accepts the optional flags parameter in either of its source spellings.
-    fn regex_flags(&self, call: &ast::ExprCall, required: usize) -> Result<u8, String> {
+    fn regex_flags(&self, call: &ast::ExprCall, required: usize) -> Result<i64, String> {
         let args = &call.arguments;
         let flags = match (args.args.get(required..), args.keywords.as_ref()) {
             (Some([]), []) => return Ok(0),
@@ -241,8 +257,30 @@ impl Checker<'_> {
             // Emitting a fresh diagnostic uses the current Python stdout on each compile.
             return Err(self.scoped_builtin_error("re.DEBUG", flags));
         }
-        self.fixed_flags(flags).ok_or_else(|| error(self.source, flags,
-            "regex flags must be literal 0, re.VERBOSE or re.UNICODE, optionally combined with |"))
+        let bits = self.fixed_flags(flags).ok_or_else(|| {
+            // A runtime operand must be evaluated at the call site, with the real
+            // Python callable already loaded. Do not use another Pattern's methods
+            // as evidence about this call.
+            if self.resolve(&call.func) == Some(Binding::Intrinsic(Intrinsic::RegexCompile))
+                && ast::helpers::any_over_expr(flags, |operand| match operand {
+                    ast::Expr::Call(_) => true,
+                    ast::Expr::Name(_) => !matches!(self.resolve(operand),
+                        Some(Binding::Intrinsic(_) | Binding::IntrinsicModule(_))),
+                    _ => false,
+                })
+            {
+                return self.scoped_builtin_error("re.compile", flags);
+            }
+            error(self.source, flags, "fixed regex flags must be literal integers or re.ASCII, re.MULTILINE, re.VERBOSE or re.UNICODE, optionally combined with |")
+        })?;
+        if bits & ASCII_FLAG != 0 && bits & UNICODE_FLAG != 0 {
+            return Err(error(
+                self.source,
+                flags,
+                "ASCII and UNICODE flags are incompatible",
+            ));
+        }
+        Ok(bits)
     }
 
     fn debug_flags(&self, expression: &ast::Expr) -> bool {
@@ -251,7 +289,7 @@ impl Checker<'_> {
                 self.debug_flags(&op.left) || self.debug_flags(&op.right)
             }
             ast::Expr::NumberLiteral(n) => {
-                matches!(&n.value, ast::Number::Int(value) if value.as_i64().is_some_and(|bits| bits & 128 != 0))
+                matches!(&n.value, ast::Number::Int(value) if value.as_i64().is_some_and(|bits| bits & imre_regex::flags::DEBUG != 0))
             }
             _ => self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::REGEX_DEBUG)),
         }
@@ -259,77 +297,278 @@ impl Checker<'_> {
 
     /// UNICODE is already the matching mode for a str pattern, but is still a
     /// nonzero flag when re.search receives an already compiled Pattern.
-    fn fixed_flags(&self, expression: &ast::Expr) -> Option<u8> {
+    fn fixed_flags(&self, expression: &ast::Expr) -> Option<i64> {
         match self.resolve(expression) {
-            Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) => return Some(64),
-            Some(Binding::Intrinsic(Intrinsic::RegexUnicode)) => return Some(32),
+            Some(Binding::Intrinsic(Intrinsic::RegexVerbose)) => return Some(VERBOSE_FLAG),
+            Some(Binding::Intrinsic(Intrinsic::RegexUnicode)) => return Some(UNICODE_FLAG),
+            Some(Binding::Intrinsic(Intrinsic::RegexMultiline)) => return Some(MULTILINE_FLAG),
+            Some(Binding::Intrinsic(Intrinsic::RegexAscii)) => return Some(ASCII_FLAG),
             _ => {}
         }
         match expression {
+            ast::Expr::Call(call)
+                if self.unshadowed_builtin(&call.func, "int")
+                    && call.arguments.keywords.is_empty()
+                    && let [flag] = call.arguments.args.as_ref() =>
+            {
+                self.fixed_flags(flag)
+            }
             ast::Expr::BinOp(op) if op.op == ast::Operator::BitOr => {
                 Some(self.fixed_flags(&op.left)? | self.fixed_flags(&op.right)?)
             }
-            ast::Expr::NumberLiteral(n) if matches!(&n.value, ast::Number::Int(value) if value.as_i64() == Some(0)) => {
-                Some(0)
+            ast::Expr::NumberLiteral(n) => {
+                let ast::Number::Int(value) = &n.value else {
+                    return None;
+                };
+                let bits = value.as_i64()?;
+                (bits & !(ASCII_FLAG | MULTILINE_FLAG | UNICODE_FLAG | VERBOSE_FLAG) == 0)
+                    .then_some(bits)
             }
             _ => None,
         }
     }
 
-    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, verbose: bool) -> Result<Expr, String> {
-        let ast::Expr::StringLiteral(literal) = pattern else {
-            return Err(error(
-                self.source,
-                pattern,
-                "re.compile requires a literal str pattern",
-            ));
+    pub(super) fn fixed_regex(&self, pattern: &ast::Expr, flags: i64) -> Result<Expr, String> {
+        let ascii = flags & ASCII_FLAG != 0;
+        let verbose = flags & VERBOSE_FLAG != 0;
+        let multiline = flags & MULTILINE_FLAG != 0;
+        let (spelling, literal, alphabet, ty) = match pattern {
+            ast::Expr::StringLiteral(literal) => {
+                check_string(literal, self.source)?;
+                (
+                    std::borrow::Cow::Borrowed(literal.value.to_str()),
+                    ir::Constant::Text(literal.value.to_str().as_bytes().to_vec()),
+                    if ascii {
+                        imre_regex::Alphabet::Ascii
+                    } else {
+                        imre_regex::Alphabet::Unicode
+                    },
+                    Type::RegexPattern,
+                )
+            }
+            ast::Expr::BytesLiteral(literal) => {
+                if flags & UNICODE_FLAG != 0 {
+                    return Err(error(
+                        self.source,
+                        pattern,
+                        "cannot use UNICODE flag with a bytes pattern",
+                    ));
+                }
+                let bytes = literal.value.bytes().collect::<Vec<_>>();
+                (
+                    std::borrow::Cow::Owned(imre_regex::byte_pattern(&bytes)),
+                    ir::Constant::Bytes(bytes),
+                    imre_regex::Alphabet::Bytes,
+                    Type::RegexBytesPattern,
+                )
+            }
+            _ => {
+                return Err(error(
+                    self.source,
+                    pattern,
+                    "re.compile requires a literal str pattern",
+                ));
+            }
         };
-        check_string(literal, self.source)?;
-        let spelling = literal.value.to_str();
-        let pattern = crate::fixed_regex::translate(spelling, verbose).map_err(|message| {
+        let bytes_pattern = ty == Type::RegexBytesPattern;
+        let parsed = imre_regex::translate_pattern_with_line_mode(
+            &spelling,
+            verbose,
+            alphabet,
+            false,
+            !bytes_pattern,
+            multiline,
+        )
+        .map_err(|message| {
             if message == crate::fixed_regex::NEEDS_CLASS_WARNING {
-                return self.object_builtin_error("regex class warning", literal);
+                return self.object_builtin_error("regex class warning", pattern);
             }
-            if boxed_lookahead(spelling, verbose) {
-                return self.object_builtin_error("regex lookahead", literal);
+            if alphabet == imre_regex::Alphabet::Bytes
+                && imre_regex::validation_source(&spelling, verbose, alphabet, false).is_ok()
+            {
+                return self.scoped_builtin_error("re.compile", pattern);
             }
-            error(self.source, literal, &message)
+            if !bytes_pattern && !multiline && boxed_lookahead(&spelling, verbose, ascii) {
+                return self.object_builtin_error("regex lookahead", pattern);
+            }
+            error(self.source, pattern, &message)
         })?;
-        self.globals
-            .regex_literals
-            .borrow_mut()
-            .entry(pattern.source.clone())
-            .or_insert_with(|| CaptureLayout {
-                groups: pattern.groups.into(),
-                nonempty_match: !pattern.may_match_empty,
-            });
+        if ascii && !bytes_pattern && spelling.contains("(?u:") {
+            return Err(self.scoped_builtin_error("re.compile", pattern));
+        }
         Ok(Expr {
-            ty: Type::RegexPattern,
+            ty,
             kind: ExprKind::Builtin(
                 Builtin::RegexCompile {
-                    source: pattern.source,
-                    spelling: literal.value.to_str().to_owned(),
+                    spelling: literal,
+                    supplied_flags: u16::try_from(flags).expect("fixed regex flag bits"),
+                    pattern: std::sync::Arc::new(parsed),
                 },
                 Vec::new(),
             ),
         })
     }
 
-    pub(super) fn compile_regex(&self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let flags = self.regex_flags(call, 1);
-        // A bytes or dynamic pattern can be constructed before the method using
-        // it is lowered, including in a first-party module imported by the caller.
-        if (flags.is_err()
-            || !matches!(
-                call.arguments.args.first(),
-                Some(ast::Expr::StringLiteral(_))
-            ))
-            && self.graph.uses_boxed_pattern_method()
-        {
-            return Err(self.scoped_builtin_error("re.compile", call));
+    pub(super) fn compile_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let bits = self.regex_flags(call, 1)?;
+        let Some(pattern) = call.arguments.args.first() else {
+            return Err(error(self.source, call, "re.compile requires a pattern"));
+        };
+        if matches!(
+            pattern,
+            ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
+        ) {
+            return self.fixed_regex(pattern, bits);
         }
-        let verbose = flags? & 64 != 0;
-        self.fixed_regex(&call.arguments.args[0], verbose)
+        if self.graph.session.is_regex_pattern(self.module, pattern) {
+            let value = self.expr(pattern)?;
+            if matches!(value.ty, Type::RegexPattern | Type::RegexBytesPattern) {
+                if bits == 0 {
+                    return Ok(value);
+                }
+                let exception = Expr {
+                    ty: Type::Exception,
+                    kind: ExprKind::Exception {
+                        kind: exception_kind("ValueError").unwrap(),
+                        message: Some(Box::new(Expr {
+                            ty: Type::Str,
+                            kind: ExprKind::Str(
+                                "cannot process flags argument with a compiled pattern".into(),
+                            ),
+                        })),
+                    },
+                };
+                return Ok(Expr {
+                    ty: value.ty,
+                    kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
+                });
+            }
+        }
+        if ast::helpers::is_constant(pattern) {
+            return self.fixed_regex(pattern, bits);
+        }
+        Err(self.scoped_builtin_error("re.compile", pattern))
+    }
+
+    /// A greedy class with a known output shape has a single-pass collector. Other Python
+    /// patterns and call signatures use the ordinary object implementation.
+    pub(super) fn regex_runs(&mut self, call: &ast::ExprCall, split: bool) -> Result<Expr, String> {
+        let name = if split { "re.split" } else { "re.findall" };
+        let ([pattern, text], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(self.scoped_builtin_error(name, call));
+        };
+        let (pattern, kind) = match pattern {
+            ast::Expr::StringLiteral(pattern) => {
+                check_string(pattern, self.source)?;
+                (
+                    crate::fixed_regex::translate(pattern.value.to_str(), false),
+                    Type::Str,
+                )
+            }
+            ast::Expr::BytesLiteral(pattern) => {
+                let bytes: Vec<_> = pattern.value.bytes().collect();
+                let source = crate::fixed_regex::byte_pattern(&bytes);
+                (
+                    crate::fixed_regex::translate_pattern(
+                        &source,
+                        false,
+                        crate::fixed_regex::Alphabet::Bytes,
+                        false,
+                        true,
+                    ),
+                    Type::Bytes,
+                )
+            }
+            _ if self.fixed_sites.is_some() => {
+                let operands = registered::values::call_arguments(call, |arg| self.expr(arg))?;
+                let value = self.call_import_with_operands(call, operands)?;
+                self.require_builtin_scope(name, call);
+                return Ok(value);
+            }
+            _ => return Err(self.scoped_builtin_error(name, call)),
+        };
+        let program = pattern
+            .ok()
+            .and_then(|pattern| {
+                crate::fixed_regex::collection(&pattern, !split, kind == Type::Bytes)
+            })
+            .ok_or_else(|| self.scoped_builtin_error(name, call))?;
+        let text = self.expr(text)?;
+        if text.ty != kind {
+            return Err(self.scoped_builtin_error(name, call));
+        }
+        Ok(self.regex_collection_expr(program, split, kind, text))
+    }
+
+    /// A bound findall/split with a proven literal layout can use exactly the
+    /// collector already used by the corresponding module function. Evaluate
+    /// the receiver before the subject, even when the caller discards the list.
+    pub(super) fn compiled_regex_collection(
+        &mut self,
+        call: &ast::ExprCall,
+        split: bool,
+        method: &'static str,
+    ) -> Result<Expr, String> {
+        let attribute = call
+            .func
+            .as_attribute_expr()
+            .expect("resolved Pattern method");
+        let ([subject], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return Err(self.scoped_builtin_error(method, call));
+        };
+        let receiver = self
+            .expr(&attribute.value)
+            .map_err(|_| self.scoped_builtin_error(method, call))?;
+        let kind = match receiver.ty {
+            Type::RegexPattern => Type::Str,
+            Type::RegexBytesPattern => Type::Bytes,
+            _ => return Err(self.scoped_builtin_error(method, call)),
+        };
+        let program = self
+            .capture_layout(&receiver)
+            .and_then(|layout| {
+                crate::fixed_regex::collection(&layout.0, !split, kind == Type::Bytes)
+            })
+            .ok_or_else(|| self.scoped_builtin_error(method, call))?;
+        let text = Self::string_value(
+            self.expr(subject)
+                .map_err(|_| self.scoped_builtin_error(method, call))?,
+        );
+        if text.ty != kind {
+            return Err(self.scoped_builtin_error(method, call));
+        }
+        let value = self.regex_collection_expr(program, split, kind, text);
+        Ok(Expr {
+            ty: value.ty,
+            kind: ExprKind::Scope {
+                body: vec![Statement::Expr(receiver)],
+                value: Box::new(value),
+                clear: vec![],
+            },
+        })
+    }
+
+    fn regex_collection_expr(
+        &mut self,
+        program: imre_regex::Collection,
+        split: bool,
+        kind: Type,
+        text: Expr,
+    ) -> Expr {
+        let element = match &program {
+            imre_regex::Collection::Rows { fields, .. } => self.types.tuple(vec![kind; *fields]),
+            _ => kind,
+        };
+        Expr {
+            ty: self.types.list(element),
+            kind: ExprKind::Builtin(Builtin::RegexCollect { program, split }, vec![text]),
+        }
     }
 
     pub(super) fn sub_regex(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -351,7 +590,7 @@ impl Checker<'_> {
                 "re.sub expects a literal str pattern, a literal str replacement, and a str input",
             ));
         };
-        let pattern = self.fixed_regex(pattern, false)?;
+        let pattern = self.fixed_regex(pattern, 0)?;
         self.pattern_sub(pattern, replacement, text)
     }
 
@@ -364,7 +603,7 @@ impl Checker<'_> {
         check_string(replacement, self.source)?;
         let groups = self
             .capture_layout(&pattern)
-            .filter(|layout| layout.nonempty_match)
+            .filter(|layout| !layout.0.may_match_empty)
             .ok_or_else(|| {
                 error(
                     self.source,
@@ -390,11 +629,27 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let flags = self.regex_flags(call, 2)?;
         let pattern = &call.arguments.args[0];
-        let pattern = if matches!(pattern, ast::Expr::StringLiteral(_)) {
-            self.fixed_regex(pattern, flags & 64 != 0)?
+        let pattern = if matches!(
+            pattern,
+            ast::Expr::StringLiteral(_) | ast::Expr::BytesLiteral(_)
+        ) {
+            self.fixed_regex(pattern, flags)?
         } else {
             let value = self.expr(pattern)?;
             if value.ty == Type::Str {
+                if flags & MULTILINE_FLAG != 0 {
+                    return Err(error(
+                        self.source,
+                        pattern,
+                        "a runtime MULTILINE search requires a compiled pattern",
+                    ));
+                }
+                if flags & ASCII_FLAG != 0 {
+                    return Err(self.scoped_builtin_error(
+                        if anchored { "re.match" } else { "re.search" },
+                        call,
+                    ));
+                }
                 // Evaluate both arguments before compiling the runtime pattern.
                 let text = self.expr_expected(&call.arguments.args[1], Type::Str)?;
                 return Ok(Expr {
@@ -402,7 +657,7 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(
                         Builtin::RegexSearchText {
                             anchored,
-                            verbose: flags & 64 != 0,
+                            verbose: flags & VERBOSE_FLAG != 0,
                         },
                         vec![value, text],
                     ),
@@ -415,7 +670,9 @@ impl Checker<'_> {
                     "cannot apply flags to a compiled pattern",
                 ));
             }
-            self.expect(Type::RegexPattern, value.ty, pattern)?;
+            if value.ty != Type::RegexBytesPattern {
+                self.expect(Type::RegexPattern, value.ty, pattern)?;
+            }
             value
         };
         self.pattern_search(
@@ -435,12 +692,27 @@ impl Checker<'_> {
         text: &ast::Expr,
         operation: Builtin,
     ) -> Result<Expr, String> {
+        let bytes_pattern = pattern.ty == Type::RegexBytesPattern;
+        let subject_type = if bytes_pattern {
+            Type::Bytes
+        } else {
+            Type::Str
+        };
+        let value = Self::string_value(self.expr(text)?);
+        // Preserve the supplied argument's kind. The pattern's matcher owns
+        // Python's wrong-subject exception after both operands have run.
+        let value = if matches!(value.ty, Type::Str | Type::Bytes) {
+            value
+        } else {
+            self.coerce(value, subject_type, text)?
+        };
         Ok(Expr {
-            ty: self.types.optional(Type::RegexMatch),
-            kind: ExprKind::Builtin(
-                operation,
-                vec![pattern, self.expr_expected(text, Type::Str)?],
-            ),
+            ty: self.types.optional(if bytes_pattern {
+                Type::RegexBytesMatch
+            } else {
+                Type::RegexMatch
+            }),
+            kind: ExprKind::Builtin(operation, vec![pattern, value]),
         })
     }
 
@@ -450,15 +722,18 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        if receiver.ty == Type::RegexPattern && attribute.attr.as_str() == "findall" {
+            return Err(self.object_builtin_error("re.Pattern.findall", call));
+        }
         self.reject_builtin_keywords(call)?;
         let method = attribute.attr.as_str();
         let args = call.arguments.args.as_ref();
-        if receiver.ty == Type::RegexPattern {
+        if matches!(receiver.ty, Type::RegexPattern | Type::RegexBytesPattern) {
             return match (method, args) {
-                ("finditer", [text]) => {
+                ("finditer", [text]) if receiver.ty == Type::RegexPattern => {
                     if !self
                         .capture_layout(&receiver)
-                        .is_some_and(|layout| layout.nonempty_match)
+                        .is_some_and(|layout| !layout.0.may_match_empty)
                     {
                         return Err(error(
                             self.source,
@@ -474,7 +749,9 @@ impl Checker<'_> {
                         ),
                     })
                 }
-                ("sub", [ast::Expr::StringLiteral(replacement), text]) => {
+                ("sub", [ast::Expr::StringLiteral(replacement), text])
+                    if receiver.ty == Type::RegexPattern =>
+                {
                     self.pattern_sub(receiver, replacement, text)
                 }
                 ("search", [text]) => self.pattern_search(receiver, text, Builtin::RegexSearch),
@@ -486,15 +763,25 @@ impl Checker<'_> {
                 )),
             };
         }
-        let layout = self.capture_layout(&receiver);
-        let receiver = if self.types.payload(receiver.ty) == Some(Type::RegexMatch) {
-            self.require_attribute_receiver(receiver, Type::RegexMatch, attribute)
+        // The implicit group zero exists for every match, independently of the pattern.
+        let layout = match (method, args) {
+            ("groups", []) | (_, [_]) => self.capture_layout(&receiver),
+            _ => None,
+        };
+        let match_type = self.types.payload(receiver.ty).unwrap_or(receiver.ty);
+        let group_type = if match_type == Type::RegexBytesMatch {
+            Type::Bytes
+        } else {
+            Type::Str
+        };
+        let receiver = if self.types.payload(receiver.ty).is_some() {
+            records::require_object_receiver(receiver, match_type, method)
         } else {
             receiver
         };
         if method == "groupdict" && args.is_empty() {
             return Ok(Expr {
-                ty: self.types.dict(Type::Str, self.types.optional(Type::Str)),
+                ty: self.types.dict(Type::Str, self.types.optional(group_type)),
                 kind: ExprKind::Builtin(Builtin::RegexGroupDict, vec![receiver]),
             });
         }
@@ -506,16 +793,16 @@ impl Checker<'_> {
                     "groups() requires a statically known fixed pattern",
                 )
             })?;
-            let slot = self.hidden(Type::RegexMatch);
+            let slot = self.hidden(match_type);
             let fields: Vec<_> = groups
                 .iter()
                 .enumerate()
                 .skip(1)
                 .map(|(index, group)| Expr {
                     ty: if group.required {
-                        Type::Str
+                        group_type
                     } else {
-                        self.types.optional(Type::Str)
+                        self.types.optional(group_type)
                     },
                     kind: ExprKind::Builtin(
                         Builtin::RegexCapture {
@@ -548,8 +835,8 @@ impl Checker<'_> {
                 "a regex match supports group(), start(), end(), span(), groups(), and groupdict()",
             ));
         }
-        let mut selector = if let [arg] = args {
-            calls::scalar_literal(arg, self.source)
+        let (selector, index) = if let [arg] = args {
+            let mut selector = calls::scalar_literal(arg, self.source)
                 .ok()
                 .filter(|value| matches!(value.ty, Type::Int | Type::Str))
                 .ok_or_else(|| {
@@ -558,33 +845,32 @@ impl Checker<'_> {
                         arg,
                         "regex groups require a literal integer index or string name",
                     )
-                })?
+                })?;
+            if let ExprKind::Unary(UnaryOp::USub, inner) = &selector.kind
+                && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
+            {
+                selector.kind = ExprKind::Int("0".into());
+            }
+            let index = Self::capture_index(layout.as_ref(), &mut selector);
+            (Some(selector), index)
         } else {
-            Expr::integer(0)
+            (None, Some(0))
         };
-        if let ExprKind::Negate(inner) = &selector.kind
-            && matches!(&inner.kind, ExprKind::Int(value) if value == "0")
-        {
-            selector.kind = ExprKind::Int("0".into());
-        }
-        let index = Self::capture_index(layout.as_ref(), &selector);
-        if let Some(index) = index {
-            selector = Expr::integer(index);
-        }
+        let capture = |operation, ty, receiver, selector: Option<Expr>| Expr {
+            ty,
+            kind: ExprKind::Builtin(
+                Builtin::RegexCapture {
+                    operation,
+                    known: index.is_some(),
+                },
+                std::iter::once(receiver).chain(selector).collect(),
+            ),
+        };
         if method == "span" {
-            let slot = self.hidden(Type::RegexMatch);
+            let slot = self.hidden(match_type);
             let bounds = [RegexCapture::Start, RegexCapture::End]
                 .into_iter()
-                .map(|operation| Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(
-                        Builtin::RegexCapture {
-                            operation,
-                            known: index.is_some(),
-                        },
-                        vec![self.local(slot), selector.clone()],
-                    ),
-                })
+                .map(|operation| capture(operation, Type::Int, self.local(slot), selector.clone()))
                 .collect();
             let ty = self.types.tuple(vec![Type::Int, Type::Int]);
             return Ok(Expr {
@@ -604,9 +890,9 @@ impl Checker<'_> {
                 || index.is_some_and(|index| {
                     layout.as_ref().is_some_and(|groups| groups[index].required)
                 }) {
-                Type::Str
+                group_type
             } else {
-                self.types.optional(Type::Str)
+                self.types.optional(group_type)
             };
             (RegexCapture::Group, ty)
         } else {
@@ -619,16 +905,7 @@ impl Checker<'_> {
                 Type::Int,
             )
         };
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Builtin(
-                Builtin::RegexCapture {
-                    operation,
-                    known: index.is_some(),
-                },
-                vec![receiver, selector],
-            ),
-        })
+        Ok(capture(operation, ty, receiver, selector))
     }
 }
 

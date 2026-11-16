@@ -3,6 +3,7 @@ import itertools
 import pickle
 import weakref
 from itertools import accumulate
+from operator import add
 
 
 def current():
@@ -11,6 +12,13 @@ def current():
     assert list(accumulate(iterable=(1, 2), func=None, initial=None)) == [1, 3]
     assert list(accumulate(['a', 'b', 'c'])) == ['a', 'ab', 'abc']
     assert list(accumulate((2, 3, 4), lambda a, b: a * b)) == [2, 6, 24]
+    assert list(accumulate([1 << 70, -2, 3], add)) == [1 << 70, (1 << 70) - 2, (1 << 70) + 1]
+
+    class SubtractFrom(int):
+        def __radd__(self, left):
+            return left - int(self)
+
+    assert list(accumulate([5, SubtractFrom(2), 1], add)) == [5, 3, 4]
 
     events = []
     failure = ValueError('source or callback')
@@ -134,6 +142,54 @@ def current():
     assert rebuild.__name__ == '__newobj_ex__'
     assert args == (WithArgs, ([2, 3],), {'initial': 7})
     assert state is None and items is None and pairs is None
+
+    class ReentrantSource:
+        def __init__(self):
+            self.pulls = 0
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            self.pulls += 1
+            if self.pulls == 1:
+                assert next(cursor) == 7
+                return 5
+            if self.pulls == 2:
+                return 7
+            raise StopIteration
+
+    cursor = accumulate(ReentrantSource())
+    assert list(cursor) == [12]
+    assert list(accumulate([None, 4], lambda old, new: (old, new))) == [None, (None, 4)]
+
+    class Reflected(int):
+        def __radd__(self, other):
+            return -int(self) - int(other)
+
+    class Sibling(int):
+        pass
+
+    assert list(accumulate([Reflected(5)], initial=True)) == [True, 6]
+    assert list(accumulate([Reflected(5)], initial=Sibling(2))) == [2, 7]
+    assert list(accumulate([Reflected(5)], initial=2)) == [2, -7]
+
+    class Declines(int):
+        def __add__(self, other):
+            return NotImplemented
+
+    try:
+        list(accumulate([Declines(1), Declines(2)]))
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("declined addition was retried on the underlying integers")
+
+    class Double(accumulate):
+        def __next__(self):
+            return 2 * super().__next__()
+
+    assert list(Double([1, 2, 3])) == [2, 6, 12]
 
     print('accumulate')
 

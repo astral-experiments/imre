@@ -1,10 +1,15 @@
 //! Collects fixed class shapes before nominal type resolution and executable lowering.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use ruff_db::parsed::ParsedModuleRef;
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_expr};
+use ty_python_core::ast_node_ref::AstNodeRef;
 
+use crate::frontend::phase::{Diagnostic, Kind};
 use crate::ir::Type;
 use crate::modules::{
     Binding, DefinitionId, Intrinsic, IntrinsicModule, SourceGraph, SourceModule,
@@ -36,11 +41,73 @@ pub(crate) enum MethodKind {
     Static,
 }
 
-pub(crate) struct Classes {
-    pub(crate) definitions: Vec<Class>,
+/// A physical method pins its indexed parse, including when a placed frame outlives the graph.
+#[derive(Clone)]
+pub(crate) enum MethodSource {
+    Parsed(ParsedModuleRef, AstNodeRef<ast::StmtFunctionDef>),
+    Owned(Arc<ast::StmtFunctionDef>),
+}
+
+impl MethodSource {
+    pub(crate) fn make_mut(&mut self) -> &mut ast::StmtFunctionDef {
+        if let Self::Parsed(parsed, node) = self {
+            *self = Self::Owned(Arc::new(node.node(parsed).clone()));
+        }
+        let Self::Owned(function) = self else {
+            unreachable!()
+        };
+        Arc::make_mut(function)
+    }
+}
+
+impl std::ops::Deref for MethodSource {
+    type Target = ast::StmtFunctionDef;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Parsed(parsed, node) => node.node(parsed),
+            Self::Owned(function) => function,
+        }
+    }
+}
+
+/// A class can bind the same function under its method name and a property name.
+#[derive(Clone)]
+pub(crate) struct ClassMethod {
+    pub(crate) name: ast::Identifier,
+    pub(crate) function: MethodSource,
+}
+
+impl ruff_text_size::Ranged for ClassMethod {
+    fn range(&self) -> ruff_text_size::TextRange {
+        self.function.range
+    }
+}
+
+impl From<ast::StmtFunctionDef> for ClassMethod {
+    fn from(function: ast::StmtFunctionDef) -> Self {
+        Self {
+            name: function.name.clone(),
+            function: MethodSource::Owned(Arc::new(function)),
+        }
+    }
+}
+
+impl std::ops::Deref for ClassMethod {
+    type Target = ast::StmtFunctionDef;
+
+    fn deref(&self) -> &Self::Target {
+        &self.function
+    }
+}
+
+pub(crate) struct Classes<'syntax> {
+    pub(crate) definitions: Vec<Class<'syntax>>,
     /// Data members only need rebindable storage when some source writes that attribute.
     pub(crate) attribute_writes: HashMap<String, HashSet<Type>>,
     pub(crate) exceptions: HashMap<DefinitionId, u32>,
+    pub(crate) registered_classes: HashSet<DefinitionId>,
+    pub(crate) scoped_bases: HashMap<DefinitionId, (&'syntax ast::Expr, &'static str)>,
     pub(crate) exception_declarations: Vec<crate::types::NamedException>,
     pub(crate) ids: HashMap<DefinitionId, usize>,
 }
@@ -58,13 +125,13 @@ pub(crate) struct SkipDecorator {
     pub(crate) reason: ast::Expr,
 }
 
-pub(crate) struct Class {
+pub(crate) struct Class<'syntax> {
     pub(crate) skip_decorators: Vec<SkipDecorator>,
     pub(crate) definition: DefinitionId,
     pub(crate) name: String,
-    pub(crate) node: ast::StmtClassDef,
+    pub(crate) node: Cow<'syntax, ast::StmtClassDef>,
     pub(crate) fields: Vec<Field>,
-    pub(crate) methods: Vec<ast::StmtFunctionDef>,
+    pub(crate) methods: Vec<ClassMethod>,
     /// Field writes required of every override called during construction.
     pub(crate) init_hooks: init_hooks::Hooks,
     /// A base initializer that passes self to Python needs the entire derived layout ready.
@@ -91,7 +158,11 @@ pub(crate) struct Class {
     pub(crate) initializer: Option<usize>,
 }
 
-impl Class {
+impl Class<'_> {
+    pub(crate) fn is_uuid(&self, graph: &SourceGraph) -> bool {
+        self.name == "UUID" && graph.modules[self.definition.module].is_bundled("uuid")
+    }
+
     pub(crate) fn has_literal_hook(&self, name: &str) -> bool {
         self.init_hooks
             .get(name)
@@ -132,7 +203,7 @@ fn empty_slots(name: &str, value: &ast::Expr) -> bool {
     name == "__slots__" && matches!(value, ast::Expr::Tuple(t) if t.elts.is_empty())
 }
 
-impl Classes {
+impl<'syntax> Classes<'syntax> {
     pub(crate) fn has_empty_slots(&self, child: usize) -> bool {
         std::iter::once(&child)
             .chain(&self.definitions[child].bases)
@@ -174,6 +245,9 @@ impl Classes {
 
     /// The entry module may need to execute class bodies even without module globals.
     pub(crate) fn has_class_values(&self, module: usize) -> bool {
+        if self.registered_classes.iter().any(|id| id.module == module) {
+            return true;
+        }
         self.definitions.iter().any(|class| {
             class.definition.module == module && (!class.skip_decorators.is_empty() || class.static_bindings.values().any(|value| {
                 matches!(value, ClassValue::Runtime { .. })
@@ -196,10 +270,21 @@ impl Classes {
         }
     }
 
-    /// Assigns nominal identities in module and source order, independently of imports' aliases.
-    pub(crate) fn collect(graph: &SourceGraph) -> Result<Self, String> {
-        let resolved = exceptions::collect(graph)?;
+    #[cfg(test)]
+    pub(crate) fn collect(graph: &'syntax SourceGraph) -> Result<Self, Diagnostic> {
+        Self::collect_layouts(graph, None)
+    }
+
+    /// Assigns nominal identities in module and source order. A registered binder may
+    /// retain completed declarations when a fixed layout reports its first error.
+    pub(crate) fn collect_layouts(
+        graph: &'syntax SourceGraph,
+        first_layout: Option<&mut Option<Diagnostic>>,
+    ) -> Result<Self, Diagnostic> {
+        let mut resolved = exceptions::collect(graph)?;
+        let mut registered_classes = std::mem::take(&mut resolved.registered);
         let mut source_nodes = Vec::new();
+        let mut scoped_bases = HashMap::new();
         let mut ids = HashMap::new();
         for (module_id, module) in graph.modules.iter().enumerate() {
             for (statement, node) in module.parsed.syntax().body.iter().enumerate() {
@@ -234,11 +319,18 @@ impl Classes {
                             Some((base, intrinsic.scoped_class_base()?))
                         })
                     {
-                        let error = module.error(base, &format!("{name} requires object lowering"));
-                        return Err(graph.require_object_class_layout(error));
+                        if graph.entry_profile.requires_fixed_entry() {
+                            return Err(module
+                                .diagnostic(base, &format!("{name} requires object lowering"))
+                                .classified(Kind::ScopedClassLayout));
+                        }
+                        if module.is_program_source() {
+                            scoped_bases.insert(definition, (base, name));
+                        }
+                        registered_classes.insert(definition);
                     }
                     ids.insert(definition, source_nodes.len());
-                    let mut record = std::borrow::Cow::Borrowed(node);
+                    let mut record = Cow::Borrowed(node);
                     if resolved.layouts.contains(&definition) {
                         // Exception inheritance is resolved above; only the additional fixed
                         // fields and methods take part in record layout and initialization.
@@ -276,11 +368,14 @@ impl Classes {
                 }
             }
         }
-        let nodes = source_nodes
-            .iter()
-            .map(|(def, node)| (*def, node.as_ref()))
-            .collect::<Vec<_>>();
-        let definitions = inheritance::resolve(graph, &nodes, &ids, &resolved)?;
+        let (definitions, registered_classes) = inheritance::resolve(
+            graph,
+            &source_nodes,
+            &mut ids,
+            &resolved,
+            registered_classes,
+            first_layout,
+        )?;
         // An inner class uses the object runtime, but every fixed class must validate first.
         if let Some(error) = graph.class_layout_error.borrow().as_ref() {
             return Err(error.clone());
@@ -299,7 +394,9 @@ impl Classes {
             attribute_writes,
             ids,
             exceptions: resolved.ids,
+            registered_classes,
             exception_declarations: resolved.named,
+            scoped_bases,
         })
     }
 }
@@ -480,24 +577,25 @@ pub(crate) fn defines_pickle_reducer(node: &ast::StmtClassDef) -> bool {
 #[derive(Default)]
 struct DeferredMethodDecorators {
     has_runtime_method: bool,
-    unsupported: Option<String>,
+    unsupported: Option<Diagnostic>,
 }
 
-fn collect_class(
+fn collect_class<'syntax>(
     graph: &SourceGraph,
     module: &SourceModule,
     definition: DefinitionId,
-    node: &ast::StmtClassDef,
+    source: &Cow<'syntax, ast::StmtClassDef>,
     parents: [Option<(usize, &Class)>; 2],
     declarations: &exceptions::Declarations,
     decorators: &mut DeferredMethodDecorators,
-) -> Result<Class, String> {
+) -> Result<Option<Class<'syntax>>, Diagnostic> {
+    let node = source.as_ref();
     let exception_layout = declarations.layouts.contains(&definition);
     let exceptions = &declarations.ids;
     let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
-        return Err(module.error(node, "pickle reducers require the object runtime"));
+        return Err(module.diagnostic(node, "pickle reducers require the object runtime"));
     }
     let http = enums::HttpEnum::bundled(module, node);
     let is_enum = http.is_some() || node.arguments.as_ref().is_some_and(|arguments| {
@@ -529,7 +627,7 @@ fn collect_class(
             true
         }
         _ => {
-            return Err(module.error(
+            return Err(module.diagnostic(
                 node,
                 "class metaclasses and keyword arguments are unsupported",
             ));
@@ -545,10 +643,7 @@ fn collect_class(
         });
     if node.type_params.is_some() {
         graph.needs_object_runtime.set(true);
-        return Err(module.error(node, "class type parameters require the object runtime"));
-    }
-    if is_enum && http.is_none() && !node.decorator_list.is_empty() {
-        return Err(module.error(node, "decorated StrEnum declarations are unsupported"));
+        return Err(module.diagnostic(node, "class type parameters require the object runtime"));
     }
     let mut enum_members = is_enum.then(enums::Members::default);
     if let Some(members) = &mut enum_members {
@@ -566,16 +661,20 @@ fn collect_class(
         };
         skip_decorators.push(skip);
     }
-    let dataclass = if http.is_some() || !skip_decorators.is_empty() {
-        None
-    } else {
-        dataclasses::options(graph, definition.module, node)?
-    };
+    let dataclass =
+        if http.is_some() || !skip_decorators.is_empty() || node.decorator_list.is_empty() {
+            None
+        } else if let Some(options) = dataclasses::options(graph, definition.module, node)? {
+            Some(options)
+        } else {
+            // An ordinary decorator can publish any value in place of the class.
+            return Ok(None);
+        };
     let value_struct = dataclass.is_some_and(|options| options.value_struct);
     if base.is_some_and(|(_, parent)| parent.dataclass.is_some_and(|options| options.value_struct))
         || value_struct && node.arguments.as_ref().is_some_and(|args| !args.is_empty())
     {
-        return Err(module.error(node, "an imre.struct is final and cannot inherit fields"));
+        return Err(module.diagnostic(node, "an imre.struct is final and cannot inherit fields"));
     }
     if value_struct {
         for statement in &node.body {
@@ -586,7 +685,7 @@ fn collect_class(
                 ast::Stmt::Pass(_) => {}
                 ast::Stmt::Expr(stmt) if matches!(&*stmt.value, ast::Expr::StringLiteral(_)) => {}
                 _ => {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         statement,
                         "imre.struct supports required fields and ordinary instance methods",
                     ));
@@ -598,7 +697,7 @@ fn collect_class(
         .then(|| ForwardingInitializer::collect(definition, node, base.map(|(_, c)| c), module))
         .flatten();
     if base.is_some_and(|(_, c)| c.forwarder.is_some()) && forwarder.is_none() {
-        return Err(module.error(
+        return Err(module.diagnostic(
             node,
             "a subclass of a variadic exception must forward a fixed set of constructor parameters",
         ));
@@ -630,30 +729,15 @@ fn collect_class(
                 .dataclass
                 .is_some_and(|b| dataclass.is_none_or(|d| d.frozen != b.frozen)))
     {
-        return Err(module.error(node, "incompatible base for a fixed-layout class"));
+        return Err(module.diagnostic(node, "incompatible base for a fixed-layout class"));
     }
-    let mut methods: Vec<ast::StmtFunctionDef> = Vec::new();
+    let mut methods: Vec<ClassMethod> = Vec::new();
     let mut method_kinds = Vec::new();
-    let mut has_custom_dir = false;
+    let mut needs_object_layout = false;
+    let mut builds_python_namespace = false;
     let mut initializer = None;
     for (ordinal, statement) in node.body.iter().enumerate() {
-        // A type-only method declaration may have a separate runtime signature.
-        let statement = match statement {
-            ast::Stmt::If(guard)
-                if guard
-                    .test
-                    .as_name_expr()
-                    .is_some_and(|test| !class_bindings.contains(test.id.as_str()))
-                    && graph.resolve(definition.module, &guard.test)
-                        == Some(Binding::Intrinsic(Intrinsic::TypeChecking))
-                    && let [otherwise] = guard.elif_else_clauses.as_slice()
-                    && otherwise.test.is_none()
-                    && let [method @ ast::Stmt::FunctionDef(_)] = otherwise.body.as_slice() =>
-            {
-                method
-            }
-            _ => statement,
-        };
+        let statement = graph.runtime_class_item(definition.module, statement);
         // A call through an upcast uses its declared layout. Do not erase an
         // override which could select a different callable at runtime.
         let member = match statement {
@@ -687,16 +771,18 @@ fn collect_class(
                     static_bindings.remove(name);
                 }
                 _ => {
-                    return Err(
-                        module.error(statement, "overriding a fixed class binding is unsupported")
-                    );
+                    return Err(module
+                        .diagnostic(statement, "overriding a fixed class binding is unsupported"));
                 }
             }
         }
         match statement {
             ast::Stmt::Assign(member) if let Some(members) = &mut enum_members => {
-                let name =
-                    members.declare(graph, module, definition.module, member, &class_bindings)?;
+                let Some(name) =
+                    members.declare(graph, module, definition.module, member, &class_bindings)?
+                else {
+                    return Ok(None);
+                };
                 names.insert(name.clone());
                 class_bindings.insert(name);
             }
@@ -712,7 +798,7 @@ fn collect_class(
                         exceptions::alias(graph, definition.module, value, exceptions) =>
             {
                 if !names.insert(name.id.to_string()) {
-                    return Err(module.error(name, "duplicate class binding"));
+                    return Err(module.diagnostic(name, "duplicate class binding"));
                 }
                 abstract_methods.remove(name.id.as_str());
                 class_bindings.insert(name.id.to_string());
@@ -722,27 +808,32 @@ fn collect_class(
                 if !is_enum && (field.value.is_none() || dataclass.is_some()) =>
             {
                 if dataclass.is_some() && !field.simple {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         field,
                         "dataclass fields require an unparenthesized name annotation",
                     ));
                 }
                 let ast::Expr::Name(name) = &*field.target else {
-                    return Err(module.error(field, "a field declaration must annotate one name"));
+                    return Err(
+                        module.diagnostic(field, "a field declaration must annotate one name")
+                    );
                 };
                 let name = name.id.as_str();
                 if name.starts_with("__") {
-                    return Err(module.error(field, "field names starting with '__' are reserved"));
+                    return Err(
+                        module.diagnostic(field, "field names starting with '__' are reserved")
+                    );
                 }
                 if names.contains(name) {
-                    return Err(module.error(field, &format!("duplicate class member {name:?}")));
+                    return Err(
+                        module.diagnostic(field, &format!("duplicate class member {name:?}"))
+                    );
                 }
                 if base
                     .is_some_and(|(_, base)| base.methods.iter().any(|m| m.name.as_str() == name))
                 {
-                    return Err(
-                        module.error(field, "a fixed field cannot replace an inherited method")
-                    );
+                    return Err(module
+                        .diagnostic(field, "a fixed field cannot replace an inherited method"));
                 }
                 let declared_field = dataclasses::field(
                     graph,
@@ -759,14 +850,16 @@ fn collect_class(
                 } else if dataclass.is_some_and(|options| options.slots)
                     && abstract_methods.contains(name)
                 {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         field,
                         "a slot replacing an abstract method requires native class construction",
                     ));
                 }
                 if let Some(index) = fields.iter().position(|inherited| inherited.name == name) {
                     if dataclass.is_none() {
-                        return Err(module.error(node, "an inherited field cannot be redeclared"));
+                        return Err(
+                            module.diagnostic(node, "an inherited field cannot be redeclared")
+                        );
                     }
                     fields[index] = declared_field;
                 } else {
@@ -792,38 +885,56 @@ fn collect_class(
                 }
                 if method.type_params.is_some() {
                     let postponed = imre_ast::future_annotations(&module.parsed.syntax().body);
-                    if crate::dynamic::function_type_params(method, postponed, true, None).is_some()
-                    {
-                        graph.needs_object_runtime.set(true);
+                    use crate::frontend::function_scope::{
+                        TypeParameterScope, type_parameter_scope,
+                    };
+                    match type_parameter_scope(method, postponed, true, None) {
+                        Some(TypeParameterScope::MethodClosure) => {
+                            let name = method.name.to_string();
+                            if !names.insert(name.clone()) {
+                                return Err(module.diagnostic(method, "duplicate class binding"));
+                            }
+                            class_bindings.insert(name);
+                            graph.class_layout_error.borrow_mut().get_or_insert_with(|| {
+                                module.diagnostic(method, "generic method requires a registered type-parameter scope")
+                                    .classified(Kind::ScopedClassLayout)
+                            });
+                            continue;
+                        }
+                        Some(TypeParameterScope::Function) if postponed => {
+                            graph.needs_object_runtime.set(true);
+                        }
+                        _ => {}
                     }
-                    return Err(module.error(method, "method type parameters are unsupported"));
+                    return Err(module.diagnostic(method, "method type parameters are unsupported"));
                 }
                 let name = method.name.as_str();
                 if base.is_some_and(|(_, base)| base.fields.iter().any(|field| field.name == name))
                 {
-                    return Err(
-                        module.error(method, "a method cannot replace an inherited fixed field")
-                    );
+                    return Err(module
+                        .diagnostic(method, "a method cannot replace an inherited fixed field"));
                 }
                 if abstract_method {
                     if name.starts_with("__") && !name.ends_with("__") {
-                        return Err(module
-                            .error(method, "a private abstract method requires name mangling"));
+                        return Err(module.diagnostic(
+                            method,
+                            "a private abstract method requires name mangling",
+                        ));
                     }
-                    if crate::modules::definition_effect(graph, definition.module, method) {
-                        return Err(module.error(
+                    if !crate::modules::inert_defaults(&method.parameters) {
+                        return Err(module.diagnostic(
                             method,
                             "an abstract method default requires executable initialization",
                         ));
                     }
                     if !abc || !method.body.iter().all(|stmt| matches!(stmt, ast::Stmt::Pass(_))
                         || matches!(stmt, ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_) | ast::Expr::EllipsisLiteral(_)))) {
-                        return Err(module.error(method, "an abstract record method must be a declaration on an ABC"));
+                        return Err(module.diagnostic(method, "an abstract record method must be a declaration on an ABC"));
                     }
                     abstract_methods.insert(name.to_owned());
                     if !graph.is_abstract_context_manager(definition) {
                         if !names.insert(name.to_owned()) {
-                            return Err(module.error(method, "duplicate abstract method"));
+                            return Err(module.diagnostic(method, "duplicate abstract method"));
                         }
                         class_bindings.insert(name.to_owned());
                         continue;
@@ -833,8 +944,10 @@ fn collect_class(
                 }
                 if name == "__hash__" {
                     if hash.is_some() || !dataclass.is_some_and(|d| d.frozen && d.eq) {
-                        return Err(module
-                            .error(method, "a custom hash requires a frozen equality dataclass"));
+                        return Err(module.diagnostic(
+                            method,
+                            "a custom hash requires a frozen equality dataclass",
+                        ));
                     }
                     hash = Some(method);
                     names.insert(name.to_owned());
@@ -842,34 +955,43 @@ fn collect_class(
                     continue;
                 }
                 if is_enum && (name.starts_with('_') || matches!(name, "name" | "value")) {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         method,
                         "StrEnum methods cannot override member metadata or special behavior",
                     ));
                 }
-                if name == "__dir__" {
-                    // The object runtime binds the class's directory hook. Continue validating
-                    // the other class members before switching to that provider.
-                    let error =
-                        module.error(method, "custom __dir__ requires native class construction");
+                if matches!(name, "__dir__" | "__next__") {
+                    // These hooks use the Python class namespace. Continue checking the
+                    // other declarations before selecting its object representation.
                     graph
-                        .object_builtin_errors
+                        .class_layout_error
                         .borrow_mut()
-                        .insert(error.clone());
-                    graph.class_layout_error.borrow_mut().get_or_insert(error);
-                    has_custom_dir = true;
+                        .get_or_insert_with(|| {
+                            module
+                                .diagnostic(
+                                    method,
+                                    &format!("custom {name} requires native class construction"),
+                                )
+                                .classified(Kind::ScopedClassLayout)
+                        });
+                    needs_object_layout = true;
                     class_bindings.insert(name.to_owned());
                     continue;
                 }
                 if name == "__del__" && graph.command_startup.is_some() {
-                    let error = module.error(method, "class finalizers require the object runtime");
-                    graph.class_layout_error.replace(Some(error.clone()));
-                    return Err(error);
+                    let error =
+                        module.diagnostic(method, "class finalizers require the object runtime");
+                    return Err(error.classified(Kind::ClassLayout));
                 }
-                let unary_protocol = matches!(
-                    name,
-                    "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
-                ) || (mapping && name == "__len__");
+                let async_iterator = name == "__aiter__"
+                    && method.is_async
+                    && imre_ast::code_flags::is_generator(&method.body);
+                let unary_protocol = async_iterator
+                    || matches!(
+                        name,
+                        "__str__" | "__repr__" | "__bool__" | "__index__" | "__iter__" | "__copy__"
+                    )
+                    || (mapping && name == "__len__");
                 if name.starts_with("__")
                     && !matches!(
                         name,
@@ -881,9 +1003,8 @@ fn collect_class(
                     && !(mapping && name == "__contains__")
                     && !(name == "__post_init__" && dataclass.is_some())
                 {
-                    return Err(
-                        module.error(method, "unsupported special method on a fixed-layout class")
-                    );
+                    return Err(module
+                        .diagnostic(method, "unsupported special method on a fixed-layout class"));
                 }
                 let kind = if abstract_method {
                     MethodKind::Instance
@@ -898,11 +1019,14 @@ fn collect_class(
                 {
                     // The public decorator can wrap even a direct method call and evaluates
                     // its arguments while the class namespace is being constructed.
-                    let error = module.error(
+                    let error = module.diagnostic(
                         decorator,
                         "unittest method skips require native class construction",
                     );
-                    graph.class_layout_error.borrow_mut().get_or_insert(error);
+                    graph
+                        .class_layout_error
+                        .borrow_mut()
+                        .get_or_insert(error.classified(Kind::ClassLayout));
                     graph.require_fallback_calls();
                     decorators.has_runtime_method = true;
                     MethodKind::Instance
@@ -925,14 +1049,16 @@ fn collect_class(
                                 graph
                                     .class_layout_error
                                     .borrow_mut()
-                                    .get_or_insert(error.clone());
+                                    .get_or_insert(error.clone().classified(Kind::ClassLayout));
                                 graph.check_method_factories.set(true);
                                 decorators.has_runtime_method = true;
                             }
                             decorators.unsupported.get_or_insert(error);
                             if !names.insert(name.to_owned()) {
-                                return Err(module
-                                    .error(method, &format!("duplicate class member {name:?}")));
+                                return Err(module.diagnostic(
+                                    method,
+                                    &format!("duplicate class member {name:?}"),
+                                ));
                             }
                             class_bindings.insert(name.to_owned());
                             continue;
@@ -941,7 +1067,7 @@ fn collect_class(
                     }
                 };
                 if name == "__call__" && kind != MethodKind::Instance {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         method,
                         "a fixed callable record requires an instance __call__ method",
                     ));
@@ -951,7 +1077,9 @@ fn collect_class(
                         || method.parameters.len() != 3
                         || method.parameters.posonlyargs.len() + method.parameters.args.len() != 3)
                 {
-                    return Err(module.error(method, "__setitem__ requires self, key and value"));
+                    return Err(
+                        module.diagnostic(method, "__setitem__ requires self, key and value")
+                    );
                 }
                 if kind == MethodKind::PropertySetter {
                     let mut accessors = methods
@@ -966,12 +1094,13 @@ fn collect_class(
                             })
                     });
                     if !getter || accessors.next().is_some() {
-                        return Err(
-                            module.error(method, "a property setter needs its preceding getter")
-                        );
+                        return Err(module
+                            .diagnostic(method, "a property setter needs its preceding getter"));
                     }
                 } else if !names.insert(name.to_owned()) {
-                    return Err(module.error(method, &format!("duplicate class member {name:?}")));
+                    return Err(
+                        module.diagnostic(method, &format!("duplicate class member {name:?}"))
+                    );
                 }
                 let first = method
                     .parameters
@@ -993,7 +1122,7 @@ fn collect_class(
                 if let Some(receiver) = receiver
                     && first.is_none_or(|parameter| parameter.name().as_str() != receiver)
                 {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         method,
                         &format!(
                             "this method's first positional parameter must be named {receiver:?}"
@@ -1003,14 +1132,14 @@ fn collect_class(
                 if kind == MethodKind::Property
                     && (method.parameters.len() != 1 || first.unwrap().default.is_some())
                 {
-                    return Err(module.error(method, "a property getter must take only self"));
+                    return Err(module.diagnostic(method, "a property getter must take only self"));
                 }
                 if kind == MethodKind::PropertySetter
                     && (method.parameters.posonlyargs.len() + method.parameters.args.len() != 2
                         || method.parameters.len() != 2)
                 {
                     return Err(
-                        module.error(method, "a property setter must take self and a value")
+                        module.diagnostic(method, "a property setter must take self and a value")
                     );
                 }
                 if (unary_protocol || name == "__post_init__")
@@ -1018,45 +1147,75 @@ fn collect_class(
                         || method.parameters.len() != 1
                         || first.is_none_or(|parameter| parameter.default.is_some()))
                 {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         method,
                         &format!("{name} must be an instance method taking only self"),
                     ));
                 }
+                builds_python_namespace |= async_iterator;
                 if name == "__init__" {
                     if kind != MethodKind::Instance {
-                        return Err(module.error(method, "__init__ must be an instance method"));
+                        return Err(
+                            module.diagnostic(method, "__init__ must be an instance method")
+                        );
                     }
                     initializer = Some(methods.len());
                 }
-                let mut method = method.clone();
+                let mut binding = if matches!(source, Cow::Borrowed(_)) {
+                    ClassMethod {
+                        name: method.name.clone(),
+                        function: MethodSource::Parsed(
+                            module.parsed.clone(),
+                            AstNodeRef::new(&module.parsed, method),
+                        ),
+                    }
+                } else {
+                    method.clone().into()
+                };
                 if forwarder.is_some() {
-                    mangle_fields(node.name.as_str(), &mut method, |_| true);
+                    mangle_fields(node.name.as_str(), binding.function.make_mut(), |_| true);
                 }
-                methods.push(method);
+                methods.push(binding);
                 method_kinds.push(kind);
                 class_bindings.insert(name.to_owned());
             }
             ast::Stmt::Assign(assign)
                 if let [ast::Expr::Name(name)] = assign.targets.as_slice()
                     && !class_bindings.contains("property")
-                    && let Some((read, write)) =
+                    && let Some(accessors) =
                         property_accessors(graph, definition.module, &assign.value) =>
             {
                 if !names.insert(name.id.to_string()) {
-                    return Err(module.error(name, "duplicate property binding"));
+                    return Err(module.diagnostic(name, "duplicate property binding"));
                 }
-                for (accessor, kind, arity) in [
-                    (Some(read), MethodKind::Property, 1),
-                    (write, MethodKind::PropertySetter, 2),
-                ] {
-                    let Some(accessor) = accessor else { continue };
+                for (index, operand) in accessors.iter().enumerate() {
+                    let Some(accessor) = operand.as_name_expr() else {
+                        // Reading a write-only property raises through the Python descriptor.
+                        builds_python_namespace |= index == 0;
+                        continue;
+                    };
+                    let accessor = accessor.id.as_str();
+                    let (kind, arity) = if index == 0 {
+                        (MethodKind::Property, 1)
+                    } else {
+                        (MethodKind::PropertySetter, 2)
+                    };
                     let Some((method, _)) = methods
                         .iter()
                         .zip(&method_kinds)
                         .find(|(m, k)| m.name.as_str() == accessor && **k == MethodKind::Instance)
                     else {
-                        return Err(module.error(
+                        if !class_bindings.contains(accessor)
+                            && let Some(Binding::Definition(id)) =
+                                graph.resolve(definition.module, operand)
+                            && graph.modules[id.module].parsed.syntax().body[id.statement]
+                                .is_function_def_stmt()
+                        {
+                            // The class captures the existing function from its defining module.
+                            builds_python_namespace = true;
+                            continue;
+                        }
+                        return Err(module.diagnostic(
                             assign,
                             "property accessors must be preceding instance methods",
                         ));
@@ -1065,14 +1224,15 @@ fn collect_class(
                         || method.parameters.posonlyargs.len() + method.parameters.args.len()
                             != arity
                     {
-                        return Err(module.error(
+                        return Err(module.diagnostic(
                             assign,
                             "property accessor has the wrong number of positional parameters",
                         ));
                     }
-                    let mut alias = method.clone();
-                    alias.name = ast::Identifier::new(name.id.as_str(), name.range);
-                    methods.push(alias);
+                    methods.push(ClassMethod {
+                        name: ast::Identifier::new(name.id.as_str(), name.range),
+                        function: method.function.clone(),
+                    });
                     method_kinds.push(kind);
                 }
                 class_bindings.insert(name.id.to_string());
@@ -1116,14 +1276,16 @@ fn collect_class(
                 let protocol = context_method(member);
                 let slots = empty_slots(member, &assign.value);
                 if !names.insert(member.to_owned())
-                    || (member.starts_with("__") && !protocol && !slots)
+                    || (member.starts_with("__") && member != "__doc__" && !protocol && !slots)
                     || base.is_some_and(|(_, b)| {
                         b.fields.iter().any(|f| f.name == member)
                             || (!protocol && b.methods.iter().any(|m| m.name.as_str() == member))
                             || b.exception_aliases.contains_key(member)
                     })
                 {
-                    return Err(module.error(name, "duplicate or reserved static class binding"));
+                    return Err(
+                        module.diagnostic(name, "duplicate or reserved static class binding")
+                    );
                 }
                 class_bindings.insert(member.to_owned());
                 static_bindings.insert(name.id.to_string(), binding);
@@ -1134,23 +1296,35 @@ fn collect_class(
                         exceptions::alias(graph, definition.module, &assign.value, exceptions) =>
             {
                 if !names.insert(name.id.to_string()) {
-                    return Err(module.error(name, "duplicate class binding"));
+                    return Err(module.diagnostic(name, "duplicate class binding"));
                 }
                 class_bindings.insert(name.id.to_string());
                 exception_aliases.insert(name.id.to_string(), target);
+            }
+            ast::Stmt::Assign(assign)
+                if !graph.entry_profile.requires_fixed_entry()
+                    && dataclass.is_none()
+                    && !exception_layout
+                    && assign.targets.len() > 1
+                    && assign.targets.iter().all(|target| target.is_name_expr()) =>
+            {
+                // A chained class assignment publishes the same evaluated value under each name.
+                return Ok(None);
             }
             ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
             ast::Stmt::ClassDef(nested) if !is_enum && dataclass.is_none() && !exception_layout => {
                 let name = nested.name.as_str();
                 if !names.insert(name.to_owned()) {
-                    return Err(module.error(nested, "duplicate class binding"));
+                    return Err(module.diagnostic(nested, "duplicate class binding"));
                 }
                 class_bindings.insert(name.to_owned());
                 graph
                     .class_layout_error
                     .borrow_mut()
                     .get_or_insert_with(|| {
-                        module.error(nested, "nested classes require native class construction")
+                        module
+                            .diagnostic(nested, "nested classes require native class construction")
+                            .classified(Kind::ClassLayout)
                     });
             }
             ast::Stmt::Pass(_) => {}
@@ -1166,15 +1340,25 @@ fn collect_class(
             {
                 // Class layout cannot select a method until the class suite runs.
                 // The object emitter evaluates the test and binds only the chosen definitions.
-                let error = module.error(
+                let error = module.diagnostic(
                     branch,
                     "conditional method definitions require native class construction",
                 );
-                graph.class_layout_error.replace(Some(error.clone()));
-                return Err(error);
+                return Err(error.classified(Kind::ClassLayout));
+            }
+            ast::Stmt::Assign(assign)
+                if module.bundled
+                    && !graph.entry_profile.requires_fixed_entry()
+                    && matches!(assign.targets.as_slice(), [ast::Expr::Name(_)])
+                    && let ast::Expr::Name(value) = assign.value.as_ref()
+                    && class_bindings.contains(value.id.as_str()) =>
+            {
+                return Err(module
+                    .diagnostic(value, "class namespace aliases require object lowering")
+                    .classified(Kind::ScopedClassLayout));
             }
             _ => {
-                return Err(module.error(
+                return Err(module.diagnostic(
                     statement,
                     "class bodies support field declarations, plain data assignments, methods, pass, and docstrings; annotated field defaults require @dataclass",
                 ));
@@ -1203,13 +1387,13 @@ fn collect_class(
             _ => false,
         })
     {
-        return Err(module.error(node, "a dataclass-generated override of an abstract method requires native class construction"));
+        return Err(module.diagnostic(node, "a dataclass-generated override of an abstract method requires native class construction"));
     }
     let mut method_origins = vec![definition; methods.len()];
     if let Some(method) = hash
         && !record_hash::toml_fields(method, &fields, graph, definition.module)
     {
-        return Err(module.error(
+        return Err(module.diagnostic(
             method,
             "a frozen custom hash must hash a TOML serialization of its exact ordered JSON fields",
         ));
@@ -1235,15 +1419,15 @@ fn collect_class(
             }
         }
     }
-    if !is_enum
-        && dataclass.is_none()
-        && let Some(init) = initializer
-    {
+    let mut open_parameter_field = false;
+    let constructor_fields = !is_enum && dataclass.is_none();
+    if constructor_fields && let Some(init) = initializer {
         let infer = fields.len() == inherited_fields.len();
-        inheritance::annotated_fields(graph, definition.module, &mut methods[init], &mut fields);
+        inheritance::annotated_fields(graph, definition.module, &methods[init], &mut fields);
         if infer {
             init_mappings::infer(graph, definition.module, init, &mut methods, &mut fields);
-            inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
+            open_parameter_field =
+                inheritance::infer_fields(graph, definition.module, &methods[init], &mut fields);
             // A write to inherited or local class data creates an instance shadow.
             fields.retain(|f| {
                 !matches!(
@@ -1257,30 +1441,32 @@ fn collect_class(
         .iter()
         .any(|field| static_bindings.contains_key(&field.name))
     {
-        return Err(module.error(
+        return Err(module.diagnostic(
             node,
             "an instance field cannot shadow a fixed class binding",
         ));
     }
     if value_struct && fields.is_empty() {
-        return Err(module.error(node, "imre.struct needs at least one field"));
+        return Err(module.diagnostic(node, "imre.struct needs at least one field"));
     }
     let generated_initializer =
         initializer.is_none() && dataclass.is_some_and(|options| options.init);
     let initializer = if generated_initializer {
         let index = methods.len();
-        methods.push(dataclasses::initializer(module, node, &fields)?);
+        methods.push(dataclasses::initializer(module, node, &fields)?.into());
         method_kinds.push(MethodKind::Instance);
         method_origins.push(definition);
         Some(index)
     } else if is_enum {
         if enum_members.as_ref().unwrap().values.is_empty() {
-            return Err(module.error(node, "a StrEnum requires at least one declared member"));
+            return Err(module.diagnostic(node, "a StrEnum requires at least one declared member"));
         }
         None
     } else {
         if dataclass.is_some_and(|options| options.frozen) {
-            return Err(module.error(node, "frozen dataclasses require a generated initializer"));
+            return Err(
+                module.diagnostic(node, "frozen dataclasses require a generated initializer")
+            );
         }
         if initializer.is_some() {
             initializer
@@ -1295,12 +1481,12 @@ fn collect_class(
             Some(index)
         } else if fields.is_empty() {
             let index = methods.len();
-            methods.push(dataclasses::initializer(module, node, &[])?);
+            methods.push(dataclasses::initializer(module, node, &[])?.into());
             method_kinds.push(MethodKind::Instance);
             method_origins.push(definition);
             Some(index)
         } else {
-            return Err(module.error(
+            return Err(module.diagnostic(
                 node,
                 "a fixed class requires an explicit or generated __init__ method",
             ));
@@ -1327,8 +1513,10 @@ fn collect_class(
                         || static_bindings.contains_key(name)
                         || exception_aliases.contains_key(name)
                     {
-                        return Err(module
-                            .error(node, "a mixin method conflicts with a fixed class member"));
+                        return Err(module.diagnostic(
+                            node,
+                            "a mixin method conflicts with a fixed class member",
+                        ));
                     }
                 }
                 methods.push(method.clone());
@@ -1350,7 +1538,7 @@ fn collect_class(
                 field.name == "_abc_impl" && matches!(field.default, Some(FieldDefault::Scalar(_)))
             }))
     {
-        return Err(module.error(
+        return Err(module.diagnostic(
             node,
             "the ABCMeta registry shadows the _abc_impl class binding",
         ));
@@ -1372,7 +1560,7 @@ fn collect_class(
         if names.contains(name) {
             let actual = hook_writes(name, Some(expected));
             if actual.transpose()?.as_ref() != Some(&expected.writes) {
-                return Err(module.error(
+                return Err(module.diagnostic(
                     node,
                     "an initializer hook override must initialize the same fields",
                 ));
@@ -1384,14 +1572,18 @@ fn collect_class(
     if let Some(initializer) = initializer
         && method_origins[initializer] == definition
         // An object-backed class can create new instance fields in its initializer.
-        && !has_custom_dir
+        && !needs_object_layout
         // A proven forwarding exception constructor writes each field through its plan.
         && forwarder.is_none()
     {
+        if open_parameter_field && fields.is_empty() && base.is_none() && !exception_layout {
+            return Ok(None);
+        }
         init_exposes_self |= check_initializer(
             module,
             &methods[initializer],
             InitializerFields {
+                constructor_fields,
                 declared: &fields,
                 bindings: &static_bindings,
                 inherited: if generated_initializer {
@@ -1417,14 +1609,18 @@ fn collect_class(
             |name| hook_writes(name, None),
         )?;
     }
-    Ok(Class {
+    // Finish validating the declaration before constructing its Python namespace.
+    if builds_python_namespace {
+        return Ok(None);
+    }
+    Ok(Some(Class {
         definition,
         skip_decorators,
         forwarder,
         name: node.name.as_str().to_owned(),
         init_hooks,
         init_exposes_self,
-        node: node.clone(),
+        node: source.clone(),
         fields,
         toml_hash: hash.is_some(),
         methods,
@@ -1441,7 +1637,7 @@ fn collect_class(
         static_bindings,
         generated_initializer,
         initializer,
-    })
+    }))
 }
 
 /// Recognize a fixed property declared from locally named accessors.
@@ -1449,7 +1645,7 @@ pub(crate) fn property_accessors<'a>(
     graph: &SourceGraph,
     module: usize,
     value: &'a ast::Expr,
-) -> Option<(&'a str, Option<&'a str>)> {
+) -> Option<&'a [ast::Expr]> {
     let ast::Expr::Call(call) = value else {
         return None;
     };
@@ -1459,13 +1655,12 @@ pub(crate) fn property_accessors<'a>(
     {
         return None;
     }
-    match call.arguments.args.as_ref() {
-        [ast::Expr::Name(get)] => Some((get.id.as_str(), None)),
-        [ast::Expr::Name(get), ast::Expr::Name(set)] => {
-            Some((get.id.as_str(), Some(set.id.as_str())))
-        }
-        _ => None,
-    }
+    let args = call.arguments.args.as_ref();
+    ((1..=2).contains(&args.len())
+        && args
+            .iter()
+            .all(|arg| arg.is_name_expr() || arg.is_none_literal_expr()))
+    .then_some(args)
 }
 
 /// Resolve declarations whose descriptor cannot bind an instance: a sealed
@@ -1544,19 +1739,20 @@ pub(crate) fn method_kind(
     module_id: usize,
     method: &ast::StmtFunctionDef,
     class_names: &HashSet<String>,
-) -> Result<MethodKind, String> {
+) -> Result<MethodKind, Diagnostic> {
     let module = &graph.modules[module_id];
-    let unsupported = |error: String| {
-        if graph.command_startup.is_some() {
-            graph.class_layout_error.replace(Some(error.clone()));
-        }
-        Err(error)
+    let unsupported = |error: Diagnostic| {
+        Err(if graph.command_startup.is_some() {
+            error.classified(Kind::ClassLayout)
+        } else {
+            error
+        })
     };
     let [decorator] = method.decorator_list.as_slice() else {
         return if method.decorator_list.is_empty() {
             Ok(MethodKind::Instance)
         } else {
-            unsupported(module.error(method, "method decorators cannot be stacked"))
+            unsupported(module.diagnostic(method, "method decorators cannot be stacked"))
         };
     };
     if graph.resolve(module_id, &decorator.expression)
@@ -1590,13 +1786,31 @@ pub(crate) fn method_kind(
     {
         return Ok(MethodKind::PropertySetter);
     }
-    unsupported(module.error(
+    unsupported(module.diagnostic(
         decorator,
         "unsupported method decorator on a fixed-layout class",
     ))
 }
 
+pub(crate) fn receiver_field<'a>(expr: &'a ast::Expr, receiver: &str) -> Option<&'a str> {
+    let attr = expr.as_attribute_expr()?;
+    (attr.value.as_name_expr()?.id == receiver).then(|| attr.attr.as_str())
+}
+
+/// An annotated store contributes to the fixed constructor only for a direct receiver field.
+pub(crate) fn initializer_assignment<'s>(
+    initializer: &ast::StmtFunctionDef,
+    statement: &'s ast::Stmt,
+) -> Option<(&'s [ast::Expr], &'s ast::Expr)> {
+    if let ast::Stmt::AnnAssign(assignment) = statement {
+        let receiver = initializer.parameters.iter_non_variadic_params().next()?;
+        receiver_field(&assignment.target, receiver.name().as_str())?;
+    }
+    imre_ast::assignment_parts(statement)
+}
+
 struct InitializerFields<'a> {
+    constructor_fields: bool,
     declared: &'a [Field],
     exposes_self: bool,
     inherited: &'a [Field],
@@ -1615,6 +1829,7 @@ fn check_initializer(
     lookup: impl Fn(&str) -> Option<Result<Vec<String>, String>>,
 ) -> Result<bool, String> {
     let InitializerFields {
+        constructor_fields,
         declared: fields,
         exposes_self: base_exposes_self,
         inherited,
@@ -1640,6 +1855,22 @@ fn check_initializer(
     let mut called_super = false;
     let mut called_exception_base = false;
     for (index, statement) in initializer.body.iter().enumerate() {
+        // A fully initialized receiver can run ordinary methods and conditional calls.
+        // Keep receiver writes and explicit initialization under the layout checks below.
+        if !exception_layout
+            && (matches!(statement, ast::Stmt::If(_) | ast::Stmt::Try(_))
+                || init_hooks::called_method(statement, receiver).is_some())
+            && (inherited.is_empty() || called_super)
+            && declared.is_subset(&initialized)
+            && !ruff_python_ast::helpers::any_over_body(&initializer.body[index..], |expr| {
+                matches!(expr, ast::Expr::Attribute(attr) if attr.ctx != ast::ExprContext::Load || attr.attr.as_str() == "__init__")
+                    || matches!(expr, ast::Expr::Name(name) if name.ctx != ast::ExprContext::Load && name.id == receiver)
+            })
+        {
+            let mut exposed = SelfUse(receiver, None, &initialized);
+            exposed.visit_body(&initializer.body[index..]);
+            return Ok(exposed.1.is_some());
+        }
         if index + 1 == initializer.body.len()
             && (inherited.is_empty() || called_super)
             && let ast::Stmt::Expr(s) = statement
@@ -1714,9 +1945,16 @@ fn check_initializer(
             );
             continue;
         }
-        let assignment = match statement {
-            ast::Stmt::Assign(assignment) => assignment,
-            ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {
+        let (written_targets, value) = match statement {
+            _ if (constructor_fields || statement.is_assign_stmt())
+                && let Some(parts) = initializer_assignment(initializer, statement) =>
+            {
+                parts
+            }
+            ast::Stmt::Expr(value)
+                if value.value.is_string_literal_expr()
+                    || value.value.is_ellipsis_literal_expr() =>
+            {
                 continue;
             }
             ast::Stmt::Expr(value)
@@ -1782,9 +2020,9 @@ fn check_initializer(
             }
         };
         let mut self_use = SelfUse(receiver, None, &initialized);
-        self_use.visit_expr(&assignment.value);
+        self_use.visit_expr(value);
         if let Some(expression) = self_use.1 {
-            if let Some(name) = init_hooks::receiver_call(&assignment.value, receiver, true)
+            if let Some(name) = init_hooks::receiver_call(value, receiver, true)
                 && matches!(lookup(name), Some(Ok(writes)) if writes.is_empty())
             {
                 hooks.entry(name.to_owned()).or_default();
@@ -1796,7 +2034,7 @@ fn check_initializer(
             }
         }
         let mut targets = Vec::new();
-        for target in &assignment.targets {
+        for target in written_targets {
             initializer_targets(target, &mut targets);
         }
         for target in targets {
@@ -1914,32 +2152,10 @@ impl<'a> Visitor<'a> for SelfUse<'a, '_> {
         }
         // A comprehension target named self is distinct from the incomplete
         // receiver. Its leftmost iterable still belongs to the enclosing scope.
-        let clauses = match expression {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        fn binds_self(target: &ast::Expr, receiver: &str) -> bool {
-            match target {
-                ast::Expr::Name(name) => name.id == receiver,
-                ast::Expr::Tuple(value) => {
-                    value.elts.iter().any(|target| binds_self(target, receiver))
-                }
-                ast::Expr::List(value) => {
-                    value.elts.iter().any(|target| binds_self(target, receiver))
-                }
-                ast::Expr::Starred(value) => binds_self(&value.value, receiver),
-                _ => false,
-            }
-        }
-        if let Some(clauses) = clauses
-            && clauses
-                .iter()
-                .any(|clause| binds_self(&clause.target, self.0))
+        if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expression)
+            && plan.binds_name(self.0)
         {
-            self.visit_expr(&clauses[0].iter);
+            self.visit_expr(plan.outer);
             return;
         }
         if matches!(expression, ast::Expr::Name(name) if name.id == self.0) {

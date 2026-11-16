@@ -99,7 +99,11 @@ impl Reads<'_> {
 impl<'ast> Visitor<'ast> for Reads<'_> {
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
         match expr {
-            ast::Expr::Name(name) if name.ctx == ast::ExprContext::Load => {
+            ast::Expr::Name(name)
+                if name.ctx == ast::ExprContext::Load
+                    && !matches!(self.graph.modules[self.owner].bindings.get(name.id.as_str()),
+                        Some(Binding::Definition(id)) if self.graph.builtin_before_function(self.owner, expr, *id)) =>
+            {
                 self.name(self.owner, name.id.as_str())
             }
             ast::Expr::Attribute(attr) if attr.ctx == ast::ExprContext::Load => {

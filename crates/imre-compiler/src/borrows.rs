@@ -24,43 +24,37 @@ pub(crate) fn analyze(module: &Module, targets: &Targets) -> Vec<FunctionBorrows
     let private = private::analyze(module);
     let (preserves, initializes) = summaries(module, true, targets, &private);
     let (readonly, readonly_initializes) = summaries(module, false, targets, &private);
-    module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .zip(&private)
-        .map(|(function, private)| {
-            let mut facts = if preserves_edges(
-                function,
-                &preserves,
-                &initializes,
-                false,
-                true,
-                targets,
-                private,
-            ) {
-                local_roots(function, &module.types, &module.functions)
-            } else {
-                FunctionBorrows {
-                    rooted: vec![false; function.locals.len()],
-                    locals: vec![false; function.locals.len()],
-                    length_roots: vec![None; function.locals.len()],
-                }
-            };
-            if preserves_edges(
-                function,
-                &readonly,
-                &readonly_initializes,
-                false,
-                false,
-                targets,
-                private,
-            ) {
-                facts.length_roots = length_roots(function, &facts, &module.types);
+    let mut result = Vec::with_capacity(private.len());
+    for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
+        // Named callees have settled summaries. Entry is outside the call graph.
+        let safe = |summaries: &[bool], initializers: &[bool], append| {
+            summaries.get(id).copied().unwrap_or_else(|| {
+                preserves_edges(
+                    function,
+                    summaries,
+                    initializers,
+                    false,
+                    append,
+                    targets,
+                    &private[id],
+                )
+            })
+        };
+        let mut facts = if safe(&preserves, &initializes, true) {
+            local_roots(function, &module.types, &module.functions)
+        } else {
+            FunctionBorrows {
+                rooted: vec![false; function.locals.len()],
+                locals: vec![false; function.locals.len()],
+                length_roots: vec![None; function.locals.len()],
             }
-            facts
-        })
-        .collect()
+        };
+        if safe(&readonly, &readonly_initializes, false) {
+            facts.length_roots = length_roots(function, &facts, &module.types);
+        }
+        result.push(facts);
+    }
+    result
 }
 
 /// Appending preserves element owners. Incoming lengths and buffers also stay
@@ -71,8 +65,7 @@ fn summaries(
     targets: &Targets,
     private: &[Vec<bool>],
 ) -> (Vec<bool>, Vec<bool>) {
-    // Unknown callees and unexpected recursive cycles retain ordinary owners.
-    // The checked call graph is acyclic, so proving upward loses no precision.
+    // Unknown callees and recursive cycles retain ordinary owners.
     let mut preserves = vec![false; module.functions.len()];
     let mut initializes = preserves.clone();
     loop {
@@ -409,9 +402,11 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions,
             entry: function(Vec::new(), Vec::new(), Vec::new()),
         }
@@ -516,7 +511,7 @@ mod tests {
         assert!(facts[2].locals[2]);
         assert!(facts[2].length_roots.iter().all(Option::is_none));
 
-        module.functions[1].body = vec![Statement::SetItem(
+        module.functions[1].body = vec![Statement::assign_item(
             Expr::local(0, list),
             integer.clone(),
             integer,
@@ -559,7 +554,7 @@ mod tests {
         let initializer = function(
             vec![0, 1],
             vec![ty; 2],
-            vec![Statement::SetField(
+            vec![Statement::set_field(
                 Expr::local(0, ty),
                 0,
                 Expr::local(1, ty),
@@ -629,7 +624,7 @@ mod tests {
         let mutating = function(
             vec![0],
             vec![ty],
-            vec![Statement::SetField(
+            vec![Statement::set_field(
                 Expr::local(0, ty),
                 0,
                 Expr::local(0, ty),
@@ -990,12 +985,12 @@ def total(rows: list[Row], fail: bool) -> int:
         let read = Statement::Expr(sequence_read(0, 2, ty));
         let inner = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), Statement::Break],
+            vec![read.clone(), Statement::Break(None)],
             Vec::new(),
         );
         let outer = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), inner, Statement::Break],
+            vec![read.clone(), inner, Statement::Break(None)],
             Vec::new(),
         );
         module.functions.push(function(
@@ -1029,12 +1024,12 @@ def total(rows: list[Row], fail: bool) -> int:
         let read = Statement::Expr(length(0, Type::ListInt));
         let inner = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), Statement::Break],
+            vec![read.clone(), Statement::Break(None)],
             Vec::new(),
         );
         let outer = Statement::While(
             Expr::local(1, Type::Bool),
-            vec![read.clone(), inner, Statement::Break],
+            vec![read.clone(), inner, Statement::Break(None)],
             Vec::new(),
         );
         let function = function(
@@ -1072,7 +1067,7 @@ def total(rows: list[Row], fail: bool) -> int:
                             reset,
                             Statement::Expr(length(1, ty)),
                             Statement::Expr(sequence_read(1, 3, ty)),
-                            Statement::Break,
+                            Statement::Break(None),
                         ],
                         Vec::new(),
                     ),

@@ -1,5 +1,4 @@
-//! Contexts own shallow bindings. Copying a context shares its map root; the first
-//! write detaches it without copying any Python value.
+//! Contexts own shallow bindings. A copy shares its map until a binding changes.
 use super::exceptions::{Error, Kind};
 use super::words::{OwnedWord, WordKind};
 use super::{Object, Storage, StorageCell, Str, finish, object, values};
@@ -7,7 +6,29 @@ use crate::StrOwner;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::hash::Hash;
 use std::rc::Rc;
+
+/// Update a binding and return its previous owner for the token. A snapshot
+/// can keep its map when the replacement denotes the very same stored value.
+pub(crate) fn replace_context_binding<K: Eq + Hash + Clone, V: Clone>(
+    root: &mut Rc<HashMap<K, V>>,
+    key: K,
+    value: Option<V>,
+    same: impl FnOnce(&V, &V) -> bool,
+) -> Option<V> {
+    if Rc::strong_count(root) > 1
+        && let Some(new) = &value
+        && root.get(&key).is_some_and(|old| same(old, new))
+    {
+        return value;
+    }
+    let bindings = Rc::make_mut(root);
+    match value {
+        Some(value) => bindings.insert(key, value),
+        None => bindings.remove(&key),
+    }
+}
 
 #[derive(Clone)]
 struct Binding {
@@ -34,16 +55,15 @@ impl State {
             .get(&(key as usize))
             .map(|b| b.value.clone())
     }
-    fn replace(&self, key: crate::ObjectOwner, value: Option<OwnedWord>) -> Option<OwnedWord> {
-        let id = crate::ObjectOwner::as_ptr(&key) as usize;
-        let old = {
-            let mut root = self.bindings.borrow_mut();
-            let bindings = Rc::make_mut(&mut root);
-            match value {
-                Some(value) => bindings.insert(id, Binding { _key: key, value }),
-                None => bindings.remove(&id),
-            }
-        };
+    fn replace(&self, key: &crate::ObjectOwner, value: Option<OwnedWord>) -> Option<OwnedWord> {
+        let id = crate::ObjectOwner::as_ptr(key) as usize;
+        let binding = value.map(|value| Binding {
+            _key: key.clone(),
+            value,
+        });
+        let old = replace_context_binding(&mut self.bindings.borrow_mut(), id, binding, |a, b| {
+            a.value.kind == b.value.kind && a.value.word == b.value.word
+        });
         old.map(|b| b.value)
     }
 }
@@ -329,13 +349,31 @@ pub unsafe extern "C" fn imre_contextvars_set(
         )
     };
     let context = current();
-    let old = context.replace(crate::ObjectOwner::clone(&key), Some(value));
+    let old = context.replace(&key, Some(value));
     wrap(Storage::ContextToken(Rc::new(Token {
         key,
         context,
         old,
         used: Cell::new(false),
     })))
+}
+
+/// Claim the token before restoring its old binding, which can release Python values.
+pub(crate) fn consume_context_token(
+    used: &Cell<bool>,
+    same_variable: bool,
+    same_context: impl FnOnce() -> bool,
+) -> Result<(), (Kind, &'static str)> {
+    if used.get() {
+        Err((Kind::RuntimeError, "has already been used once"))
+    } else if !same_variable {
+        Err((Kind::ValueError, "was created by a different ContextVar"))
+    } else if !same_context() {
+        Err((Kind::ValueError, "was created in a different Context"))
+    } else {
+        used.set(true);
+        Ok(())
+    }
 }
 
 /// # Safety
@@ -346,24 +384,16 @@ pub unsafe extern "C" fn imre_contextvars_reset(key: *const Object, tok: *const 
     // SAFETY: the compiler checks the token layout at the call site.
     let owner = unsafe { object(tok) };
     let result = token(owner, |t| {
-        let context = current();
-        let error = if t.used.get() {
-            Some((Kind::RuntimeError, "has already been used once"))
-        } else if !key.is_null() && !std::ptr::eq(key, crate::ObjectOwner::as_ptr(&t.key)) {
-            Some((Kind::ValueError, "was created by a different ContextVar"))
-        } else if !Rc::ptr_eq(&context, &t.context) {
-            Some((Kind::ValueError, "was created in a different Context"))
-        } else {
-            None
-        };
-        if let Some((kind, reason)) = error {
+        let same_variable = key.is_null() || std::ptr::eq(key, crate::ObjectOwner::as_ptr(&t.key));
+        if let Err((kind, reason)) = consume_context_token(&t.used, same_variable, || {
+            Rc::ptr_eq(&current(), &t.context)
+        }) {
             return Err(Error::new(
                 kind,
                 format!("{} {reason}", description(owner)?),
             ));
         }
-        t.used.set(true);
-        context.replace(t.key.clone(), t.old.clone());
+        t.context.replace(&t.key, t.old.clone());
         Ok(())
     });
     // Formatting an invalid token can raise while rendering its variable's default.
@@ -408,9 +438,9 @@ pub unsafe extern "C" fn imre_contextvars_old(tok: *const Object) -> *const Obje
     token(unsafe { object(tok) }, |t| match &t.old {
         None => missing(),
         Some(v) => {
-            // Only scalars, tuples and existing ObjectValue views reach this ABI.
-            // For kind 5 preserve that existing view, including module attributes.
-            if v.kind.raw() == 5 {
+            // Preserve the original view, including in a populated nullable slot.
+            // A null nullable word represents a stored None and needs boxing below.
+            if v.kind.base() == 5 && v.word != 0 {
                 // SAFETY: the token roots the checked view.
                 return crate::ObjectOwner::into_raw(unsafe {
                     crate::ObjectOwner::acquire_word(v.word)

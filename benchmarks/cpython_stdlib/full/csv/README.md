@@ -1,10 +1,10 @@
 # CPython CSV suite on Linux
 
-The native unittest loader discovers the same 128 tests in the same order as Linux CPython 3.14.5. Ordinary and runtime-import builds each pass 122 and skip six at both `-O0` and `-O3`. The original tests exercise readers and writers, dictionary field order, quoting and newlines, dialect registration, error handling and dialect detection. Imre runs their bodies, assertions, stream fixtures and cleanups. [Pinned source](UPSTREAM.json) · [Reference outcomes](reference-linux.json) · [Intact native evidence](evidence-linux.json)
+The frozen CSV ledger records 128 discoveries in the same order as Linux CPython 3.14.5. Its ordinary and explicit runtime-import builds each passed 122 and skipped six at both `-O0` and `-O3`. The ledger identifies its historical compiler and runtime by SHA-256. Public `8dd8ab48` independently reproduced both modes and all 128 outcomes at O0 and O3. The original tests exercise readers and writers, dictionary field order, quoting and newlines, dialect registration, error handling and dialect detection. Imre runs their bodies, assertions, stream fixtures and cleanups. [Pinned source](UPSTREAM.json) · [Reference outcomes](reference-linux.json) · [Intact native evidence](evidence-linux.json)
 
 The pinned CPython release build passes 124 and skips the four `TestLeaks` methods with the reason `requires sys.gettotalrefcount()`. Imre takes the same four skips. Two upstream `cpython_only` decorators also skip `MiscTestCase.test_disallow_instantiation` and `MiscTestCase.test_lazy_import` on Imre. Both report `implementation detail specific to cpython`. The ledger classifies these two as `unexpected-skip` because the reference interpreter runs them.
 
-Run from the repository root with a release Imre compiler and runtime, Linux CPython 3.14.5 and the path to Clang in `CLANG`. The runner verifies and stages the pinned test package inside the entry's module root, then calls `unittest.defaultTestLoader.loadTestsFromModule(test_csv)`. It checks the complete ordered discovery and result vectors against the CPython reference.
+Run from the repository root with a release Imre compiler and runtime, Linux CPython 3.14.5 and the path to Clang in `CLANG`. The runner builds ordinary executables at O0 and O3. It verifies and stages the pinned test package inside the entry's module root, then calls `unittest.defaultTestLoader.loadTestsFromModule(test_csv)`. It checks the complete ordered discovery and result vectors against the CPython reference.
 
 ```sh
 suite=benchmarks/cpython_stdlib/full/csv

@@ -2223,9 +2223,10 @@ class PyZipFile(ZipFile):
         the modules into the archive.  If pathname is a plain
         directory, listdir *.py and enter all modules.  Else, pathname
         must be a Python *.py file and the module will be put into the
-        archive.  Added modules are always module.pyc.
-        This method will compile the module.py into module.pyc if
-        necessary.
+        archive.  On interpreters with a bytecode cache tag, compile
+        modules to .pyc if necessary.  Without a cache tag, keep source
+        files under their .py names.  Legacy mode can also copy an
+        existing up-to-date .pyc.
         If filterfunc(pathname) is given, it is called with every argument.
         When it is False, the file or directory is skipped.
         """
@@ -2305,6 +2306,20 @@ class PyZipFile(ZipFile):
         /python/lib/string, return (/python/lib/string.pyc, string).
         """
         def _compile(file, optimize=-1):
+            if pycache_opt0 is None:
+                # Check syntax without creating a bytecode cache. A construct
+                # unsupported by the native compiler can still ship as source.
+                if self.debug:
+                    print("Checking", file)
+                with open(file, "rb") as src:
+                    source = src.read()
+                try:
+                    compile(source, file, "exec")
+                except SyntaxError as err:
+                    print(f"{type(err).__name__}: {err}")
+                except NotImplementedError:
+                    pass
+                return False
             import py_compile
             if self.debug:
                 print("Compiling", file)
@@ -2317,29 +2332,38 @@ class PyZipFile(ZipFile):
 
         file_py  = pathname + ".py"
         file_pyc = pathname + ".pyc"
-        pycache_opt0 = importlib.util.cache_from_source(file_py, optimization='')
-        pycache_opt1 = importlib.util.cache_from_source(file_py, optimization=1)
-        pycache_opt2 = importlib.util.cache_from_source(file_py, optimization=2)
+        def _current(path):
+            return (path is not None and os.path.isfile(path) and
+                    os.stat(path).st_mtime >= os.stat(file_py).st_mtime)
+
+        resolve_cache = importlib.util.cache_from_source
+        try:
+            pycache_opt0 = resolve_cache(file_py, optimization='')
+        except NotImplementedError:
+            from importlib._bootstrap_external import cache_from_source
+            if (sys.implementation.cache_tag is not None or
+                    resolve_cache is not cache_from_source):
+                raise
+            pycache_opt0 = pycache_opt1 = pycache_opt2 = None
+        else:
+            pycache_opt1 = importlib.util.cache_from_source(file_py, optimization=1)
+            pycache_opt2 = importlib.util.cache_from_source(file_py, optimization=2)
         if self._optimize == -1:
             # legacy mode: use whatever file is present
-            if (os.path.isfile(file_pyc) and
-                  os.stat(file_pyc).st_mtime >= os.stat(file_py).st_mtime):
+            if _current(file_pyc):
                 # Use .pyc file.
                 arcname = fname = file_pyc
-            elif (os.path.isfile(pycache_opt0) and
-                  os.stat(pycache_opt0).st_mtime >= os.stat(file_py).st_mtime):
+            elif _current(pycache_opt0):
                 # Use the __pycache__/*.pyc file, but write it to the legacy pyc
                 # file name in the archive.
                 fname = pycache_opt0
                 arcname = file_pyc
-            elif (os.path.isfile(pycache_opt1) and
-                  os.stat(pycache_opt1).st_mtime >= os.stat(file_py).st_mtime):
+            elif _current(pycache_opt1):
                 # Use the __pycache__/*.pyc file, but write it to the legacy pyc
                 # file name in the archive.
                 fname = pycache_opt1
                 arcname = file_pyc
-            elif (os.path.isfile(pycache_opt2) and
-                  os.stat(pycache_opt2).st_mtime >= os.stat(file_py).st_mtime):
+            elif _current(pycache_opt2):
                 # Use the __pycache__/*.pyc file, but write it to the legacy pyc
                 # file name in the archive.
                 fname = pycache_opt2
@@ -2370,8 +2394,7 @@ class PyZipFile(ZipFile):
                 else:
                     msg = "invalid value for 'optimize': {!r}".format(self._optimize)
                     raise ValueError(msg)
-            if not (os.path.isfile(fname) and
-                    os.stat(fname).st_mtime >= os.stat(file_py).st_mtime):
+            if not _current(fname):
                 if not _compile(file_py, optimize=self._optimize):
                     fname = arcname = file_py
         archivename = os.path.split(arcname)[1]

@@ -405,7 +405,9 @@ impl Checker<'_> {
             body.push(Statement::Try {
                 body: vec![statement],
                 handlers: vec![ir::ExceptHandler {
-                    kinds: vec![exception_kind("Exception").unwrap()],
+                    matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                        exception_kind("Exception").unwrap(),
+                    ]),
                     name: Some(caught),
                     body: vec![Statement::Assign(suite, fallback)],
                 }],

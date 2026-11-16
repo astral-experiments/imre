@@ -144,7 +144,7 @@ def main():
     for name in ("imre", "runtime", "clang", "result"):
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--cpython-source", type=Path)
-    parser.add_argument("--intact", action="store_true", help="run the complete CSV module in ordinary and runtime-imports builds")
+    parser.add_argument("--intact", action="store_true", help="run the complete CSV module at O0 and O3")
     parser.add_argument("--negative-control", action="store_true", help="run the one-fault intact suite at ordinary O0")
     parser.add_argument("--jobs", type=int, default=1, help="parallel intact-suite builds and runs")
     parser.add_argument("--timeout", type=int, default=21600, help="seconds per intact build or execution")

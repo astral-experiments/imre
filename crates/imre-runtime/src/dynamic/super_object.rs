@@ -1,13 +1,17 @@
 use super::*;
 
 impl Context {
+    pub(super) fn assigned_class_name(&self, scope: Id) -> Option<Id> {
+        self.scope_data(scope)
+            .class_namespace
+            .as_ref()
+            .and_then(|namespace| namespace.name_override)
+    }
+
     pub(super) fn class_name(&self, class: Id) -> &str {
         match self.heap.get(class) {
             Value::Class { name, scope, .. } => self
-                .scope_data(*scope)
-                .class_namespace
-                .as_ref()
-                .and_then(|namespace| namespace.name_override)
+                .assigned_class_name(*scope)
                 .map_or(name.as_str(), |id| {
                     self.str_value(id).expect("class name is a string")
                 }),
@@ -147,6 +151,20 @@ impl Context {
         self.linearize_with(bases, |ctx, base| ctx.base_lineage(base, published))
     }
 
+    /// Exception types expose more native ancestors for method lookup than for allocation.
+    pub(super) fn exception_mro(
+        &mut self,
+        bases: &[Id],
+        ancestors: &[Id],
+        lineage: impl FnMut(&mut Self, Id) -> Vec<Id>,
+    ) -> Result<Option<Vec<Id>>> {
+        if ancestors.iter().any(|&base| matches!(self.heap.get(base), Value::Native(name) if builtins::is_exception(name))) {
+            self.linearize_with(bases, lineage).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Merge either the live base lineages or a proposed hierarchy before it is published.
     pub(super) fn linearize_with(
         &mut self,
@@ -210,7 +228,7 @@ impl Context {
             ));
         };
         let base = self.builtin("super");
-        if !self.super_subtype(class, base) {
+        if !self.real_subtype(class, base) {
             return Err(self.invalid_new_subtype("super", class));
         }
         let storage = self.alloc(Value::Super {
@@ -290,8 +308,8 @@ impl Context {
         Ok(self.alloc(state))
     }
 
-    /// supercheck uses the real MRO, never an ABC registration or a metaclass hook.
-    fn super_subtype(&mut self, class: Id, base: Id) -> bool {
+    /// Test inheritance using the actual method resolution order.
+    pub(super) fn real_subtype(&mut self, class: Id, base: Id) -> bool {
         self.is_type_object(class)
             && (class == base
                 || if let Some(mro) = self.published_mro(class) {
@@ -306,12 +324,17 @@ impl Context {
         let (start, receiver) = match args {
             [] => {
                 let scope = self.heap.current_scope();
-                let Value::Scope(frame) = self.heap.get(scope) else {
+                let (Value::Scope(frame), Value::Code(code)) = (
+                    self.heap.get(scope),
+                    self.heap.get(self.heap.current_code()),
+                ) else {
                     return Err(Error::new("RuntimeError", "super(): no arguments"));
                 };
-                let first = frame
-                    .first_argument
-                    .as_ref()
+                let first = code
+                    .definition
+                    .parsed_parameters
+                    .get()
+                    .and_then(|params| params.positional.first())
                     .ok_or_else(|| Error::new("RuntimeError", "super(): no arguments"))?;
                 let receiver = self
                     .scope_name(scope, first)
@@ -327,7 +350,8 @@ impl Context {
                         "RuntimeError",
                         format!(
                             "super(): __class__ is not a type ({})",
-                            self.type_name(*class)
+                            self.builtin_type_name(*class)
+                                .unwrap_or_else(|| self.type_name(*class))
                         ),
                     ));
                 }
@@ -360,16 +384,16 @@ impl Context {
     }
 
     fn super_owner(&mut self, start: Id, receiver: Id) -> Result<Id> {
-        if receiver == NONE || self.super_subtype(receiver, start) {
+        if receiver == NONE || self.real_subtype(receiver, start) {
             return Ok(receiver);
         }
         let actual = self.exact_type(receiver)?;
-        if self.super_subtype(actual, start) {
+        if self.real_subtype(actual, start) {
             return Ok(actual);
         }
         // A proxy may report its wrapped type without changing the bound receiver.
         match self.lookup_attr(receiver, "__class__") {
-            Ok(reported) if reported != actual && self.super_subtype(reported, start) => {
+            Ok(reported) if reported != actual && self.real_subtype(reported, start) => {
                 return Ok(reported);
             }
             Err(error) if !self.is_attribute_error(&error) => return Err(error),
@@ -492,14 +516,21 @@ impl Context {
         name: &str,
     ) -> Result<Option<Id>> {
         if owner != NONE {
-            let exception_method = builtins::base_exception_method(name).is_some()
+            let exception_method = matches!(name, "__new__" | "__init__")
+                || builtins::exception_methods(imre_ast::exceptions::Kind::BaseException)
+                    .contains(&name)
                 || super::exception_group::METHODS.contains(&name);
-            let lineage = self.base_lineage(owner, exception_method);
+            let lineage = self.base_lineage(owner, true);
             let after = lineage.iter().skip_while(|&&class| class != start).skip(1);
             let instance = if owner == receiver { NONE } else { receiver };
             for &class in after {
                 if let Some(value) = self.own_class_attr(class, name) {
                     return self.bind_attribute(value, instance, owner).map(Some);
+                }
+                // Native Enum bases have real class namespaces. An inherited
+                // descriptor must bind at its defining class to the original owner.
+                if self.enum_scopes.contains_key(&class) && self.class_attr(class, name).is_some() {
+                    continue;
                 }
                 // Resolve inherited object methods at their real position, after any Python mixin.
                 if let Value::Native(kind) = self.heap.get(class)
@@ -510,6 +541,7 @@ impl Context {
                             | "__reduce_ex__"
                             | "__prepare__"
                             | "mro"
+                            | "__subclasses__"
                     )
                     && !(exception_method && builtins::is_exception(kind))
                 {
@@ -518,20 +550,31 @@ impl Context {
                         Err(error) if error.kind == "AttributeError" => continue,
                         Err(error) => return Err(error),
                     };
-                    if let Value::Method {
-                        callable,
-                        receiver: bound,
-                        ..
-                    } = *self.heap.get(member)
-                        && bound == class
-                        && self.class_attr(class, name) == Some(callable)
-                    {
-                        // Lookup may have installed the raw descriptor on this native class.
-                        // An inherited descriptor must wait for its own position in the MRO.
-                        if self.own_class_attr(class, name) != Some(callable) {
+                    // A lazy native lookup can install a slot or return an inherited one.
+                    // Use the same raw declarations as ordinary lookup before binding the result.
+                    let raw = match *self.heap.get(member) {
+                        Value::Method {
+                            callable, receiver, ..
+                        } if receiver == class => callable,
+                        _ => member,
+                    };
+                    if self.own_class_attr(class, name) == Some(raw) {
+                        member = raw;
+                    } else {
+                        // Some object slots are interned on demand outside its class dictionary.
+                        let inherited =
+                            self.base_lineage(class, true)
+                                .into_iter()
+                                .skip(1)
+                                .any(|base| {
+                                    self.own_class_attr(base, name) == Some(raw)
+                                        || (Some(&base) == self.builtins.get("object")
+                                            && self.builtins.get(&format!("object.{name}"))
+                                                == Some(&raw))
+                                });
+                        if inherited {
                             continue;
                         }
-                        member = callable;
                     }
                     return self.bind_attribute(member, instance, owner).map(Some);
                 }

@@ -203,6 +203,59 @@ def expanduser(path):
     return (userhome + path[i:]) or sep
 
 
+# From CPython 3.14.5 Lib/posixpath.py. See stdlib/docstrings/LICENSE.
+# Expand paths containing shell variable substitutions.
+# This expands the forms $variable and ${variable} only.
+# Non-existent variables are left unchanged.
+
+_varpattern = r'\$(\w+|\{[^}]*\}?)'
+_varsub = None
+_varsubb = None
+
+def expandvars(path):
+    """Expand shell variables of form $var and ${var}.  Unknown variables
+    are left unchanged."""
+    path = os.fspath(path)
+    global _varsub, _varsubb
+    if isinstance(path, bytes):
+        if b'$' not in path:
+            return path
+        if not _varsubb:
+            import re
+            _varsubb = re.compile(_varpattern.encode(), re.ASCII).sub
+        sub = _varsubb
+        start = b'{'
+        end = b'}'
+        environ = getattr(os, 'environb', None)
+    else:
+        if '$' not in path:
+            return path
+        if not _varsub:
+            import re
+            _varsub = re.compile(_varpattern, re.ASCII).sub
+        sub = _varsub
+        start = '{'
+        end = '}'
+        environ = os.environ
+
+    def repl(m):
+        name = m[1]
+        if name.startswith(start):
+            if not name.endswith(end):
+                return m[0]
+            name = name[1:-1]
+        try:
+            if environ is None:
+                value = os.fsencode(os.environ[os.fsdecode(name)])
+            else:
+                value = environ[name]
+        except KeyError:
+            return m[0]
+        else:
+            return value
+
+    return sub(repl, path)
+
 def abspath(path):
     """Return a normalized absolute path."""
     path = os.fspath(path)

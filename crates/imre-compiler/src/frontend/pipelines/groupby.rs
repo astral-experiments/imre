@@ -1,6 +1,7 @@
 //! A directly consumed group shares one live source cursor and keyed lookahead.
 
 use super::*;
+use crate::frontend::phase::Result;
 
 /// Recognize an immediate list assignment that consumes the private grouper.
 fn materialization<'a>(statement: &'a ast::Stmt, group: &str) -> Option<&'a ast::ExprName> {
@@ -102,7 +103,7 @@ impl Checker<'_> {
         let item = input.value;
         let item_type = self.locals[item];
         let (key_value, retained_callback) = if let Some(callback) = callback {
-            let callback = self.item_callback(callback, item_type, None, None)?;
+            let callback = self.item_callback(callback)?.bind(self, item_type, None)?;
             if callback.ty == Type::None {
                 input.evaluate.push(Statement::Expr(callback));
                 (self.local(item), None)
@@ -157,7 +158,9 @@ impl Checker<'_> {
         let mut pull = vec![Statement::Try {
             body: pull,
             handlers: vec![ir::ExceptHandler {
-                kinds: vec![exception_kind("StopIteration").unwrap()],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                    exception_kind("StopIteration").unwrap(),
+                ]),
                 name: None,
                 body: vec![Statement::Assign(ready, Expr::boolean(false))],
             }],
@@ -192,7 +195,7 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Boolean(false, vec![not(self.local(have_group)), boundary.clone()]),
             },
-            vec![Statement::Break],
+            vec![Statement::Break(None)],
             Vec::new(),
         ));
         input.next = vec![Statement::If(
@@ -204,8 +207,8 @@ impl Checker<'_> {
         input.clear.extend([next_key, group_key, have_group]);
         self.invalidate_loop_facts(&loop_.body, Some((&input, &loop_.iter)))?;
         let writes = input.writes.clone();
-        self.lower_prepared_iteration(key_target, input, &loop_.orelse, Vec::new(), |checker| {
-            let mut body = Vec::new();
+        let orelse = &loop_.orelse;
+        self.lower_prepared_iteration(key_target, input, orelse, Vec::new(), |checker, body| {
             if let Some(callback) = retained_callback {
                 body.push(Statement::Assign(grouper, checker.local(callback)));
             }
@@ -238,11 +241,11 @@ impl Checker<'_> {
                     group,
                     &inner.orelse,
                     Vec::new(),
-                    |checker| {
+                    |checker, each| {
                         // A break leaves the outer iterator to skip the rest of this group.
-                        let mut each = vec![Statement::Assign(ready, Expr::boolean(false))];
-                        each.extend(checker.block(&inner.body)?.0);
-                        Ok(each)
+                        each.push(Statement::Assign(ready, Expr::boolean(false)));
+                        checker.lower_block(&inner.body, Some(each))?;
+                        Ok(true)
                     },
                 )?;
                 body.extend(statements);
@@ -261,7 +264,11 @@ impl Checker<'_> {
                     ),
                 })];
                 drain.append(&mut pull);
-                drain.push(Statement::If(boundary, vec![Statement::Break], Vec::new()));
+                drain.push(Statement::If(
+                    boundary,
+                    vec![Statement::Break(None)],
+                    Vec::new(),
+                ));
                 body.push(Statement::Scope {
                     body: vec![
                         Statement::Assign(
@@ -278,8 +285,8 @@ impl Checker<'_> {
                     clear: vec![accumulating],
                 });
             }
-            body.extend(checker.block(rest)?.0);
-            Ok(body)
+            checker.lower_block(rest, Some(body))?;
+            Ok(true)
         })
     }
 }

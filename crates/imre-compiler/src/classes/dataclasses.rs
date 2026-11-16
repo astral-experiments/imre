@@ -6,6 +6,7 @@ use ruff_python_ast as ast;
 use ruff_text_size::Ranged;
 
 use super::Field;
+use crate::frontend::phase::{Diagnostic, Kind};
 use crate::modules::{Binding, DefinitionId, Intrinsic, SourceGraph, SourceModule};
 
 #[derive(Clone, Copy)]
@@ -42,33 +43,20 @@ pub(super) fn options(
 ) -> Result<Option<DataclassOptions>, String> {
     let module = &graph.modules[module_id];
     let [decorator] = node.decorator_list.as_slice() else {
-        return if node.decorator_list.is_empty() {
-            Ok(None)
-        } else {
-            Err(module.error(node, "class decorators cannot be stacked"))
-        };
+        return Err(module.error(node, "class decorators cannot be stacked"));
     };
     let (target, arguments) = match &decorator.expression {
         ast::Expr::Call(call) => (&*call.func, Some(&call.arguments)),
         expression => (expression, None),
     };
-    let binding = graph.resolve(module_id, target);
-    if let Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(name))) = binding {
-        graph.needs_object_runtime.set(true);
-        return Err(module.error(
-            decorator,
-            &format!("{name} requires native Python object operations"),
-        ));
-    }
-    let value_struct = binding == Some(Binding::Intrinsic(Intrinsic::Struct));
+    let value_struct = module.value_structs.contains(&node.start());
     if value_struct && arguments.is_some() {
         return Err(module.error(decorator, "use bare @imre.struct without options"));
     }
-    if !value_struct && binding != Some(Binding::Intrinsic(Intrinsic::Dataclass)) {
-        return Err(module.error(
-            decorator,
-            "only the sealed @dataclasses.dataclass decorator is supported",
-        ));
+    if !value_struct
+        && graph.resolve(module_id, target) != Some(Binding::Intrinsic(Intrinsic::Dataclass))
+    {
+        return Ok(None);
     }
     let mut options = DataclassOptions {
         value_struct,
@@ -120,7 +108,7 @@ pub(super) fn field(
     name: &str,
     options: Option<&DataclassOptions>,
     class_names: &HashSet<String>,
-) -> Result<Field, String> {
+) -> Result<Field, Diagnostic> {
     let module = &graph.modules[module_id];
     let mut field = Field {
         module: module_id,
@@ -137,11 +125,13 @@ pub(super) fn field(
     };
     if let ast::Expr::Call(call) = value
         && graph.resolve(module_id, &call.func)
-            == Some(Binding::Intrinsic(Intrinsic::DataclassField))
+            == Some(Binding::Intrinsic(Intrinsic::DATACLASS_FIELD))
         && !shadowed(&call.func, class_names)
     {
         if !call.arguments.args.is_empty() {
-            return Err(module.error(call, "dataclass field options must be keyword arguments"));
+            return Err(
+                module.diagnostic(call, "dataclass field options must be keyword arguments")
+            );
         }
         let mut names = HashSet::new();
         for keyword in &call.arguments.keywords {
@@ -149,7 +139,7 @@ pub(super) fn field(
             match name {
                 "default" => {
                     if field.default.is_some() {
-                        return Err(module.error(
+                        return Err(module.diagnostic(
                             keyword,
                             "field cannot specify both default and default_factory",
                         ));
@@ -159,7 +149,7 @@ pub(super) fn field(
                 }
                 "default_factory" => {
                     if field.default.is_some() {
-                        return Err(module.error(
+                        return Err(module.diagnostic(
                             keyword,
                             "field cannot specify both default and default_factory",
                         ));
@@ -172,7 +162,7 @@ pub(super) fn field(
                 "init" if boolean(module, &keyword.value)? => {}
                 "hash" if matches!(keyword.value, ast::Expr::NoneLiteral(_)) => {}
                 _ => {
-                    return Err(module.error(
+                    return Err(module.diagnostic(
                         keyword,
                         &format!("unsupported dataclass field option {name:?}"),
                     ));
@@ -224,7 +214,7 @@ fn factory(
     module_id: usize,
     value: &ast::Expr,
     class_names: &HashSet<String>,
-) -> Result<FieldDefault, String> {
+) -> Result<FieldDefault, Diagnostic> {
     let constructor = if let ast::Expr::Lambda(lambda) = value
         && lambda
             .parameters
@@ -249,7 +239,7 @@ fn factory(
             && graph.modules[id.module].parsed.syntax().body[id.statement].start() >= value.start()
         {
             return Err(graph.modules[module_id]
-                .error(value, "a direct default factory must already be defined"));
+                .diagnostic(value, "a direct default factory must already be defined"));
         }
         return Ok(FieldDefault::Record(id));
     }
@@ -269,10 +259,10 @@ fn factory(
             _ => {}
         }
     }
-    Err(graph.modules[module_id].error(
+    Err(graph.modules[module_id].diagnostic(
         value,
         "default_factory requires a supported container or a zero-argument dataclass constructor",
-    ))
+    ).classified(Kind::ScopedClassLayout))
 }
 
 /// Validate even defaults hidden behind an explicit initializer; later type
@@ -458,7 +448,12 @@ class Item:
         )
         .unwrap();
         let error = Classes::collect(&graph).err().unwrap();
-        assert!(error.contains("unparenthesized name annotation"), "{error}");
+        assert!(
+            error
+                .to_string()
+                .contains("unparenthesized name annotation"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -11,6 +11,11 @@ def wait(ready, gate):
     gate.acquire()
 
 
+def acquire_keyword(ready, /, *, gate=None):
+    ready.acquire()
+    gate.acquire(False)
+
+
 def exercise(keywords, keep_container):
     ready = threading.Lock()
     gate = threading.Lock()
@@ -74,3 +79,15 @@ def exercise(keywords, keep_container):
 for keywords in (False, True):
     for keep_container in (False, True):
         exercise(keywords, keep_container)
+
+
+for supplied in (False, True):
+    ready, default, explicit = (threading.Lock() for _ in range(3))
+    acquire_keyword.__kwdefaults__["gate"] = default
+    worker = threading.Thread(
+        target=acquire_keyword, args=(ready,), kwargs={"gate": explicit} if supplied else {}
+    )
+    worker.start()
+    worker.join(5)
+    assert not worker.is_alive() and ready.locked()
+    assert explicit.locked() == supplied and default.locked() != supplied

@@ -43,8 +43,8 @@ def main():
         def edit(value):
             helper.write_text(f'def heading() -> str:\n    return "{value}"\n')
 
-        def invoke(name, *arguments, success=True):
-            result = subprocess.run([binary, *arguments], cwd=root, env=env, capture_output=True)
+        def invoke(name, *arguments, success=True, timeout=None):
+            result = subprocess.run([binary, *arguments], cwd=root, env=env, capture_output=True, timeout=timeout)
             assert (result.returncode == 0) == success, (arguments, result.returncode, result.stderr)
             assert b"\x1b" not in result.stderr and b"\r" not in result.stderr, result.stderr
             lines = result.stderr.decode().splitlines()
@@ -116,6 +116,21 @@ def main():
         quiet_out, quiet_error = invoke("quiet_compile_failure", "run", "-q", "main.py", "--", "fail", success=False)
         assert not out and not quiet_out and actions(failed) == ["Compiling"] and quiet_error
         assert not actions(quiet_error) and failed[1:] == quiet_error, (failed, quiet_error)
+
+        # Native discovery must not open a FIFO while deciding whether to admit the source.
+        os.mkfifo(root / "runtime.pipe")
+        source = root / "typed.py"
+        source.write_text('def take(value: int) -> int:\n    return value\nprint(take("x"))\n')
+        before = (root / "reporter").read_bytes()
+        build = ("build", "-q", "typed.py", "--runtime", "runtime.pipe", "-o", "reporter")
+        out, error = invoke("invalid_with_fifo_runtime", *build, success=False, timeout=30)
+        assert not out and any("typed.py:3:" in line and "expected int, got str" in line for line in error), error
+        assert (root / "reporter").read_bytes() == before
+        source.write_text("print(42)\n")
+        out, error = invoke("valid_with_fifo_runtime", *build, success=False, timeout=30)
+        assert not out and any("Runtime not found: runtime.pipe" in line for line in error), error
+        assert (root / "reporter").read_bytes() == before
+
 
     if args.output:
         args.output.write_text(json.dumps(transcripts, indent=2) + "\n")

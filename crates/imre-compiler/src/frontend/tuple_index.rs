@@ -55,7 +55,7 @@ impl Checker<'_> {
             Type::Int => key,
             Type::Bool => Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![key]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![key]),
             },
             _ => {
                 return Err(error(

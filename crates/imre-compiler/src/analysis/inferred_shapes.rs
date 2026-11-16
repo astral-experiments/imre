@@ -623,7 +623,7 @@ impl<'a> Visitor<'a> for Shapes<'a> {
                     | Expr::Generator(_) => {
                         self.optional(|v| walk_expr(v, expr));
                     }
-                    Expr::Lambda(_) => {}
+                    Expr::Lambda(lambda) => imre_ast::visit_lambda_defaults(self, lambda),
                     _ => walk_expr(self, expr),
                 }
             }

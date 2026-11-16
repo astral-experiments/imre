@@ -55,16 +55,33 @@ pub fn function_flags(params: Option<&ast::Parameters>, nested: bool, method: bo
 struct Yields(bool);
 impl<'a> Visitor<'a> for Yields {
     fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-        if !self.0 && !matches!(stmt, ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)) {
-            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-                visitor::walk_stmt(self, stmt)
+        if !self.0 {
+            stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || match stmt {
+                ast::Stmt::FunctionDef(function) => {
+                    for expr in crate::function_definition_expressions(function) {
+                        self.visit_expr(expr);
+                    }
+                }
+                ast::Stmt::ClassDef(class) => {
+                    for expr in crate::class_definition_expressions(class) {
+                        self.visit_expr(expr);
+                    }
+                }
+                _ => visitor::walk_stmt(self, stmt),
             });
         }
     }
     fn visit_expr(&mut self, expr: &'a ast::Expr) {
         match expr {
             ast::Expr::Yield(_) | ast::Expr::YieldFrom(_) => self.0 = true,
-            ast::Expr::Lambda(_) => {}
+            ast::Expr::Lambda(lambda) if !self.0 => {
+                // Defaults run in the enclosing activation. Only the nested body is deferred.
+                if let Some(parameters) = &lambda.parameters {
+                    for default in crate::parameter_defaults(parameters) {
+                        self.visit_expr(default);
+                    }
+                }
+            }
             _ if !self.0 => stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
                 visitor::walk_expr(self, expr)
             }),
@@ -85,4 +102,29 @@ pub fn yields_in_expression(expr: &ast::Expr) -> bool {
     let mut yields = Yields::default();
     yields.visit_expr(expr);
     yields.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_definition_yields_in_its_enclosing_scope() {
+        let module = ruff_python_parser::parse_module(
+            "def positional():\n    def inner(x=(yield 1)): pass\n\
+             def keyword():\n    def inner(*, x=(yield 2)): pass\n\
+             def decorated():\n    @(yield 3)\n    def inner(): pass\n\
+             def ordinary():\n    def inner(): yield 4\n\
+             def base():\n    class Inner((yield 1)): pass\n\
+             def keyword_base():\n    class Inner(metaclass=(yield 2)): pass\n\
+             def decorated_class():\n    @(yield 3)\n    class Inner[T]: pass\n\
+             def method():\n    class Inner:\n        def gen(self): yield 4\n",
+        )
+        .unwrap();
+        let expected = [true, true, true, false, true, true, true, false];
+        for (stmt, expected) in module.suite().iter().zip(expected) {
+            let function = stmt.as_function_def_stmt().unwrap();
+            assert_eq!(is_generator(&function.body), expected, "{}", function.name);
+        }
+    }
 }

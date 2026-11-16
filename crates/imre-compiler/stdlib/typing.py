@@ -2,6 +2,7 @@
 
 import _typing as _typing_runtime
 import builtins as _builtins
+import collections
 import copyreg
 import functools
 import sys as _sys
@@ -16,12 +17,10 @@ from collections import ChainMap as _ChainMap, OrderedDict as _OrderedDict, dequ
 from collections.abc import Callable as _ABCCallable
 from _collections_abc import AsyncIterator as _AsyncIterator, Awaitable as _Awaitable
 from abc import abstractmethod
-from annotationlib import ForwardRef, _make_forward_ref
-from annotationlib import annotations_to_string as _annotation_strings, type_repr as _annotation_type_repr
 from functools import lru_cache
 from _typing import _idfunc
 from types import GenericAlias
-from typing import Any, Callable, Generic, Protocol, TypeVar, Union
+from typing import Any, Callable, Generic, Protocol, TypeVar, Union, _GenericAlias
 from typing import ParamSpec, ParamSpecArgs, ParamSpecKwargs, TypeVarTuple
 
 
@@ -226,6 +225,44 @@ def _collect_type_parameters(args, *, enforce_default_ordering: bool = True):
     return tuple(parameters)
 
 
+def _generic_init_subclass(cls, *args, **kwargs):
+    super(Generic, cls).__init_subclass__(*args, **kwargs)
+    tvars = []
+    if '__orig_bases__' in cls.__dict__:
+        error = Generic in cls.__orig_bases__
+    else:
+        error = (Generic in cls.__bases__ and
+                    cls.__name__ != 'Protocol' and
+                    type(cls) != _TypedDictMeta)
+    if error:
+        raise TypeError("Cannot inherit from plain Generic")
+    if '__orig_bases__' in cls.__dict__:
+        tvars = _collect_type_parameters(cls.__orig_bases__)
+        # Look for Generic[T1, ..., Tn].
+        # If found, tvars must be a subset of it.
+        # If not found, tvars is it.
+        # Also check for and reject plain Generic,
+        # and reject multiple Generic[...].
+        gvars = None
+        for base in cls.__orig_bases__:
+            if (isinstance(base, _GenericAlias) and
+                    base.__origin__ is Generic):
+                if gvars is not None:
+                    raise TypeError(
+                        "Cannot inherit from Generic[...] multiple times.")
+                gvars = base.__parameters__
+        if gvars is not None:
+            tvarset = set(tvars)
+            gvarset = set(gvars)
+            if not tvarset <= gvarset:
+                s_vars = ', '.join(str(t) for t in tvars if t not in gvarset)
+                s_args = ', '.join(str(g) for g in gvars)
+                raise TypeError(f"Some type variables ({s_vars}) are"
+                                f" not listed in Generic[{s_args}]")
+            tvars = gvars
+    cls.__parameters__ = tuple(tvars)
+
+
 def _caller(depth=1, default='__main__'):
     try:
         return _sys._getframemodulename(depth + 1) or default
@@ -307,7 +344,7 @@ Text = str
 
 
 # Protocol introspection from CPython 3.14.5 Lib/typing.py. See stdlib/docstrings/LICENSE.
-def is_protocol(tp: type, /) -> _builtins.bool:
+def is_protocol(tp: type, /) -> bool:
     """Return True if the given type is a Protocol.
 
     Example::
@@ -592,7 +629,7 @@ def _typeddict_field(value, module, owner=None):
     if value is None:
         return type(None)
     if isinstance(value, str):
-        return _make_forward_ref(value, module, owner)
+        return _typing._make_forward_ref(value, module, owner)
     message = "TypedDict('Name', {f0: t0, f1: t1, ...}); each t must be a type"
     return _type_check(value, message)
 
@@ -615,259 +652,6 @@ def _typeddict_qualifiers(tp):
     return qualifiers
 
 
-class _TypedDictSymbol:
-    """An operand in a synthetic annotation namespace (see annotationlib._Stringifier)."""
-
-    __slots__ = ForwardRef.__slots__
-
-    def __expression__(self):
-        node = self.__ast_node__
-        return ((node,), 20) if type(node) is str else node
-
-    def __repr__(self):
-        tokens, _ = self.__expression__()
-        from annotationlib import _render_tokens
-        return _render_tokens(tokens)
-
-    def __hash__(self):
-        return id(self)
-
-    def __operand__(self, value, precedence=0):
-        if type(value) is _TypedDictSymbol:
-            tokens, priority = value.__expression__()
-            return ("(", *tokens, ")") if priority < precedence else tokens
-        from annotationlib import _template_constant, _template_repr
-        from string.templatelib import Template
-        if type(value) is Template:
-            return ((_template_repr, value),)
-        if self.__stringifier_dict__.stringify or value is None or type(value) in (str, int, float, bool, complex):
-            # Rendering a constant may run a user's repr. Keep the value until unparse.
-            return ((_template_constant, value),)
-        if type(value) in (list, tuple, set, dict):
-            if type(value) is set and not value:
-                return ("{*()}",)
-            opening, closing = ("[", "]") if type(value) is list else (
-                ("(", ")") if type(value) is tuple else ("{", "}"))
-            tokens = [opening]
-            for i, item in enumerate(value):
-                if i:
-                    tokens.append(", ")
-                tokens.extend(self.__operand__(item))
-                if type(value) is dict:
-                    tokens.append(": ")
-                    tokens.extend(self.__operand__(value[item]))
-            if type(value) is tuple and len(value) == 1:
-                tokens.append(",")
-            tokens.append(closing)
-            return tuple(tokens)
-        # Real operands may have no name in the eventual evaluation namespace.
-        names = self.__stringifier_dict__
-        key = f"__annotationlib_name_{names.next_id}__"
-        names.next_id += 1
-        return ((key, value),)
-
-    def __derived__(self, tokens, precedence=20):
-        return self.__stringifier_dict__.symbol(tokens, None, self.__globals__, self.__owner__,
-                                               self.__forward_is_class__, precedence)
-
-    def __getattr__(self, name):
-        return self.__derived__((*self.__operand__(self, 20), ".", name))
-
-    def __iter__(self):
-        # ast.unparse uses bitwise-or precedence for the operand of a star.
-        yield self.__derived__(("*", *self.__operand__(self, 6)))
-
-    def __getitem__(self, index):
-        if self.__ast_node__ == "__classdict__":
-            raise KeyError
-        tokens = [*self.__operand__(self, 20), "["]
-        items = index if isinstance(index, tuple) and index else (index,)
-        for i, item in enumerate(items):
-            if i:
-                tokens.append(", ")
-            if isinstance(item, slice):
-                if item.start is not None:
-                    tokens.extend(self.__operand__(item.start))
-                tokens.append(":")
-                if item.stop is not None:
-                    tokens.extend(self.__operand__(item.stop))
-                if item.step is not None:
-                    tokens.append(":")
-                    tokens.extend(self.__operand__(item.step))
-            else:
-                tokens.extend(self.__operand__(item))
-        if isinstance(index, tuple) and len(index) == 1:
-            tokens.append(",")
-        tokens.append("]")
-        return self.__derived__(tuple(tokens))
-
-    def __call__(self, *args, **kwargs):
-        tokens = [*self.__operand__(self, 20), "("]
-        for arg in args:
-            tokens.extend(self.__operand__(arg))
-            tokens.append(", ")
-        for key, value in kwargs.items():
-            tokens.extend((key, "="))
-            tokens.extend(self.__operand__(value))
-            tokens.append(", ")
-        if args or kwargs:
-            tokens.pop()
-        tokens.append(")")
-        return self.__derived__(tuple(tokens))
-
-    def __contains__(self, item):
-        if self.__ast_node__ == "__conditional_annotations__":
-            return True
-        raise NotImplementedError("symbolic annotation membership")
-
-    def __format__(self, spec):
-        raise TypeError("Cannot stringify annotation containing string formatting")
-
-    def _binary(op, precedence, *, reverse=False, comparison=False):
-        # Powers bind to the right. Nested comparisons need parentheses on either side.
-        left_precedence = precedence + (comparison or op == "**")
-        right_precedence = precedence + (op != "**")
-
-        def binary(self, other):
-            left, right = (other, self) if reverse else (self, other)
-            return self.__derived__(
-                (*self.__operand__(left, left_precedence), f" {op} ",
-                 *self.__operand__(right, right_precedence)), precedence)
-        return binary
-
-    __pow__ = _binary("**", 13)
-    __rpow__ = _binary("**", 13, reverse=True)
-    __mul__ = _binary("*", 11)
-    __rmul__ = _binary("*", 11, reverse=True)
-    __matmul__ = _binary("@", 11)
-    __rmatmul__ = _binary("@", 11, reverse=True)
-    __truediv__ = _binary("/", 11)
-    __rtruediv__ = _binary("/", 11, reverse=True)
-    __floordiv__ = _binary("//", 11)
-    __rfloordiv__ = _binary("//", 11, reverse=True)
-    __mod__ = _binary("%", 11)
-    __rmod__ = _binary("%", 11, reverse=True)
-    __add__ = _binary("+", 10)
-    __radd__ = _binary("+", 10, reverse=True)
-    __sub__ = _binary("-", 10)
-    __rsub__ = _binary("-", 10, reverse=True)
-    __lshift__ = _binary("<<", 9)
-    __rlshift__ = _binary("<<", 9, reverse=True)
-    __rshift__ = _binary(">>", 9)
-    __rrshift__ = _binary(">>", 9, reverse=True)
-    __and__ = _binary("&", 8)
-    __rand__ = _binary("&", 8, reverse=True)
-    __xor__ = _binary("^", 7)
-    __rxor__ = _binary("^", 7, reverse=True)
-    __or__ = _binary("|", 6)
-    __ror__ = _binary("|", 6, reverse=True)
-    __eq__ = _binary("==", 5, comparison=True)
-    __ne__ = _binary("!=", 5, comparison=True)
-    __lt__ = _binary("<", 5, comparison=True)
-    __le__ = _binary("<=", 5, comparison=True)
-    __gt__ = _binary(">", 5, comparison=True)
-    __ge__ = _binary(">=", 5, comparison=True)
-    del _binary
-
-    def _unary(op):
-        def unary(self):
-            return self.__derived__((op, *self.__operand__(self, 12)), 12)
-        return unary
-
-    __pos__ = _unary("+")
-    __neg__ = _unary("-")
-    __invert__ = _unary("~")
-    del _unary
-
-
-class _TypedDictNames(dict):
-    """Resolve missing names without modifying the provider's globals or cells."""
-
-    def symbol(self, tokens, cell, globals, owner, is_class, precedence=20):
-        value = _TypedDictSymbol()
-        value.__arg__ = None
-        value.__ast_node__ = tokens[0] if len(tokens) == 1 else (tokens, precedence)
-        value.__code__ = None
-        value.__stringifier_dict__ = self
-        value.__globals__ = globals
-        value.__cell__ = cell
-        value.__forward_module__ = None
-        value.__forward_is_class__ = is_class
-        value.__forward_is_argument__ = False
-        value.__owner__ = owner
-        value.__extra_names__ = dict(t for t in tokens if type(t) is tuple and type(t[0]) is str) or None
-        value.__resolved_str_cache__ = None
-        self.symbols.append(value)
-        return value
-
-    def __missing__(self, name):
-        return self.symbol((name,), None, self.source_globals, self.owner, self.is_class)
-
-    def finish(self):
-        # Convert the actual operands as in CPython. They can be held inside a
-        # typing alias, an arbitrary container, or a callback's saved state.
-        for value in self.symbols:
-            if type(value.__ast_node__) is str:
-                value.__arg__ = value.__ast_node__
-                value.__ast_node__ = None
-            else:
-                value.__ast_node__, _ = value.__expression__()
-            value.__stringifier_dict__ = None
-            if value.__cell__ is None:
-                value.__cell__ = self.cells
-            _typing._finish_field_ref(value)
-        self.symbols.clear()
-
-
-def _typeddict_names(source_globals, cells, owner, known, is_class=None, *, stringify=False):
-    names = _TypedDictNames()
-    names.source_globals = source_globals
-    names.cells = cells
-    names.owner = owner
-    names.is_class = isinstance(owner, type) if is_class is None else is_class
-    names.stringify = stringify
-    names.symbols = []
-    names.next_id = 1
-    if known is not None:
-        names.update(known)
-    return names
-
-
-def _typeddict_cell(value):
-    return (lambda: value).__closure__[0]
-
-
-def _typeddict_replay(annotate, owner, format, allow_evaluation):
-    from annotationlib import Format
-    from types import FunctionType
-    known = {**annotate.__builtins__, **annotate.__globals__} if allow_evaluation else None
-    stringify = format == Format.STRING
-    source_globals = None if stringify else annotate.__globals__
-    names = _typeddict_names(source_globals, None, None if stringify else owner, known,
-                             stringify=stringify)
-    is_class = isinstance(owner, type)
-    closure = None
-    if annotate.__closure__:
-        names.cells = {}
-        new_cells = []
-        for name, cell in zip(annotate.__code__.co_freevars, annotate.__closure__, strict=True):
-            names.cells[name] = cell
-            if allow_evaluation:
-                try:
-                    cell.cell_contents
-                except ValueError:
-                    pass
-                else:
-                    new_cells.append(cell)
-                    continue
-            value = names.symbol((name,), cell, annotate.__globals__, owner, is_class)
-            new_cells.append(_typeddict_cell(value))
-        closure = tuple(new_cells)
-    func = FunctionType(annotate.__code__, names, argdefs=annotate.__defaults__,
-                        closure=closure, kwdefaults=annotate.__kwdefaults__)
-    return func, names
-
-
 def _call_annotate(annotate, format, owner=None):
     from annotationlib import call_annotate_function
     return call_annotate_function(annotate, format, owner=owner)
@@ -886,7 +670,7 @@ def _make_eager_annotate(types=_sentinel):
         if format in (1, 3):
             return checked
         if format == 4:
-            return _annotation_strings(types)
+            return _typing._annotation_strings(types)
         raise NotImplementedError(format)
 
     return annotate
@@ -913,8 +697,6 @@ def NamedTuple(typename, fields=_sentinel, /, **kwargs):
 
         Employee = NamedTuple('Employee', [('name', str), ('id', int)])
     """
-    from collections import namedtuple
-
     if fields is _sentinel:
         if kwargs:
             deprecated_thing = "Creating NamedTuple classes using keyword arguments"
@@ -958,22 +740,66 @@ def NamedTuple(typename, fields=_sentinel, /, **kwargs):
     field_names = [n for n, _ in fields]
 
     annotate = _make_eager_annotate(types)
-    nt = namedtuple(typename, field_names, defaults=(), module=_caller())
-    nt.__annotate__ = nt.__new__.__annotate__ = annotate
+    nt = _make_nmtuple(typename, field_names, annotate, _caller())
     nt.__orig_bases__ = (NamedTuple,)
     return nt
 
 
+def _make_nmtuple(typename, fields, annotate, module, defaults=()):
+    cls = collections.namedtuple(typename, fields, defaults=defaults, module=module)
+    cls.__annotate__ = cls.__new__.__annotate__ = annotate
+    return cls
+
+
+class NamedTupleMeta(type):
+    def __new__(mcls, typename, bases, namespace):
+        if "__classcell__" in namespace:
+            raise TypeError("uses of super() and __class__ are unsupported in methods of NamedTuple subclasses")
+        if any(base is not _NamedTuple and base is not Generic for base in bases):
+            raise TypeError("can only inherit from a NamedTuple type and Generic")
+        if "__annotations__" in namespace:
+            types = namespace["__annotations__"]
+            fields = list(types)
+            annotate = _make_eager_annotate(types)
+        else:
+            from annotationlib import get_annotate_from_class_namespace
+            original = get_annotate_from_class_namespace(namespace)
+            if original is None:
+                fields = []
+                annotate = _make_eager_annotate()
+            else:
+                annotate = _namedtuple_annotate(original)
+                fields = list(annotate(3))
+        default_names = []
+        for field in fields:
+            if field in namespace:
+                default_names.append(field)
+            elif default_names:
+                raise TypeError(f"Non-default namedtuple field {field} cannot follow default field"
+                                f"{'s' if len(default_names) > 1 else ''} {', '.join(default_names)}")
+        cls = _make_nmtuple(typename, fields, annotate, namespace["__module__"],
+                            defaults=[namespace[n] for n in default_names])
+        cls.__bases__ = tuple(tuple if b is _NamedTuple else b for b in bases)
+        if Generic in bases:
+            cls.__class_getitem__ = classmethod(_namedtuple_generic_getitem)
+        _namedtuple_set_names(typename, cls, namespace)
+        if Generic in bases:
+            cls.__init_subclass__()
+        return cls
+
+
+_NamedTuple = type.__new__(NamedTupleMeta, "NamedTuple", (), {})
+
+
 def _namedtuple_mro_entries(bases):
     assert NamedTuple in bases
-    return (_typing._NamedTuple,)
+    return (_NamedTuple,)
 
 
 NamedTuple.__mro_entries__ = _namedtuple_mro_entries
 
 
-def _namedtuple_set_names(cls, namespace):
-    typename = cls.__name__
+def _namedtuple_set_names(typename, cls, namespace):
     for name, value in namespace.items():
         if name in ('__new__', '__init__', '__slots__', '__getnewargs__',
                     '_fields', '_field_defaults', '_make', '_replace', '_asdict', '_source'):
@@ -1040,7 +866,7 @@ def _configure_typeddict(cls, fields, total, own_annotate=None, bases=(), *, nam
             if format != 4:
                 own = {key: _typeddict_field(tp, cls.__module__) for key, tp in own.items()}
         elif format == 4:
-            own = _annotation_strings(fields)
+            own = _typing._annotation_strings(fields)
         elif format in (1, 3):
             own = annotations
         else:
@@ -1496,12 +1322,32 @@ class _Final:
 
 
 _cleanups = [_typing_runtime._clear_alias_caches]
+_caches = {}
 
 
-def _typing_cache(func):
-    cached = lru_cache(func)
+def _typing_cache(func, *, typed=False):
+    cached = lru_cache(typed=typed)(func)
     _cleanups.append(cached.cache_clear)
     return cached
+
+
+def _tp_cache(func=None, /, *, typed=False):
+    def decorator(func):
+        _caches[func] = _typing_cache(func, typed=typed)
+
+        @functools.wraps(func)
+        def inner(*args, **kwargs):
+            try:
+                return _caches[func](*args, **kwargs)
+            except TypeError:
+                pass
+            return func(*args, **kwargs)
+
+        return inner
+
+    if func is None:
+        return decorator
+    return decorator(func)
 
 
 class _NotIterable:
@@ -1671,14 +1517,14 @@ def TypeAlias(self, parameters):
 def _type_repr(arg):
     if isinstance(arg, tuple):
         return '[' + ', '.join(_type_repr(item) for item in arg) + ']'
-    return _annotation_type_repr(arg)
+    return _typing._annotation_type_repr(arg)
 
 
 def _type_convert(arg, module=None, *, allow_special_forms=False, owner=None):
     if arg is None:
         return type(None)
     if isinstance(arg, str):
-        return _make_forward_ref(arg, module, owner, is_class=allow_special_forms)
+        return _typing._make_forward_ref(arg, module, owner, is_class=allow_special_forms)
     return arg
 
 
@@ -1715,7 +1561,7 @@ def _make_callable_alias(constructor, origin, params):
 def _typeddict_qualifier_alias(form, parameters):
     item = _type_check(parameters, f"{form._name} accepts only a single type.")
     if isinstance(item, str):
-        item = _make_forward_ref(item)
+        item = _typing._make_forward_ref(item)
     return _typing._GenericAlias(form, (type(None) if item is None else item,))
 
 
@@ -2607,7 +2453,7 @@ class _AnnotatedAlias(_NotIterable):
             self.__parameters__ = () if isinstance(origin, type) else getattr(origin, "__parameters__", ())
 
     def __repr__(self):
-        origin = _annotation_type_repr(self.__origin__)
+        origin = _typing._annotation_type_repr(self.__origin__)
         return f"typing.Annotated[{origin}, {', '.join(repr(item) for item in self.__metadata__)}]"
 
     def __eq__(self, other):
@@ -2650,7 +2496,7 @@ def Annotated(self, *parameters):
         raise TypeError("Annotated[...] should not be used with an unpacked TypeVarTuple")
     origin = _type_check(origin, "Annotated[t, ...]: t must be a type.", allow_special_forms=True)
     if isinstance(origin, str):
-        origin = _make_forward_ref(origin, is_class=True)
+        origin = _typing._make_forward_ref(origin, is_class=True)
     return _AnnotatedAlias(type(None) if origin is None else origin, parameters[1:])
 
 
@@ -2701,15 +2547,15 @@ def evaluate_forward_ref(
     value = forward_ref.evaluate(globals=globals, locals=locals,
                                  type_params=type_params, owner=owner, format=format)
 
-    if (isinstance(value, ForwardRef)
+    if (isinstance(value, _typing.ForwardRef)
             and format == Format.FORWARDREF):
         return value
 
     if isinstance(value, str):
-        value = _make_forward_ref(value, module=forward_ref.__forward_module__,
-                                  owner=owner or forward_ref.__owner__,
-                                  is_argument=forward_ref.__forward_is_argument__,
-                                  is_class=forward_ref.__forward_is_class__)
+        value = _typing._make_forward_ref(value, module=forward_ref.__forward_module__,
+                                          owner=owner or forward_ref.__owner__,
+                                          is_argument=forward_ref.__forward_is_argument__,
+                                          is_class=forward_ref.__forward_is_class__)
     if owner is None:
         owner = forward_ref.__owner__
     return _eval_type(
@@ -2759,7 +2605,7 @@ def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=f
     if type_params is _sentinel:
         _deprecation_warning_for_no_type_params_passed("typing._eval_type")
         type_params = ()
-    if isinstance(t, ForwardRef):
+    if isinstance(t, _typing.ForwardRef):
         if prefer_fwd_module and t.__forward_module__ is not None:
             globalns = _forward_ref_module_globals(t, owner)
         return evaluate_forward_ref(t, globals=globalns, locals=localns,
@@ -2771,8 +2617,8 @@ def _eval_type(t, globalns, localns, type_params=_sentinel, *, recursive_guard=f
         return t
     if kind == "builtin":
         args = tuple(
-            _make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
-                              owner=getattr(parent_fwdref, "__owner__", None))
+            _typing._make_forward_ref(arg, module=getattr(parent_fwdref, "__forward_module__", None),
+                                      owner=getattr(parent_fwdref, "__owner__", None))
             if isinstance(arg, str) else arg for arg in t.__args__
         )
         unpacked = t.__unpacked__
@@ -2843,7 +2689,8 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         return value
     args = getattr(value, '__args__', ())
     values = args
-    if type(value) is GenericAlias:
+    is_generic_alias = isinstance(value, GenericAlias)
+    if is_generic_alias:
         # Strings inside builtin aliases are type arguments, even in class annotations.
         module = getattr(parent_ref, '__forward_module__', None)
         ref_owner = getattr(parent_ref, '__owner__', None)
@@ -2858,13 +2705,13 @@ def _resolve_hint(value, globalns, localns, owner, seen, include_extras, format,
         for name in ('Required', 'NotRequired', 'ReadOnly'):
             if origin is getattr(_typing, name, None):
                 return resolved[0]
-    if type(value) is GenericAlias and value.__unpacked__:
+    if is_generic_alias and value.__unpacked__:
         return Unpack[GenericAlias(origin, resolved)]
     if resolved == args:
         return value
     if origin is _typing.Union:
         return _typing.Union[resolved]
-    if type(value) is GenericAlias:
+    if is_generic_alias:
         return GenericAlias(origin, resolved)
     if type(value) is _typing._GenericAlias:
         name = getattr(value, '_name', None)
@@ -3019,7 +2866,14 @@ def dataclass_transform(
 
 
 def __getattr__(attr):
-    if attr in {"Pattern", "Match"}:
+    if attr in {"ForwardRef", "_make_forward_ref"}:
+        import annotationlib
+        alias = getattr(annotationlib, attr)
+    elif attr == "_annotation_strings":
+        from annotationlib import annotations_to_string as alias
+    elif attr == "_annotation_type_repr":
+        from annotationlib import type_repr as alias
+    elif attr in {"Pattern", "Match"}:
         import re
         alias = _SpecialGenericAlias(getattr(re, attr), 1)
     elif attr in {"ContextManager", "AsyncContextManager"}:

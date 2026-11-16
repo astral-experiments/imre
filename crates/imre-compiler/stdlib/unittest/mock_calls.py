@@ -1,47 +1,20 @@
-from _imre_mock import is_call_list, mark_call_list
-
-
-def _call_text(args: list[_Arg], kwargs: dict[str, _Arg]) -> str:
-    parts: list[str] = []
-    for arg in args:
-        parts.append(arg.text)
-    for key in kwargs:
-        parts.append(key + "=" + kwargs[key].text)
-    return "call(" + ", ".join(parts) + ")"
+from _imre_mock import mark_call_list
 
 
 @dataclass(repr=False)
 class _Call:
-    _args: list[_Arg]
-    _kwargs: dict[str, _Arg]
-    _text: str = field(compare=False)
+    _args: tuple[object, ...]
+    _kwargs: dict[str, object]
 
-    def __init__(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
-        self._args = args
-        self._kwargs = kwargs
-        self._text = _call_text(args, kwargs)
-
-    @staticmethod
-    def _represent(value: _Call | None) -> str:
-        if value is None:
-            return "None"
-        return _format_recorded_call(value, "call")
-
-    @staticmethod
-    def _represent_list(values: list[_Call]) -> str:
-        parts: list[str] = []
-        for value in values:
-            parts.append(_format_recorded_call(value, "call"))
-        return _format_list(parts, is_call_list(values))
+    def __repr__(self) -> str:
+        return _format_recorded_call(self, "call")
 
 
 def _format_recorded_call(value: _Call, name: str) -> str:
-    if name == "call":
-        return value._text
-    return name + value._text[4:]
+    return _format_call_signature(name, value._args, value._kwargs)
 
 
-def _new_call(args: list[_Arg], kwargs: dict[str, _Arg]) -> _Call:
+def _new_call(args: tuple[object, ...], kwargs: dict[str, object]) -> _Call:
     return _Call(args, kwargs)
 
 

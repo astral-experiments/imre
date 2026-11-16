@@ -1,9 +1,24 @@
 //! ABI between LLVM-generated Python functions and Imre-owned objects.
 
+use std::borrow::Cow;
 use std::ffi::{CStr, c_char};
 use std::slice;
+use std::sync::Arc;
 
+use super::source_code::CONDITIONAL;
 use super::*;
+
+mod linked_literals;
+
+/// The checked compiler supplies the field counts directly. Earlier native objects
+/// encode positional markers and keyword names in a private list.
+enum ClassPatternFields<'a> {
+    Written {
+        positional: usize,
+        keywords: &'a [Id],
+    },
+    List(Id),
+}
 
 fn flag(v: bool) -> Id {
     if v { TRUE } else { FALSE }
@@ -17,31 +32,6 @@ impl Context {
         value
     }
 
-    /// Call with packed operands and drop their temporary roots after a successful return.
-    fn call_packed(
-        &mut self,
-        callable: Id,
-        arguments: Id,
-        keywords: Id,
-        mark: usize,
-        scope: Id,
-    ) -> Result<Id> {
-        let args = self.items(arguments)?;
-        let kwargs = if keywords == NONE {
-            Vec::new()
-        } else {
-            self.keyword_args(keywords)?
-        };
-        let result = self.call_in_scope(scope, callable, args, kwargs)?;
-        if !self
-            .heap
-            .discard_scalar_call(mark, result, arguments, callable)
-        {
-            self.finish_call_operands(mark, result);
-        }
-        self.check_call_return(result)
-    }
-
     /// A Python call expression checks for delivery after the callee's native work completes.
     pub(super) fn check_call_return(&mut self, result: Id) -> Result<Id> {
         #[cfg(unix)]
@@ -50,15 +40,19 @@ impl Context {
         {
             // A Python handler can delete the last other reference and force collection.
             self.heap.keep(result);
-            self.dispatch_signals()?;
+            // SAFETY: the caller retained the result on this thread's active frame.
+            unsafe { Self::dispatch_pending_calls(self)? };
         }
         Ok(result)
     }
 
     /// Instantiate exception classes used by raise and its explicit cause.
     fn instantiate_exception_class(&mut self, value: Id) -> Result<Id> {
+        if matches!(self.heap.get(value), Value::Raised(_)) {
+            return Ok(value);
+        }
         let base = self.builtin("BaseException");
-        if !self.subclass(value, base) {
+        if !self.direct_subclass(value, base) {
             return Ok(value);
         }
         let result = self.call(value, Vec::new(), Vec::new())?;
@@ -74,6 +68,59 @@ impl Context {
             ));
         }
         Ok(result)
+    }
+
+    /// Normalize against the class selected by raise, even if constructing the cause
+    /// changed the original instance's class.
+    fn normalize_raised(&mut self, class: Id, exception: Id) -> Result<Id> {
+        let actual = self.exact_type(exception)?;
+        let metaclass = self.heap.get(class).instance_class();
+        let custom_type = metaclass.is_some_and(|meta| self.builtins.get("type") != Some(&meta));
+        let accepted = if custom_type {
+            self.python_subclass_check(actual, class)?
+        } else {
+            self.direct_subclass(actual, class)
+        };
+        if accepted {
+            return Ok(exception);
+        }
+
+        let result = self
+            .call(class, vec![exception], Vec::new())
+            .and_then(|value| {
+                if matches!(self.heap.get(value), Value::Raised(_)) {
+                    Ok(value)
+                } else {
+                    Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "calling {} should have returned an instance of BaseException, not {}",
+                            self.repr(class),
+                            self.type_name(value)
+                        ),
+                    ))
+                }
+            });
+        result.map_err(|error| {
+            let failure = self.raised_instance(error);
+            self.heap.keep(failure);
+            let args = builtins::call(self, "repr", &[exception], &[])
+                .unwrap_or_else(|_| self.text("<unknown>"));
+            let prefix = self.text(format!(
+                "Normalization failed: type={} args=",
+                self.class_name(class)
+            ));
+            if let Ok(note) = self.concat_strings(prefix, args) {
+                let _ = self.add_exception_note(failure, note);
+            }
+            self.error_from_instance(failure)
+        })
+    }
+
+    /// Propagate an already normalized instance with the active exception as context.
+    pub(super) fn raise_normalized(&mut self, instance: Id) -> Result<Id> {
+        self.chain_raised_instance(instance);
+        Err(self.error_from_instance(instance))
     }
 
     /// Check the mapping and its length before evaluating the pattern's key expressions.
@@ -142,25 +189,114 @@ impl Context {
         self.python_instance_check(subject, class)
     }
 
-    /// Fetch keyword fields in source order before evaluating their nested patterns.
-    fn match_class(&mut self, subject: Id, class: Id, names: Id) -> Result<Id> {
+    /// Resolve positional names only after isinstance succeeds, then fetch all
+    /// fields in source order before testing any nested patterns.
+    fn match_class(
+        &mut self,
+        subject: Id,
+        class: Id,
+        fields: ClassPatternFields<'_>,
+    ) -> Result<Id> {
         if !self.class_pattern_matches(subject, class)? {
             return Ok(NONE);
         }
-        let Value::List(names) = self.heap.get(names) else {
-            unreachable!("compiled class pattern keywords")
+        let (positional, keywords) = match fields {
+            ClassPatternFields::Written {
+                positional,
+                keywords,
+            } => (positional, Cow::Borrowed(keywords)),
+            ClassPatternFields::List(names) => {
+                let Value::List(names) = self.heap.get(names) else {
+                    unreachable!("compiled class pattern arguments")
+                };
+                let positional = names.iter().take_while(|&&name| name == NONE).count();
+                (positional, Cow::Owned(names[positional..].to_vec()))
+            }
         };
-        let names = names.clone();
-        let mut fields = Vec::with_capacity(names.len());
-        for name in names {
-            let name = self.str_value(name)?.to_owned();
-            match self.lookup_attr(subject, &name) {
+        let mut fields = Vec::with_capacity(positional + keywords.len());
+        let mut seen = Vec::new();
+        let mut first = 0;
+        let args_mark = self.heap.temporary_mark();
+        let mut positional_names = Vec::new();
+        if positional > 0 {
+            let match_args = self.optional_attr(class, "__match_args__")?;
+            let match_self = match_args.is_none() && self.class_matches_self(class)?;
+            let elements = match match_args {
+                Some(tuple) => match self.heap.get(tuple) {
+                    Value::Tuple(items) => items.as_slice(),
+                    _ => {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "{}.__match_args__ must be a tuple (got {})",
+                                self.class_name(class),
+                                self.type_name(tuple)
+                            ),
+                        ));
+                    }
+                },
+                None => &[],
+            };
+            let allowed = if match_self { 1 } else { elements.len() };
+            if positional > allowed {
+                let suffix = if allowed == 1 { "" } else { "s" };
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "{}() accepts {allowed} positional sub-pattern{suffix} ({positional} given)",
+                        self.class_name(class)
+                    ),
+                ));
+            }
+            if match_self {
+                self.heap.keep(subject);
+                fields.push(subject);
+                first = 1;
+            } else {
+                positional_names.extend_from_slice(&elements[..positional]);
+            }
+        }
+        for (index, &name) in (first..).zip(positional_names.iter().chain(keywords.iter())) {
+            if index < positional
+                && !matches!(self.heap.get(name), Value::Str(_) | Value::SurrogateStr(_))
+            {
+                return Err(Error::new(
+                    "TypeError",
+                    format!(
+                        "__match_args__ elements must be strings (got {})",
+                        self.type_name(name)
+                    ),
+                ));
+            }
+            if positional > 0 {
+                if seen.iter().any(|&other| self.equal(other, name)) {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "{}() got multiple sub-patterns for attribute {}",
+                            self.class_name(class),
+                            self.repr(name)
+                        ),
+                    ));
+                }
+                seen.push(name);
+            }
+            let attr = super::attribute_name::AttributeName::Python {
+                key: name,
+                text: None,
+            };
+            match self.lookup_attribute(subject, attr, false) {
                 Ok(field) => {
                     self.heap.keep(field);
                     fields.push(field);
                 }
                 Err(error) if self.is_attribute_error(&error) => return Ok(NONE),
                 Err(error) => return Err(error),
+            }
+            if index + 1 == positional {
+                // MATCH_CLASS drops the descriptor's tuple after its positional reads.
+                // Retain the extracted values and names across this observable boundary.
+                self.discard_temporaries(args_mark, fields.iter().chain(&seen).copied());
             }
         }
         Ok(self.alloc(Value::Tuple(fields)))
@@ -178,6 +314,16 @@ impl Context {
 
     pub(super) fn op(&mut self, op: &str, a: Id, b: Id, c: Id) -> Result<Id> {
         match op {
+            "bind_doctest_module" => self.bind_doctest_module(a, b),
+            "displayhook" => {
+                self.heap.keep(a);
+                let hook = self
+                    .sys_binding("displayhook")?
+                    .ok_or_else(|| Error::new("RuntimeError", "lost sys.displayhook"))?;
+                self.heap.keep(hook);
+                self.call(hook, vec![a], Vec::new())?;
+                Ok(NONE)
+            }
             "annotation_format" => {
                 let limit = self.int(2);
                 let unsupported = self.binary(">", a, limit)?;
@@ -197,10 +343,7 @@ impl Context {
                 Ok(self.alloc(Value::TypeAlias {
                     name: a,
                     parameters,
-                    definition: typing::AliasDefinition::Lazy {
-                        evaluator: b,
-                        cached: None,
-                    },
+                    definition: typing::AliasDefinition::Lazy(typing::LazyEvaluation::new(b)),
                 }))
             }
             "template_interpolation" => {
@@ -212,19 +355,16 @@ impl Context {
                 };
                 self.template_interpolation(a, b, conversion, spec)
             }
-            "build_template" => {
-                let interpolations = self.items(b)?;
-                Ok(self.template_from_literal(a, interpolations))
-            }
+            "build_template" => self.template_from_literal(a, b),
             "linked_string_tuple" => {
                 let items = self.items(a)?;
-                Ok(self.linked_constant(|ctx| {
+                self.linked_constant(|ctx| {
                     ctx.heap
                         .linked_string_constant(b, |heap| heap.packed_tuple(items, true))
-                }))
+                })
             }
-            "linked_string" => Ok(self.heap.linked_string_constant(b, |_| a)),
-            "match_class" => self.match_class(a, b, c),
+            "linked_string" => self.heap.linked_string_constant(b, |_| a),
+            "match_class" => self.match_class(a, b, ClassPatternFields::List(c)),
             "match_mapping" => self.match_mapping(a, b),
             "match_mapping_keys" => self.match_mapping_keys(a, b),
             "match_sequence" => Ok(builtins::boolean(
@@ -233,7 +373,7 @@ impl Context {
             )),
             "match_sequence_length" => builtins::call(self, "len", &[a], &[]),
             "builtin" => {
-                let name = copy_label(self.str_value(a)?)?;
+                let name = self.copy_name(a)?;
                 Ok(self.builtin(&name))
             }
             "annotation_scope" => Ok(self
@@ -243,7 +383,7 @@ impl Context {
             "lookup_annotation_global"
             | "lookup_class_annotation"
             | "lookup_class_annotation_global" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op != "lookup_annotation_global" {
                     if let Some(&cell) = self.scope_data(a).closure.cells.get("__classdict__") {
                         let Value::Cell(Some(mapping)) = *self.heap.get(cell) else {
@@ -265,19 +405,19 @@ impl Context {
                 self.lookup(scope, &name)
             }
             "lookup" | "lookup_class_local" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "lookup_class_local" {
                     return self.lookup_class_local(a, &name);
                 }
                 self.lookup(a, &name)
             }
             "assign" | "assign_target" | "assign_named_target" => {
+                let name = self.copy_name(b)?;
                 let scope = if op == "assign_named_target" {
-                    self.named_expression_scope(a)
+                    self.named_expression_scope(a, &name)
                 } else {
                     a
                 };
-                let name = copy_label(self.str_value(b)?)?;
                 let replaced = self.store_source_name(scope, &name, c)?;
                 if matches!(op, "assign_target" | "assign_named_target") {
                     Ok(flag(replaced))
@@ -296,44 +436,68 @@ impl Context {
                 scope.globals.insert(name);
                 Ok(NONE)
             }
-            "delname" | "clearname" => {
-                let name = copy_label(self.str_value(b)?)?;
+            "delname" => {
+                let name = self.copy_name(b)?;
                 let released = self.replacing_finalizer(a, &name, NONE);
                 let scope = self.binding_scope(a, &name);
-                if self.remove_binding(scope, &name, b)? {
-                    if released {
-                        self.heap.release_unbound_finalizers();
+                let removed = match self.remove_binding(scope, &name, b) {
+                    Err(error)
+                        if self.scope_data(a).parent.is_none()
+                            && !self.scope_data(a).globals.contains(name.as_str()) =>
+                    {
+                        // DELETE_NAME replaces the mapping error after its callback has unwound.
+                        self.raised_instance(error);
+                        false
                     }
-                } else if op == "delname" {
+                    result => result?,
+                };
+                if !removed {
                     return Err(self.missing_binding(a, scope, &name));
+                }
+                if released {
+                    self.collect_after_release();
                 }
                 Ok(NONE)
             }
             "comprehension_scope" => self.comprehension_scope(a, b),
             "import" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.module(&name)
             }
             "fromlist" => self.prepare_fromlist(a, b),
             "from" => self.import_from(a, b),
             "import_star" => self.import_star(a, b),
-            "lookup_enter" => self.context_method(a, "__enter__"),
-            "lookup_exit" => self.context_method(a, "__exit__"),
+            "lookup_enter" => {
+                self.context_method(a, if b == TRUE { "__aenter__" } else { "__enter__" })
+            }
+            "lookup_exit" => {
+                self.context_method(a, if b == TRUE { "__aexit__" } else { "__exit__" })
+            }
+            "await_iter" => {
+                let method = match b {
+                    0 => None,
+                    1 => Some("__aenter__"),
+                    2 => Some("__aexit__"),
+                    _ => return Err(Error::new("SystemError", "invalid await context")),
+                };
+                self.await_iterator(a, method)
+            }
             "attr" | "method" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 if op == "method" {
                     self.lookup_method(a, &name)
                 } else {
-                    self.lookup_attr(a, &name)
+                    self.lookup_attribute_operand(
+                        a,
+                        super::attribute_name::AttributeName::Text(&name),
+                        true,
+                        Some(b),
+                    )
                 }
             }
-            "setattr" => {
-                let name = copy_label(self.str_value(b)?)?;
-                self.set_attr(a, &name, c)?;
-                Ok(c)
-            }
+            "setattr" => self.set_attr(a, &self.copy_name(b)?, c),
             "delattr" => {
-                let name = copy_label(self.str_value(b)?)?;
+                let name = self.copy_name(b)?;
                 self.delete_attr(a, &name)?;
                 Ok(NONE)
             }
@@ -353,6 +517,17 @@ impl Context {
                 Ok(c)
             }
             "list" => Ok(self.alloc(Value::List(Vec::new()))),
+            "spread_arguments" => {
+                // An exact tuple already holds the evaluated positional arguments.
+                // Snapshot other iterables before entering the callee.
+                if matches!(self.heap.get(a), Value::Tuple(_)) {
+                    Ok(a)
+                } else {
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, a, Some(b))?;
+                    Ok(self.alloc(Value::List(items)))
+                }
+            }
             "set" => Ok(self.alloc(Value::Set {
                 entries: Default::default(),
                 frozen: false,
@@ -379,16 +554,39 @@ impl Context {
                 Ok(a)
             }
             "extend" => {
-                for item in self.items(b)? {
-                    self.op("append", a, item, NONE)?;
+                if matches!(self.heap.get(a), Value::List(_)) {
+                    let mut items = Vec::new();
+                    self.expand_positional_items(&mut items, b, None)?;
+                    let Value::List(list) = self.heap.get_mut(a) else {
+                        unreachable!()
+                    };
+                    // Fill the available space before growing so __sizeof__ and
+                    // partial progress on allocation failure match repeated append.
+                    let mut remaining = items.as_slice();
+                    while !remaining.is_empty() {
+                        list.try_reserve(1)
+                            .map_err(|_| Error::new("MemoryError", ""))?;
+                        let count = remaining.len().min(list.capacity() - list.len());
+                        let (chunk, rest) = remaining.split_at(count);
+                        list.extend_from_slice(chunk);
+                        remaining = rest;
+                    }
+                } else if matches!(self.heap.get(a), Value::Set { frozen: false, .. }) {
+                    builtins::update_set(self, a, b)?;
+                } else {
+                    for item in self.items(b)? {
+                        self.op("append", a, item, NONE)?;
+                    }
                 }
                 Ok(a)
             }
             "update" => self.merge_mapping(a, b, super::calls::MappingOperation::Unpack),
-            "keywords" => {
-                self.merge_mapping(a, b, super::calls::MappingOperation::Keywords(Some(c)))
-            }
-            "unpack" => {
+            "keywords" | "class_keywords" => self.merge_mapping(
+                a,
+                b,
+                super::calls::MappingOperation::Keywords((op == "keywords").then_some(c)),
+            ),
+            "unpack" | "unpack_read" => {
                 let count = usize::try_from(self.as_integer(b)?)
                     .map_err(|_| Error::new("ValueError", "invalid unpack length"))?;
                 let star = if c == NONE {
@@ -401,8 +599,7 @@ impl Context {
                     }
                     Some(star)
                 };
-                let items = self.unpack_items(a, count, star)?;
-                Ok(self.alloc(Value::List(items)))
+                self.unpack_sequence(a, count, star, op == "unpack_read")
             }
             "unpack_take" => {
                 let index = usize::try_from(self.as_integer(b)?).expect("compiled unpack index");
@@ -414,21 +611,14 @@ impl Context {
             "slice_object" => Ok(self.alloc(Value::Slice([a, b, c]))),
             "class_typevartuple" => Ok(super::typing::declared_pack(self, a)),
             "class_paramspec" => Ok(super::paramspec::declared(self, a)),
+            "type_parameter_evaluator" => super::typing::set_parameter_evaluator(self, a, b, c),
             "class_parameter_scope" | "function_parameter_scope" => {
                 super::typing::parameter_scope(self, a, b, op == "class_parameter_scope")
             }
-            "class_annotation_environment" => self.class_annotation_environment(a, b),
-            "class_annotation_locals" => {
-                let parent = self.scope_data(a).parent.expect("annotation globals");
-                let local = self.scope("", Some(parent));
-                let Value::Scope(frame) = self.heap.get_mut(local) else {
-                    unreachable!()
-                };
-                frame.exec_locals = Some(b);
-                Ok(local)
-            }
+            "class_parameter_frame" => super::typing::class_parameter_frame(self, a, b),
+            "class_annotation_environment" => Ok(self.class_annotation_environment(a)),
             "class_base_scope" => {
-                if self.scope_data(b).class_body.is_none() {
+                if !self.scope_data(b).in_class_body {
                     return Ok(a);
                 }
                 // A generic class's bases can read its enclosing class dictionary. Its
@@ -440,7 +630,6 @@ impl Context {
                     unreachable!()
                 };
                 frame.exec_locals = Some(namespace);
-                frame.closure.declared_complete = true;
                 Ok(scope)
             }
             "class" | "parameterized_class" => {
@@ -451,26 +640,17 @@ impl Context {
                 };
                 self.class(b, c, keywords, op == "parameterized_class")
             }
-            "coroutine_function" => {
-                let Value::Function { code, .. } = *self.heap.get(a) else {
-                    return Err(Error::new("SystemError", "invalid coroutine definition"));
-                };
-                let Value::Code(code) = self.heap.get_mut(code) else {
-                    unreachable!("function code")
-                };
-                code.coroutine = true;
-                Ok(a)
-            }
             "mark_module_annotation" => {
                 self.mark_module_annotation(a, b)?;
                 Ok(NONE)
             }
+            "mark_class_annotation" => self.record_class_annotation(a, b, c),
             "setup_module_string_annotations" | "setup_module_annotations" => {
                 self.setup_module_annotations(a, op == "setup_module_string_annotations")?;
                 Ok(NONE)
             }
             "annotate" => {
-                if self.scope_data(a).class_body.is_some() {
+                if self.scope_data(a).in_class_body {
                     let mapping = self.lookup_class_local(a, "__annotations__")?;
                     self.put_item(mapping, b, c)?;
                 } else {
@@ -479,24 +659,16 @@ impl Context {
                 }
                 Ok(NONE)
             }
-            "truth" => Ok(flag(self.truth(a)?)),
-            "generator" => self.generator(a, b, c),
-            "yielded" => Ok(self.alloc(Value::Yielded(a))),
+            "generator" => self.generator(a, b),
             "iter" => self.loop_iterator(a),
+            "get_iter" => self.iterator(a),
+            "loop_cursor" => Ok(self.loop_cursor(a)),
+            "async_iter" => self.async_for_iter(a),
+            "async_next_iter" => self.async_for_next(a),
             "break_iter" => {
                 self.release_loop_iterator(a);
                 Ok(NONE)
             }
-            "more" | "more_else" => {
-                let more = self.iterator_has_item(a)?;
-                if !more && op == "more_else" {
-                    self.heap.release_unbound_finalizers();
-                }
-                Ok(flag(more))
-            }
-            "next" => self
-                .next_item(a)?
-                .ok_or_else(|| Error::new("StopIteration", "")),
             "not" => Ok(flag(!self.truth(a)?)),
             "neg" | "pos" if matches!(self.heap.get(a), Value::Calendar { value, .. } if value.class() == "timedelta") =>
             {
@@ -507,18 +679,20 @@ impl Context {
                 };
                 stdlib::call(self, method, &[a], &[])
             }
-            "neg" | "pos" if let Value::Float(f) = self.heap.get(a) => {
-                Ok(self.alloc(Value::Float(if op == "neg" { -*f } else { *f })))
+            "pos"
+                if matches!(
+                    self.heap.get(a),
+                    Value::Int(_) | Value::Float(_) | Value::Complex(_)
+                ) =>
+            {
+                Ok(a)
             }
-            "neg" | "pos" if let Value::Complex(z) = self.heap.get(a) => {
-                if op == "pos" {
-                    Ok(a)
-                } else {
-                    Ok(self.alloc(Value::Complex(super::complex::Complex {
-                        real: -z.real,
-                        imag: -z.imag,
-                    })))
-                }
+            "neg" if let Value::Float(f) = self.heap.get(a) => Ok(self.alloc(Value::Float(-f))),
+            "neg" if let Value::Complex(z) = self.heap.get(a) => {
+                Ok(self.alloc(Value::Complex(super::complex::Complex {
+                    real: -z.real,
+                    imag: -z.imag,
+                })))
             }
             "neg" | "pos" | "~" => {
                 let (slot, symbol) = match op {
@@ -546,7 +720,6 @@ impl Context {
                 self.flag_or_integer(class, result)
             }
             "format_conversion" => self.format_conversion(a, b),
-            "format_concat" => self.concat_strings(a, b),
             "format" => {
                 let value = if b == NONE {
                     a
@@ -557,6 +730,8 @@ impl Context {
             }
             "take_error" => {
                 let error = self
+                    .heap
+                    .execution
                     .pending
                     .take()
                     .ok_or_else(|| Error::new("RuntimeError", "no active exception"))?;
@@ -564,33 +739,44 @@ impl Context {
                 Ok(self.raised_instance(error))
             }
             "restore_caught" => {
-                let enclosing = self.heap.caught_exception(a);
-                self.heap.replace_active(enclosing);
+                self.heap.restore_caught(a);
                 Ok(NONE)
             }
             "matches" => {
-                if let Value::Raised(error) = self.heap.get(a) {
-                    Ok(flag(self.raised_error_matches(error, b)))
-                } else {
-                    Ok(FALSE)
-                }
+                let base = self.builtin("BaseException");
+                let classes = self.tuple_elements(b).unwrap_or(std::slice::from_ref(&b));
+                self.check_exception_classes(classes, base)?;
+                let matched = matches!(self.heap.get(a), Value::Raised(error)
+                    if classes.iter().any(|&class| self.raised_error_matches(error, class)));
+                Ok(flag(matched))
             }
-            "exit_context" => {
-                let (class, traceback, active) = if b == NONE {
-                    (NONE, NONE, self.heap.caught_exception(c))
+            "exit_context" | "async_exit_context" => {
+                let active = if b == NONE {
+                    self.heap.caught_exception(c)
                 } else {
-                    (self.exact_type(b)?, self.exception_traceback(b)?, b)
+                    b
                 };
                 let prior = self.heap.replace_active(active);
-                let result = self.call(a, vec![class, b, traceback], Vec::new());
+                let result = self.call_context_exit(a, b);
                 // The exceptional exit's truth test still runs inside the handler.
-                let result = if b == NONE {
+                let result = if b == NONE || op == "async_exit_context" {
                     result
                 } else {
                     result.and_then(|value| self.truth(value).map(flag))
                 };
                 self.heap.replace_active(prior);
                 result
+            }
+            "except_star_split" => {
+                let (matched, rest) = super::exception_group::split_star(self, a, b)?;
+                Ok(self.alloc(Value::Tuple(vec![matched, rest])))
+            }
+            "except_star_merge" => {
+                let Value::List(raised) = self.heap.get(b) else {
+                    return Err(Error::new("SystemError", "expected except* arm outcomes"));
+                };
+                let raised = super::copy_ids(raised)?;
+                super::exception_group::merge_star(self, a, &raised)
             }
             "raise" | "reraise" => {
                 let a = if op == "reraise" && a == NONE {
@@ -602,55 +788,34 @@ impl Context {
                     return Err(Error::new("RuntimeError", "No active exception to reraise"));
                 }
                 let exception = self.instantiate_exception_class(a)?;
-                let Value::Raised(e) = self.heap.get(exception) else {
+                if !matches!(self.heap.get(exception), Value::Raised(_)) {
                     return Err(Error::new(
                         "TypeError",
                         "exceptions must derive from BaseException",
                     ));
-                };
-                let mut error = e.clone();
-                let trace = error.tracing();
-                trace.instance = Some(exception);
-                if op == "raise" {
-                    if c == TRUE {
-                        let cause = self.instantiate_exception_class(b)?;
-                        if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
-                            return Err(Error::new(
-                                "TypeError",
-                                "exception causes must derive from BaseException",
-                            ));
-                        }
-                        trace.cause = Some(cause);
-                    }
-                    if exception != a && !self.instance_of(exception, a) {
-                        // A class may allocate a different exception. CPython normalizes
-                        // the target by calling the requested class with that instance.
-                        let Value::Raised(original) = self.heap.get_mut(exception) else {
-                            unreachable!()
-                        };
-                        *original = error;
-                        let normalized = self.call(a, vec![exception], Vec::new())?;
-                        let Value::Raised(result) = self.heap.get(normalized) else {
-                            return Err(Error::new(
-                                "TypeError",
-                                format!(
-                                    "calling {} should have returned an instance of BaseException, not {}",
-                                    self.repr(a),
-                                    self.type_name(normalized)
-                                ),
-                            ));
-                        };
-                        error = result.clone();
-                        error.tracing().instance = Some(normalized);
-                    }
-                    let active = self.heap.active_exception();
-                    if active != NONE
-                        && error.trace.as_ref().and_then(|trace| trace.instance) != Some(active)
-                    {
-                        error.context = active;
-                    }
                 }
-                Err(error)
+                if op == "reraise" {
+                    return Err(self.error_from_instance(exception));
+                }
+                let class = if a == exception {
+                    self.exact_type(exception)?
+                } else {
+                    a
+                };
+                // The cause constructor can mutate __class__ and collect its old value.
+                self.heap.keep(class);
+                if c == TRUE {
+                    let cause = self.instantiate_exception_class(b)?;
+                    if cause != NONE && !matches!(self.heap.get(cause), Value::Raised(_)) {
+                        return Err(Error::new(
+                            "TypeError",
+                            "exception causes must derive from BaseException",
+                        ));
+                    }
+                    self.set_exception_cause(exception, cause)?;
+                }
+                let normalized = self.normalize_raised(class, exception)?;
+                self.raise_normalized(normalized)
             }
             "unsupported" => Err(Error::new("NotImplementedError", self.str_value(a)?)),
             _ => match op.strip_prefix("inplace:") {
@@ -666,9 +831,17 @@ impl Context {
 // until main returns. The context is accessed on one execution thread.
 unsafe fn cstr<'a>(ptr: *const c_char) -> &'a str {
     // SAFETY: the LLVM emitter passes a NUL-terminated UTF-8 constant.
-    unsafe { CStr::from_ptr(ptr) }
-        .to_str()
-        .expect("compiler UTF-8 constant")
+    unsafe { std::str::from_utf8_unchecked(CStr::from_ptr(ptr).to_bytes()) }
+}
+
+/// Recover the native filename constant emitted from OsStr::as_encoded_bytes.
+unsafe fn native_path<'a>(ptr: *const c_char) -> &'a Path {
+    // SAFETY: the compiler emits a nul-terminated native path in the executable's target encoding.
+    unsafe {
+        Path::new(std::ffi::OsStr::from_encoded_bytes_unchecked(
+            CStr::from_ptr(ptr).to_bytes(),
+        ))
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -683,6 +856,12 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     // SAFETY: native main supplies argc/argv and a static JSON constant.
     let mut config: serde_json::Value =
         serde_json::from_str(unsafe { cstr(config) }).expect("compiler target metadata");
+    if config["no_site"] != true {
+        // site normally caches this value before the entry can change its environment.
+        config["initial_user_base"] = imre_ast::layout::InterpreterLayout::user_base()
+            .and_then(|base| base.into_os_string().into_string().ok())
+            .into();
+    }
     let ignore_environment = config["ignore_environment"].as_bool().unwrap_or(false)
         || config["isolated"].as_bool().unwrap_or(false);
     if config["faulthandler"].is_null() {
@@ -693,10 +872,11 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     let options: Vec<String> =
         serde_json::from_value(config["warnoptions"].take()).unwrap_or_default();
     config["warnoptions"] = crate::sys::startup_warning_options(ignore_environment, options).into();
-    if config["unbuffered"].as_bool() == Some(true) {
-        crate::imre_stdio_unbuffered_init();
-    }
-    crate::sys::initialize_encoding(ignore_environment, config["utf8_mode"].as_bool());
+    crate::prepare_stdio(
+        ignore_environment,
+        config["utf8_mode"].as_bool(),
+        config["unbuffered"].as_bool() == Some(true),
+    );
     config["utf8_mode"] = crate::sys::imre_sys_utf8_mode().into();
     config["warn_default_encoding"] = config["warn_default_encoding"]
         .as_bool()
@@ -737,7 +917,7 @@ pub(super) unsafe extern "C" fn imre_dyn_new(
     Box::into_raw(Box::new(new_context(config, args)))
 }
 
-pub(super) fn new_context<S: Into<String>>(
+pub(super) fn new_context<S: Into<crate::Str>>(
     config: serde_json::Value,
     args: impl IntoIterator<Item = S>,
 ) -> Context {
@@ -745,86 +925,100 @@ pub(super) fn new_context<S: Into<String>>(
     if let Some(depth @ 1..=65535) = config["tracemalloc"].as_u64() {
         heap.allocation_traces.start_at_startup(depth as usize);
     }
-    new_context_with_heap(config, args, heap)
-}
-
-pub(super) fn new_context_with_heap<S: Into<String>>(
-    config: serde_json::Value,
-    args: impl IntoIterator<Item = S>,
-    heap: Heap,
-) -> Context {
     let launcher = config["executable"].as_str();
-    let helper_executable =
-        launcher.map_or_else(crate::objects::python_executable_text, str::to_owned);
     let executable = launcher
         .map(PathBuf::from)
         .or_else(|| std::env::current_exe().ok())
         .unwrap_or_default();
+    let interpreter = Arc::new(InterpreterState {
+        layout: stdlib::interpreter_layout(&config, &executable),
+        executable,
+        helper_executable: launcher
+            .map_or_else(crate::objects::python_executable_text, str::to_owned),
+        config: Arc::new(config),
+        worker_count: AtomicUsize::new(0),
+        socket_default_timeout: Mutex::new(None),
+        finalizing: AtomicBool::new(false),
+    });
+    context_with_heap(interpreter, args, heap, false)
+}
+
+pub(super) fn new_worker_context(interpreter: Arc<InterpreterState>, heap: Heap) -> Context {
+    context_with_heap(interpreter, std::iter::empty::<String>(), heap, true)
+}
+
+fn context_with_heap<S: Into<crate::Str>>(
+    interpreter: Arc<InterpreterState>,
+    args: impl IntoIterator<Item = S>,
+    heap: Heap,
+    private_context: bool,
+) -> Context {
     let mut ctx = Context {
         heap,
-        threads: Default::default(),
-        workers: Default::default(),
-        socket_default_timeout: Default::default(),
-        config,
-        executable,
-        helper_executable,
+        threads: lowlevel_threads::Workers {
+            private_context,
+            ..Default::default()
+        },
+        config: Arc::clone(&interpreter.config),
+        interpreter,
+        sendfile_writes: Vec::new(),
         argv: NONE,
-        sys_path: NONE,
+        startup_path0: None,
+        saved_entry_root: None,
         default_encoding: NONE,
+        displaced_sni_callbacks: Default::default(),
         audit_hooks: Vec::new(),
         fork_hooks: Default::default(),
         fault_file: None,
+        fault_user_files: HashMap::new(),
         exit_callbacks: Vec::new(),
-        finalizing: Default::default(),
-        contexts: Vec::new(),
-        buffer_exports: Vec::new(),
-        sorting_lists: Vec::new(),
         repr_ancestors: Vec::new(),
+        repr_spare_stack: false,
         // Measure the execution thread before entering the native Python evaluator.
         repr_sequence_words: super::operators::remaining_repr_words(),
-        suspended_typing_frames: 0,
         token_missing: NONE,
-        native_code_objects: HashMap::new(),
+        native_filename_labels: HashMap::new(),
+        original_builtins: None,
         source_builtins: None,
         zip_directories: HashMap::new(),
         zip_path_importers: NONE,
         codec_entries: Default::default(),
         warning_state: None,
         frozen_override: 0,
+        pending_builtin_names_scope: None,
         modules: NONE,
         import_missing: NONE,
         bootstrap_globals: NONE,
         bootstrap_module: NONE,
+        importlib_code: None,
         import_registry_installed: false,
         bootstrap_file_spec: NONE,
         finder_external: NONE,
         classes: HashMap::new(),
         enum_scopes: HashMap::new(),
         signal_handlers: Vec::new(),
+        reporting_wakeup_errors: false,
         typing: super::typing::Registry::default(),
         builtins: HashMap::new(),
-        native_type_dicts: HashMap::new(),
+        scope_name_slots: Default::default(),
+        native_type_dicts: Default::default(),
         sources: HashMap::new(),
-        call_depth: 0,
         deque_comparison_repeats: 0,
-        pending: None,
-        slot_depth: 0,
     };
     ctx.modules = ctx.dict(Vec::new());
     let object = ctx.builtin("object");
     ctx.import_missing = ctx.instance(object, None);
     let args = args.into_iter().map(|s| ctx.text(s)).collect();
     ctx.argv = ctx.alloc(Value::List(args));
-    let paths: Vec<String> =
-        serde_json::from_value(ctx.config["paths"].clone()).expect("compiler search paths");
-    let paths = paths.into_iter().map(|p| ctx.text(p)).collect();
-    ctx.sys_path = ctx.alloc(Value::List(paths));
     ctx.default_encoding = ctx.heap.code_name(crate::sys::default_encoding().as_str());
-    let current = ctx.alloc(Value::Context(Default::default()));
-    ctx.contexts.push(current);
     ctx.token_missing = ctx.alloc(Value::TokenMissing);
     // Resolving the handler after an allocation failure must not grow the builtin cache.
     ctx.builtin("MemoryError");
+    // These are already-present runtime types, including the types of singletons,
+    // code, functions and iterators. Publish them before user-defined subclasses.
+    for name in builtins::core_types() {
+        ctx.builtin(name);
+    }
     ctx
 }
 
@@ -849,27 +1043,306 @@ pub(super) unsafe extern "C" fn imre_dyn_register_source(
     len: u64,
     code: Code,
 ) {
+    // SAFETY: compiled entries supply static module names, source and executable code.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Native(code)) }
+}
+
+/// Attach a checked interactive input immediately after registering its owning module.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_module_single(
+    ctx: *mut Context,
+    owner: *const c_char,
+    filename: *const c_char,
+    source: *const u8,
+    len: u64,
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the linked entry supplies static filenames, native code and exactly len source bytes.
+    let (ctx, owner, filename, source) = unsafe {
+        (
+            &mut *ctx,
+            cstr(owner),
+            cstr(filename),
+            std::slice::from_raw_parts(source, len as usize),
+        )
+    };
+    let module = ctx
+        .sources
+        .get_mut(owner)
+        .and_then(|sources| sources.last_mut())
+        .expect("registered prompt owner");
+    Rc::make_mut(module.single_inputs.get_or_insert_with(Default::default)).push(SingleInput {
+        filename,
+        source,
+        flags,
+        code,
+    });
+}
+
+/// Accept older physical file registrations that do not carry compiler flags.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // Older file registrations supplied no fingerprint.
+    let digest = if len == 32 && !digest.is_null() {
+        // SAFETY: the compiler emits a static constant containing all 32 SHA-256 bytes.
+        Some(unsafe { &*digest.cast::<[u8; 32]>() })
+    } else {
+        None
+    };
+    // SAFETY: the compiler supplies static names, filename and initializer.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File {
+                entry: code,
+                digest,
+                flags: None,
+                declared_open_path: None,
+            },
+        )
+    }
+}
+
+/// Register a physical file's checked bytes, future flags and compiled initializer.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies the static operands of a physical file registration.
+    unsafe { register_file_code(ctx, name, file, digest, flags, code, None) }
+}
+
+/// Register the physical file selected for an explicitly included module.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_declared_file_code_at(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+    file_to_open: *const c_char,
+) {
+    // SAFETY: the compiler supplies the static operands of the selected file registration.
+    unsafe {
+        register_file_code(
+            ctx,
+            name,
+            file,
+            digest,
+            flags,
+            code,
+            Some(native_path(file_to_open)),
+        )
+    }
+}
+
+unsafe fn register_file_code(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    entry: Code,
+    declared_open_path: Option<&'static Path>,
+) {
+    // SAFETY: the compiler supplies a static digest, names and module entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::File {
+                entry,
+                digest: Some(&*digest),
+                flags: Some(flags),
+                declared_open_path,
+            },
+        );
+    }
+}
+
+/// Register the compiled body for a ZIP member without adding a directory finder.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_zip_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    digest: *const [u8; 32],
+    flags: u32,
+    code: Code,
+) {
+    // SAFETY: native registration supplies static names, digest and entry point.
+    unsafe {
+        register_compiled(
+            ctx,
+            name,
+            file,
+            std::ptr::null(),
+            0,
+            ModuleInitializer::Zip(code, &*digest, flags),
+        )
+    }
+}
+
+/// Register compiled Python that runs after a built-in module installs its native bindings.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_builtin_source(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    code: Code,
+) {
+    // SAFETY: the compiler supplies the same static storage as for a file initializer.
+    unsafe { register_compiled(ctx, name, file, text, len, ModuleInitializer::Builtin(code)) }
+}
+
+unsafe fn register_compiled(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    initializer: ModuleInitializer,
+) {
     // SAFETY: module names and filenames are static compiler-emitted strings.
-    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), cstr(file)) };
+    let (ctx, name, file) = unsafe { (&mut *ctx, cstr(name), native_path(file)) };
     // SAFETY: non-null text points to a static source constant with exactly len bytes.
     let bundled_text =
         (!text.is_null()).then(|| unsafe { std::slice::from_raw_parts(text, len as usize) });
-    ctx.sources
-        .entry(name.to_owned())
-        .or_default()
-        .push(SourceModule {
-            path: file.into(),
-            code,
-            bundled_text,
+    register_source(ctx, name, file, initializer, bundled_text);
+}
+
+/// Register a discovery-time error and preserve the source for loader inspection.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_register_module_error(
+    ctx: *mut Context,
+    name: *const c_char,
+    file: *const c_char,
+    text: *const u8,
+    len: u64,
+    message: *const c_char,
+    position: *const [u32; 4],
+    details: u8,
+    archive_digest: *const [u8; 32],
+) {
+    // SAFETY: the compiler emits all strings and the position as static constants.
+    unsafe {
+        let position = position.as_ref();
+        let parser_line = (details == 2).then(|| {
+            let source = std::str::from_utf8(std::slice::from_raw_parts(text, len as usize))
+                .expect("compiler emitted UTF-8");
+            source
+                .split_inclusive('\n')
+                .nth(position.expect("parser error position")[0] as usize - 1)
+                .unwrap_or("")
         });
+        register_compiled(
+            ctx,
+            name,
+            file,
+            text,
+            len,
+            ModuleInitializer::Invalid {
+                message: cstr(message),
+                position,
+                in_args: details != 0,
+                parser_line,
+                archive_digest: archive_digest.as_ref(),
+            },
+        );
+    }
+}
+
+/// Bind an emitted expression to its actual annotation string. Equal runtime
+/// text has no association with it. The heap forgets the binding on collection.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bind_expression(ctx: *mut Context, text: Id, entry: Code) {
+    // SAFETY: compiled callers pass the active interpreter and a linked native entry.
+    let ctx = unsafe { &mut *ctx };
+    ctx.heap
+        .linked_sources
+        .insert(text, LinkedSource::Expression(entry));
+}
+
+/// Select the prelinked module for the actual builtin and the exact source at this call.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
+    ctx: *mut Context,
+    callable: Id,
+    text: Id,
+    entry: Code,
+    flags: u32,
+    expected: *const c_char,
+) -> Id {
+    // SAFETY: compiled callers supply an active context and static NUL-terminated UTF-8 source.
+    let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec")
+        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+    {
+        return text;
+    }
+    if let Err(error) = ctx.heap.reserve_temporaries(3) {
+        return finish(ctx, Err(error));
+    }
+    let filename = ctx.text("<string>");
+    ctx.native_module_code(entry, filename, Some(flags))
+}
+
+fn register_source(
+    ctx: &mut Context,
+    name: &'static str,
+    file: &'static Path,
+    code: ModuleInitializer,
+    bundled_text: Option<&'static [u8]>,
+) {
+    ctx.sources.entry(name).or_default().push(SourceModule {
+        path: file.into(),
+        code,
+        bundled_text,
+        single_inputs: None,
+    });
 }
 
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
     // SAFETY: main transfers its unique allocation from imre_dyn_new exactly once.
     let mut ctx = unsafe { Box::from_raw(ctx) };
+    let interpreter = Arc::clone(&ctx.interpreter);
+    let _publication = crate::fault_handler::FramePublication::enter(&interpreter.finalizing);
     let mark = ctx.heap.temporary_mark();
-    let result = ctx.startup_sys().and_then(|_| {
+    let mut failed_site = false;
+    let mut file_globals = None;
+    // With unfrozen modules, importing site can execute a filesystem replacement for stat.
+    // Preserve the existing hook-triggered startup in that mode.
+    let startup_site = ctx.config["executable"].is_string()
+        && ctx.config["no_site"] != true
+        && (ctx.config["frozen_modules"] != false || ctx.config["sitecustomize"] == true);
+    let frame = ctx.startup_sys().and_then(|launched| {
+        if ctx.config["path0"] == true && !startup_site {
+            ctx.insert_startup_path0(launched)?;
+        }
         if ctx.config["faulthandler"].as_bool() == Some(true) {
             let handler = ctx.module("faulthandler")?;
             let enable = ctx.lookup_attr(handler, "enable")?;
@@ -885,6 +1358,10 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
         // keep replaced streams alive throughout the main module's execution.
         ctx.heap.release_temporaries_since(mark);
         ctx.install_import_registry()?;
+        // Startup imports can retain or replace __main__ before the FILE gets its code.
+        let mark = ctx.heap.temporary_mark();
+        ctx.main_module()?;
+        ctx.heap.release_temporaries_since(mark);
         if ctx.config["warnoptions"]
             .as_array()
             .is_some_and(|options| !options.is_empty())
@@ -896,15 +1373,44 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             }
             ctx.heap.release_temporaries_since(mark);
         }
-        let main = ctx
-            .load_bootstrap_module("__main__", None, NONE)?
-            .ok_or_else(|| Context::missing_module("__main__"))?;
+        if startup_site {
+            let mark = ctx.heap.temporary_mark();
+            ctx.initialize_startup_site()
+                .inspect_err(|_| failed_site = true)?;
+            ctx.heap.release_temporaries_since(mark);
+            if ctx.config["path0"] == true {
+                ctx.insert_startup_path0(launched)?;
+            }
+        }
+        let name = ctx.text("__main__");
+        ctx.prepare_main_module(&mut file_globals)?
+            .ok_or_else(|| Context::missing_module("__main__", name))
+    });
+    let main = match frame {
+        // SAFETY: finish owns the boxed context. The loader's borrow has ended and its
+        // rooted frame remains active until the native script returns.
+        Ok(frame) => unsafe { frame.run(&raw mut *ctx) },
+        Err(error) => Err(error),
+    };
+    let result = main.and_then(|main| {
         if let Some(name) = ctx.config["module_entry"].as_str().map(str::to_owned) {
-            ctx.run_module_as_main(name)
+            let call = ctx.prepare_module_as_main(name)?;
+            // SAFETY: finish owns the context. Preparation ended before the named entry runs.
+            unsafe { call.run(&raw mut *ctx) }
         } else {
             Ok(main)
         }
     });
+    if failed_site && let Err(error) = result {
+        eprintln!("Fatal Python error: init_import_site: Failed to import the site module");
+        eprintln!("Python runtime state: initialized");
+        stdlib::traceback::report_chain(&mut ctx, error);
+        stdlib::io::flush_standard_outputs(&mut ctx);
+        crate::fault_handler::unregister_all();
+        #[cfg(unix)]
+        crate::signals::finalize();
+        return 1;
+    }
     let mut interrupted = result
         .as_ref()
         .is_err_and(|e| ctx.is_builtin_error(e, "KeyboardInterrupt"));
@@ -923,31 +1429,20 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             status
         }
         // Startup can fail before the interpreter has created its sys module.
-        Err(error) if ctx.is_os_error(&error) && error.args.is_some() => {
-            if stdlib::traceback::chain_link(&error).is_some() {
+        Err(error) if ctx.is_os_error(&error) && error.owner(&ctx.heap).args.is_some() => {
+            if stdlib::traceback::chain_link(error.owner(&ctx.heap)).is_some() {
                 stdlib::traceback::report_chain(&mut ctx, error);
             } else {
                 ctx.report_os_error(error);
             }
             1
         }
-        Err(error) if stdlib::traceback::chain_link(&error).is_some() => {
+        Err(error) if stdlib::traceback::chain_link(error.owner(&ctx.heap)).is_some() => {
             stdlib::traceback::report_chain(&mut ctx, error);
             1
         }
         Err(mut error) => {
-            let current = error
-                .trace
-                .as_ref()
-                .and_then(|trace| trace.instance)
-                .and_then(|id| {
-                    if let Value::Raised(saved) = ctx.heap.get(id) {
-                        Some(saved)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or(&error);
+            let current = error.owner(&ctx.heap);
             if current.args.is_some() {
                 error.message = ctx.exception_message(current);
             }
@@ -955,10 +1450,30 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             1
         }
     };
-    super::thread_worker::shutdown(&mut ctx);
+    if let Some(globals) = file_globals {
+        ctx.clear_main_file_attributes(globals);
+    }
+    let shutdown_mark = ctx.heap.temporary_mark();
+    let shutdown = super::thread_worker::prepare_shutdown(&mut ctx);
+    // SAFETY: finish owns the context and the shutdown frame until the call returns.
+    if let Err(error) = shutdown.and_then(|call| unsafe { call.run(&raw mut *ctx) }) {
+        super::unraisable::report(
+            &mut ctx,
+            error,
+            false,
+            None,
+            "Exception ignored on threading shutdown",
+        );
+    }
+    ctx.heap.release_temporaries_since(shutdown_mark);
     atexit::run(&mut ctx);
+    #[cfg(unix)]
+    if crate::signals::is_main() {
+        crate::signals::disable_wakeup();
+    }
     // Exit callbacks run before Python enters its finalization phase.
-    ctx.finalizing
+    ctx.interpreter
+        .finalizing
         .store(true, std::sync::atomic::Ordering::Release);
     ctx.heap.discarded_shutdown_write = Some(false);
     ctx.heap.release_temporaries_since(mark);
@@ -980,8 +1495,13 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
             "Exception ignored during resource cleanup",
         );
     }
+    let flushed = stdlib::io::flush_standard_outputs(&mut ctx);
+    let status = crate::objects::exceptions::status_after_flush(status, flushed);
     stdlib::io::prepare_writer_shutdown(&ctx);
+    crate::fault_handler::unregister_all();
     crate::fault_handler::disable();
+    #[cfg(unix)]
+    crate::signals::finalize();
     if status == 0 && ctx.heap.has_pending_callback_write() {
         use std::io::Write;
 
@@ -1003,51 +1523,44 @@ pub(super) unsafe extern "C" fn imre_dyn_finish(ctx: *mut Context) -> i32 {
 pub(super) fn report_system_exit(ctx: &mut Context, error: Error) -> i32 {
     use std::io::Write;
 
-    let instance = error
-        .trace
-        .as_ref()
-        .and_then(|trace| trace.instance)
-        .unwrap_or_else(|| ctx.alloc(Value::Raised(error)));
+    let mark = ctx.heap.temporary_mark();
+    let instance = ctx.raised_instance(error);
     ctx.heap.keep(instance);
+    let before_code = ctx.heap.temporary_mark();
     let code = ctx.lookup_attr(instance, "code").unwrap_or(instance);
-    if code == NONE {
-        return 0;
+    let status = if code == NONE {
+        Some(0)
+    } else {
+        ctx.borrow_int(code)
+            .ok()
+            .map(|integer| integer.exit_status())
+    };
+    if let Some(status) = status {
+        ctx.discard_temporaries(before_code, None);
+        ctx.discard_temporaries(mark, None);
+        return status;
     }
-    if let Ok(integer) = ctx.as_int(code) {
-        return integer.to_i64().unwrap_or(-1) as i32;
-    }
-    ctx.heap.keep(code);
-    if let Some(file) = ctx
-        .sys_binding("stderr")
-        .ok()
-        .flatten()
-        .filter(|&f| f != NONE)
-    {
+    ctx.discard_temporaries(mark, Some(code));
+    if let Ok(stream) = ctx.sys_binding("stderr") {
+        let file = stream.unwrap_or(NONE);
         ctx.heap.keep(file);
-        if let Ok(writer) = ctx.lookup_attr(file, "write") {
-            ctx.heap.keep(writer);
-            if let Ok(text) = builtins::call(ctx, "str", &[code], &[]) {
-                let _ = ctx.call(writer, vec![text], Vec::new());
-            }
+        let mark = ctx.heap.temporary_mark();
+        if file != NONE {
+            let _ = builtins::write_object(ctx, file, code);
+        } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
+            && let Ok(text) = ctx.str_value(text)
+        {
+            // PyObject_Print writes strict UTF-8 directly to the C stream.
+            let _ = std::io::stderr().write_all(text.as_bytes());
         }
-    } else if let Ok(text) = builtins::call(ctx, "str", &[code], &[])
-        && let Ok(bytes) = ctx.encode_utf8_codepoints(text, false, "backslashreplace")
-    {
-        let _ = crate::sys::stderr_writer().write_all(&bytes);
+        ctx.discard_temporaries(mark, None);
     }
-    // The message's __str__ or the stream's write method may have replaced stderr.
-    let newline = ctx.text("\n");
-    let written = ctx.sys_binding("stderr").and_then(|file| {
-        let writer = ctx.lookup_attr(file.unwrap_or(NONE), "write")?;
-        ctx.call(writer, vec![newline], Vec::new())
-    });
-    if written.is_err() {
-        let _ = crate::sys::stderr_writer().write_all(b"\n");
-    }
+    // Formatting or releasing the write result can replace stderr before the newline.
+    super::excepthook::write_stderr(ctx, "\n");
     1
 }
 
-fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
+pub(super) fn finish(ctx: &mut Context, result: Result<Id>) -> Id {
     finish_at(ctx, result, None)
 }
 
@@ -1063,10 +1576,490 @@ fn finish_at(ctx: &mut Context, result: Result<Id>, span: Option<&[u32; 4]>) -> 
         }
         Err(mut error) => {
             ctx.record_exception_frame(&mut error, span);
-            ctx.pending = Some(error);
+            ctx.heap.execution.pending = Some(error);
             NONE
         }
     }
+}
+
+/// Snapshot a fixed pair before either read-only unpacking target is assigned.
+///
+/// # Safety
+/// Generated code supplies the active context and two writable handle slots.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unpack_pair(
+    ctx: *mut Context,
+    value: Id,
+    items: *mut [Id; 2],
+) -> Id {
+    // SAFETY: the emitter allocates both slots in the active native frame.
+    let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = snapshot_pair(ctx, value, items);
+    finish(ctx, result)
+}
+
+/// Snapshot two items and return the handle that must keep them alive during assignment.
+fn snapshot_pair(ctx: &mut Context, value: Id, items: &mut [Id; 2]) -> Result<Id> {
+    match ctx.heap.get(value) {
+        Value::Tuple(values) if values.len() == 2 => {
+            items.copy_from_slice(values);
+            Ok(value)
+        }
+        Value::List(values) if values.len() == 2 => {
+            items.copy_from_slice(values);
+            // Assigning the first target can mutate the list. Keep both original
+            // items in the current frame; finish roots the second handle.
+            ctx.heap.reserve_temporaries(2).map(|()| {
+                ctx.heap.keep(items[0]);
+                items[1]
+            })
+        }
+        _ => ctx.unpack_items(value, 2, None).map(|values| {
+            // The iterator path roots each handle as it consumes it.
+            items.copy_from_slice(&values);
+            NONE
+        }),
+    }
+}
+
+/// Advance an acquired loop cursor. Return 1 for a rooted item or 0 on exhaustion or error.
+///
+/// # Safety
+/// Generated code supplies a live cursor and one writable handle slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_pull_item(
+    ctx: *mut Context,
+    iter: Id,
+    item: *mut Id,
+    has_else: bool,
+) -> i32 {
+    // SAFETY: the caller keeps the context and cursor live throughout the pull.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return 0;
+    }
+    let next = match ctx.heap.get(iter) {
+        Value::Iterator { .. } => ctx.next_builtin_sequence_item(iter),
+        _ => ctx.next_item(iter),
+    };
+    let value = match next {
+        Ok(value) => value,
+        Err(error) => {
+            finish(ctx, Err(error));
+            return 0;
+        }
+    };
+    if let Some(value) = value {
+        // The loop body can remove this item and collect its former owner.
+        let value = finish(ctx, Ok(value));
+        if ctx.heap.execution.pending.is_some() {
+            return 0;
+        }
+        // SAFETY: generated code supplies the slot for the rooted item.
+        unsafe { item.write(value) };
+        1
+    } else {
+        if has_else {
+            ctx.heap.release_unbound_finalizers();
+        }
+        0
+    }
+}
+
+/// Return 2 for two projected handles, 1 for an owned row and 0 for exhaustion or error.
+/// The caller unpacks an ordinary row at the target's source position.
+///
+/// # Safety
+/// The caller owns the active context, cursor and two writable handle slots.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_pull_pair(
+    ctx: *mut Context,
+    iter: Id,
+    items: *mut [Id; 2],
+    has_else: bool,
+) -> i32 {
+    // SAFETY: generated code owns these scratch slots in the active frame.
+    let (ctx, items) = unsafe { (&mut *ctx, &mut *items) };
+    if ctx.heap.execution.pending.is_some() {
+        return 0;
+    }
+    match pull_pair(ctx, iter, items) {
+        Ok(0) if has_else => {
+            ctx.heap.release_unbound_finalizers();
+            0
+        }
+        Ok(status) => status,
+        Err(error) => {
+            finish(ctx, Err(error));
+            0
+        }
+    }
+}
+
+fn pull_pair(ctx: &mut Context, iter: Id, items: &mut [Id; 2]) -> Result<i32> {
+    let source = match *ctx.heap.get(iter) {
+        Value::LoopIterator { source } => source,
+        _ => iter,
+    };
+    if let Value::DictIterator(cursor) = *ctx.heap.get(source)
+        && cursor.is_plain_items()
+    {
+        let Some(pair) = cursor.next_entry_pair(ctx, source)? else {
+            return Ok(0);
+        };
+        ctx.heap.reserve_temporaries(2)?;
+        for value in pair {
+            ctx.heap.keep(value);
+        }
+        *items = pair;
+        Ok(2)
+    } else if let Some(row) = ctx.next_item(source)? {
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(row);
+        items[0] = row;
+        Ok(1)
+    } else {
+        Ok(0)
+    }
+}
+
+/// Construct a fresh sequence using the permanent handles in a linked literal.
+///
+/// # Safety
+/// `ctx` must be live and `data` must contain exactly `len` readable bytes
+/// encoding valid permanent handles as little-endian pairs.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_permanent_sequence(
+    ctx: *mut Context,
+    data: *const u8,
+    len: usize,
+    tuple: bool,
+) -> Id {
+    // SAFETY: the legacy entry supplies the same permanent handles as a byte count.
+    unsafe { imre_dyn_build_sequence(ctx, data.cast(), len / 2, true, tuple, std::ptr::null()) }
+}
+
+/// Build a display from evaluated handles or from linked immutable handle data.
+///
+/// # Safety
+/// The caller supplies a live context and `count` rooted native handles, or little-endian
+/// u16 permanent handles when `packed` is set. A nonnull slot identifies a constant tuple.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_sequence(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    packed: bool,
+    tuple: bool,
+    slot: *const u8,
+) -> Id {
+    // SAFETY: generated code supplies its active context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let items = || -> Result<Vec<Id>> {
+        let mut items = Vec::new();
+        items
+            .try_reserve_exact(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        if packed {
+            // SAFETY: little-endian pairs in module data need not be aligned.
+            let pairs = unsafe { slice::from_raw_parts(data.cast::<[u8; 2]>(), count) };
+            items.extend(pairs.iter().map(|&pair| Id::from(u16::from_le_bytes(pair))));
+        } else {
+            // SAFETY: a zero-length display may pass null; the frame roots all other handles.
+            items.extend_from_slice(unsafe { live_handles(data, count) });
+        }
+        Ok(items)
+    };
+    let result = if !slot.is_null() {
+        ctx.linked_constant(|ctx| {
+            ctx.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |heap| {
+                    Ok(heap.packed_tuple(items()?, true))
+                })
+        })
+    } else if tuple && packed {
+        ctx.linked_constant(|ctx| Ok(ctx.heap.packed_tuple(items()?, true)))
+    } else {
+        items().map(|items| {
+            if tuple {
+                ctx.heap.packed_tuple(items, false)
+            } else {
+                ctx.alloc(Value::List(items))
+            }
+        })
+    };
+    finish(ctx, result)
+}
+
+/// Transfer the evaluated keys to a fresh set in operand order, including the release of
+/// duplicates and, following an insertion error, the remaining keys before the partial set.
+///
+/// # Safety
+/// The compiler supplies a live context, rooted handles, and the mark before their evaluation.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_build_set(
+    ctx: *mut Context,
+    data: *const Id,
+    count: usize,
+    mark: usize,
+) -> Id {
+    // SAFETY: the caller keeps this frame and its handle array live across hash/equality callbacks.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    // SAFETY: the compiler roots each key and keeps its native operand array live for this call.
+    let keys = unsafe { live_handles(data, count) };
+    let result = (|| {
+        ctx.heap.reserve_temporaries(1 + count)?;
+        let set = ctx.op("set", NONE, NONE, NONE)?;
+        ctx.discard_temporaries(mark, std::iter::once(set).chain(keys.iter().rev().copied()));
+        let mut result = Ok(set);
+        for (index, &key) in keys.iter().enumerate() {
+            if result.is_ok() {
+                result = builtins::set_add(ctx, set, key).map(|()| set);
+            }
+            let key_mark = mark + count - index;
+            match &result {
+                Ok(_) => ctx.discard_truth(key_mark),
+                Err(error) => ctx.discard_temporaries(key_mark, error.roots()),
+            }
+        }
+        ctx.release_with_result(mark, result)
+    })();
+    finish(ctx, result)
+}
+
+/// Intern an already evaluated immutable value in its linked source unit.
+///
+/// # Safety
+/// The context and value must be live and the compiler slot must have a stable, unique address.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_linked_value(
+    ctx: *mut Context,
+    slot: *const u8,
+    value: Id,
+) -> Id {
+    // SAFETY: generated code keeps the value rooted in its live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx
+        .heap
+        .cached_constant(super::value::ConstantSlot::Linked(slot.addr()), |_| {
+            Ok(value)
+        });
+    finish(ctx, result)
+}
+
+/// Insert one streamed display operand and transfer its roots to the receiving list or set.
+///
+/// # Safety
+/// The compiler passes its live context, a mutable list or set, its operand and their mark.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_display_item(
+    ctx: *mut Context,
+    list: Id,
+    item: Id,
+    mark: usize,
+    extend: bool,
+) -> Id {
+    let op = if extend { c"extend" } else { c"append" };
+    // SAFETY: this is the ordinary checked operation on the same rooted operands.
+    let result = unsafe { imre_dyn_op_at(ctx, op.as_ptr(), list, item, NONE, std::ptr::null()) };
+    if result != NONE {
+        // SAFETY: both operations return their target container on success.
+        unsafe { &mut *ctx }.discard_temporaries(mark, [result]);
+    }
+    result
+}
+
+/// Pop a failed display's operands in stack order while their Python exception stays active.
+///
+/// # Safety
+/// The context and mark must belong to the active registered frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_display(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated error edge is in the frame which established the mark.
+    unsafe { &mut *ctx }.unwind_operands(mark);
+}
+
+/// Copy two exact builtin floats into the current frame's reusable operand slots.
+///
+/// # Safety
+/// The context and both handles are live, and `values` points to two writable doubles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exact_float_pair(
+    ctx: *const Context,
+    left: Id,
+    right: Id,
+    values: *mut [f64; 2],
+) -> bool {
+    // SAFETY: the frame holds both objects throughout this read.
+    let heap = &unsafe { &*ctx }.heap;
+    if let (Value::Float(a), Value::Float(b)) = (heap.get(left), heap.get(right)) {
+        // SAFETY: the frame reserved two slots before requesting the projection.
+        unsafe { values.write([*a, *b]) };
+        return true;
+    }
+    false
+}
+
+/// Own a computed double as a fresh Python float in the active frame.
+///
+/// # Safety
+/// The context is live and `span` is null or a static operator position.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_own_float(
+    ctx: *mut Context,
+    value: f64,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the generated operation owns the active context and its position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    let object = ctx.alloc(Value::Float(value));
+    finish_at(ctx, Ok(object), span)
+}
+
+/// Borrow a tagged integer from an exact Python int. Zero indicates another type.
+///
+/// # Safety
+/// Generated code keeps the object rooted until its last use of the borrowed word.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_exact_int_word(ctx: *const Context, object: Id) -> usize {
+    // SAFETY: the caller supplies its active context and a live handle.
+    match unsafe { &*ctx }.heap.get(object) {
+        Value::Int(integer) => integer.0,
+        _ => 0,
+    }
+}
+
+/// Compare against an integer whose tagged word the caller already has.
+///
+/// # Safety
+/// The frame supplies a live context, two rooted operands, a comparison opcode,
+/// and the original right operand's tagged word.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_compare_integer_rhs(
+    ctx: *mut Context,
+    opcode: *const c_char,
+    left: Id,
+    right: Id,
+    word: i64,
+) -> Id {
+    // SAFETY: the generated frame owns the context and supplies a static opcode.
+    let context = unsafe { &*ctx };
+    if context.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    if let Value::Int(x) = context.heap.get(left)
+        && let Some(x) = x.as_small()
+    {
+        let y = word >> 1;
+        // SAFETY: opcode names one of the six checked comparison operators.
+        return flag(match unsafe { cstr(opcode) } {
+            "==" => x == y,
+            "!=" => x != y,
+            "<" => x < y,
+            "<=" => x <= y,
+            ">" => x > y,
+            ">=" => x >= y,
+            _ => unreachable!("expected a checked comparison"),
+        });
+    }
+    // SAFETY: the original operands and operation remain live for Python dispatch.
+    unsafe { imre_dyn_op_at(ctx, opcode, left, right, NONE, std::ptr::null()) }
+}
+
+/// Apply checked remainder by a positive power of two to a Python operand.
+///
+/// # Safety
+/// Generated code supplies its active context, a rooted dividend, and the
+/// permanent integer handle of the proven literal divisor.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_masked_remainder(
+    ctx: *mut Context,
+    dividend: Id,
+    divisor: Id,
+) -> Id {
+    // SAFETY: the generated frame owns the context and both operands.
+    let context = unsafe { &*ctx };
+    if context.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    if let Value::Int(integer) = context.heap.get(dividend)
+        && let Some(value) = integer.as_small()
+    {
+        let zero = Heap::cached_integer(0).expect("zero has a permanent handle");
+        let mask = divisor - zero - 1;
+        return zero + ((value as Id) & mask);
+    }
+    // SAFETY: the original operands and checked frame are live on the fallback edge.
+    unsafe {
+        imre_dyn_op_at(
+            ctx,
+            c"%".as_ptr(),
+            dividend,
+            divisor,
+            NONE,
+            std::ptr::null(),
+        )
+    }
+}
+
+/// Read a subscription whose checked index produced an owned integer or a Python result.
+///
+/// # Safety
+/// The caller transfers the nonzero integer word and roots the receiver and alternate
+/// key. The position is null or points to the registered operation's static range.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_int_item(
+    ctx: *mut Context,
+    receiver: Id,
+    word: usize,
+    fallback: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: the checked frame owns the context and supplies its static range.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    let index = (word != 0).then(|| crate::Int(word));
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let key = if let Some(index) = index {
+        if let Some(item) = ctx.exact_sequence_item(receiver, &index) {
+            return finish_at(ctx, Ok(item), span);
+        }
+        let object = ctx.alloc(Value::Int(index));
+        let object = finish(ctx, Ok(object));
+        if ctx.heap.execution.pending.is_some() {
+            return NONE;
+        }
+        object
+    } else {
+        fallback
+    };
+    let result = ctx.get_item(receiver, key);
+    finish_at(ctx, result, span)
+}
+
+/// Move one owned tagged integer into the active Python heap.
+///
+/// # Safety
+/// The caller transfers a live integer reference and owns the context for this call.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize) -> Id {
+    // SAFETY: the caller owns the context and transfers the reference to the heap.
+    let ctx = unsafe { &mut *ctx };
+    let object = ctx.alloc(Value::Int(crate::Int(word)));
+    finish(ctx, Ok(object))
 }
 
 #[unsafe(no_mangle)]
@@ -1081,7 +2074,33 @@ pub(super) unsafe extern "C" fn imre_dyn_lit(
     ctx.linked_constant(|ctx| load_linked_literal(ctx, kind, data))
 }
 
+/// Load a literal only after the preceding checked operation succeeded.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_boxed_guarded_lit(
+    ctx: *mut Context,
+    kind: i32,
+    data: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: compiled code holds the context and supplies exactly len literal bytes.
+    unsafe {
+        if imre_dyn_failed(ctx) {
+            0
+        } else {
+            imre_dyn_lit(ctx, kind, data, len)
+        }
+    }
+}
+
 fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
+    // Small decimal integers already occupy permanent slots and need no temporary root.
+    if kind == 0
+        && let Ok(text) = std::str::from_utf8(data)
+        && let Ok(value) = text.parse::<i64>()
+        && let Some(id) = Heap::cached_integer(value)
+    {
+        return id;
+    }
     // Each literal roots its value and the returned handle; metadata roots every name.
     let roots = if kind == 5 {
         data.iter()
@@ -1169,6 +2188,256 @@ fn load_linked_literal(ctx: &mut Context, kind: i32, data: &[u8]) -> Id {
     finish(ctx, value)
 }
 
+/// Resolve an identifier from the linked code object in the current Python scope.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_lookup(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: the emitter supplies a live context and a constant of exactly len bytes.
+    let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let mut result = std::str::from_utf8(name)
+        .map_err(|error| Error::new("UnicodeError", error.to_string()))
+        .and_then(|name| ctx.lookup(scope, name));
+    finish_operand_position(ctx, &mut result, None);
+    finish(ctx, result)
+}
+
+/// Read a checked target from its owning comprehension scope, including a captured cell.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_lookup_local(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+) -> Id {
+    // SAFETY: the emitter links a Rust str identifier of exactly len bytes.
+    let (ctx, key) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(name, len)),
+        )
+    };
+    if ctx.heap.execution.pending.is_none()
+        && ctx.scope_data(scope).namespace.is_none()
+        && let Some(value) = ctx.scope_name(scope, key)
+    {
+        ctx.heap.take_call_position();
+        return finish(ctx, Ok(value));
+    }
+    // SAFETY: the ordinary lookup accepts the same scope and identifier.
+    unsafe { imre_dyn_lookup(ctx, scope, name, len) }
+}
+
+/// Store a linked identifier and report whether its previous owner needs releasing.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assign_target(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+) -> Id {
+    // SAFETY: the compiled frame supplies its active context and the linked identifier bytes.
+    let (ctx, name) = unsafe { (&mut *ctx, slice::from_raw_parts(name, len)) };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = std::str::from_utf8(name)
+        .map_err(|error| Error::new("UnicodeError", error.to_string()))
+        .and_then(|name| ctx.store_source_name(scope, name, value))
+        .map(flag);
+    finish(ctx, result)
+}
+
+/// Clear a named handler through its ordinary observable store, release and deletion.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_clear_handler_target(
+    ctx: *mut Context,
+    scope: Id,
+    name: *const u8,
+    len: usize,
+    mark: usize,
+    live: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: the compiled activation owns the context, linked name and live handle array.
+    unsafe {
+        let replaced = imre_dyn_assign_target(ctx, scope, name, len, NONE);
+        if imre_dyn_failed(ctx) {
+            return NONE;
+        }
+        imre_dyn_assignment_target_at(ctx, mark, live, count, replaced);
+        imre_boxed_named_op(ctx, c"delname".as_ptr(), scope, name, len, NONE)
+    }
+}
+
+/// Bind a member of the returned import object in the importing frame.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_bind_from(
+    ctx: *mut Context,
+    scope: Id,
+    module: Id,
+    member: Id,
+    binding: *const u8,
+    len: usize,
+) {
+    // SAFETY: the checked frame owns the context and the linked UTF-8 binding.
+    let (ctx, binding) = unsafe {
+        (
+            &mut *ctx,
+            std::str::from_utf8_unchecked(slice::from_raw_parts(binding, len)),
+        )
+    };
+    if ctx.heap.execution.pending.is_some() {
+        return;
+    }
+    let mark = ctx.heap.temporary_mark();
+    let result = ctx.import_from(module, member).and_then(|value| {
+        // A class namespace or a colliding globals key can run Python during the store.
+        ctx.heap.reserve_temporaries(1)?;
+        ctx.heap.keep(value);
+        let binding = ctx.heap.code_name(binding);
+        ctx.op("assign", scope, binding, value)
+    });
+    if let Err(error) = result {
+        finish(ctx, Err(error));
+    }
+    // A mapping can discard its value. Release it before the next member lookup.
+    ctx.unwind_operands(mark);
+}
+
+/// Execute an import statement through the importing frame's builtins.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_import_literal(
+    ctx: *mut Context,
+    scope: Id,
+    spelling: *const u8,
+    len: usize,
+    fromlist: Id,
+    level: u32,
+) -> Id {
+    // SAFETY: the frame supplies its context and exactly len linked identifier bytes.
+    let name = unsafe { imre_boxed_guarded_lit(ctx, 6, spelling, len) };
+    // SAFETY: the literal call has returned and the executing frame owns the live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.import_in_scope(ctx.heap.current_code(), scope, name, fromlist, level);
+    finish(ctx, result)
+}
+
+/// Read a contiguous slice and attribute failures to the subscription expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: all original handles are forwarded without a linked constant marker.
+    unsafe { imre_dyn_get_linked_slice_at(ctx, receiver, start, stop, std::ptr::null(), span) }
+}
+
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_get_linked_slice_at(
+    ctx: *mut Context,
+    receiver: Id,
+    start: Id,
+    stop: Id,
+    marker: *const u8,
+    span: *const [u32; 4],
+) -> Id {
+    // SAFETY: generated native code owns its context and supplies a static span or null.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.get_slice(
+        receiver,
+        start,
+        stop,
+        (!marker.is_null()).then_some(marker as usize),
+    );
+    finish_at(ctx, result, span)
+}
+
+/// Apply a boxed operation with a linked code name as its second operand.
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub(super) unsafe extern "C" fn imre_boxed_named_op(
+    ctx: *mut Context,
+    op: *const c_char,
+    receiver: Id,
+    name: *const u8,
+    len: usize,
+    value: Id,
+) -> Id {
+    // A checked operand can have failed before the emitter reaches the name.
+    // SAFETY: the executing frame supplies its live context.
+    if unsafe { imre_dyn_failed(ctx) } {
+        return NONE;
+    }
+    // SAFETY: generated code owns the context, opcode and linked name for this call.
+    unsafe {
+        let key = imre_dyn_lit(ctx, 6, name, len);
+        if imre_dyn_failed(ctx) {
+            0
+        } else {
+            imre_dyn_op_at(ctx, op, receiver, key, value, std::ptr::null())
+        }
+    }
+}
+
+/// Apply a written attribute operation at its source after both operands have succeeded.
+///
+/// # Safety
+/// The frame supplies a live context, its operand mark, a NUL-terminated UTF-8
+/// identifier, and a pointer to the four source-position words.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_mutate_attribute_at(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    value: Id,
+    delete: bool,
+    position: *const [u32; 4],
+    mark: usize,
+) {
+    // SAFETY: generated code supplies the live context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return;
+    }
+    let previous = ctx.heap.take_call_position();
+    // SAFETY: generated code supplies a non-null static four-word position.
+    ctx.heap.set_call_position(Some(unsafe { *position }));
+    // SAFETY: the compiler emits a terminated source identifier.
+    let name = unsafe { cstr(name) };
+    let result = if delete {
+        ctx.delete_attr(receiver, name)
+    } else {
+        ctx.set_attr(receiver, name, value).map(|_| ())
+    };
+    // Source operands may run Python during release. Keep their caller at STORE_ATTR
+    // or DELETE_ATTR and preserve a descriptor exception through those callbacks.
+    ctx.heap.execution.pending = result.err();
+    ctx.unwind_operands(mark);
+    let mut result = ctx.heap.execution.pending.take().map_or(Ok(()), Err);
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Uniform));
+    ctx.heap.set_call_position(previous);
+    if let Err(error) = result {
+        finish(ctx, Err(error));
+    }
+}
+
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_op_at(
     ctx: *mut Context,
@@ -1180,17 +2449,115 @@ pub(super) unsafe extern "C" fn imre_dyn_op_at(
 ) -> Id {
     // SAFETY: generated native code owns its context and supplies a static opcode.
     let (ctx, op) = unsafe { (&mut *ctx, cstr(opcode)) };
-    if ctx.pending.is_some() && op != "take_error" {
+    if ctx.heap.execution.pending.is_some() && op != "take_error" {
         return NONE;
+    }
+    let uniform_operand = matches!(
+        op,
+        "pos" | "neg" | "~" | "not" | "format" | "format_conversion"
+    );
+    // SAFETY: generated instructions supply null or a native [4 x i32] constant.
+    let mut span = unsafe { span.as_ref() };
+    if uniform_operand && let Some(position) = span.take() {
+        ctx.heap.set_call_position(Some(*position));
     }
     let reraise = op == "reraise" && (a != NONE || ctx.heap.active_exception() != NONE);
-    let result = ctx.op(op, a, b, c);
+    let mut result = ctx.op(op, a, b, c);
+    if matches!(
+        op,
+        "attr"
+            | "method"
+            | "spread_arguments"
+            | "extend"
+            | "keywords"
+            | "class_keywords"
+            | "iter"
+            | "await_iter"
+            | "async_exit_context"
+    ) || (b == TRUE && matches!(op, "lookup_enter" | "lookup_exit"))
+        || uniform_operand
+    {
+        finish_operand_position(
+            ctx,
+            &mut result,
+            (uniform_operand || op == "method").then_some(value::TracebackAnchor::Uniform),
+        );
+    }
     if reraise && let Err(error) = result {
-        ctx.pending = Some(error);
+        ctx.heap.execution.pending = Some(error);
         return NONE;
     }
-    // SAFETY: the emitter supplies null or a native [4 x i32] module constant.
-    finish_at(ctx, result, unsafe { span.as_ref() })
+    if let Err(error) = &mut result
+        && let Some(&[line, start, operator, end]) = span
+        && let Some(width) = match op {
+            "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "@" => Some(1),
+            "//" | "**" | "<<" | ">>" => Some(2),
+            _ => None,
+        }
+    {
+        error.tracing().source_position = Some((
+            line,
+            value::TracebackSpan {
+                start,
+                end,
+                end_line: line,
+                anchor: value::TracebackAnchor::Operator(operator, width),
+            },
+        ));
+        return finish(ctx, result);
+    }
+    if result.is_err() && span.is_none() && matches!(op, "//" | "%" | "<<" | ">>") {
+        ctx.heap.use_expression_line();
+    }
+    finish_at(ctx, result, span)
+}
+
+/// Match a class using the written positional count and the caller's keyword handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_match_class(
+    ctx: *mut Context,
+    subject: Id,
+    class: Id,
+    positional: usize,
+    keywords: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: generated code owns an active context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    // SAFETY: the caller keeps its keyword handles valid for this call.
+    let keywords = unsafe { live_handles(keywords, count) };
+    let result = ctx.match_class(
+        subject,
+        class,
+        ClassPatternFields::Written {
+            positional,
+            keywords,
+        },
+    );
+    finish(ctx, result)
+}
+
+/// Test the operand at its source position, preserving exceptions raised by Python truth hooks.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_truth_at(
+    ctx: *mut Context,
+    value: Id,
+    span: *const [u32; 4],
+) -> bool {
+    // SAFETY: the caller owns its context and supplies null or a static module position.
+    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
+    if ctx.heap.execution.pending.is_some() {
+        return false;
+    }
+    let mut result = ctx.truth(value);
+    finish_operand_position(ctx, &mut result, None);
+    result.unwrap_or_else(|error| {
+        finish_at(ctx, Err(error), span);
+        false
+    })
 }
 
 /// Publish a continued expression's source line without changing its statement's GC roots.
@@ -1225,10 +2592,213 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     scope: Id,
 ) -> Id {
     // SAFETY: the generated caller owns the context and supplies a null or static position.
-    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    scoped_call(ctx, span, |ctx| {
-        ctx.call_packed(callable, args, kwargs, mark, scope)
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            callable,
+            |ctx| {
+                let arguments = ctx.items(args)?;
+                if kwargs == NONE {
+                    ctx.prepare_call_in_scope(scope, callable, arguments.into(), Vec::new())
+                } else {
+                    ctx.prepare_call_with_keyword_dict(scope, callable, arguments, kwargs)
+                }
+            },
+            |ctx, mark, result| {
+                if !ctx.heap.discard_scalar_call(mark, result, args, callable) {
+                    ctx.finish_call_operands(mark, result);
+                }
+            },
+        )
+    }
+}
+
+/// Look up an immediate call before evaluating its arguments. Exact string methods
+/// can pass their receiver as the first positional operand without allocating a method.
+///
+/// # Safety
+/// The caller supplies the active context, a NUL-terminated ordinary str method symbol, and a
+/// writable receiver slot. The slot is initialized on successful lookup.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.string_method_target(receiver, name)
     })
+}
+
+/// Prepare an ordinary positional method call before evaluating its arguments.
+///
+/// # Safety
+/// The caller supplies the active context, a NUL-terminated UTF-8 name and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_builtin_method_target(
+    ctx: *mut Context,
+    receiver: Id,
+    name: *const c_char,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code retains the context and passes static method names.
+    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
+    method_target(ctx, bound_receiver, |ctx| {
+        ctx.builtin_method_target(receiver, name)
+    })
+}
+
+/// Resolve an immediate get call before evaluating arguments that may release its receiver.
+///
+/// # Safety
+/// The caller supplies the active context and a writable receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_dict_get_target(
+    ctx: *mut Context,
+    receiver: Id,
+    bound_receiver: *mut Id,
+) -> Id {
+    // SAFETY: generated code owns the context and passes one writable slot.
+    let (ctx, bound_receiver) = unsafe { (&mut *ctx, &mut *bound_receiver) };
+    method_target(ctx, bound_receiver, |ctx| ctx.dict_get_target(receiver))
+}
+
+/// Propagate a failing receiver expression before looking up its method.
+fn method_target(
+    ctx: &mut Context,
+    bound_receiver: &mut Id,
+    lookup: impl FnOnce(&mut Context) -> Result<(Id, Id)>,
+) -> Id {
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let mut result = lookup(ctx).map(|(callable, receiver)| {
+        *bound_receiver = receiver;
+        callable
+    });
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Uniform));
+    finish(ctx, result)
+}
+
+/// Test a handle against the evaluated elements of a literal tuple.
+///
+/// # Safety
+/// The generated caller roots the operands and provides a readable array of
+/// `count` handles for the duration of the comparison.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_contains_literal_tuple(
+    ctx: *mut Context,
+    item: Id,
+    values: *const Id,
+    count: usize,
+    negate: u32,
+) -> Id {
+    // SAFETY: the caller owns this context and retains the array through rich comparisons.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let mut candidates = values.iter().copied();
+    let result = ctx
+        .contains_next(item, |_| Ok(candidates.next()))
+        .map(|found| flag(found ^ (negate != 0)));
+    finish(ctx, result)
+}
+
+/// Invoke a prepared method. The leading operand is either the unbound method's
+/// receiver or None when lookup returned a bound callable.
+///
+/// # Safety
+/// The positional call ABI applies, with one additional leading receiver slot.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_positional_method_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    count: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the compiler writes and retains every operand through the call.
+    let values = unsafe { live_handles(values, count) };
+    let args = values.strip_prefix(&[NONE]).unwrap_or(values);
+    // SAFETY: the subslice belongs to the same live array and the remaining ABI is identical.
+    unsafe {
+        imre_dyn_positional_call_at(ctx, callable, args.as_ptr(), args.len(), mark, span, scope)
+    }
+}
+
+/// Return a single field from an exact string partition, or index the result of a
+/// custom method using the ordinary subscription protocol.
+///
+/// # Safety
+/// The active caller roots both prepared operands and supplies null or static positions.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_partition_field_at(
+    context: *mut Context,
+    callable: Id,
+    operands: *const [Id; 2],
+    index: u32,
+    get_span: *const [u32; 4],
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
+) -> Id {
+    // SAFETY: the generated call supplies a receiver slot and exactly one argument.
+    let (ctx, [receiver, separator]) = unsafe { (&mut *context, *operands) };
+    if let Value::Native(symbol) = ctx.heap.get(callable)
+        && matches!(symbol.as_str(), "str.partition" | "str.rpartition")
+        && matches!(ctx.heap.get(receiver), Value::Str(_))
+        && matches!(ctx.heap.get(separator), Value::Str(_))
+    {
+        let reverse = symbol == "str.rpartition";
+        // SAFETY: the call position is null or static.
+        return unsafe {
+            scoped_call(
+                context,
+                span.as_ref(),
+                mark,
+                callable,
+                |ctx| {
+                    let fields = crate::objects::partition_text(
+                        ctx.str_value(receiver)?,
+                        ctx.str_value(separator)?,
+                        reverse,
+                    )?;
+                    let selected = match (fields, index) {
+                        (Some((left, _)), 0) => ctx.text(left.to_owned()),
+                        (Some(_), 1) => separator,
+                        (Some((_, right)), 2) => ctx.text(right.to_owned()),
+                        (None, 0) if !reverse => receiver,
+                        (None, 2) if reverse => receiver,
+                        (None, 0..=2) => ctx.text(""),
+                        _ => unreachable!("compiler emits indices in 0..=2"),
+                    };
+                    Ok(calls::RegisteredCall::Returned(selected))
+                },
+                Context::finish_call_operands,
+            )
+        };
+    }
+    // SAFETY: the receiver slot, argument and call position follow the prepared method ABI.
+    let result = unsafe {
+        imre_dyn_positional_method_at(context, callable, operands.cast(), 2, mark, span, scope)
+    };
+    // SAFETY: the call has returned, so its borrow of this context has ended.
+    let ctx = unsafe { &mut *context };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let key = ctx.int(i64::from(index));
+    let result = ctx.get_item(result, key);
+    // SAFETY: the subscript position is null or static.
+    finish_at(ctx, result, unsafe { get_span.as_ref() })
 }
 
 /// Invoke a call whose positional operands remain rooted in the caller's frame.
@@ -1247,58 +2817,205 @@ pub(super) unsafe extern "C" fn imre_dyn_positional_call_at(
     scope: Id,
 ) -> Id {
     // SAFETY: both pointers follow the generated call ABI.
-    let (ctx, span) = unsafe { (&mut *ctx, span.as_ref()) };
-    scoped_call(ctx, span, |ctx| {
-        // SAFETY: the generated caller retains all operands and writes the array before this call.
-        let args = copy_ids(unsafe { live_handles(values, count) })?;
-        let result = ctx.call_in_scope(scope, callable, args, Vec::new())?;
-        ctx.finish_call_operands(mark, result);
-        ctx.check_call_return(result)
-    })
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            callable,
+            |ctx| {
+                let args = live_handles(values, count);
+                ctx.prepare_call_in_scope(scope, callable, args.into(), Vec::new())
+            },
+            Context::finish_call_operands,
+        )
+    }
 }
 
-/// Clear the recorded call position and publish the return value or exception.
-fn scoped_call(
-    ctx: &mut Context,
-    span: Option<&[u32; 4]>,
-    invoke: impl FnOnce(&mut Context) -> Result<Id>,
+/// Call with positional values followed by values for statically named keywords.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keyword_call_at(
+    ctx: *mut Context,
+    callable: Id,
+    values: *const Id,
+    positional: usize,
+    mut names: *const c_char,
+    keywords: usize,
+    mark: usize,
+    span: *const [u32; 4],
+    scope: Id,
 ) -> Id {
-    if ctx.pending.is_some() {
+    // SAFETY: the compiler supplies its context, optional static position and initialized handles.
+    unsafe {
+        scoped_call(
+            ctx,
+            span.as_ref(),
+            mark,
+            callable,
+            |ctx| {
+                let values = live_handles(values, positional + keywords);
+                let (args, named) = values.split_at(positional);
+                let mut kwargs = Vec::new();
+                kwargs
+                    .try_reserve_exact(keywords)
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                for &value in named {
+                    // SAFETY: the emitter stores one NUL-terminated UTF-8 identifier for each value.
+                    let name = cstr(names);
+                    kwargs.push((copy_label(name)?, value));
+                    names = names.add(name.len() + 1);
+                }
+                ctx.prepare_call_in_scope(scope, callable, args.into(), kwargs)
+            },
+            Context::finish_call_operands,
+        )
+    }
+}
+
+/// Preserve the operation range when transferring an exception back to the caller.
+fn finish_operand_position<T>(
+    ctx: &mut Context,
+    result: &mut Result<T>,
+    ordinary_anchor: Option<value::TracebackAnchor>,
+) {
+    if let Some([line, end_line, start, end]) = ctx.heap.take_call_position()
+        && let Err(error) = result
+    {
+        let anchor = if matches!(
+            ctx.code_object(ctx.heap.current_code()).body,
+            value::Body::Suspended(_)
+        ) {
+            value::TracebackAnchor::Uniform
+        } else if let Some(anchor) = ordinary_anchor {
+            anchor
+        } else {
+            return;
+        };
+        error.tracing().source_position = Some((
+            line,
+            value::TracebackSpan {
+                end_line,
+                start,
+                end,
+                anchor,
+            },
+        ));
+    }
+}
+
+/// # Safety
+/// The generated caller owns execution of this context. Its operand mark and position
+/// belong to the caller's frame and stay live while the registered frame runs.
+unsafe fn scoped_call(
+    context: *mut Context,
+    span: Option<&[u32; 4]>,
+    mark: usize,
+    callable: Id,
+    prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    release: impl FnOnce(&mut Context, usize, Id),
+) -> Id {
+    // SAFETY: restrict preparation's borrow to its own phase of the call.
+    let ctx = unsafe { &mut *context };
+    if ctx.heap.execution.pending.is_some() {
         ctx.heap.set_call_position(None);
         return NONE;
     }
-    let result = invoke(ctx);
-    ctx.heap.set_call_position(None);
-    finish_at(ctx, result, span)
+    let call = OperandCall::prepare(ctx, mark, callable, prepare);
+    // SAFETY: the generated caller owns the marked operands throughout the call.
+    let mut result = call.and_then(|call| unsafe { call.run(context, release) });
+    // SAFETY: execution has returned to the generated caller.
+    let ctx = unsafe { &mut *context };
+    // Ordinary traceback nodes also own the saved call range, including when the
+    // emitter supplied no highlight for the traceback printer.
+    finish_operand_position(ctx, &mut result, Some(value::TracebackAnchor::Call));
+    match result {
+        Ok(id) if id != NONE && ctx.heap.keeps_single_operand(mark, id) => id,
+        result => finish_at(ctx, result, span),
+    }
 }
 
-/// Record a class annotation only when its statement executes.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_mark_class_annotation(
-    ctx: *mut Context,
-    scope: Id,
-    name: Id,
-    offset: u32,
-) -> Id {
-    // SAFETY: the compiler passes the active context and handles from the current class body.
-    let ctx = unsafe { &mut *ctx };
-    let result = ctx.record_class_annotation(scope, name, offset);
-    finish(ctx, result)
+/// A registered call and the caller's operand mark to restore on return.
+pub(super) struct OperandCall {
+    call: calls::RegisteredCall,
+    mark: usize,
+    transferred: bool,
 }
 
-/// The compiler emits a native entry when body_line is zero, or generator source otherwise.
+impl OperandCall {
+    pub(super) fn prepare(
+        ctx: &mut Context,
+        mark: usize,
+        callable: Id,
+        prepare: impl FnOnce(&mut Context) -> Result<calls::RegisteredCall>,
+    ) -> Result<Self> {
+        let call = prepare(ctx)?;
+        let transferred = matches!(call, calls::RegisteredCall::Native(_))
+            && match *ctx.heap.get(callable) {
+                Value::Function { .. } => true,
+                Value::Method { callable, .. } => {
+                    matches!(ctx.heap.get(callable), Value::Function { .. })
+                }
+                _ => false,
+            };
+        if transferred {
+            ctx.heap.release_bound_call_operands(mark);
+        }
+        Ok(Self {
+            call,
+            mark,
+            transferred,
+        })
+    }
+
+    /// # Safety
+    /// This thread owns the context and marked caller frame used to prepare the call.
+    #[inline]
+    pub(super) unsafe fn run(
+        self,
+        context: *mut Context,
+        release: impl FnOnce(&mut Context, usize, Id),
+    ) -> Result<Id> {
+        // SAFETY: the owner has resumed with the prepared activation still rooted.
+        let value = unsafe { self.call.run(context) }?;
+        // SAFETY: the call returned to the marked caller on this thread.
+        let ctx = unsafe { &mut *context };
+        if self.transferred {
+            // Caller-side packed handles may already have been collected.
+            ctx.finish_call_operands(self.mark, value);
+        } else {
+            release(ctx, self.mark, value);
+        }
+        ctx.check_call_return(value)
+    }
+}
+
+/// Definition sites carry either an ordinary entry or a coroutine resume entry.
 #[repr(C)]
 union PrelinkedEntry {
     native: Code,
-    source: *const c_char,
+    suspended: value::ResumeCode,
 }
 
 #[repr(C)]
 pub(super) struct PrelinkedSite {
     entry: PrelinkedEntry,
-    filename: *const c_char,
+    // Kept in the linked site ABI. The active parent Code owns the filename.
+    _filename: *const c_char,
     first_line: u32,
-    body_line: u32,
+    tag: u32,
+}
+
+/// Definition-time scope and flag fields from a compiled function's parameter metadata.
+#[derive(Default, serde::Deserialize)]
+#[serde(default)]
+struct DefinitionMetadata {
+    generator_lambda: bool,
+    annotation_class: serde_json::Value,
+    scope_reads: serde_json::Value,
+    scope_complete: serde_json::Value,
+    method_class_cell: serde_json::Value,
+    class_cell: serde_json::Value,
+    code_flags: serde_json::Value,
 }
 
 #[unsafe(no_mangle)]
@@ -1317,20 +3034,26 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
     // SAFETY: the compiler supplies a live context and a distinct static record for this definition.
     let (ctx, definition) = unsafe { (&mut *ctx, &*site) };
     let key = site as usize;
-    let code = if let Some(&code) = ctx.native_code_objects.get(&key) {
+    let owner = ctx.heap.current_code();
+    let code = if let Some(&(_, code)) = ctx
+        .code_object(owner)
+        .nested
+        .iter()
+        .find(|(site, _)| *site == key)
+    {
         code
     } else {
-        // SAFETY: the filename is a nul-terminated constant in the native executable.
-        let file = unsafe { cstr(definition.filename) };
-        // SAFETY: the compiler tags native functions with line zero and suspended suites
-        // with their one-based source line and a static, nul-terminated UTF-8 string.
+        let filename = ctx.code_object(owner).filename;
+        // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
-            if definition.body_line == 0 {
-                value::Body::Native(definition.entry.native)
-            } else {
-                value::Body::PendingGenerator {
-                    source: cstr(definition.entry.source),
-                    body_line: definition.body_line,
+            match definition.tag {
+                0 => value::Body::Native(definition.entry.native, NONE),
+                value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
+                _ => {
+                    return finish(
+                        ctx,
+                        Err(Error::new("SystemError", "invalid compiled definition tag")),
+                    );
                 }
             }
         };
@@ -1340,16 +3063,23 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             name,
             parameters,
             (qualname, doc),
-            value::Location {
-                file: file.into(),
-                line: definition.first_line,
-                span: None,
-            },
+            (filename, definition.first_line),
         );
-        ctx.native_code_objects.insert(key, code);
+        let constants = match ctx.heap.compilation_constants(owner) {
+            Ok(constants) => constants,
+            Err(error) => return finish(ctx, Err(error)),
+        };
+        let Value::Code(parent) = ctx.heap.get_mut(owner) else {
+            unreachable!()
+        };
+        parent.nested.push((key, code));
+        let Value::Code(child) = ctx.heap.get_mut(code) else {
+            unreachable!()
+        };
+        child.compilation_constants = constants;
         code
     };
-    ctx.define_function(
+    let result = ctx.define_function(
         code,
         scope,
         name,
@@ -1358,7 +3088,8 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         doc,
         annotate,
         annotation_scope,
-    )
+    );
+    finish(ctx, result)
 }
 
 impl Context {
@@ -1377,6 +3108,22 @@ impl Context {
         Some(freevars)
     }
 
+    /// Include the explicit or implicit __class__ read once in the sorted closure layout.
+    fn freevars_with_class_cell<'a>(
+        &self,
+        enclosing: Option<Id>,
+        reads: impl Iterator<Item = &'a str>,
+        captures_class: bool,
+    ) -> Option<Vec<String>> {
+        let mut freevars =
+            self.enclosing_freevars(enclosing?, reads.filter(|&name| name != "__class__"))?;
+        if captures_class {
+            freevars.push("__class__".to_owned());
+            freevars.sort();
+        }
+        Some(freevars)
+    }
+
     /// Determine whether a read resolves to an enclosing function rather than module globals.
     pub(super) fn is_enclosing_freevar(&self, mut scope: Id, name: &str) -> Option<bool> {
         loop {
@@ -1384,11 +3131,8 @@ impl Context {
             let Some(parent) = frame.parent else {
                 return Some(false);
             };
-            // A separate exec/eval locals mapping supplies names to the module, never closure cells.
-            if frame.exec_locals.is_some() {
-                return Some(false);
-            }
-            if frame.class_body.is_none() {
+            // Class and mapping locals serve direct reads. A nested function closes over their parent.
+            if !frame.in_class_body && frame.exec_locals.is_none() {
                 if frame.globals.contains(name) {
                     return Some(false);
                 }
@@ -1397,6 +3141,9 @@ impl Context {
                 }
                 if !frame.closure.declared_complete {
                     return None;
+                }
+                if name == "__class__" && frame.class_cell.is_some() {
+                    return Some(true);
                 }
             }
             scope = parent;
@@ -1410,7 +3157,7 @@ impl Context {
             if let Some(&cell) = frame.closure.cells.get(name) {
                 return cell;
             }
-            if frame.class_body.is_none() && frame.closure.declared.contains(name) {
+            if !frame.in_class_body && frame.closure.declared.contains(name) {
                 let Value::Scope(frame) = self.heap.get_mut(cursor) else {
                     unreachable!()
                 };
@@ -1421,6 +3168,12 @@ impl Context {
                     unreachable!()
                 };
                 frame.closure.cells.insert(name.to_owned(), cell);
+                return cell;
+            }
+            if !frame.in_class_body
+                && name == "__class__"
+                && let Some(cell) = frame.class_cell
+            {
                 return cell;
             }
             cursor = frame.parent.expect("free variable has enclosing scope");
@@ -1434,71 +3187,122 @@ impl Context {
         name: Id,
         parameters: Id,
         metadata_pair: (Id, Id),
-        location: value::Location,
+        (filename, first_line): (Id, u32),
     ) -> Id {
-        let filename = self.text(location.file);
         let (qualname, doc) = metadata_pair;
         let module_definition = self.scope_data(scope).parent.is_none();
-        let metadata: serde_json::Value = self
+        let metadata: DefinitionMetadata = self
             .str_value(parameters)
             .ok()
+            .filter(|v| v.trim_start().starts_with('{'))
             .and_then(|v| serde_json::from_str(v).ok())
             .unwrap_or_default();
-        let annotation_class = metadata["annotation_class"] == true;
-        let mut read_class = false;
-        let reads = metadata["scope_reads"]
+        let annotation_class = metadata.annotation_class == true;
+        let class = self.scope_data(scope);
+        let class_reads =
+            class.in_class_body && (annotation_class || metadata.method_class_cell.is_boolean());
+        let mut implicit = Vec::new();
+        if annotation_class {
+            implicit.push("__classdict__".to_owned());
+        }
+        let reads = metadata
+            .scope_reads
             .as_array()
             .into_iter()
             .flatten()
-            .filter_map(|v| v.as_str())
-            .filter(|name| {
-                if annotation_class && *name == "__class__" {
-                    read_class = true;
-                    false
-                } else {
-                    !annotation_class || *name != "__classdict__"
+            .filter_map(|value| value.as_str())
+            .filter(|&name| {
+                if annotation_class && name == "__classdict__" {
+                    return false;
                 }
+                let captured = match name {
+                    "__class__" => annotation_class && class.in_class_body,
+                    "__classdict__" => class_reads,
+                    CONDITIONAL => class_reads && class.conditional_annotation_cell().is_some(),
+                    _ => false,
+                };
+                if captured {
+                    implicit.push(name.to_owned());
+                }
+                !captured
             });
-        let lexical = if annotation_class {
+        let lexical = if annotation_class
+            && !self
+                .scope_data(scope)
+                .closure
+                .cells
+                .contains_key("__classdict__")
+        {
             self.scope_data(scope).parent.unwrap_or(scope)
         } else {
             scope
         };
-        let freevars = (metadata["scope_complete"].as_bool() == Some(true)
-            && metadata["class_cell"].as_bool() != Some(true))
-        .then(|| self.enclosing_freevars(lexical, reads))
-        .flatten()
+        let freevars = if metadata.scope_complete != true {
+            None
+        } else if let Some(captures_class) = metadata.method_class_cell.as_bool() {
+            self.freevars_with_class_cell(self.scope_data(scope).parent, reads, captures_class)
+        } else if metadata.class_cell == true {
+            // A nested function can read __class__ through super(), or resolve it as a global.
+            self.is_enclosing_freevar(lexical, "__class__")
+                .and_then(|captures| self.freevars_with_class_cell(Some(lexical), reads, captures))
+        } else {
+            self.enclosing_freevars(lexical, reads)
+        }
         .map(|mut freevars| {
-            if annotation_class {
-                freevars.push("__classdict__".to_owned());
-                if read_class {
-                    freevars.push("__class__".to_owned());
-                }
+            if !implicit.is_empty() {
+                freevars.append(&mut implicit);
                 freevars.sort();
             }
             freevars
         });
         let closure_supported = freevars.is_some();
         let freevars = freevars.unwrap_or_default();
-        let flags = metadata["code_flags"]
+        let flags = metadata
+            .code_flags
             .as_u64()
             .and_then(|v| u32::try_from(v).ok());
-        self.alloc(Value::Code(value::CodeObject {
+        let definition = value::CodeDefinition {
             parsed_parameters: Default::default(),
+            module_definition,
+            flags: flags.unwrap_or_default(),
+            flags_complete: flags.is_some(),
+            generator_lambda: metadata.generator_lambda,
+            freevars: (!freevars.is_empty()).then(|| freevars.into()),
+            closure_supported,
+        };
+        self.realize_code(
+            body,
+            definition,
+            name,
+            parameters,
+            (qualname, doc),
+            (filename, first_line),
+        )
+    }
+
+    pub(super) fn realize_code(
+        &mut self,
+        body: value::Body,
+        definition: value::CodeDefinition,
+        name: Id,
+        parameters: Id,
+        (qualname, doc): (Id, Id),
+        (filename, first_line): (Id, u32),
+    ) -> Id {
+        self.alloc(Value::Code(value::CodeObject {
+            compilation_constants: NONE,
+            varnames: NONE,
+            cellvars: NONE,
+            freevar_names: NONE,
             body,
             name,
             qualname,
             doc,
             parameters,
             filename,
-            first_line: location.line,
-            module_definition,
-            coroutine: false,
-            flags: flags.unwrap_or_default(),
-            flags_complete: flags.is_some(),
+            first_line,
+            definition,
             nested: Vec::new(),
-            freevars,
-            closure_supported,
         }))
     }
 
@@ -1513,21 +3317,49 @@ impl Context {
         doc: Id,
         annotate: Id,
         annotation_scope: bool,
-    ) -> Id {
+    ) -> Result<Id> {
+        let defining_scope = scope;
         let owner = self.scope_data(scope);
-        let class_cell = owner.class_cell;
+        let in_class = owner.in_class_body;
+        let conditional_cell = owner.conditional_annotation_cell();
+        // A borrowed method only owns its defining class if its code captures __class__.
+        let code_data = self.code_object(code);
+        let mut class_cell = owner.class_cell.filter(|_| {
+            !code_data.definition.closure_supported
+                || code_data
+                    .definition
+                    .freevars()
+                    .iter()
+                    .any(|name| name == "__class__")
+        });
         let scope = if owner.exec_locals.is_some()
-            || ((owner.class_body.is_some() || owner.class_namespace.is_some())
-                && !annotation_scope)
+            || ((owner.in_class_body || owner.class_namespace.is_some()) && !annotation_scope)
         {
             owner.parent.unwrap_or(scope)
         } else {
             scope
         };
-        let fields =
-            super::function_fields::FunctionFields::new(self, scope, name, qualname, doc, annotate);
+        let known_closure = self.code_object(code).definition.closure_supported;
+        let (module, environment) = self.new_function_globals(scope, known_closure)?;
+        let fields = super::function_fields::FunctionFields::new(
+            self, scope, module, name, qualname, doc, annotate,
+        );
+        let names = self.code_object(code).definition.freevars.clone();
+        let names = names.as_deref().unwrap_or_default();
+        let entries = if defaults == NONE {
+            Vec::new()
+        } else {
+            self.dict_entries(defaults)
+                .expect("function defaults are a dict")
+                .to_vec()
+        };
+        // Only default values and implicit class cells need the parameter metadata here.
         let signature = self.code_object(code).parameters;
-        let signature: serde_json::Value = if signature == NONE {
+        let signature: serde_json::Value = if signature == NONE
+            || (entries.is_empty()
+                && !names.iter().any(|name| {
+                    matches!(name.as_str(), "__class__" | "__classdict__" | CONDITIONAL)
+                })) {
             serde_json::Value::Null
         } else {
             serde_json::from_str(
@@ -1536,10 +3368,6 @@ impl Context {
             )
             .expect("function parameters are valid JSON")
         };
-        let entries = self
-            .dict_entries(defaults)
-            .expect("function defaults are a dict")
-            .to_vec();
         let lookup = |name: &str| {
             entries.iter().find_map(|&(key, value)| {
                 matches!(self.heap.get(key), Value::Str(text) if text == name).then_some(value)
@@ -1576,51 +3404,56 @@ impl Context {
         } else {
             self.dict(keyword)
         };
-        let names = self.code_object(code).freevars.clone();
-        let mut cells = Vec::new();
-        for name in &names {
-            if signature["annotation_class"] == true {
-                if name == "__classdict__" {
-                    cells.push(self.class_annotation_dict_cell(scope));
-                    continue;
-                }
+        let mut cells = indexmap::IndexMap::with_capacity(names.len());
+        let class_reads = in_class
+            && (signature["annotation_class"] == true
+                || signature["method_class_cell"].is_boolean());
+        for name in names {
+            let cell = if name == "__classdict__"
+                && (class_reads || signature["annotation_class"] == true)
+            {
+                let owner = if class_reads { defining_scope } else { scope };
+                self.class_annotation_dict_cell(owner)
+            } else if name == CONDITIONAL
+                && class_reads
+                && let Some(cell) = conditional_cell
+            {
+                cell
+            } else if name == "__class__"
+                && in_class
+                && (signature["method_class_cell"] == true || signature["annotation_class"] == true)
+            {
+                class_cell.expect("class scope")
+            } else {
+                let cell = self.capture_free_cell(scope, name);
                 if name == "__class__" {
-                    cells.push(class_cell.expect("class annotation scope"));
-                    continue;
+                    class_cell = Some(cell);
                 }
-            }
-            cells.push(self.capture_free_cell(scope, name));
+                cell
+            };
+            cells.insert(name.clone(), cell);
         }
-        let scope = if self.code_object(code).closure_supported {
-            let mut globals = scope;
-            while let Some(parent) = self.scope_data(globals).parent {
-                globals = parent;
-            }
-            self.closure_environment(globals, names, &cells)
+        let scope = if known_closure {
+            self.environment_with_cells(environment, cells)
         } else {
-            scope
+            environment
         };
-        let closure = if cells.is_empty() {
-            NONE
-        } else {
-            self.alloc(Value::Tuple(cells))
-        };
-        self.alloc(Value::Function {
+        Ok(self.alloc(Value::Function {
             fields,
-            closure,
+            closure: NONE,
             code,
             scope,
             class_cell,
             defaults,
             kwdefaults,
-        })
+        }))
     }
 }
 
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_failed(ctx: *const Context) -> bool {
     // SAFETY: the generated caller holds the context throughout this query.
-    unsafe { (*ctx).pending.is_some() }
+    unsafe { (*ctx).heap.execution.pending.is_some() }
 }
 
 /// Record the caller's temporary root boundary before an expression runs.
@@ -1637,11 +3470,113 @@ pub(super) unsafe extern "C" fn imre_dyn_comprehension_step(ctx: *mut Context, m
     unsafe { (&mut *ctx).comprehension_step(mark) }
 }
 
+/// Check the result discarded by a compiled expression statement after evaluating it once.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_discard_expression(ctx: *mut Context, value: Id) {
+    // SAFETY: the caller owns the context and the result is live in its current frame.
+    unsafe { (&mut *ctx).heap.note_discarded_coroutine(value) }
+}
+
 /// Release a consumed truth operand on the branch that no longer needs it.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_discard_truth(ctx: *mut Context, mark: usize) {
     // SAFETY: the mark comes from the same active Python frame.
     unsafe { (&mut *ctx).discard_truth(mark) }
+}
+
+/// Unwind a partially evaluated operand stack from the top, keeping the exception live.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_operands(ctx: *mut Context, mark: usize) {
+    // SAFETY: the generated caller owns this context and marked the same activation.
+    unsafe { (&mut *ctx).unwind_operands(mark) }
+}
+
+/// Construct a template interpolation from its four evaluated Python objects.
+///
+/// # Safety
+/// The generated frame owns the context and roots all four handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_interpolation(
+    ctx: *mut Context,
+    value: Id,
+    expression: Id,
+    conversion: Id,
+    format_spec: Id,
+) -> Id {
+    // SAFETY: the generated caller owns the active context.
+    let ctx = unsafe { &mut *ctx };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = ctx.template_interpolation(value, expression, conversion, format_spec);
+    finish(ctx, result)
+}
+
+/// Join the checked f-string parts and pop them in Python evaluation-stack order.
+///
+/// # Safety
+/// The generated caller owns the context, retains the readable array of `count`
+/// handles, and took `mark` before evaluating this expression.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_format_parts(
+    ctx: *mut Context,
+    mark: usize,
+    values: *const Id,
+    count: usize,
+) -> Id {
+    // SAFETY: the caller owns the context and roots the parts through the join.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    // Successful joins add only exact text roots. Release those with the last source
+    // operand, keeping the joined result live before a source destructor can run.
+    let parts_end = ctx.heap.temporary_mark();
+    let joined = ctx.join_formatted(values);
+    let result = finish(ctx, joined);
+    if ctx.heap.execution.pending.is_none() {
+        if ctx.heap.observes_released_roots() {
+            for slot in (mark + 1..parts_end).rev() {
+                ctx.discard_temporaries(slot, [result]);
+            }
+        }
+        ctx.discard_temporaries(mark, [result]);
+    }
+    result
+}
+
+/// Replace the active operand stack above a mark, publishing survivors before collection.
+///
+/// # Safety
+/// The active frame owns the mark and supplies `count` initialized handles.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_replace_temporaries(
+    ctx: *mut Context,
+    mark: usize,
+    values: *const Id,
+    count: usize,
+) {
+    // SAFETY: the generated caller retains the context and the complete native root array.
+    let (ctx, values) = unsafe { (&mut *ctx, live_handles(values, count)) };
+    ctx.heap.insert_temporaries(mark, values);
+    ctx.unwind_operands(mark + count);
+}
+
+/// Publish surviving operands before collecting, returning the boundary above the first one.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_keep_operands(
+    ctx: *mut Context,
+    mark: usize,
+    first: Id,
+    second: Id,
+) -> usize {
+    // SAFETY: these live handles and the mark belong to the current generated frame.
+    let ctx = unsafe { &mut *ctx };
+    if second == NONE && ctx.heap.keeps_single_operand(mark, first) {
+        return mark + 1;
+    }
+    ctx.discard_temporaries(
+        mark,
+        std::iter::once(first).chain((second != NONE).then_some(second)),
+    );
+    mark + 1
 }
 
 /// Publish the named expression's result before the caller evaluates its next operand.
@@ -1655,8 +3590,7 @@ pub(super) unsafe extern "C" fn imre_dyn_named_assignment(
     // SAFETY: the mark and result belong to the current generated expression.
     let ctx = unsafe { &mut *ctx };
     if replaced == TRUE && ctx.heap.named_assignment(mark, value) {
-        ctx.collect_unreachable();
-        ctx.heap.release_unbound_finalizers();
+        ctx.finish_binding_release();
     }
 }
 
@@ -1670,19 +3604,68 @@ unsafe fn live_handles<'a>(live: *const Id, len: usize) -> &'a [Id] {
     }
 }
 
-/// Finish one target before the next target can observe a replaced writer.
+/// Unwind a failed statement after its exception has been taken for a context exit.
+///
+/// # Safety
+/// Generated code supplies the active frame's surviving roots, including the
+/// exception and exit callable, then its abandoned operands from bottom to top.
 #[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_assignment_target(
+pub(super) unsafe extern "C" fn imre_dyn_unwind_frame(
     ctx: *mut Context,
+    live: *const Id,
+    len: usize,
+    retained: usize,
+) {
+    // SAFETY: the caller owns the context and provides len initialized handles.
+    let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
+    debug_assert!(retained <= len && ctx.heap.execution.pending.is_none());
+    ctx.heap.insert_temporaries(0, live);
+    ctx.unwind_operands(retained);
+}
+
+/// Unwind a failed expression's operands before its pending lexical targets.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_unwind_slots(
+    ctx: *mut Context,
+    mark: usize,
+    retiring: *const Id,
+    len: usize,
+) {
+    // SAFETY: generated code passes initialized root words and its own operand mark.
+    let (ctx, retiring) = unsafe { (&mut *ctx, live_handles(retiring, len)) };
+    if ctx.heap.observes_released_roots() {
+        ctx.heap.insert_temporaries(mark, retiring);
+    }
+    ctx.unwind_operands(mark);
+}
+
+/// Finish a store while retaining the operands below its mark.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_assignment_target_at(
+    ctx: *mut Context,
+    mark: usize,
     live: *const Id,
     len: usize,
     replaced: Id,
 ) {
     // SAFETY: the caller owns the context and its live handle array.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    if ctx.heap.assignment_target(live, replaced == TRUE) && !ctx.can_skip_finalizer_sweep() {
-        ctx.collect_unreachable();
+    if ctx.heap.assignment_target(mark, live, replaced == TRUE)
+        && !ctx.can_skip_finalizer_sweep(ctx.heap.temporary_mark())
+    {
+        ctx.collect_after_release();
     }
+}
+
+/// Expose a compound statement's full instruction position during its implicit calls.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_definition_position(
+    ctx: *mut Context,
+    position: *const [u32; 4],
+) {
+    // SAFETY: linked code supplies its active context and an optional static range.
+    let (ctx, position) = unsafe { (&mut *ctx, position.as_ref()) };
+    ctx.heap.set_definition_position(position.copied());
 }
 
 /// Move the executing frame to an implicit call site without releasing statement temporaries.
@@ -1693,6 +3676,33 @@ pub(super) unsafe extern "C" fn imre_dyn_set_statement_line(ctx: *mut Context, l
     ctx.heap.set_statement_line(line);
     ctx.heap
         .replace_expression(value::ExpressionPosition::Statement);
+}
+
+/// Native code entry for the namedtuple constructor, after ordinary Python argument binding.
+pub(super) unsafe extern "C" fn namedtuple_constructor(raw: *mut Context, scope: Id) -> Id {
+    // SAFETY: execute entered the function frame; all arguments are rooted by its scope and
+    // the static filename lives for the whole process. There are no operand temporaries yet.
+    unsafe {
+        imre_dyn_statement_with_exception(raw, std::ptr::null(), 0, c"<string>".as_ptr(), 1, NONE)
+    };
+    // SAFETY: the caller retains exclusive ownership until this code entry returns.
+    let ctx = unsafe { &mut *raw };
+    if ctx.heap.execution.pending.is_some() {
+        return NONE;
+    }
+    let result = super::namedtuple::construct(ctx, scope);
+    finish(ctx, result)
+}
+
+/// Enter a statement with no live operand handles or saved handler exception.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_statement_at(
+    ctx: *mut Context,
+    file: *const c_char,
+    line: u32,
+) {
+    // SAFETY: the entered frame and its linked filename have the ordinary checkpoint lifetime.
+    unsafe { imre_dyn_statement_with_exception(ctx, std::ptr::null(), 0, file, line, NONE) };
 }
 
 #[unsafe(no_mangle)]
@@ -1706,25 +3716,59 @@ pub(super) unsafe extern "C" fn imre_dyn_statement_with_exception(
 ) {
     // SAFETY: the emitter supplies its current frame's explicitly live temporaries.
     let (ctx, live) = unsafe { (&mut *ctx, live_handles(live, len)) };
-    // SAFETY: file names are static constants in the generated native program.
-    let file = unsafe { cstr(file) };
-    ctx.checkpoint(
-        live,
-        value::Location {
-            file: file.into(),
-            line,
-            span: None,
-        },
-        caught,
-    );
-    #[cfg(unix)]
-    if let Err(mut error) = ctx.dispatch_signals() {
-        ctx.record_exception_frame(&mut error, None);
-        ctx.pending = Some(error);
+    // SAFETY: emitted filenames are static native strings for the life of the executable.
+    if let Err(error) = unsafe { ctx.native_statement(live, file, line, caught) } {
+        finish(ctx, Err(error));
     }
 }
 
 impl Context {
+    /// Publish a native statement. Its caller records a failure once at the frame boundary.
+    pub(super) unsafe fn native_statement(
+        &mut self,
+        live: &[Id],
+        file: *const c_char,
+        line: u32,
+        caught: Id,
+    ) -> Result<()> {
+        // SAFETY: both the emitted ABI and native providers pass a static native filename.
+        let file = unsafe { self.native_filename_label(file) }?;
+        self.checkpoint(
+            live,
+            value::Location {
+                file,
+                line,
+                span: None,
+            },
+            caught,
+        );
+        #[cfg(unix)]
+        // SAFETY: the statement has published this frame and its live operands.
+        unsafe {
+            Self::dispatch_pending_calls(self)?
+        };
+        Ok(())
+    }
+
+    /// Decode a static, NUL-terminated native filename once for statement diagnostics.
+    unsafe fn native_filename_label(&mut self, file: *const c_char) -> Result<Arc<str>> {
+        if let Some(label) = self.native_filename_labels.get(&file.addr()) {
+            return Ok(label.clone());
+        }
+        // SAFETY: the emitted filename is a native path constant for the lifetime of the program.
+        let path = unsafe { native_path(file) };
+        let label: Arc<str> = match path.to_str() {
+            Some(text) if text.is_ascii() => text.into(),
+            _ => {
+                let filename = self.import_path_text(path)?;
+                self.filename_display(filename)?.as_ref().into()
+            }
+        };
+        self.native_filename_labels
+            .insert(file.addr(), label.clone());
+        Ok(label)
+    }
+
     /// Check the old binding without calling a Python mapping's lookup hook.
     pub(super) fn replacing_finalizer(&self, scope: Id, name: &str, value: Id) -> bool {
         if !self.heap.tracks_finalizers() {
@@ -1741,34 +3785,35 @@ impl Context {
     }
 
     pub(super) fn heap_and_roots(&mut self) -> (&mut Heap, impl Iterator<Item = Id> + '_) {
-        self.threads.reap(&mut self.heap);
-        self.reap_thread_operands();
+        self.heap.reap_finished_workers();
         (
             &mut self.heap,
             self.classes
                 .values()
                 .chain(self.enum_scopes.values())
                 .chain(self.signal_handlers.iter())
+                .chain(self.displaced_sni_callbacks.iter())
                 .chain(self.typing.roots())
                 .chain(self.builtins.values())
-                .chain(self.native_type_dicts.values())
-                .chain(self.native_code_objects.values())
+                .chain(
+                    self.native_type_dicts
+                        .0
+                        .values()
+                        .map(super::NativeTypeNamespace::dictionary),
+                )
                 .chain(self.warning_state.iter().flat_map(|state| state.roots()))
                 .chain(self.codec_entries.roots())
                 .chain(&self.audit_hooks)
                 .chain(self.fork_hooks.iter().flatten())
                 .chain(&self.exit_callbacks)
                 .copied()
-                .chain(self.workers.roots().copied())
                 .chain(self.threads.roots())
                 .chain(self.fault_file)
-                .chain(self.contexts.iter().copied())
-                .chain(self.buffer_exports.iter().copied())
-                .chain(self.pending.iter().flat_map(Error::roots))
+                .chain(self.fault_user_files.values().copied())
+                .chain(self.original_builtins)
                 .chain(self.source_builtins)
                 .chain([
                     self.argv,
-                    self.sys_path,
                     self.zip_path_importers,
                     self.modules,
                     self.import_missing,
@@ -1809,12 +3854,14 @@ impl Context {
                 .gc_schedule
                 .generation_if_due(&self.heap.gc_settings)
             {
-                let _ = self.collect_generation(generation);
+                let _ = self.collect_with_callbacks(generation);
             }
             return;
         }
         if self.heap.has_ordinary_finalizers()
             && !self.heap.caller_keeps_only_finalizer()
+            // A bound stream can keep its underlying finalizer alive without naming it.
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
             && self.heap.has_unbound_finalizer(NONE)
         {
             match self.drain_acyclic_finalizers() {
@@ -1828,43 +3875,201 @@ impl Context {
                 Ok(false) => {}
             }
         }
-        let (heap, roots) = self.heap_and_roots();
-        if let Some(callbacks) = heap.collect_if_due(roots) {
-            self.run_weak_callbacks(callbacks);
+        let finalizers = self.heap.take_finalizer_check();
+        if self.heap.take_sweep_request()
+            || (finalizers
+                && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+                && !self.surviving_release_roots())
+        {
+            let (heap, roots) = self.heap_and_roots();
+            if let Some(callbacks) = heap.collect(roots) {
+                self.run_weak_callbacks(callbacks);
+            }
+            let _ = self.drain_scheduled_coroutines();
         }
     }
 
     /// Flush unreachable file owners before the caller evaluates its next operand.
     pub(super) fn leave_frame(&mut self, result: Id, returning: bool) {
-        if self.heap.leave(result, returning) {
-            self.collect_unreachable();
+        if self.heap.leave(result, returning)
+            && !self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+        {
+            if self.finalize_unowned_generator_loop()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
+            if self.heap.retire_closed_descriptors()
+                && self.can_skip_finalizer_sweep(self.heap.temporary_mark())
+            {
+                return;
+            }
+            self.collect_after_release();
+        }
+    }
+
+    /// Close an isolated generator before paying for a complete collection at frame exit.
+    fn finalize_unowned_generator_loop(&mut self) -> bool {
+        let Some((generator, iterator)) = self.heap.pending_generator_loop() else {
+            return false;
+        };
+        let globals = self.finalizer_path_roots();
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        if !self.heap.cached_finalizers_kept_except(
+            globals,
+            streams.as_ref(),
+            Some(self.heap.temporary_mark()),
+            &[generator],
+        ) {
+            return false;
+        }
+        let (heap, roots) = self.heap_and_roots();
+        if !heap.generator_loop_is_unowned(generator, iterator, roots) {
+            return false;
+        }
+        self.dispatch_finalizer(generator);
+        true
+    }
+
+    /// Release a removed list binding while its remaining items still own their references.
+    pub(super) fn release_list_owner(&mut self, owner: Id) {
+        if !self.heap.observes_released_roots()
+            || !matches!(self.heap.get(owner), Value::List(items) if !items.is_empty())
+            || (!self.heap.has_weak_values && !self.heap.could_own_finalizer(owner, false))
+        {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        if self.can_skip_finalizer_sweep(mark) {
+            return;
+        }
+        self.heap.keep(owner);
+        let (heap, roots) = self.heap_and_roots();
+        if heap.expand_released_sequence(mark, roots) {
+            self.unwind_operands(mark);
+        } else {
+            self.heap.release_temporaries_since(mark);
+        }
+    }
+
+    /// Release expression operands from the stack top. A dead sequence transfers its
+    /// elements to the stack, keeping earlier siblings alive across Python callbacks.
+    pub(super) fn unwind_operands(&mut self, mark: usize) {
+        if !self.heap.observes_released_roots() || self.can_skip_finalizer_sweep(mark) {
+            self.heap.release_temporaries_since(mark);
+            return;
+        }
+        while self.heap.temporary_mark() > mark {
+            let index = self.heap.temporary_mark() - 1;
+            let (heap, roots) = self.heap_and_roots();
+            if !heap.expand_released_sequence(index, roots) {
+                self.discard_truth(index);
+            }
         }
     }
 
     /// Publish the surviving roots before the next operand can observe a discarded writer.
     pub(super) fn discard_truth(&mut self, mark: usize) {
+        if let Some(error) = self.heap.execution.pending.take() {
+            // A weak callback may reenter Python during unwind. Keep the original
+            // exception alive without exposing it as a failure of the callback.
+            self.discard_temporaries(mark, error.roots());
+            self.heap.execution.pending = Some(error);
+            self.heap.release_temporaries_since(mark);
+        } else {
+            self.discard_temporaries(mark, None);
+        }
+    }
+
+    /// Release operand roots and report whether a weak callback or finalizer may become runnable.
+    fn release_operand_roots(&mut self, mark: usize) -> bool {
         if (!self.heap.tracks_finalizers() && !self.heap.has_weak_values)
-            || self.can_skip_finalizer_sweep()
+            || self.can_skip_finalizer_sweep(mark)
         {
             self.heap.release_temporaries_since(mark);
-        } else if self.heap.discard_truth_operands(mark, self.modules) {
+            false
+        } else {
+            self.heap.discard_truth_operands(mark, self.modules)
+        }
+    }
+
+    /// Root the surviving results before an operand release runs weak callbacks or finalizers.
+    pub(super) fn discard_temporaries(
+        &mut self,
+        mark: usize,
+        results: impl IntoIterator<Item = Id>,
+    ) {
+        let collect = self.release_operand_roots(mark);
+        for result in results {
+            self.heap.keep(result);
+        }
+        if collect {
+            self.collect_after_release();
+        }
+    }
+
+    /// Release temporary operands while their return value or raised exception stays live.
+    pub(super) fn release_with_result(&mut self, mark: usize, result: Result<Id>) -> Result<Id> {
+        let collect = self.release_operand_roots(mark);
+        match &result {
+            Ok(value) => self.heap.keep(*value),
+            Err(error) => {
+                for root in error.roots() {
+                    self.heap.keep(root);
+                }
+            }
+        }
+        if collect {
+            self.collect_after_release();
+        }
+        result
+    }
+
+    pub(super) fn finalizer_path_roots(&self) -> [Id; 2] {
+        use super::stdlib::datetime::isocalendar::MODULE_REF;
+        [
+            self.modules,
+            self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
+        ]
+    }
+
+    /// The caller already discarded its dead operands and found a possible observable release.
+    fn surviving_release_roots(&mut self) -> bool {
+        if !self.heap.has_finalizer_cohort() {
+            return false;
+        }
+        let (heap, roots) = self.heap_and_roots();
+        heap.retained_paths_keep_owners(roots, true)
+    }
+
+    fn collect_after_release(&mut self) {
+        if self.surviving_release_roots() {
+            self.learn_release_paths();
+        } else {
             self.collect_unreachable();
         }
     }
 
     /// Skip the sweep only while surviving roots keep every finalizer and weak edge alive.
-    fn can_skip_finalizer_sweep(&self) -> bool {
-        use super::stdlib::datetime::isocalendar::MODULE_REF;
-        // Include the three owners retained by sys.__stdin__.
-        self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + 3
-            && !self.heap.full_collection_active()
-            && (!self.heap.has_weak_values
-                || self.heap.weak_module_kept_by(
-                    self.modules,
-                    self.builtins.get(MODULE_REF).copied().unwrap_or(NONE),
-                ))
-            && super::stdlib::io::rooted_input_chain(self)
-                .is_some_and(|input| self.heap.finalizers_kept_by(&input))
+    pub(super) fn can_skip_finalizer_sweep(&self, retained_current: usize) -> bool {
+        if self.heap.full_collection_active() {
+            return false;
+        }
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        if streams.as_ref().is_some_and(|roots| {
+            self.heap.tracked_finalizer_count() <= super::value::MAX_FRAME_FINALIZERS + roots.len()
+                && self.heap.finalizers_kept_by(roots)
+        }) {
+            return !self.heap.has_weak_values || {
+                let [modules, reference] = self.finalizer_path_roots();
+                self.heap.weak_values_kept_by(modules, reference)
+            };
+        }
+        self.heap.cached_finalizers_kept(
+            self.finalizer_path_roots(),
+            streams.as_ref(),
+            Some(retained_current),
+        )
     }
 
     /// Keep the returned value and earlier operands while dropping the completed call's temporaries.
@@ -1872,11 +4077,44 @@ impl Context {
         if !self.heap.tracks_finalizers() {
             return;
         }
-        if self.can_skip_finalizer_sweep() {
+        if self.can_skip_finalizer_sweep(mark) {
             self.heap.keep_call_result(mark, result);
         } else if self.heap.discard_operands(mark, result, self.modules) {
-            self.collect_unreachable();
+            // The return value is now rooted in the caller, including its live stream layers.
+            let stream = super::stdlib::io::text_descriptor_chain(&self.heap, result);
+            if !self.heap.full_collection_active()
+                && (stream.is_some()
+                    || self.heap.is_pending_finalizer(result)
+                    || matches!(self.heap.get(result), Value::File(_)))
+                && self.heap.cached_finalizers_kept_except(
+                    self.finalizer_path_roots(),
+                    super::stdlib::io::rooted_standard_streams(self).as_ref(),
+                    Some(self.heap.temporary_mark()),
+                    stream
+                        .as_ref()
+                        .map_or(std::slice::from_ref(&result), |chain| chain.as_slice()),
+                )
+            {
+                return;
+            }
+            self.collect_after_release();
         }
+    }
+
+    /// Finish an assignment that dropped a possible finalizer owner.
+    pub(super) fn finish_binding_release(&mut self) {
+        if !self.can_skip_finalizer_sweep(self.heap.temporary_mark()) {
+            self.collect_after_release();
+        }
+        self.heap.release_unbound_finalizers();
+    }
+
+    /// Deliver warnings discovered by this sweep before the next Python operation changes filters.
+    fn drain_scheduled_coroutines(&mut self) -> Result<()> {
+        if !self.heap.full_collection_active() && self.heap.take_unawaited_check() {
+            self.drain_acyclic_finalizers()?;
+        }
+        Ok(())
     }
 
     /// Sweep using the active frames and the context's roots before running callbacks.
@@ -1888,6 +4126,64 @@ impl Context {
         if let Some(callbacks) = heap.collect(roots) {
             self.run_weak_callbacks(callbacks);
         }
+        let _ = self.drain_scheduled_coroutines();
+        self.learn_release_paths();
+    }
+
+    fn learn_release_paths(&mut self) {
+        let [modules, reference] = self.finalizer_path_roots();
+        self.heap.learn_weak_roots(modules, reference);
+        let streams = super::stdlib::io::rooted_standard_streams(self);
+        self.heap
+            .learn_descriptor_paths([modules, reference], streams.as_ref());
+    }
+
+    /// Notify observers around both scheduled and explicit collections, including empty passes.
+    pub(super) fn collect_with_callbacks(&mut self, generation: u8) -> Result<usize> {
+        if self.heap.gc_schedule.collecting || self.heap.full_collection_active() {
+            return Ok(0);
+        }
+        self.heap.gc_schedule.collecting = true;
+        self.invoke_gc_callbacks("start", generation, 0);
+        let result = self.collect_generation(generation);
+        if let Ok(collected) = result {
+            self.invoke_gc_callbacks("stop", generation, collected);
+        }
+        self.heap.gc_schedule.collecting = false;
+        result
+    }
+
+    fn invoke_gc_callbacks(&mut self, phase: &str, generation: u8, collected: usize) {
+        if self.heap.gc_callback(0).is_none() {
+            return;
+        }
+        let mark = self.heap.temporary_mark();
+        let phase = self.text(phase);
+        let fields = [
+            ("generation", i64::from(generation)),
+            ("collected", collected as i64),
+            ("uncollectable", 0),
+        ]
+        .map(|(key, value)| (self.heap.code_name(key), self.int(value)));
+        let info = self.dict(fields.into());
+        let mut index = 0;
+        // Python can mutate the shared info dictionary and the live list at each call.
+        while let Some(callback) = self.heap.gc_callback(index) {
+            let step = self.heap.temporary_mark();
+            self.heap.keep(callback);
+            if let Err(error) = self.call(callback, vec![phase, info], Vec::new()) {
+                super::unraisable::report(
+                    self,
+                    error,
+                    true,
+                    Some(callback),
+                    "Exception ignored while calling GC callback",
+                );
+            }
+            self.heap.release_temporaries_since(step);
+            index += 1;
+        }
+        self.heap.release_temporaries_since(mark);
     }
 
     /// Resolve weakrefs before callbacks, then recheck the original cyclic isolate.
@@ -1895,12 +4191,19 @@ impl Context {
         if self.heap.full_collection_active() {
             return Ok(0);
         }
+        // A warning hook can resurrect a coroutine whose arguments include a separate cycle.
+        // Resolve unreachable acyclic owners before clearing the cyclic isolate's weakrefs.
+        if self.heap.has_unstarted_coroutines() {
+            self.collect_unreachable();
+        }
         self.drain_acyclic_finalizers()?;
         let mark = self.heap.temporary_mark();
         let (heap, roots) = self.heap_and_roots();
         let callbacks = heap.begin_collection(roots, generation)?;
-        let check_older_owners = generation < 2
-            && (!callbacks.is_empty() || self.heap.full_collection_members().next().is_some());
+        if callbacks.is_empty() && self.heap.finish_empty_collection() {
+            self.drain_scheduled_coroutines()?;
+            return Ok(0);
+        }
         let mut released = 0;
         if !callbacks.is_empty() {
             self.run_weak_callbacks(callbacks.iter().copied());
@@ -1912,25 +4215,29 @@ impl Context {
                 self.run_weak_callbacks(deferred);
             }
         }
+        let mut ran_python = !callbacks.is_empty();
         while let Some(owner) = self.heap.pending_full_finalizer() {
+            ran_python = true;
             self.dispatch_finalizer(owner);
         }
         let (heap, roots) = self.heap_and_roots();
-        let (count, callbacks) = heap.finish_full_collection(roots);
+        let (count, callbacks) = heap.finish_full_collection(roots, ran_python);
         if let Some(callbacks) = callbacks {
             self.run_weak_callbacks(callbacks);
         }
-        if check_older_owners {
+        if generation < 2 {
             // Even a resurrected cycle can release its last edge to an older acyclic value.
             self.collect_unreachable();
         }
         self.heap.end_full_collection();
+        self.drain_scheduled_coroutines()?;
         Ok(count + released)
     }
 
     /// Invoke pending callbacks after the heap has cleared every dead reference.
     pub(super) fn run_weak_callbacks(&mut self, callbacks: impl IntoIterator<Item = (Id, Id)>) {
         for (callback, reference) in callbacks {
+            let mark = self.heap.temporary_mark();
             if let Err(error) = self.call(callback, vec![reference], Vec::new()) {
                 // clear_weak_targets retains __callback__ for cyclic GC, but clears it
                 // on ordinary release. CPython uses a distinct diagnostic for each.
@@ -1946,6 +4253,7 @@ impl Context {
                 };
                 super::unraisable::report(self, error, true, Some(callback), message);
             }
+            self.discard_truth(mark);
         }
     }
 }
@@ -1954,6 +4262,184 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn workers_keep_the_interpreters_startup_prefix() {
+        let dir = std::env::temp_dir().join(format!("imre-venv-{}", getrandom::u64().unwrap()));
+        std::fs::create_dir(&dir).unwrap();
+        let cfg = dir.join("pyvenv.cfg");
+        let config = serde_json::json!({"python_version": "3.14", "executable": dir.join("imre")});
+        let first = dir.join("first");
+        let second = dir.join("second");
+        std::fs::write(&cfg, format!("home = {}", first.display())).unwrap();
+        let mut main = new_context(config.clone(), ["imre"]);
+        std::fs::write(&cfg, format!("home = {}", second.display())).unwrap();
+        let base_prefix = |ctx: &mut Context| {
+            let value = stdlib::attribute(ctx, "sys", "base_prefix").unwrap();
+            PathBuf::from(ctx.str_value(value).unwrap())
+        };
+        let interpreter = main.interpreter.clone();
+        let child_prefix = std::thread::spawn(move || {
+            base_prefix(&mut new_worker_context(interpreter, Heap::new()))
+        })
+        .join()
+        .unwrap();
+        let mut next = new_context(config, ["imre"]);
+        std::fs::remove_file(&cfg).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
+        assert_eq!(base_prefix(&mut main), first);
+        assert_eq!(child_prefix, first);
+        assert_eq!(base_prefix(&mut next), second);
+    }
+
+    #[test]
+    fn compiled_pull_uses_the_current_range_iterator() {
+        use crate::Int;
+
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for (start, reverse) in [(20_i128, false), (i128::from(i64::MAX) + 1, true)] {
+            let range = range::Range::new(
+                Int::new(start.into()),
+                Int::new((start + 3).into()),
+                Int::from(1),
+            )
+            .unwrap();
+            let iter = ctx.alloc(Value::RangeIterator(range.iter(reverse)));
+            // Advance the same iterator through a different reference before the loop.
+            ctx.next_item(iter).unwrap().unwrap();
+            let mut item = NONE;
+            for expected in [start + 1, if reverse { start } else { start + 2 }] {
+                // SAFETY: the iterator is live and the item slot is writable.
+                let status = unsafe { imre_dyn_pull_item(&mut ctx, iter, &mut item, false) };
+                assert_eq!(status, 1);
+                assert_eq!(ctx.repr(item), expected.to_string());
+            }
+            // SAFETY: exhaustion uses the same live context and slot.
+            let status = unsafe { imre_dyn_pull_item(&mut ctx, iter, &mut item, true) };
+            assert_eq!(status, 0);
+            assert!(ctx.heap.execution.pending.is_none());
+        }
+    }
+
+    #[test]
+    fn native_function_construction_uses_interpreter_builtins_without_mutating_globals() {
+        unsafe extern "C" fn size(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the native function ABI supplies the active, exclusively borrowed Context.
+            let ctx = unsafe { &mut *raw };
+            let result = ctx.lookup(scope, "len").and_then(|callee| {
+                let text = ctx.text("abc");
+                ctx.call(callee, vec![text], Vec::new())
+            });
+            finish(ctx, result)
+        }
+
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let builtins = ctx.default_source_builtins().unwrap();
+        let scope = ctx.scope("example", None);
+        let name = ctx.text("size");
+        let parameters = ctx.text(r#"{"scope_complete":true,"scope_reads":["len"]}"#);
+        let filename = ctx.text("example.py");
+        let code = ctx.prelinked_code(
+            value::Body::Native(size, NONE),
+            scope,
+            name,
+            parameters,
+            (name, NONE),
+            (filename, 1),
+        );
+        let globals = ctx.dict(Vec::new());
+        let function = ctx.construct_function(&[code, globals], &[]).unwrap();
+        assert_eq!(ctx.lookup_attr(function, "__builtins__").unwrap(), builtins);
+        assert!(ctx.dict_named_item(globals, "__builtins__").is_none());
+        let size = ctx.call(function, vec![], vec![]).unwrap();
+        assert_eq!(ctx.as_int(size).unwrap().to_i64(), Some(3));
+    }
+
+    #[test]
+    fn newly_created_functions_capture_rebound_builtins_in_the_same_globals() {
+        let mut ctx = new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let old = ctx.dict(Vec::new());
+        let updated = ctx.dict(Vec::new());
+        let key = ctx.text("__builtins__");
+        let globals = ctx.dict(vec![(key, old)]);
+        let first = ctx.function_environment("invoice", globals, old);
+        assert_eq!(ctx.new_function_globals(first, true).unwrap().1, first);
+        ctx.set_dictionary_key(globals, key, updated, None, true)
+            .unwrap();
+        let second = ctx.new_function_globals(first, true).unwrap().1;
+        assert_ne!(first, second);
+        assert_eq!(ctx.module_globals(second).unwrap(), globals);
+        assert_eq!(ctx.function_builtins(first).unwrap(), old);
+        assert_eq!(ctx.function_builtins(second).unwrap(), updated);
+        assert_eq!(ctx.new_function_globals(second, true).unwrap().1, second);
+
+        // sys.modules is mutable and cannot identify a function's original builtins.
+        let original = ctx.module("builtins").unwrap();
+        let alternate = ctx.module("sys").unwrap();
+        let builtins_name = ctx.text("builtins");
+        ctx.set_dictionary_key(ctx.modules, builtins_name, alternate, None, true)
+            .unwrap();
+        let ordinary = ctx.scope("app", None);
+        ctx.bind(ordinary, "__builtins__", alternate);
+        let captured = ctx.new_function_globals(ordinary, true).unwrap().1;
+        assert_ne!(captured, ordinary);
+        let expected = ctx.definition_builtins(alternate).unwrap();
+        assert_eq!(ctx.function_builtins(captured).unwrap(), expected);
+        ctx.set_dictionary_key(ctx.modules, builtins_name, original, None, true)
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_filename_labels_belong_to_the_interpreter() {
+        let new_context = || {
+            let argv = [c"imre".as_ptr()];
+            // SAFETY: the constructor consumes the argument pointers before returning.
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) }
+        };
+        let label = |ctx: &mut Context, filename: &'static CStr| {
+            // SAFETY: the string literal has the same lifetime as an emitted filename.
+            unsafe { ctx.native_filename_label(filename.as_ptr()) }.unwrap()
+        };
+        let mut first = new_context();
+        let mut second = new_context();
+        let raw = c"ledger-\xff.py";
+        let first_label = Arc::downgrade(&label(&mut first, raw));
+        let second_label = label(&mut second, raw);
+        assert_eq!(&*label(&mut first, c"other.py"), "other.py");
+
+        first.collect_generation(2).unwrap();
+        let retained = first_label.upgrade().unwrap();
+        assert!(Arc::ptr_eq(&retained, &label(&mut first, raw)));
+        assert!(!Arc::ptr_eq(&retained, &second_label));
+        drop(retained);
+        drop(first);
+        assert!(first_label.upgrade().is_none());
+        assert!(Arc::ptr_eq(&second_label, &label(&mut second, raw)));
+    }
+
+    #[test]
+    fn linked_small_integer_literals_use_permanent_slots() {
+        let argv = [c"imre".as_ptr()];
+        // SAFETY: the argument and configuration pointers outlive context initialization.
+        let mut ctx =
+            unsafe { Box::from_raw(imre_dyn_new(1, argv.as_ptr(), c"{\"paths\":[]}".as_ptr())) };
+        ctx.heap
+            .enter(NONE, NONE, value::FrameOwner::Function(NONE));
+        let mark = ctx.heap.temporary_mark();
+        for (text, expected) in [("-5", -5), ("0", 0), ("256", 256)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+            assert_eq!(ctx.heap.temporary_mark(), mark);
+        }
+        for (text, expected) in [("-6", -6), ("257", 257), ("0xff", 255), ("1_0", 10)] {
+            let id = load_linked_literal(&mut ctx, 0, text.as_bytes());
+            assert!(matches!(ctx.heap.get(id), Value::Int(n) if n.as_small() == Some(expected)));
+        }
+    }
 
     #[test]
     fn dictionary_view_intersection_collects_discarded_values() {
@@ -1973,7 +4459,7 @@ mod tests {
         let source = ctx.alloc(Value::Range(range));
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -1999,7 +4485,7 @@ mod tests {
         let encode = ctx.builtin("urllib.parse.urlencode");
 
         let mark = ctx.heap.temporary_mark();
-        let value: Rc<[Vec<String>]> = Rc::from([]);
+        let value: Rc<[Vec<Id>]> = Rc::from([]);
         let probe = Rc::downgrade(&value);
         ctx.alloc(Value::AttrGetter(value));
         ctx.heap.release_temporaries_since(mark);
@@ -2043,8 +4529,8 @@ mod tests {
             NONE
         }
 
-        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<String>]>) {
-            let value: Rc<[Vec<String>]> = Rc::from([]);
+        fn payload(ctx: &mut Context) -> (Id, Weak<[Vec<Id>]>) {
+            let value: Rc<[Vec<Id>]> = Rc::from([]);
             let probe = Rc::downgrade(&value);
             (ctx.alloc(Value::AttrGetter(value)), probe)
         }
@@ -2061,34 +4547,39 @@ mod tests {
         frame
             .closure
             .declared
-            .extend(["kept".into(), "unused".into()]);
+            .extend(["kept".into(), "other".into(), "unused".into()]);
         frame.closure.declared_complete = true;
         let (kept, kept_probe) = payload(&mut ctx);
         let (unused, unused_probe) = payload(&mut ctx);
         ctx.bind(outer, "kept", kept);
+        ctx.bind(outer, "other", NONE);
         ctx.bind(outer, "unused", unused);
         let name = ctx.text("read");
-        let signature = ctx.text(r#"{"scope_complete":true,"scope_reads":["kept"]}"#);
+        let signature = ctx.text(r#"{"scope_complete":true,"scope_reads":["kept","other"]}"#);
         let location = value::Location {
             file: "cells.py".into(),
             line: 1,
             span: None,
         };
+        let filename = ctx.text(location.file.as_ref());
         let code = ctx.prelinked_code(
-            value::Body::Native(read),
+            value::Body::Native(read, NONE),
             outer,
             name,
             signature,
             (name, NONE),
-            location.clone(),
+            (filename, location.line),
         );
         let defaults = ctx.dict(Vec::new());
-        let function = ctx.define_function(code, outer, name, defaults, name, NONE, NONE, false);
-        let closure = ctx.lookup_attr(function, "__closure__").unwrap();
-        let Value::Tuple(cells) = ctx.heap.get(closure) else {
+        let function = ctx
+            .define_function(code, outer, name, defaults, name, NONE, NONE, false)
+            .unwrap();
+        let Value::Function { scope, closure, .. } = *ctx.heap.get(function) else {
             unreachable!()
         };
-        let cell = cells[0];
+        assert_eq!(closure, NONE);
+        let cell = ctx.scope_data(scope).closure.cells["kept"];
+        let other = ctx.scope_data(scope).closure.cells["other"];
         for (roots, keeps_value) in [
             (&[function][..], true),
             (&[cell][..], true),
@@ -2101,6 +4592,11 @@ mod tests {
             ctx.checkpoint(roots, location.clone(), NONE);
             assert!(unused_probe.upgrade().is_none());
             assert_eq!(kept_probe.upgrade().is_some(), keeps_value);
+            if roots == [function] {
+                let closure = ctx.lookup_attr(function, "__closure__").unwrap();
+                assert_eq!(ctx.tuple_elements(closure), Some(&[cell, other][..]));
+                assert_eq!(ctx.lookup_attr(function, "__closure__").unwrap(), closure);
+            }
         }
     }
 }

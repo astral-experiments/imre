@@ -112,7 +112,6 @@ fn parse<T, S, E>(
     string: impl Fn(&str, usize) -> Result<S, Problem<E>>,
     mut build: impl FnMut(DecodedJson<T, S>) -> Result<T, E>,
 ) -> Result<T, Problem<E>> {
-    let digit_limit = crate::integer_text::decimal_digit_limit();
     let mut frames = Vec::new();
     loop {
         let mut node = match cursor.peek() {
@@ -152,6 +151,8 @@ fn parse<T, S, E>(
                     "-Infinity" => DecodedJson::Constant("-Infinity"),
                     token if token.starts_with('"') => DecodedJson::String(string(token, start)?),
                     token => {
+                        // A hook for an earlier object may have changed the integer digit limit.
+                        let digit_limit = crate::integer_text::decimal_digit_limit();
                         if digit_limit != 0
                             && token.len() > digit_limit as usize
                             && !token.contains(['.', 'e', 'E'])

@@ -43,7 +43,7 @@ def check_files(bridge, root):
     # and every undefined byte separately. A single bad byte must not mask the
     # decoders' valid mappings. The product never launches Python to decode.
     table = (
-        HERE.parents[3] / "crates/imre-runtime/src/objects/linecache/codec_names.txt"
+        HERE.parents[3] / "crates/imre-ast/src/source_encoding/codec_names.txt"
     )
     representatives = {}
     for row in table.read_text().splitlines():

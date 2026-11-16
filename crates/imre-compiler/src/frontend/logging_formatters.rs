@@ -28,7 +28,7 @@ impl Checker<'_> {
             if let ast::Expr::Dict(dict) = arg
                 && dict.items.is_empty()
             {
-                return this.dictionary(dict, Some((Type::Str, Type::None)));
+                return this.dictionary(dict, Some((Type::Str, Type::None)), None);
             }
             let value = this.expr(arg)?;
             if value.ty == Type::None

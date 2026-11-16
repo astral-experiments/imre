@@ -1,7 +1,14 @@
+import copy
 import functools
+import pickle
 
 
 def current():
+    from _functools import Placeholder, _PlaceholderType, partial as native_partial
+
+    assert native_partial is functools.partial
+    assert Placeholder is functools.Placeholder and type(Placeholder) is _PlaceholderType
+
     def capture(*args, **keywords):
         return args, keywords
 
@@ -50,4 +57,95 @@ def current():
         else:
             raise AssertionError("malformed partial state accepted")
         check_state()
+    class Callback(functools.partial):
+        pass
+
+    for cls in (functools.partial, Callback):
+        callback = cls(len, [1])
+        reduction = functools.partial.__reduce__(callback)
+        assert callback.__reduce_ex__(4) == reduction
+        _, _, state = reduction
+        assert state[2] is callback.keywords and state[3] is None
+        namespace = callback.__dict__
+        assert callback.__reduce__()[2][3] is namespace
+        callback.label = []
+        try:
+            del callback.__dict__
+        except TypeError as error:
+            assert str(error) == "cannot delete __dict__"
+        else:
+            raise AssertionError("deleted the partial instance dictionary")
+        assert callback.__dict__ is namespace and namespace["label"] is callback.label
+        shallow = copy.copy(callback)
+        deep = copy.deepcopy(callback)
+        assert type(shallow) is type(deep) is cls
+        assert shallow.args is callback.args and shallow.keywords is callback.keywords
+        assert shallow.label is callback.label
+        assert deep.args[0] is not callback.args[0] and deep.keywords is not callback.keywords
+        assert deep.label is not callback.label and deep() == 1
+
+    deleted = []
+
+    class CustomDictionary:
+        __slots__ = ()
+
+        @property
+        def __dict__(self):
+            return "custom"
+
+        @__dict__.deleter
+        def __dict__(self):
+            deleted.append(self)
+
+    class CustomFirst(CustomDictionary, functools.partial):
+        pass
+
+    class PartialFirst(functools.partial, CustomDictionary):
+        pass
+
+    first = CustomFirst(len)
+    last = PartialFirst(len)
+    del first.__dict__
+    try:
+        del last.__dict__
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("later mixin shadowed the partial dictionary")
+    assert deleted == [first]
+
+    cycle = functools.partial(len)
+    cycle.__setstate__((len, (cycle,), {}, None))
+    for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
+        restored = pickle.loads(pickle.dumps(cycle, protocol))
+        assert restored.args[0] is restored
+    from _thread import allocate_lock
+    import gc
+    import weakref
+
+    lock = allocate_lock()
+    lock.acquire()
+    original = weakref.ref(lock)
+
+    class Timeout:
+        def __index__(self):
+            acquire.__setstate__((len, ((),), {}, None))
+            gc.collect()
+            original().release()
+            return 0
+
+    acquire = functools.partial(type(lock).acquire, lock, timeout=Timeout())
+    del lock
+    assert acquire()
+    gc.collect()
+    assert original() is None
+    def capture(**keywords):
+        return list(keywords.items())
+
+    bound = {str(i): i for i in range(64)}
+    for offset in (0, 32, 64):
+        supplied = {str(i + offset): -i for i in reversed(range(64))}
+        expected = bound.copy()
+        expected.update(supplied)
+        assert functools.partial(capture, **bound)(**supplied) == list(expected.items())
     print("partial state restored")

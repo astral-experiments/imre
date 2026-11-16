@@ -27,6 +27,24 @@ class Abstract(Protocol):
 
 
 def current():
+    import weakref
+
+    class Slotted(Protocol):
+        __slots__ = ()
+
+    class ConcreteSlots(Slotted):
+        __slots__ = ()
+
+    value = ConcreteSlots()
+    assert vars(Protocol)["__slots__"] == ()
+    assert not hasattr(value, "__dict__")
+    try:
+        weakref.ref(value)
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("an empty slotted protocol supplied weak-reference storage")
+
     print(typing.TYPE_CHECKING is False, typing.Protocol is Protocol)
     print(Protocol.__bases__ == (typing.Generic,), HasHTML.__mro__[1:3] == (Protocol, typing.Generic))
     assert is_protocol(HasHTML) and typing.is_protocol(Abstract)
@@ -92,6 +110,23 @@ def current():
 
     class Explicit(HasHTML, Sized, Protocol, object):
         pass
+
+    marker_error = ValueError("base marker lookup")
+
+    class MarkerDescriptor:
+        def __get__(self, instance, owner):
+            raise marker_error
+
+    class MarkedBase(typing.Generic[parameter]):
+        _is_protocol = MarkerDescriptor()
+
+    try:
+        class FromMarkedBase(MarkedBase, Protocol):
+            pass
+    except ValueError as error:
+        assert error is marker_error
+    else:
+        raise AssertionError("protocol base lookup skipped its descriptor")
 
     class GenericProtocol(Protocol, typing.Generic[parameter], object):
         pass

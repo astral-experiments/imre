@@ -7,11 +7,11 @@ fn tag(ty: Type) -> u8 {
         Type::Str => 0,
         Type::Bytes => 1,
         // Both are Object owners and occupy separate closed unions with str.
-        Type::List(_) | Type::Dict(_) | Type::FrozenStrings | Type::Float => 2,
+        Type::ListInt | Type::List(_) | Type::Dict(_) | Type::FrozenStrings | Type::Float => 2,
         // These owners share the always-true Object tag. No admitted union
         // contains both an exception and a LogRecord.
         Type::Exception | Type::LogRecord => 3,
-        Type::Class(_) | Type::Tuple(_) => 4,
+        Type::Class(_) | Type::Tuple(_) | Type::VarTuple(_) => 4,
         Type::Enum(_) | Type::IntEnum(_) => 5,
         Type::Path => 6,
         Type::Int => 7,
@@ -42,7 +42,18 @@ impl Emitter<'_, '_> {
         }
         let tag = tag(source);
         let word = self.word(&value);
-        let operand = if source == Type::Float {
+        let operand = if source == Type::ListInt {
+            debug_assert_eq!(value.ty, source);
+            debug_assert_eq!(
+                self.module.types.sequence_union_element(returns),
+                Some(Type::Int)
+            );
+            // Tag 2 owns an Object. The int list keeps its specialized allocation inside that view.
+            let view = self.instruction(format!("call ptr @imre_box_value(i32 4, i64 {word})"));
+            let address = self.instruction(format!("ptrtoint ptr {view} to i64"));
+            self.reference(&value, "release");
+            self.instruction(format!("or i64 {address}, {tag}"))
+        } else if source == Type::Float {
             self.instruction(format!(
                 "call i64 @imre_union_from_float(i64 {word}, i1 {})",
                 value.ty != source
@@ -104,10 +115,39 @@ impl Emitter<'_, '_> {
                     value.operand,
                     returns != Type::Float
                 ))
+            } else if returns == Type::ListInt {
+                debug_assert_eq!(
+                    self.module.types.sequence_union_element(value.ty),
+                    Some(Type::Int)
+                );
+                self.output.local_helper(
+                    "imre_union_into_int_list",
+                    "declare i64 @imre_union_into_int_list(i64)\n",
+                );
+                self.instruction(format!(
+                    "call i64 @imre_union_into_int_list(i64 {})",
+                    value.operand
+                ))
             } else if returns == Type::Int {
                 self.instruction(format!(
                     "call i64 @imre_union_into_int(i64 {})",
                     value.operand
+                ))
+            } else if self.module.types.payload(returns) == Some(Type::Int) {
+                // Zero is absent. A present integer must recover its canonical key representation.
+                let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
+                let absent = self.body.current.clone();
+                let (convert, end) = (self.label(), self.label());
+                self.branch(&present, &convert, &end);
+                self.start(&convert);
+                let integer = self.instruction(format!(
+                    "call i64 @imre_union_into_int(i64 {})",
+                    value.operand
+                ));
+                self.jump(&end);
+                self.start(&end);
+                self.instruction(format!(
+                    "phi i64 [ 0, %{absent} ], [ {integer}, %{convert} ]"
                 ))
             } else if matches!(returns, Type::Enum(_) | Type::IntEnum(_)) {
                 self.instruction(format!("lshr i64 {}, 3", value.operand))
@@ -137,6 +177,13 @@ impl Emitter<'_, '_> {
         ))
     }
 
+    pub(super) fn exception_matches(&mut self, exception: &str, kind: u32) -> String {
+        let matched = self.instruction(format!(
+            "call i32 @imre_exception_matches(ptr {exception}, i32 {kind})"
+        ));
+        self.instruction(format!("icmp ne i32 {matched}, 0"))
+    }
+
     /// Inspect exception and record layouts only after proving the payload is present
     /// and selecting its tag if it is part of a finite union.
     pub(super) fn instance_test(&mut self, value: &Value, classes: &[InstanceType]) -> String {
@@ -161,12 +208,12 @@ impl Emitter<'_, '_> {
         if let Some(payload) = self.module.types.payload(value.ty) {
             let present = self.instruction(format!("icmp ne i64 {}, 0", value.operand));
             let (inspect, end) = (self.label(), self.label());
-            let absent = self.current.clone();
+            let absent = self.body.current.clone();
             self.branch(&present, &inspect, &end);
             self.start(&inspect);
             let payload = self.decode_word(value.operand.clone(), payload);
             let result = self.instance_test(&payload, classes);
-            let inspected = self.current.clone();
+            let inspected = self.body.current.clone();
             self.jump(&end);
             self.start(&end);
             return self.instruction(format!(
@@ -303,13 +350,13 @@ impl Emitter<'_, '_> {
                         ) || inspect_io(selected)
                         {
                             let (inspect, end) = (self.label(), self.label());
-                            let other = self.current.clone();
+                            let other = self.body.current.clone();
                             self.branch(&found, &inspect, &end);
                             self.start(&inspect);
                             let word = self.instruction(format!("and i64 {}, -8", value.operand));
                             let payload = self.decode_word(word, selected);
                             let matches = self.instance_test(&payload, &[class]);
-                            let inspected = self.current.clone();
+                            let inspected = self.body.current.clone();
                             self.jump(&end);
                             self.start(&end);
                             self.instruction(format!(
@@ -360,11 +407,7 @@ impl Emitter<'_, '_> {
                         | Type::NamedException(_)
                 )
             {
-                let matched = self.instruction(format!(
-                    "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
-                    value.operand
-                ));
-                self.instruction(format!("icmp ne i32 {matched}, 0"))
+                self.exception_matches(&value.operand, kind)
             } else {
                 u8::from(class.accepts(value.ty, &self.module.types)).to_string()
             };

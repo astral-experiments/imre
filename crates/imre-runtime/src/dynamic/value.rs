@@ -1,46 +1,99 @@
 //! Values shared by native functions loading Python modules through `sys.path`.
 
+mod text_positions;
+mod weak_roots;
+
+use text_positions::TextPosition;
+
+use super::allocation_traces::AllocationTraces;
 use super::gc_schedule::{GcSchedule, GcSettings};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::ops::Range;
 use std::sync::{Arc, Weak};
+
+use indexmap::IndexSet;
 
 use super::Context;
 
 pub(super) type Id = u64;
-pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
 
-/// Immutable executable and argument layout shared by functions from one Python definition.
+#[derive(Eq, Hash, PartialEq)]
+pub(super) enum ConstantSlot {
+    Legacy(i64),
+    Linked(usize),
+}
+
+type MemberValues = hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>;
+pub(super) type Code = unsafe extern "C" fn(*mut Context, Id) -> Id;
+/// The entry reloads this slot before borrowing the interpreter on every activation.
+pub(super) type ResumeCode =
+    unsafe extern "C" fn(*mut super::native_suspension::Activation, Id) -> *mut std::ffi::c_void;
+
 #[derive(Clone)]
 pub(super) struct CodeObject {
     pub body: Body,
     pub parameters: Id,
-    /// Decoded argument metadata is shared by calls using this immutable code object.
-    pub parsed_parameters: std::cell::OnceCell<std::rc::Rc<serde_json::Value>>,
+    /// The tuple of local names in declaration order, or None when that order is unknown.
+    pub varnames: Id,
+    /// Captured parameters in slot order followed by cell-only locals, cached on first read.
+    pub cellvars: Id,
+    /// Canonical Python tuple of free variable names, materialized on first access.
+    pub freevar_names: Id,
     pub name: Id,
     pub qualname: Id,
     pub doc: Id,
     pub filename: Id,
     pub first_line: u32,
+    pub definition: CodeDefinition,
+    pub nested: Vec<(usize, Id)>,
+    /// Heap-owned literal slots shared with sibling code objects; NONE until first use.
+    pub compilation_constants: Id,
+}
+
+/// Heap-independent lexical layout resolved at the Python definition site.
+#[derive(Clone, Default)]
+pub(super) struct CodeDefinition {
+    /// Decoded on first use. Worker callbacks reuse the defining code's binding layout.
+    pub parsed_parameters: std::cell::OnceCell<Arc<super::CallParameters>>,
     pub module_definition: bool,
-    pub coroutine: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
     /// Runtime source retains execution flags even when its complete co_flags is unknown.
     pub flags_complete: bool,
-    pub nested: Vec<(usize, Id)>,
-    pub freevars: Vec<String>,
+    pub generator_lambda: bool,
+    pub freevars: Option<Arc<[String]>>,
     pub closure_supported: bool,
+}
+
+impl CodeDefinition {
+    pub(super) fn freevars(&self) -> &[String] {
+        self.freevars.as_deref().unwrap_or_default()
+    }
+}
+
+impl CodeObject {
+    pub(super) fn native_entry(&self) -> Option<Code> {
+        match self.body {
+            Body::Native(entry, _) => Some(entry),
+            _ => None,
+        }
+    }
+
+    pub(super) fn is_coroutine(&self) -> bool {
+        self.definition.flags & imre_ast::code_flags::COROUTINE != 0
+    }
 }
 
 #[derive(Clone)]
 pub(super) enum Body {
-    Native(Code),
-    Source(std::rc::Rc<super::source_code::Program>),
-    PendingGenerator {
-        source: &'static str,
-        body_line: u32,
+    /// The immutable operand tuple is owned by this interpreter's code object.
+    Native(Code, Id),
+    Suspended(ResumeCode),
+    /// Constants retained by a parsed code object with no executable entry.
+    Parsed {
+        constants: Id,
     },
 }
 
@@ -51,20 +104,36 @@ pub(super) struct Hmac {
     pub digest_size: Id,
     pub block_size: Id,
 }
-pub(super) const NONE: Id = 0;
-pub(super) const FALSE: Id = 1;
-pub(super) const TRUE: Id = 2;
-pub(super) const ELLIPSIS: Id = 3;
-pub(super) const NOT_IMPLEMENTED: Id = 4;
-pub(super) const EMPTY_TUPLE: Id = 5;
+mod permanent {
+    include!("../../native/boxed-handles.rs");
+}
+pub(super) use permanent::{
+    ELLIPSIS, EMPTY_TUPLE, FALSE, NATIVE_SUSPENDED_BODY, NONE, NOT_IMPLEMENTED, TRUE,
+};
+use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
+const FIRST_DYNAMIC_SLOT: usize =
+    FIRST_SMALL_INT as usize + (SMALL_INT_MAX - SMALL_INT_MIN + 1) as usize;
 
 /// Two frame-bound text streams can each retain a wrapper, buffer, and raw file.
 pub(super) const MAX_FRAME_FINALIZERS: usize = 2 * 3;
+
+pub(super) const ZSTD_COMPRESS_TYPE: &str = "compression.zstd.ZstdCompressor";
+pub(super) const ZSTD_DECOMPRESS_TYPE: &str = "compression.zstd.ZstdDecompressor";
+pub(super) const ZSTD_COMPRESS_METHODS: &[&str] = &["compress", "flush", "set_pledged_input_size"];
+pub(super) const BZ2_COMPRESS_TYPE: &str = "_bz2.BZ2Compressor";
+pub(super) const BZ2_DECOMPRESS_TYPE: &str = "_bz2.BZ2Decompressor";
+pub(super) const BZ2_DECOMPRESS_FIELDS: &[&str] = &["eof", "unused_data", "needs_input"];
+pub(super) const LZMA_COMPRESS_TYPE: &str = "_lzma.LZMACompressor";
+pub(super) const LZMA_DECOMPRESS_TYPE: &str = "_lzma.LZMADecompressor";
+pub(super) const CODEC_COMPRESS_METHODS: &[&str] = &["compress", "flush"];
+pub(super) const CODEC_DECOMPRESS_METHODS: &[&str] = &["decompress"];
+pub(super) const LZMA_DECOMPRESS_FIELDS: &[&str] = &["check", "eof", "needs_input", "unused_data"];
 
 pub(super) const ZLIB_DECOMPRESS_TYPE: &str = "zlib.Decompress";
 pub(super) const ZLIB_DECOMPRESS_COPY_METHODS: &[&str] = &["copy", "__copy__", "__deepcopy__"];
 pub(super) const SSL_ERROR_TYPE: &str = "ssl.SSLError";
 
+pub(super) const STRUCT_UNPACK_ITERATOR: &str = "_struct.unpack_iterator";
 pub(super) const REGEX_PATTERN_TYPE: &str = "re.Pattern";
 pub(super) const REGEX_MATCH_TYPE: &str = "re.Match";
 pub(super) const REGEX_SCANNER_TYPE: &str = "_sre.SRE_Scanner";
@@ -76,11 +145,28 @@ pub(super) const TEMPLATE_TYPE: &str = "string.templatelib.Template";
 pub(super) const TEMPLATE_ITER_TYPE: &str = "string.templatelib.TemplateIter";
 pub(super) const INTERPOLATION_TYPE: &str = "string.templatelib.Interpolation";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum TracebackAnchor {
+    Call,
+    Uniform,
+    Column(u32),
+    Operator(u32, u8),
+    Hidden,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct TracebackSpan {
+    pub end_line: u32,
+    pub start: u32,
+    pub anchor: TracebackAnchor,
+    pub end: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Location {
-    pub file: std::borrow::Cow<'static, str>,
+    pub file: std::sync::Arc<str>,
     pub line: u32,
-    pub span: Option<[u32; 3]>,
+    pub span: Option<TracebackSpan>,
 }
 
 /// Immutable construction-time fields independent of BaseException.args.
@@ -93,26 +179,26 @@ pub(super) struct GroupData {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct Trace {
+    /// A supplied throw exception keeps its context until the receiving frame handles it.
+    pub(super) generator_input: bool,
     // Pending activations precede the already exposed, mutable Python traceback.
     pending_frames: Vec<(Location, Id)>,
+    pub(super) source_position: Option<(u32, TracebackSpan)>,
     pub instance: Option<Id>,
     pub cause: Option<Id>,
+    pub suppress_context: Option<bool>,
     pub import_message: Option<Id>,
+    /// Location of a compiler error before its Python exception can be built.
+    pub pending_syntax: Option<super::source_code::SyntaxSpan>,
     /// Live members belong to the exception instance across traceback clones.
-    pub source_syntax: Option<crate::shared::Shared<[std::cell::Cell<Id>; 9]>>,
-    pub import_names: Option<[Id; 3]>,
+    pub source_syntax: Option<Id>,
+    pub import_names: [Option<Id>; 3],
     pub group: Option<GroupData>,
     pub name_error_name: Option<Id>,
+    pub attribute_fields: [Option<Id>; 2],
     pub dictionary: Option<Id>,
     stop_value: Id,
     head: Id,
-}
-
-#[derive(Debug)]
-pub(super) struct ImportFields {
-    pub name: Option<String>,
-    pub path: Option<String>,
-    pub name_from: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -123,13 +209,12 @@ pub(super) struct Error {
     pub message: String,
     pub args: Option<Id>,
     pub decode: Option<Box<DecodeState>>,
-    pub os_args: Option<crate::shared::Shared<super::os_error::Args>>,
+    pub os_args: Option<triomphe::Arc<super::os_error::Args>>,
     // Keep the context reachable even if the optional traceback cannot be allocated.
     pub context: Id,
     pub trace: Option<allocator_api2::boxed::Box<Trace>>,
     /// Python object held by the writable SystemExit.code member.
     pub exit_code: Id,
-    pub import: Option<crate::shared::Shared<ImportFields>>,
 }
 
 /// The decoder reuses these writable fields while BaseException.args keeps its first tuple.
@@ -143,30 +228,84 @@ pub(super) struct DecodeState {
 }
 
 impl Error {
+    pub(super) fn unbound_local(name: &str) -> Self {
+        Self::new(
+            "UnboundLocalError",
+            format!(
+                "cannot access local variable '{name}' where it is not associated with a value"
+            ),
+        )
+    }
+
     pub fn new(kind: &str, message: impl Into<String>) -> Self {
+        let kind = if kind == "MemoryError" {
+            std::borrow::Cow::Borrowed("MemoryError")
+        } else {
+            std::borrow::Cow::Owned(kind.to_owned())
+        };
+        Self::with_kind(kind, message.into())
+    }
+
+    fn with_kind(kind: std::borrow::Cow<'static, str>, message: String) -> Self {
         Self {
-            kind: if kind == "MemoryError" {
-                std::borrow::Cow::Borrowed("MemoryError")
-            } else {
-                std::borrow::Cow::Owned(kind.to_owned())
-            },
+            kind,
             class: NONE,
-            message: message.into(),
+            message,
             args: None,
             decode: None,
             os_args: None,
             context: NONE,
             trace: None,
             exit_code: NONE,
-            import: None,
         }
+    }
+
+    pub(super) fn source_syntax(
+        message: impl Into<String>,
+        span: ruff_text_size::TextRange,
+    ) -> Self {
+        Self::located_source_syntax(message, super::source_code::SyntaxSpan::InArgs(span))
+    }
+
+    pub(super) fn located_source_syntax(
+        message: impl Into<String>,
+        span: super::source_code::SyntaxSpan,
+    ) -> Self {
+        let mut error = Self::new("SyntaxError", message);
+        let Some(trace) = error.try_tracing() else {
+            return Self::new("MemoryError", "");
+        };
+        trace.pending_syntax = Some(span);
+        error
     }
 
     /// Construct an error without copying a static exception name.
     pub fn new_static(kind: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            kind: std::borrow::Cow::Borrowed(kind),
-            ..Self::new("", message)
+        Self::with_kind(std::borrow::Cow::Borrowed(kind), message.into())
+    }
+
+    pub(super) fn instance(&self) -> Option<Id> {
+        self.trace.as_ref()?.instance
+    }
+
+    /// A normalized exception owns its Python members and traceback while it unwinds.
+    pub(super) fn owner<'a>(&'a self, heap: &'a Heap) -> &'a Self {
+        match self.instance() {
+            Some(id) => match heap.get(id) {
+                Value::Raised(owner) => owner,
+                _ => unreachable!("normalized exception"),
+            },
+            None => self,
+        }
+    }
+
+    pub(super) fn owner_mut<'a>(&'a mut self, heap: &'a mut Heap) -> &'a mut Self {
+        match self.instance() {
+            Some(id) => match heap.get_mut(id) {
+                Value::Raised(owner) => owner,
+                _ => unreachable!("normalized exception"),
+            },
+            None => self,
         }
     }
 
@@ -175,23 +314,20 @@ impl Error {
         (self.class != NONE).then_some(self.class)
     }
 
-    /// Attach the module and member names exposed on a Python import exception.
-    pub fn with_import(
-        mut self,
-        name: Option<&str>,
-        path: Option<String>,
-        name_from: Option<&str>,
-    ) -> Self {
-        let fields = ImportFields {
-            name: name.map(str::to_owned),
-            path,
-            name_from: name_from.map(str::to_owned),
-        };
-        let Ok(fields) = crate::shared::Shared::try_new(fields) else {
+    /// Preserve the original Python name supplied by the importer.
+    pub(super) fn with_import_name(mut self, name: Id) -> Self {
+        let Some(trace) = self.try_tracing() else {
             return Self::new("MemoryError", "");
         };
-        self.import = Some(fields);
+        trace.import_names[0] = Some(name);
         self
+    }
+
+    /// Explicitly assigning a cause suppresses the context until Python changes the flag.
+    pub(super) fn suppresses_context(&self) -> bool {
+        self.trace
+            .as_ref()
+            .is_some_and(|t| t.suppress_context.unwrap_or(t.cause.is_some()))
     }
 
     /// Read an exception group's retained message and immutable children.
@@ -249,12 +385,7 @@ impl Error {
                     .chain(trace.instance)
                     .chain(trace.cause)
                     .chain(trace.import_message)
-                    .chain(
-                        trace
-                            .source_syntax
-                            .iter()
-                            .flat_map(|fields| fields.iter().map(std::cell::Cell::get)),
-                    )
+                    .chain(trace.source_syntax)
                     .chain(trace.import_names.into_iter().flatten())
                     .chain(trace.group.iter().flat_map(|group| {
                         [group.message, group.exceptions]
@@ -262,6 +393,7 @@ impl Error {
                             .chain(group.sequence_repr)
                     }))
                     .chain(trace.name_error_name)
+                    .chain(trace.attribute_fields.into_iter().flatten())
                     .chain(trace.dictionary)
                     .chain((trace.head != NONE).then_some(trace.head))
             }))
@@ -288,17 +420,77 @@ impl Error {
 }
 
 impl Context {
-    /// Reuse the Python exception object when an already observed error is raised again.
-    pub(super) fn raised_instance(&mut self, mut error: Error) -> Id {
-        if let Some(id) = error.trace.as_mut().and_then(|trace| trace.instance.take()) {
-            *self.heap.get_mut(id) = Value::Raised(error);
-            id
-        } else {
-            self.alloc(Value::Raised(error))
+    pub(super) fn error_from_instance(&self, instance: Id) -> Error {
+        let Value::Raised(error) = self.heap.get(instance) else {
+            unreachable!("expected a normalized exception instance")
+        };
+        // Unwinding needs the exception class and diagnostic text. The instance
+        // retains the traceback and the Python values that handlers can change.
+        let mut pending = Error::with_kind(error.kind.clone(), error.message.clone());
+        pending.class = error.class;
+        pending.tracing().instance = Some(instance);
+        pending
+    }
+
+    /// Expose a native error once, or return the Python instance already propagating.
+    pub(super) fn raised_instance(&mut self, error: Error) -> Id {
+        error
+            .instance()
+            .unwrap_or_else(|| self.alloc(Value::Raised(error)))
+    }
+
+    /// A resumed frame chains to its own handled exception, regardless of the caller's handler.
+    pub(super) fn chain_generator_input(&mut self, error: &mut Error) {
+        let frame = self.heap.execution.current();
+        if frame.has_local_exception && frame.active != NONE {
+            if let Some(instance) = error.instance() {
+                self.chain_raised_instance(instance);
+            } else {
+                error.context = frame.active;
+            }
+        }
+    }
+
+    /// Chain an explicitly raised instance to the exception currently being handled.
+    pub(super) fn chain_raised_instance(&mut self, raised: Id) {
+        let active = self.heap.active_exception();
+        if active == NONE || active == raised {
+            return;
+        }
+        let mut current = active;
+        let mut checkpoint = active;
+        for distance in 1usize.. {
+            let Value::Raised(previous) = self.heap.get_mut(current) else {
+                unreachable!("exception context")
+            };
+            if previous.context == raised {
+                previous.context = NONE;
+                break;
+            }
+            current = previous.context;
+            if current == NONE || current == checkpoint {
+                break;
+            }
+            // Detect a pre-existing cycle without modifying it or allocating a visited set.
+            if distance.is_power_of_two() {
+                checkpoint = current;
+            }
+        }
+        let Value::Raised(instance) = self.heap.get_mut(raised) else {
+            unreachable!("normalized exception")
+        };
+        let previous = std::mem::replace(&mut instance.context, active);
+        if previous != NONE && previous != active {
+            self.heap.collect_next_statement = true;
         }
     }
 
     /// Snapshot active Python code without materializing Python frame objects.
+    /// Return the UTF-8 spelling used in native diagnostics for a Python filename.
+    pub(super) fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
+        self.heap.filename_display(id)
+    }
+
     pub(super) fn publish_fault_frames(&self) {
         self.heap
             .publish_fault_frames(crate::fault_handler::generation());
@@ -306,13 +498,13 @@ impl Context {
 
     /// Capture code metadata at creation without extending the life of any caller frame.
     pub(super) fn coroutine_origin(&mut self) -> Id {
-        let depth = self.threads.coroutine_origin_depth as usize;
+        let depth = self.heap.execution.coroutine_origin_depth as usize;
         if depth == 0 {
             return NONE;
         }
         let mut frames = Vec::new();
-        for index in (0..self.heap.frames.len()).rev() {
-            let frame = &self.heap.frames[index];
+        for index in (0..self.heap.execution.frames.len()).rev() {
+            let frame = &self.heap.execution.frames[index];
             let Some(location) = &frame.location else {
                 continue;
             };
@@ -320,7 +512,7 @@ impl Context {
                 continue;
             }
             let code = self.code_object(frame.code);
-            let line = frame.line(&self.heap, location);
+            let line = frame.line(location);
             let (file, name) = (code.filename, code.name);
             let line = self.int(i64::from(line));
             frames.push(self.alloc(Value::Tuple(vec![file, line, name])));
@@ -335,25 +527,22 @@ impl Context {
     pub(super) fn frame_position(&self, object: Id) -> Option<[u32; 4]> {
         let frame = self
             .heap
+            .execution
             .frames
             .iter()
             .rev()
             .find(|frame| frame.object == Some(object))?;
-        if let Some(position) = frame.call_position {
-            return Some(position);
-        }
-        match (frame.expression, &self.code_object(frame.code).body) {
-            (ExpressionPosition::Source { range, .. }, Body::Source(program)) => {
-                program.expression_range(range)
-            }
-            _ => None,
-        }
+        frame.call_position.or_else(|| {
+            let location = frame.location.as_ref()?;
+            let span = location.span?;
+            Some([location.line, span.end_line, span.start, span.end])
+        })
     }
 
-    /// Return the same Python frame to introspection and traceback construction.
     pub(super) fn active_frame(&mut self, depth: usize) -> Result<Option<(Location, Id)>> {
         let Some((index, _)) = self
             .heap
+            .execution
             .frames
             .iter()
             .enumerate()
@@ -367,7 +556,7 @@ impl Context {
     }
 
     fn materialize_frame(&mut self, index: usize) -> Result<Option<(Location, Id)>> {
-        let frame = &self.heap.frames[index];
+        let frame = &self.heap.execution.frames[index];
         if frame.code == NONE {
             return Ok(None);
         }
@@ -380,7 +569,7 @@ impl Context {
         // An escaped ordinary frame owns its caller even after both functions return.
         // Materialize the missing prefix iteratively, stopping at a cached frame or
         // a generator whose resumer is meaningful only during this activation.
-        let start = self.heap.frames[..=index]
+        let start = self.heap.execution.frames[..=index]
             .iter()
             .rposition(|frame| {
                 frame.object.is_some()
@@ -389,7 +578,7 @@ impl Context {
             .unwrap_or(0);
         let mut previous = NONE;
         for position in start..=index {
-            let frame = &self.heap.frames[position];
+            let frame = &self.heap.execution.frames[position];
             if let Some(object) = frame.object {
                 previous = object;
                 continue;
@@ -402,14 +591,17 @@ impl Context {
             }
             let (scope, code, owner) = (frame.scope, frame.code, frame.owner);
             let globals = self.module_globals(scope)?;
+            let builtins = self.function_builtins(scope)?;
             let unoptimized_locals = super::frame_locals::unoptimized_namespace(self, scope, code)?;
             let class_proxy_scope = super::frame_locals::class_cells(self, scope, code);
             let object = self.alloc(Value::PythonFrame {
                 unoptimized_locals,
                 class_proxy_scope,
+                overwritten_fast_locals: Vec::new(),
                 scope,
                 code,
                 globals,
+                builtins,
                 back: (!matches!(owner, FrameOwner::Generator(_))).then_some(previous),
                 lineno: line,
             });
@@ -419,7 +611,7 @@ impl Context {
                 };
                 *frame = Some(object);
             }
-            self.heap.frames[position].object = Some(object);
+            self.heap.execution.frames[position].object = Some(object);
             previous = object;
         }
         Ok(Some((location, previous)))
@@ -444,7 +636,7 @@ impl Context {
             return Ok(NONE);
         }
         if let Some(index) =
-            self.heap.frames.iter().rposition(
+            self.heap.execution.frames.iter().rposition(
                 |frame| matches!(frame.owner, FrameOwner::Generator(owner) if owner == id),
             )
             && let Some((_, frame)) = self.materialize_frame(index)?
@@ -452,12 +644,15 @@ impl Context {
             return Ok(frame);
         }
         let globals = self.module_globals(scope)?;
+        let builtins = self.function_builtins(scope)?;
         let object = self.alloc(Value::PythonFrame {
             unoptimized_locals: None,
             class_proxy_scope: None,
+            overwritten_fast_locals: Vec::new(),
             scope,
             code,
             globals,
+            builtins,
             back: None,
             lineno,
         });
@@ -472,13 +667,14 @@ impl Context {
     pub(super) fn generator_frame_back(&mut self, object: Id) -> Result<Id> {
         let Some(index) = self
             .heap
+            .execution
             .frames
             .iter()
             .rposition(|frame| frame.object == Some(object))
         else {
             return Ok(NONE);
         };
-        let Some(caller) = self.heap.frames[..index]
+        let Some(caller) = self.heap.execution.frames[..index]
             .iter()
             .rposition(|frame| frame.code != NONE && frame.location.is_some())
         else {
@@ -488,26 +684,52 @@ impl Context {
     }
 
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
-        let failure = match self.materialize_frame(self.heap.frames.len() - 1) {
+        let position = error.trace.as_mut().and_then(|t| t.source_position.take());
+        if let Some((line, _)) = position {
+            self.heap.set_statement_line(line);
+        }
+        let failure = match self.materialize_frame(self.heap.execution.frames.len() - 1) {
             Err(failure) => failure,
             Ok(None) => return,
             Ok(Some((mut loc, frame))) => {
                 if let Some(&[line, start, split, end]) = span {
                     loc.line = line;
-                    loc.span = Some([start, split, end]);
+                    loc.span = Some(TracebackSpan {
+                        end_line: line,
+                        start,
+                        anchor: TracebackAnchor::Column(split),
+                        end,
+                    });
+                } else if let Some((_, span)) = position {
+                    loc.span = Some(span);
+                } else if let Some(span) = &mut loc.span
+                    && span.anchor == TracebackAnchor::Hidden
+                    && let ExpressionPosition::Line(line) = self.heap.execution.current().expression
+                    && line == loc.line
+                {
+                    // An eager expression shares the published range of a definition,
+                    // but its own failing instruction is highlighted in the traceback.
+                    span.anchor = TracebackAnchor::Uniform;
                 }
                 let active = self.heap.active_exception();
-                if error.context == NONE
+                let generator_input = error
+                    .trace
+                    .as_mut()
+                    .is_some_and(|trace| std::mem::take(&mut trace.generator_input));
+                let instance = error.instance();
+                let owner = error.owner_mut(&mut self.heap);
+                if !generator_input
                     && active != NONE
-                    && error.trace.as_ref().is_none_or(|trace| {
-                        trace.head == NONE
-                            && trace.pending_frames.is_empty()
-                            && trace.instance != Some(active)
-                    })
+                    && instance != Some(active)
+                    && owner.context == NONE
+                    && owner
+                        .trace
+                        .as_ref()
+                        .is_none_or(|trace| trace.head == NONE && trace.pending_frames.is_empty())
                 {
-                    error.context = active;
+                    owner.context = active;
                 }
-                if let Some(trace) = error.try_tracing()
+                if let Some(trace) = owner.try_tracing()
                     && trace.pending_frames.try_reserve(1).is_ok()
                 {
                     trace.pending_frames.push((loc, frame));
@@ -530,20 +752,81 @@ impl Context {
         };
         let mut head = trace.head;
         if !trace.pending_frames.is_empty() {
-            for (at, frame) in std::mem::take(&mut trace.pending_frames) {
-                head = self.alloc(Value::Traceback {
-                    frame,
-                    next: head,
-                    lineno: i64::from(at.line),
-                    span: at.span,
-                });
-            }
+            let pending = std::mem::take(&mut trace.pending_frames);
+            head = self.prepend_traceback_frames(pending, head);
             let Value::Raised(error) = self.heap.get_mut(exception) else {
                 unreachable!()
             };
             error.tracing().head = head;
         }
         Ok(head)
+    }
+
+    fn prepend_traceback_frames(&mut self, frames: Vec<(Location, Id)>, mut head: Id) -> Id {
+        for (at, frame) in frames {
+            head = self.alloc(Value::Traceback {
+                frame,
+                next: head,
+                lineno: i64::from(at.line),
+                span: at.span,
+            });
+        }
+        head
+    }
+
+    /// At the import boundary, unlink frozen loader frames through its explicit call marker.
+    /// ImportError discards every frozen loader frame. Exposed Python traceback tails retain identity.
+    pub(super) fn trim_import_traceback(&mut self, mut error: Error) -> Error {
+        let Some(importlib) = self.importlib_code else {
+            return error;
+        };
+        let trim_all = self.is_builtin_error(&error, "ImportError");
+        let Some(trace) = error.owner_mut(&mut self.heap).trace.as_mut() else {
+            return error;
+        };
+        let pending = std::mem::take(&mut trace.pending_frames);
+        let tail = trace.head;
+        let mut head = self.prepend_traceback_frames(pending, tail);
+        let mut node = head;
+        let mut previous = NONE;
+        let mut before_chunk = NONE;
+        let mut in_loader = false;
+        while let Value::Traceback { frame, next, .. } = *self.heap.get(node) {
+            let Value::PythonFrame { code, .. } = *self.heap.get(frame) else {
+                unreachable!("traceback frame")
+            };
+            let code = self.code_object(code);
+            let loader = self.heap.compilation_entry(code).is_some_and(|entry| {
+                importlib
+                    .units
+                    .iter()
+                    .any(|&unit| std::ptr::fn_addr_eq(unit, entry))
+            });
+            if loader && !in_loader {
+                before_chunk = previous;
+            }
+            in_loader = loader;
+            if loader
+                && (trim_all
+                    || code
+                        .native_entry()
+                        .is_some_and(|entry| std::ptr::fn_addr_eq(entry, importlib.remove_frames)))
+            {
+                if before_chunk == NONE {
+                    head = next;
+                } else if let Value::Traceback { next: link, .. } = self.heap.get_mut(before_chunk)
+                {
+                    *link = next;
+                }
+                previous = before_chunk;
+                self.heap.collect_next_statement = true;
+            } else {
+                previous = node;
+            }
+            node = next;
+        }
+        error.owner_mut(&mut self.heap).tracing().head = head;
+        error
     }
 
     /// Store an explicit cause, including None, using the same state as raise-from.
@@ -557,7 +840,9 @@ impl Context {
         let Value::Raised(error) = self.heap.get_mut(exception) else {
             unreachable!("cause assignment requires an exception instance")
         };
-        if let Some(old) = error.tracing().cause.replace(cause)
+        let trace = error.tracing();
+        trace.suppress_context = None;
+        if let Some(old) = trace.cause.replace(cause)
             && old != NONE
             && old != cause
         {
@@ -630,6 +915,7 @@ impl Context {
             Value::ParamSpec(_) => "ParamSpec",
             Value::ParamSpecMarker(kind, _) => kind.class().rsplit_once('.').unwrap().1,
             Value::ConstEvaluator(_) => "constevaluator",
+            Value::FractionHash(_) => "builtin_function_or_method",
             Value::TypeVar(_) => "TypeVar",
             Value::TypeVarTuple { .. } => "TypeVarTuple",
             Value::GenericAlias(alias) => alias.kind.type_name(),
@@ -646,7 +932,9 @@ impl Context {
             Value::Module {
                 constructor: None, ..
             } => "module",
-            Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).heap_type() => {
+            Value::Socket { class, .. } | Value::Instance { class, .. }
+                if let Some(name) = self.heap.get(*class).heap_type() =>
+            {
                 name
             }
             Value::Instance { class, .. }
@@ -707,7 +995,7 @@ impl Context {
     pub(super) fn decode_error(&mut self, native: crate::Error) -> Error {
         let state = native.decode_args().map(|args| DecodeState {
             encoding: self.text(args.encoding),
-            object: self.alloc(Value::Bytes(args.object.to_vec())),
+            object: self.heap.bytes_from_data(args.object.to_vec()),
             start: args.start,
             end: args.end,
             reason: self.text(args.reason),
@@ -761,6 +1049,19 @@ impl Context {
     }
 }
 
+impl From<crate::source_arguments::Error> for Error {
+    fn from(error: crate::source_arguments::Error) -> Self {
+        match error {
+            crate::source_arguments::Error::Memory => Self::new("MemoryError", ""),
+            crate::source_arguments::Error::Arity(message)
+            | crate::source_arguments::Error::Duplicate(message)
+            | crate::source_arguments::Error::UnmatchedKeyword(message) => {
+                Self::new("TypeError", message)
+            }
+        }
+    }
+}
+
 impl From<crate::Error> for Error {
     fn from(error: crate::Error) -> Self {
         let os_args = match error
@@ -768,7 +1069,7 @@ impl From<crate::Error> for Error {
             .map(|args| {
                 super::os_error::Args::new(super::os_error::Args::Native {
                     source: args,
-                    fields: std::cell::Cell::new(None),
+                    fields: std::sync::OnceLock::new(),
                 })
             })
             .transpose()
@@ -800,7 +1101,8 @@ impl Error {
     }
 
     fn fmt_trace(&self, f: &mut fmt::Formatter<'_>, heap: Option<&Heap>) -> fmt::Result {
-        if let Some(trace) = &self.trace
+        let owner = heap.map_or(self, |heap| self.owner(heap));
+        if let Some(trace) = &owner.trace
             && (!trace.pending_frames.is_empty() || (heap.is_some() && trace.head != NONE))
         {
             writeln!(f, "Traceback (most recent call last):")?;
@@ -822,9 +1124,9 @@ impl Error {
                     let Value::Code(code) = heap.get(*code) else {
                         unreachable!()
                     };
-                    let Value::Str(file) = heap.get(code.filename) else {
-                        unreachable!()
-                    };
+                    let file = heap
+                        .filename_display(code.filename)
+                        .map_err(|_| fmt::Error)?;
                     writeln!(f, "  File {file:?}, line {lineno}")?;
                     current = *next;
                 }
@@ -846,6 +1148,8 @@ impl fmt::Display for Error {
 
 pub(super) type Result<T> = std::result::Result<T, Error>;
 
+pub(super) const TEXT_SIGNATURE_END: &str = ")\n--\n\n";
+
 /// Data retained by class namespaces after their body has run.
 #[derive(Clone, Default)]
 pub(super) struct ClassNamespace {
@@ -855,6 +1159,8 @@ pub(super) struct ClassNamespace {
     pub itertools_layout: Option<&'static str>,
     /// Attribute writes to the type object itself are forbidden, independently of its instance layout.
     pub immutable_type: bool,
+    /// A native heap layout can be used as the base of a Python class.
+    pub subclassable_heap_type: bool,
     pub bases: Id,
     /// The tuple passed to type.__new__ when it differs from the direct bases' native storage.
     pub supplied_bases: Option<Id>,
@@ -863,18 +1169,22 @@ pub(super) struct ClassNamespace {
     pub defining_module: Option<Id>,
     /// A name assigned through type's __name__ descriptor, including a str subclass.
     pub name_override: Option<Id>,
+    /// Original string storage for a possible Argument Clinic header, independent of later __doc__ writes.
+    pub original_doc: Option<Id>,
     /// Backing dictionary shared by live class namespace proxies.
     pub dictionary: Option<Id>,
+    /// Slot replacement removed the original type's own instance layout descriptors.
+    pub layout_descriptors_cleared: bool,
     /// Closure cell shared by method annotation providers.
     pub annotation_dict_cell: Option<Id>,
-    /// The field dictionary (NONE if unbound) and executed offsets while the class body runs.
-    pub annotation_scratch: Option<(Id, HashSet<u32>)>,
+    /// The eager field dictionary and private conditional index cell while the class body runs.
+    pub annotation_scratch: Option<(Id, Option<Id>)>,
     /// Class annotation attributes are served by the installed provider.
     pub provider_annotations: bool,
     /// Run pending instance finalizers after user exit callbacks, while the heap is live.
     pub finalize_at_shutdown: bool,
     /// Slot names consumed when the class is created, independent of later namespace mutations.
-    pub slot_names: Option<std::rc::Rc<[String]>>,
+    pub slot_names: Option<Arc<[String]>>,
     /// Dynamic classes install real descriptors instead of using inline fields by spelling.
     pub member_slots: bool,
 }
@@ -887,15 +1197,14 @@ pub(super) enum ComprehensionKind {
 
 #[derive(Clone)]
 pub(super) struct Scope {
-    pub class_body: Option<Vec<String>>,
+    pub in_class_body: bool,
     pub enum_namespace: Option<Box<super::enums::auto::EnumNamespace>>,
     pub is_abstract: bool,
     pub comprehension: Option<ComprehensionKind>,
     pub class_cell: Option<Id>,
     pub class_namespace: Option<Box<ClassNamespace>>,
-    pub first_argument: Option<String>,
-    pub names: indexmap::IndexMap<String, Id>,
-    pub closure: allocator_api2::boxed::Box<ClosureScope>,
+    pub names: indexmap::IndexMap<crate::Str, Id>,
+    pub closure: ClosureScope,
     pub namespace: Option<Id>,
     pub globals: HashSet<String>,
     pub exec_globals: Option<ExecGlobals>,
@@ -905,25 +1214,98 @@ pub(super) struct Scope {
 }
 
 impl Scope {
+    pub(super) fn conditional_annotation_cell(&self) -> Option<Id> {
+        self.class_namespace.as_ref()?.annotation_scratch?.1
+    }
+
+    pub(super) fn new(module: String, parent: Option<Id>) -> Self {
+        Self {
+            in_class_body: false,
+            enum_namespace: None,
+            is_abstract: false,
+            comprehension: None,
+            class_cell: None,
+            class_namespace: None,
+            names: Default::default(),
+            closure: Default::default(),
+            namespace: None,
+            globals: Default::default(),
+            exec_globals: None,
+            exec_locals: None,
+            parent,
+            module,
+        }
+    }
+
+    /// Snapshot names in binding order. The finished type keeps its qualified name as metadata.
+    pub(super) fn class_namespace_entries(&self, building: bool) -> Vec<(crate::Str, Id)> {
+        self.names
+            .iter()
+            .filter(|(name, _)| building || name.as_str() != "__qualname__")
+            .map(|(name, &value)| (name.clone(), value))
+            .collect()
+    }
+
     /// The class body's live dictionary, once exposed through Python code.
     pub(super) fn class_body_mapping(&self) -> Option<Id> {
-        self.class_body.as_ref().and(self.namespace)
+        self.namespace.filter(|_| self.in_class_body)
     }
 
     /// type.__qualname__ lives outside the finished class dictionary.
     pub(super) fn binding_namespace(&self, name: &str) -> Option<Id> {
         self.namespace.filter(|_| {
-            name != "__qualname__" || self.class_namespace.is_none() || self.class_body.is_some()
+            name != "__qualname__" || self.class_namespace.is_none() || self.in_class_body
         })
+    }
+}
+
+/// Lexical names shared by calls to the same code object until a frame adds a name.
+#[derive(Clone, Debug, Default)]
+pub(super) struct DeclaredLocals(Option<Arc<IndexSet<String>>>);
+
+impl From<IndexSet<String>> for DeclaredLocals {
+    fn from(names: IndexSet<String>) -> Self {
+        Self((!names.is_empty()).then(|| Arc::new(names)))
+    }
+}
+
+impl TryFrom<Vec<String>> for DeclaredLocals {
+    type Error = Error;
+
+    fn try_from(names: Vec<String>) -> Result<Self> {
+        let mut declared = IndexSet::new();
+        declared
+            .try_reserve_exact(names.len())
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        declared.extend(names);
+        Ok(declared.into())
+    }
+}
+
+impl std::ops::Deref for DeclaredLocals {
+    type Target = IndexSet<String>;
+
+    fn deref(&self) -> &Self::Target {
+        static EMPTY: std::sync::LazyLock<IndexSet<String>> =
+            std::sync::LazyLock::new(IndexSet::new);
+        self.0.as_deref().unwrap_or_else(|| &EMPTY)
+    }
+}
+
+impl std::ops::DerefMut for DeclaredLocals {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        Arc::make_mut(self.0.get_or_insert_with(Default::default))
     }
 }
 
 #[derive(Clone, Default)]
 pub(super) struct ClosureScope {
-    pub declared: HashSet<String>,
+    /// A synthetic parent exposes captured cells and forwards other walrus stores to globals.
+    pub environment: bool,
+    pub declared: DeclaredLocals,
     pub declared_complete: bool,
-    pub nonlocals: HashSet<String>,
-    pub cells: HashMap<String, Id>,
+    pub nonlocals: DeclaredLocals,
+    pub cells: indexmap::IndexMap<String, Id>,
     /// Keys added by frame introspection that are not lexical variables.
     pub extra_locals: Option<Id>,
     pub cleared: bool,
@@ -942,17 +1324,30 @@ pub(super) struct BoxedGzipDecoder {
 }
 
 #[derive(Clone)]
-pub(super) struct BoxedTextFile {
-    pub(super) file: crate::objects::TextFile,
-    pub(super) finalizing: bool,
-    pub(super) line_buffering: bool,
-    pub(super) buffer: Option<Id>,
+pub(super) struct BoxedFile<T> {
+    file: T,
+    dictionary: Option<Id>,
 }
 
-impl std::ops::Deref for BoxedTextFile {
-    type Target = crate::objects::TextFile;
+impl<T> BoxedFile<T> {
+    pub(super) fn new(file: T) -> Self {
+        Self {
+            file,
+            dictionary: None,
+        }
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
+impl<T> AsRef<T> for BoxedFile<T> {
+    fn as_ref(&self) -> &T {
+        &self.file
+    }
+}
+
+impl<T> std::ops::Deref for BoxedFile<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
         &self.file
     }
 }
@@ -960,25 +1355,42 @@ impl std::ops::Deref for BoxedTextFile {
 /// State that belongs to a single initialization of a native module.
 #[derive(Clone, Copy)]
 pub(super) enum NativeModuleState {
+    PendingBuiltin,
+    SocketType(Id),
     LocaleError(Id),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    TermiosError(Id),
     IsoCalendarDate(Id),
     SslError(Id),
     PickleWriter {
         pickling_error: Id,
         dispatch_table: Id,
+        reverse_names: Id,
+        reverse_imports: Id,
     },
 }
 
 impl NativeModuleState {
-    fn references(self, visit: &mut MarkQueue<'_>) {
+    fn references(self, visit: &mut impl VisitReferences) {
         match self {
-            Self::LocaleError(class) | Self::IsoCalendarDate(class) | Self::SslError(class) => {
-                visit.push(class)
-            }
+            Self::PendingBuiltin => {}
+            Self::SocketType(class)
+            | Self::LocaleError(class)
+            | Self::IsoCalendarDate(class)
+            | Self::SslError(class) => visit.push(class),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            Self::TermiosError(class) => visit.push(class),
             Self::PickleWriter {
                 pickling_error,
                 dispatch_table,
-            } => visit.extend([pickling_error, dispatch_table]),
+                reverse_names,
+                reverse_imports,
+            } => visit.extend([
+                pickling_error,
+                dispatch_table,
+                reverse_names,
+                reverse_imports,
+            ]),
         }
     }
 }
@@ -991,6 +1403,14 @@ pub(super) struct IoOpenTypes {
     pub writer: Id,
     pub random: Id,
     pub wrapper: Id,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum SlotStorage {
+    Exception(imre_ast::exceptions::Kind, usize),
+    Instance,
+    Module(usize),
+    ReadOnlyText(Id),
 }
 
 #[derive(Clone)]
@@ -1009,6 +1429,13 @@ pub(super) enum Value {
         // Preserve a fixed zone's Python constructor objects, including subclasses.
         tzoffset: Id,
         tzname: Id,
+    },
+    #[cfg(target_os = "linux")]
+    Epoll(std::rc::Rc<crate::objects::epoll::Epoll>),
+    #[cfg(target_os = "linux")]
+    Mmap {
+        region: Option<std::rc::Rc<super::stdlib::mmap::Region>>,
+        pos: usize,
     },
     Poll(std::rc::Rc<std::cell::RefCell<crate::objects::readiness::Poll>>),
     Scandir(std::rc::Rc<super::stdlib::os::scandir::Scan>),
@@ -1032,13 +1459,13 @@ pub(super) enum Value {
     },
     Range(super::range::Range),
     RangeIterator(super::range::Cursor),
-    Str(String),
+    Str(crate::Str),
     /// Python code points for text containing at least one surrogate.
     SurrogateStr(Vec<u32>),
     Array(super::array::Array),
     Bytes(Vec<u8>),
     RawReadWindow(super::raw_read_window::Window),
-    BytesIoStorage(Option<std::rc::Rc<crate::objects::Memory>>),
+    BytesIoStorage(Box<super::stdlib::io::BytesIoStorage>),
     BytesIoBuffer {
         stream: Id,
         storage: Id,
@@ -1055,6 +1482,8 @@ pub(super) enum Value {
         lease: Option<Id>,
         // An ownerless C buffer has private backing storage but exposes obj as None.
         anonymous: bool,
+        // A native export's Python release callback cannot derive another view.
+        restricted: bool,
         layout: Option<super::memoryview::ViewLayout>,
         readonly: bool,
         hash: Option<i64>,
@@ -1066,25 +1495,45 @@ pub(super) enum Value {
     Hmac(Hmac),
     Struct {
         format: String,
-        layout: std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>,
+        layout: Option<std::rc::Rc<crate::objects::interpreter_stdlib::StructFormat>>,
     },
     MetadataArchive(std::rc::Rc<crate::objects::ZipArchive>),
     ExpatParser(std::rc::Rc<super::stdlib::pyexpat::NativeParser>),
-    Random(std::rc::Rc<std::cell::RefCell<crate::objects::Generator>>),
+    Random(super::stdlib::random::instance::RandomState),
     HandlerLock(std::sync::Arc<crate::objects::logging::HandlerLock>),
     #[cfg(unix)]
     MemoryBio(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::Bio>>),
     #[cfg(unix)]
-    TlsContext(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>),
+    TlsContext(
+        std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::Context>>,
+        super::stdlib::ssl::Registration,
+    ),
     #[cfg(unix)]
-    TlsSession(std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>),
+    TlsSession(
+        std::rc::Rc<std::cell::RefCell<Option<super::stdlib::ssl::provider::Session>>>,
+        super::stdlib::ssl::Owner,
+    ),
     #[cfg(unix)]
-    TlsListener(crate::ObjectOwner),
+    TlsTransport(Box<crate::objects::socket::TlsEndpoint>),
     #[cfg(unix)]
-    TlsBioSession(std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>),
-    Socket(crate::ObjectOwner),
+    TlsBioSession {
+        session: std::rc::Rc<std::cell::RefCell<super::stdlib::ssl::provider::bio::BioSession>>,
+        server_hostname: Id,
+        owner: super::stdlib::ssl::Owner,
+    },
+    Socket {
+        class: Id,
+        handle: crate::ObjectOwner,
+    },
     Deque(Box<crate::objects::DequeRing<Id>>),
     GenericAliasIterator(Option<Id>),
+    StructUnpackIterator {
+        record: Option<Id>,
+        buffer: Option<Id>,
+        exporter: Option<Id>,
+        offset: usize,
+        length: usize,
+    },
     MemoryIterator {
         view: Option<Id>,
         index: usize,
@@ -1128,11 +1577,12 @@ pub(super) enum Value {
         ordered: bool,
     },
     DictIterator(DictIterator),
+    SetIterator(SetIterator),
     DefaultDict {
         factory: Id,
         entries: super::dictionary::Entries,
     },
-    Scope(Scope),
+    Scope(allocator_api2::boxed::Box<Scope>),
     Cell(Option<Id>),
     Super {
         start: Id,
@@ -1146,11 +1596,19 @@ pub(super) enum Value {
         initializing: bool,
         // Private state retained by this generation of a native module.
         module_state: Option<NativeModuleState>,
-        // Imported modules are resolved separately from independently constructed ones.
+        /// Named Python slots use offsets preserved by compatible module class changes.
+        #[expect(
+            clippy::box_collection,
+            reason = "keep the optional slot map pointer-sized"
+        )]
+        module_slots: Option<Box<HashMap<usize, Id>>>,
+        // Concrete Python type. Imported base modules use None; a directly constructed
+        // module has an empty internal import name and always carries its constructor.
         constructor: Option<Id>,
     },
     Function {
         fields: super::function_fields::FunctionFields,
+        /// A supplied or already exposed Python closure tuple. The scope owns the cells.
         closure: Id,
         code: Id,
         scope: Id,
@@ -1189,8 +1647,8 @@ pub(super) enum Value {
         lineno: u32,
         code: Id,
         scope: Id,
-        iterators: Vec<Id>,
-        protected: Vec<super::source_code::FinallyBlock>,
+
+        native: Option<super::native_suspension::Saved>,
         offset: Option<usize>,
         running: bool,
     },
@@ -1205,11 +1663,12 @@ pub(super) enum Value {
         name: String,
         scope: Id,
         ancestors: Vec<Id>,
-        namedtuple_fields: Option<std::rc::Rc<[String]>>,
+        namedtuple_fields: Option<Arc<[String]>>,
     },
     ParamSpec(super::paramspec::ParamSpec),
     ParamSpecMarker(super::paramspec::Marker, Id),
     ConstEvaluator(Id),
+    FractionHash(Id),
     TypeAlias {
         name: Id,
         parameters: Id,
@@ -1219,7 +1678,7 @@ pub(super) enum Value {
     TypeVarTuple {
         name: Id,
         module: Id,
-        default: Id,
+        default: super::typing::ParameterValue,
         declared: bool,
     },
     NoDefault,
@@ -1227,20 +1686,21 @@ pub(super) enum Value {
     Union(super::union::Union),
     Instance {
         class: Id,
-        fields: indexmap::IndexMap<String, Id>,
+        fields: Box<indexmap::IndexMap<String, Id>>,
         /// Storage addressed by the declaring member, independent of the instance dictionary.
-        member_values: Option<hashbrown::HashMap<Id, Id, std::collections::hash_map::RandomState>>,
+        member_values: Option<Box<MemberValues>>,
         /// Exact ordinary instance dictionary once exposed or replaced.
         namespace: Option<Id>,
         dictionary: Option<Id>,
+        socket: Option<crate::ObjectOwner>,
         scalar: Option<Id>,
         property: Option<Box<super::property::Property>>,
         weak_reference: Option<Box<super::weakref::Reference>>,
-        cycle: Option<Box<super::stdlib::itertools::Cycle>>,
+        itertools: Option<Box<super::stdlib::itertools::Cursor>>,
         memory_stream: Option<super::stdlib::io::MemoryStream>,
     },
     Native(String),
-    AttrGetter(std::rc::Rc<[Vec<String>]>),
+    AttrGetter(std::rc::Rc<[Vec<Id>]>),
     /// A tuple field position and the descriptor’s writable docstring.
     TupleGetter {
         index: i64,
@@ -1252,27 +1712,43 @@ pub(super) enum Value {
     SlotMember {
         owner: Id,
         name: Id,
+        storage: SlotStorage,
     },
     /// The original keys are held in a Python tuple, shared by multi-key reductions.
     ItemGetter(Id),
+    /// Captured arguments are kept alive across calls, including Python attribute hooks.
+    MethodCaller {
+        name: Id,
+        args: Id,
+        keywords: Id,
+    },
     ThreadLocal(super::thread_local::Dictionaries),
     ThreadHandle(std::sync::Arc<super::thread_worker::Handle>),
     PrimitiveLock(std::sync::Arc<crate::objects::locks::PrimitiveLock>),
     Raised(Error),
+    CompilationConstants {
+        // The linked module owns the code across executions. Each execution owns its literals.
+        entry: Option<Code>,
+        slots: HashMap<usize, Id>,
+    },
+    SyntaxMembers([Id; 9]),
     Traceback {
         frame: Id,
         next: Id,
         lineno: i64,
-        span: Option<[u32; 3]>,
+        span: Option<TracebackSpan>,
     },
     PythonFrame {
         // The original namespace outlives execution of a module or class body.
         unoptimized_locals: Option<Id>,
         // A class proxy sees lexical cells, even when its namespace shadows their names.
         class_proxy_scope: Option<Id>,
+        // The frame owns values displaced by writes through a locals proxy.
+        overwritten_fast_locals: Vec<Id>,
         scope: Id,
         code: Id,
         globals: Id,
+        builtins: Id,
         // Ordinary frames retain their caller. Generator frames resolve their live resumer.
         back: Option<Id>,
         lineno: u32,
@@ -1320,7 +1796,6 @@ pub(super) enum Value {
         table: Id,
         marker: Id,
     },
-    Yielded(Id),
     AstWalk {
         queue: std::collections::VecDeque<Id>,
         running: bool,
@@ -1352,7 +1827,6 @@ pub(super) enum Value {
     // Private to a compiled loop. Python-visible iterators keep their original identity.
     LoopIterator {
         source: Id,
-        peeked: Option<Id>,
     },
     Iterator {
         kind: &'static str,
@@ -1373,6 +1847,8 @@ pub(super) enum Value {
     HeapTypeMethod {
         owner: Id,
         name: &'static str,
+        /// Slot wrappers and native methods have different descriptor and bound-callable types.
+        slot_wrapper: bool,
     },
     IoMethod {
         owner: Id,
@@ -1382,21 +1858,23 @@ pub(super) enum Value {
     ProcessPreparation(std::rc::Rc<std::cell::RefCell<crate::objects::BoxedPreparation>>),
     ProcessHandle {
         child: Option<crate::objects::BoxedPopen>,
-        reported: bool,
     },
-    File(crate::shared::Shared<super::stdlib::BinaryFile>),
-    TextFile(BoxedTextFile),
-    GzipReader(crate::Shared<std::cell::RefCell<crate::objects::FileState>>),
+    File(BoxedFile<super::stdlib::BinaryFile>),
     GzipDecoder(crate::Shared<BoxedGzipDecoder>),
     ZlibDecompressor {
         state: crate::Shared<std::cell::RefCell<super::stdlib::zlib::Decompressor>>,
         dictionary: Option<Id>,
     },
+    ZstdCompressor(triomphe::Arc<std::sync::Mutex<crate::zstd_streams::Compressor>>),
+    ZstdDecompressor(super::stdlib::zstd::Decompressor),
+    Bz2Compressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::codec::Compressor>>),
+    Bz2Decompressor(crate::Shared<std::cell::RefCell<super::stdlib::bz2::Decompressor>>),
+    LzmaCompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Compressor>>),
+    LzmaDecompressor(crate::Shared<std::cell::RefCell<super::stdlib::lzma::Decompressor>>),
     ZlibCompressor(crate::Shared<std::cell::RefCell<super::stdlib::zlib::Compressor>>),
     RegexScanner {
         pattern: Id,
         subject: Id,
-        buffer_view: Option<Id>,
         initial_start: usize,
         start: Option<usize>,
         end: usize,
@@ -1404,13 +1882,14 @@ pub(super) enum Value {
     },
     RegexPattern(std::rc::Rc<super::stdlib::regex::Pattern>),
     BufferedRandom(
-        crate::Shared<std::cell::RefCell<crate::objects::FileState>>,
+        BoxedFile<crate::Shared<std::cell::RefCell<crate::objects::FileState>>>,
         Id,
     ),
     RegexMatch(std::rc::Rc<super::stdlib::regex::Match>),
     Context(std::rc::Rc<HashMap<Id, Id>>),
     ContextVar {
         name: Id,
+        name_hash: i64,
         default: Option<Id>,
         repr_active: std::cell::Cell<bool>,
     },
@@ -1418,7 +1897,7 @@ pub(super) enum Value {
         context: Id,
         variable: Id,
         old: Option<Id>,
-        used: bool,
+        used: Cell<bool>,
     },
     TokenMissing,
 }
@@ -1437,21 +1916,81 @@ pub(super) struct CachedCall {
     pub hash: i64,
 }
 
+impl Context {
+    pub(super) fn native_file_dictionary(&mut self, obj: Id) -> Id {
+        if let Some(dictionary) = self.heap.get(obj).native_file_dict() {
+            return dictionary;
+        }
+        let dictionary = self.dict(Vec::new());
+        match self.heap.get_mut(obj) {
+            Value::File(file) => file.dictionary = Some(dictionary),
+            Value::BufferedRandom(file, _) => file.dictionary = Some(dictionary),
+            _ => unreachable!("native file without an instance dictionary"),
+        }
+        dictionary
+    }
+}
+
 impl Value {
+    /// Use the ordinary UTF-8 layout whenever all Python code points are scalars.
+    pub(super) fn from_codepoints(points: Vec<u32>) -> Self {
+        if points.iter().any(|c| (0xd800..=0xdfff).contains(c)) {
+            Self::SurrogateStr(points)
+        } else {
+            let text: String = points
+                .into_iter()
+                .map(|c| char::from_u32(c).expect("Python code point"))
+                .collect();
+            Self::Str(text.into())
+        }
+    }
+
+    pub(super) fn socket_handle(&self) -> Option<&crate::ObjectOwner> {
+        match self {
+            Self::Socket { handle: s, .. }
+            | Self::Instance {
+                socket: Some(s), ..
+            } => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Whether releasing this native value can still flush or close a descriptor.
+    fn owns_open_descriptor(&self) -> bool {
+        match self {
+            Self::File(file) => !file.closed(),
+            #[cfg(target_os = "linux")]
+            Self::Epoll(epoll) => epoll.fd() >= 0,
+            #[cfg(target_os = "linux")]
+            Self::Mmap { region, .. } => region.is_some(),
+            Self::Socket { handle: socket, .. }
+            | Self::Instance {
+                socket: Some(socket),
+                ..
+            } => crate::objects::socket::fd(socket) >= 0,
+            _ => false,
+        }
+    }
+
+    pub(super) fn native_file_dict(&self) -> Option<Id> {
+        match self {
+            Self::File(file) => file.dictionary,
+            Self::BufferedRandom(file, _) => file.dictionary,
+            _ => None,
+        }
+    }
+
     /// Class of a native file whose Python descriptors are installed by _io.
     pub(super) fn native_io_class_name(&self) -> Option<&'static str> {
         match self {
             Self::BufferedRandom(..) => Some("_io.BufferedRandom"),
-            Self::TextFile(_) => Some("_io.TextIOWrapper"),
             Self::File(file) => Some(match file.as_ref() {
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading && fd.writing => {
                     "_io.BufferedRandom"
                 }
                 super::stdlib::BinaryFile::Descriptor(fd) if fd.reading => "_io.BufferedReader",
                 super::stdlib::BinaryFile::Descriptor(_) => "_io.BufferedWriter",
-                super::stdlib::BinaryFile::Reader { .. } => "_io.BufferedReader",
-                super::stdlib::BinaryFile::Writer { .. }
-                | super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
+                super::stdlib::BinaryFile::Standard { .. } => "_io.BufferedWriter",
             }),
             _ => None,
         }
@@ -1460,17 +1999,23 @@ impl Value {
     /// Returns the name used for both builtin class lookup and diagnostic messages.
     pub(super) fn intrinsic_type_name(&self) -> Option<&str> {
         Some(match self {
+            #[cfg(target_os = "linux")]
+            Self::Epoll(_) => "select.epoll",
+            #[cfg(target_os = "linux")]
+            Self::Mmap { .. } => "mmap.mmap",
             Self::Selector(handle) => handle.borrow().class_name(),
             #[cfg(unix)]
             Self::MemoryBio(_) => "_ssl.MemoryBIO",
             #[cfg(unix)]
-            Self::TlsContext(_) => "_imre_ssl.Context",
+            Self::TlsContext(..) => "_imre_ssl.Context",
             #[cfg(unix)]
-            Self::TlsSession(_) => "_imre_ssl.Session",
+            Self::TlsSession(..) => "_imre_ssl.Session",
             #[cfg(unix)]
-            Self::TlsListener(_) => "_imre_ssl.Listener",
+            Self::TlsTransport(endpoint) if endpoint.fully_shut() => "_imre_ssl.Shutdown",
             #[cfg(unix)]
-            Self::TlsBioSession(_) => "_imre_ssl.BioSession",
+            Self::TlsTransport(_) => "_imre_ssl.Listener",
+            #[cfg(unix)]
+            Self::TlsBioSession { .. } => "_imre_ssl.BioSession",
             Self::Context(_) => "_contextvars.Context",
             Self::ContextVar { .. } => "_contextvars.ContextVar",
             Self::ContextToken { .. } => "_contextvars.Token",
@@ -1488,8 +2033,7 @@ impl Value {
             Self::Filter { .. } => "filter",
             Self::Hash(state) => state.lock().class_name(),
             Self::HeapTypeMethod {
-                name: "__repr__" | "__str__",
-                ..
+                slot_wrapper: true, ..
             } => "wrapper_descriptor",
             Self::HeapTypeMethod { .. } => "method_descriptor",
             Self::Zip { .. } => "zip",
@@ -1501,15 +2045,22 @@ impl Value {
             Self::RawReadWindow(_) => "_imre_raw_read_window",
             Self::MemoryView { .. } => "memoryview",
             Self::ByteArray(_) => "bytearray",
-            Self::File(_) | Self::TextFile(_) => return self.native_io_class_name(),
+            Self::File(_) => return self.native_io_class_name(),
             Self::ProcessHandle { .. } => "_imre_subprocess.Handle",
             Self::ProcessPreparation(_) => "_imre_subprocess.Prepared",
             Self::BufferedRandom(..) => "_io.BufferedRandom",
             Self::GzipDecoder(_) => "object",
-            Self::GzipReader(_) => "object",
             Self::ZlibDecompressor { .. } => ZLIB_DECOMPRESS_TYPE,
+            Self::ZstdCompressor(_) => ZSTD_COMPRESS_TYPE,
+            Self::ZstdDecompressor(_) => ZSTD_DECOMPRESS_TYPE,
+            Self::Bz2Compressor(_) => BZ2_COMPRESS_TYPE,
+            Self::Bz2Decompressor(_) => BZ2_DECOMPRESS_TYPE,
+            Self::LzmaCompressor(_) => LZMA_COMPRESS_TYPE,
+            Self::LzmaDecompressor(_) => LZMA_DECOMPRESS_TYPE,
             Self::ZlibCompressor(_) => ZLIB_COMPRESS_TYPE,
             Self::GenericAliasIterator(_) => "generic_alias_iterator",
+            Self::Struct { .. } => "struct.Struct",
+            Self::StructUnpackIterator { .. } => STRUCT_UNPACK_ITERATOR,
             Self::MemoryIterator { .. } => "memory_iterator",
             Self::SequenceIterator { .. } => "iterator",
             Self::ReverseSequence { .. } => "reversed",
@@ -1533,6 +2084,7 @@ impl Value {
             Self::Enumerate { .. } => "enumerate",
             Self::Iterator { kind, .. } => kind,
             Self::DictIterator(iter) => iter.class_name(),
+            Self::SetIterator(_) => "set_iterator",
             Self::Set { frozen: true, .. } => "frozenset",
             Self::Set { frozen: false, .. } => "set",
             Self::Dict(_) => "dict",
@@ -1542,7 +2094,9 @@ impl Value {
             Self::TupleGetterDoc | Self::ReadOnlyMember(_, _) | Self::SlotMember { .. } => {
                 "member_descriptor"
             }
+            Self::AttrGetter(_) => "operator.attrgetter",
             Self::ItemGetter(_) => "operator.itemgetter",
+            Self::MethodCaller { .. } => "operator.methodcaller",
             Self::Code(_) => "code",
             Self::Cell(_) => "cell",
             Self::Generator { .. } => "generator",
@@ -1565,7 +2119,7 @@ impl Value {
             },
             Self::ClassMethod { .. } => "classmethod",
             Self::ThreadLocal(_) => super::thread_local::CLASS,
-            Self::ThreadHandle(_) => "_thread._ThreadHandle",
+            Self::ThreadHandle(_) => super::thread_handle::CLASS,
             Self::Random(_) => "Random",
             Self::HandlerLock(_) => super::thread_rlock::CLASS,
             Self::PrimitiveLock(_) => super::thread_lock::CLASS,
@@ -1608,10 +2162,16 @@ impl Value {
         }
     }
 
+    /// Exact in-memory streams free their buffer directly on ordinary deallocation.
+    pub(super) fn is_exact_memory_stream(&self) -> bool {
+        matches!(self.io_kind(), Some("BytesIO" | "StringIO"))
+    }
+
     /// Only Python instances and exception subclasses have instance finalizers.
     pub(super) fn finalizer_class(&self) -> Option<Id> {
         match self {
             Self::Instance { class, .. } => Some(*class),
+            Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
             _ => None,
         }
@@ -1619,7 +2179,9 @@ impl Value {
 
     pub(super) fn instance_class(&self) -> Option<Id> {
         match self {
-            Self::Instance { class, .. } | Self::FrameLocalsProxy { class, .. } => Some(*class),
+            Self::Instance { class, .. }
+            | Self::Socket { class, .. }
+            | Self::FrameLocalsProxy { class, .. } => Some(*class),
             Self::Class { metaclass, .. } => *metaclass,
             Self::Module { constructor, .. } => *constructor,
             Self::Raised(error) => error.class(),
@@ -1627,7 +2189,7 @@ impl Value {
         }
     }
 
-    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut MarkQueue<'_>) {
+    fn visit_bindings(bindings: &HashMap<Id, Id>, visit: &mut impl VisitReferences) {
         for (key, value) in bindings {
             visit.extend([*key, *value]);
         }
@@ -1655,11 +2217,13 @@ impl Value {
             | Self::Code(_)
             | Self::Native(_)
             | Self::Scope(_)
+            | Self::CompilationConstants { .. }
+            | Self::SyntaxMembers(_)
             | Self::LoopIterator { .. }
             | Self::PythonBufferLease { .. }
             | Self::ProcessPreparation(_)
-            | Self::ProcessHandle { .. }
-            | Self::Yielded(_) => false,
+            | Self::ProcessHandle { .. } => false,
+            Self::Weak(reference) if reference.internal => false,
             Self::Tuple(items) => !items.is_empty(),
             _ => true,
         }
@@ -1707,9 +2271,90 @@ impl Value {
         )
     }
 
-    fn children(&self, visit: &mut MarkQueue<'_>) {
+    /// Strong reference to the wrapped coroutine or to its suspended execution state.
+    fn suspended_owner(&self) -> Option<Id> {
         match self {
+            Self::CoroutineWrapper(coroutine) => Some(*coroutine),
+            Self::Coroutine { frame, .. } => Some(*frame),
+            Self::Generator { scope, .. } => Some(*scope),
+            _ => None,
+        }
+    }
+
+    /// Each stored slot keeps both the declaring member and its value alive.
+    /// Let a bounded search decline the table before constructing its iterator.
+    fn stored_member_edges(
+        &self,
+        accept: impl FnOnce(&MemberValues) -> bool,
+    ) -> impl Iterator<Item = [Id; 2]> + '_ {
+        let values = match self {
+            Self::Instance { member_values, .. } => member_values.as_deref(),
+            _ => None,
+        };
+        values
+            .filter(|values| accept(values))
+            .into_iter()
+            .flatten()
+            .map(|(&member, &value)| [member, value])
+    }
+
+    fn children(&self, visit: &mut impl VisitReferences) {
+        self.try_children(visit)
+            .expect("borrowed native state during collection");
+    }
+
+    /// Changing a traced child of these values requires a mutable borrow of the heap slot.
+    fn directly_stores_children(&self) -> bool {
+        matches!(
+            self,
+            Self::List(_)
+                | Self::Tuple(_)
+                | Self::Dict(_)
+                | Self::Set { .. }
+                | Self::Function { .. }
+                | Self::Code(_)
+                | Self::Scope(_)
+                | Self::Cell(_)
+                | Self::CompilationConstants { .. }
+                | Self::SyntaxMembers(_)
+                | Self::Class { .. }
+                | Self::Method { .. }
+                | Self::ClassMethod { .. }
+                | Self::StaticMethod { .. }
+                | Self::TupleGetter { .. }
+                | Self::IoMethod { .. }
+                | Self::LayoutDescriptor(..)
+                | Self::SlotMember { .. }
+                | Self::GetSetDescriptor { .. }
+                | Self::Instance {
+                    property: None,
+                    weak_reference: None,
+                    itertools: None,
+                    memory_stream: None,
+                    ..
+                }
+        )
+    }
+
+    /// Visiting an unrooted native object can encounter a borrow held by its caller.
+    fn try_children(
+        &self,
+        visit: &mut impl VisitReferences,
+    ) -> std::result::Result<(), std::cell::BorrowError> {
+        match self {
+            Self::CompilationConstants { slots, .. } => visit.extend(slots.values().copied()),
+            Self::SyntaxMembers(fields) => visit.extend(fields),
             Self::Deque(ring) => visit.extend(&ring.items),
+            Self::StructUnpackIterator {
+                record,
+                buffer,
+                exporter,
+                ..
+            } => {
+                visit.extend(record);
+                visit.extend(buffer);
+                visit.extend(exporter);
+            }
             Self::MemoryIterator { view: source, .. }
             | Self::SequenceIterator { source, .. }
             | Self::ReverseSequence { source, .. }
@@ -1726,12 +2371,23 @@ impl Value {
                 }
             }
             Self::DictIterator(iter) => visit.extend(iter.dict),
+            Self::SetIterator(iter) => visit.extend(iter.set),
             Self::FormatIterator { input, .. } => visit.push(*input),
             Self::ThreadLocal(local) => visit.extend(local.live()),
             Self::Count { current, step, .. } => visit.extend([*current, *step]),
             Self::Repeat(repeat) => visit.push(repeat.value),
             Self::TupleGetter { doc, .. } => visit.extend(doc),
+            Self::AttrGetter(paths) => {
+                for path in paths.iter() {
+                    visit.extend(path);
+                }
+            }
             Self::ItemGetter(keys) => visit.push(*keys),
+            Self::MethodCaller {
+                name,
+                args,
+                keywords,
+            } => visit.extend([*name, *args, *keywords]),
             Self::KeyWrapper { comparator, object } => {
                 visit.push(*comparator);
                 visit.extend(object);
@@ -1745,10 +2401,7 @@ impl Value {
             Self::Zip { inputs, .. } => visit.extend(inputs.iter()),
             Self::Filter { predicate, input } => visit.extend([*predicate, *input]),
             Self::CallableIterator(state) => visit.extend(state.iter().flatten()),
-            Self::LoopIterator { source, peeked } => {
-                visit.push(*source);
-                visit.extend(peeked);
-            }
+            Self::LoopIterator { source } => visit.push(*source),
             Self::NamedTuple { values, extras, .. } => {
                 visit.extend(values);
                 visit.extend(extras.iter().map(|&(_, id)| id));
@@ -1778,9 +2431,9 @@ impl Value {
                 visit.extend([*context, *variable]);
                 visit.extend(old);
             }
-            Self::Yielded(item) => visit.push(*item),
             Self::Slice(parts) => visit.extend(parts),
-            Self::BytesIoStorage(_) | Self::BufferWrapper => {}
+            Self::BytesIoStorage(state) => visit.extend(state.snapshot.get()),
+            Self::BufferWrapper => {}
             Self::BytesIoBuffer { stream, storage } => visit.extend([*stream, *storage]),
             Self::RawReadWindow(window) => visit.push(window.backing),
             Self::PythonBufferLease {
@@ -1827,7 +2480,7 @@ impl Value {
                 visit.extend([entry.name, entry.path]);
                 visit.extend(entry.cached_objects());
             }
-            Self::Selector(selector) => selector.borrow().trace(visit),
+            Self::Selector(selector) => selector.try_borrow()?.trace(visit),
             Self::FrameLocalsProxy { class, frame } => visit.extend([*class, *frame]),
             Self::Scope(scope) => {
                 visit.extend(scope.closure.extra_locals);
@@ -1841,9 +2494,11 @@ impl Value {
                     visit.extend([class.bases, class.mro]);
                     visit.extend(class.supplied_bases);
                     visit.extend(class.name_override);
+                    visit.extend(class.original_doc);
                     visit.extend(class.annotation_dict_cell);
-                    if let Some((fields, _)) = &class.annotation_scratch {
-                        visit.push(*fields);
+                    if let Some((fields, active)) = class.annotation_scratch {
+                        visit.push(fields);
+                        visit.extend(active);
                     }
                     visit.extend(class.dictionary);
                     visit.extend(class.defining_module);
@@ -1866,9 +2521,13 @@ impl Value {
                 origin,
                 constructor,
                 module_state,
+                module_slots,
                 ..
             } => {
                 visit.push(*scope);
+                if let Some(slots) = module_slots {
+                    visit.extend(slots.values());
+                }
                 if let Some(state) = module_state {
                     state.references(visit);
                 }
@@ -1876,8 +2535,11 @@ impl Value {
                 visit.extend(constructor);
             }
             Self::Cell(value) => visit.extend(value),
-            Self::Coroutine { frame, origin } => visit.extend([*frame, *origin]),
-            Self::CoroutineWrapper(coroutine) => visit.push(*coroutine),
+            Self::Coroutine { origin, .. } => {
+                visit.extend(self.suspended_owner());
+                visit.push(*origin);
+            }
+            Self::CoroutineWrapper(_) => visit.extend(self.suspended_owner()),
             Self::AsyncGenerator {
                 frame, finalizer, ..
             } => {
@@ -1913,14 +2575,21 @@ impl Value {
                 fields.children(visit);
             }
             Self::Code(code) => {
+                visit.push(code.compilation_constants);
+
                 visit.push(code.name);
                 visit.push(code.qualname);
                 visit.push(code.doc);
                 visit.push(code.filename);
                 visit.push(code.parameters);
+                visit.push(code.varnames);
+                visit.push(code.cellvars);
+                visit.push(code.freevar_names);
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
-                if let Body::Source(program) = &code.body {
-                    visit.push(program.string_roots);
+                match code.body {
+                    Body::Native(_, operands) if operands != NONE => visit.push(operands),
+                    Body::Parsed { constants } => visit.push(constants),
+                    _ => {}
                 }
             }
             Self::Generator {
@@ -1929,19 +2598,17 @@ impl Value {
                 name,
                 qualname,
                 code,
-                scope,
-                iterators,
-                protected,
+
+                native,
                 ..
             } => {
-                visit.extend([*code, *scope, *name, *qualname, owner.root()]);
+                if let Some(saved) = native {
+                    saved.visit(visit);
+                }
+                visit.push(*code);
+                visit.extend(self.suspended_owner());
+                visit.extend([*name, *qualname, owner.root()]);
                 visit.extend(*frame);
-                visit.extend(iterators);
-                visit.extend(
-                    protected
-                        .iter()
-                        .flat_map(super::source_code::FinallyBlock::roots),
-                );
             }
             Self::Class {
                 scope,
@@ -1962,9 +2629,18 @@ impl Value {
                 module,
                 default,
                 ..
-            } => visit.extend([*name, *module, *default]),
-            Self::ParamSpec(p) => visit.extend([p.name, p.bound, p.default, p.namespace]),
-            Self::ParamSpecMarker(_, origin) | Self::ConstEvaluator(origin) => visit.push(*origin),
+            } => {
+                visit.extend([*name, *module]);
+                default.visit(visit);
+            }
+            Self::ParamSpec(p) => {
+                visit.extend([p.name, p.bound]);
+                p.default.visit(visit);
+                visit.push(p.namespace);
+            }
+            Self::ParamSpecMarker(_, origin)
+            | Self::ConstEvaluator(origin)
+            | Self::FractionHash(origin) => visit.push(*origin),
             Self::TypeAlias {
                 name,
                 parameters,
@@ -1972,22 +2648,18 @@ impl Value {
             } => {
                 visit.extend([*name, *parameters]);
                 match *definition {
-                    super::typing::AliasDefinition::Lazy { evaluator, cached } => {
-                        visit.push(evaluator);
-                        visit.extend(cached);
-                    }
+                    super::typing::AliasDefinition::Lazy(lazy) => lazy.visit(visit),
                     super::typing::AliasDefinition::Eager { value, module } => {
                         visit.extend([value, module]);
                     }
                 }
             }
-            Self::TypeVar(var) => visit.extend([
-                var.name,
-                var.module,
-                var.bound,
-                var.constraints,
-                var.default,
-            ]),
+            Self::TypeVar(var) => {
+                visit.extend([var.name, var.module]);
+                var.bound.visit(visit);
+                var.constraints.visit(visit);
+                var.default.visit(visit);
+            }
             Self::GenericAlias(alias) => {
                 visit.extend([alias.origin, alias.args, alias.parameters]);
                 visit.extend(alias.name);
@@ -2000,16 +2672,26 @@ impl Value {
                 visit.extend([union.args, union.members, union.parameters]);
                 visit.extend(union.unhashable);
             }
-            Self::SlotMember { owner, name } => visit.extend([*owner, *name]),
+            Self::SlotMember {
+                owner,
+                name,
+                storage,
+            } => {
+                visit.extend([*owner, *name]);
+                if let SlotStorage::ReadOnlyText(text) = storage {
+                    visit.push(*text);
+                }
+            }
             Self::Instance {
                 class,
                 fields,
-                member_values,
+                member_values: _,
                 namespace,
                 dictionary,
                 scalar,
                 weak_reference,
-                cycle,
+                itertools,
+                socket: _,
                 memory_stream,
                 property,
             } => {
@@ -2019,8 +2701,8 @@ impl Value {
                 if let Some(reference) = weak_reference {
                     visit.push(reference.callback);
                 }
-                if let Some(cycle) = cycle {
-                    cycle.children(visit);
+                if let Some(cursor) = itertools {
+                    cursor.children(visit);
                 }
                 match memory_stream {
                     Some(super::stdlib::io::MemoryStream::BufferedFile(file)) => visit.push(*file),
@@ -2040,8 +2722,7 @@ impl Value {
                         visit.extend(pair.writer);
                     }
                     Some(super::stdlib::io::MemoryStream::Bytes(stream)) => {
-                        visit.push(stream.storage);
-                        visit.extend(stream.snapshot.get())
+                        visit.push(stream.storage)
                     }
                     Some(super::stdlib::io::MemoryStream::Wrapper(stream)) => {
                         stream.children(visit)
@@ -2053,10 +2734,8 @@ impl Value {
                 }
                 visit.push(*class);
                 visit.extend(dictionary);
-                if let Some(values) = member_values {
-                    for (&member, &value) in values.iter() {
-                        visit.extend([member, value]);
-                    }
+                for edges in self.stored_member_edges(|_| true) {
+                    visit.extend(edges);
                 }
                 visit.extend(fields.values());
                 visit.extend(namespace);
@@ -2100,20 +2779,23 @@ impl Value {
                 visit.extend([*function, *dictionary, *table, *marker]);
                 visit.extend(entries.iter().map(|call| call.key));
             }
-            Self::Raised(error) => visit.extend(error.roots()),
+            Self::Raised(error) => error.roots().for_each(visit.visitor()),
             Self::Traceback { frame, next, .. } => visit.extend([*frame, *next]),
             Self::PythonFrame {
                 unoptimized_locals,
                 class_proxy_scope,
+                overwritten_fast_locals,
                 scope,
                 code,
                 globals,
+                builtins,
                 back,
                 ..
             } => {
                 visit.extend(*unoptimized_locals);
                 visit.extend(*class_proxy_scope);
-                visit.extend([*scope, *code, *globals]);
+                visit.extend(overwritten_fast_locals.iter().rev());
+                visit.extend([*scope, *code, *globals, *builtins]);
                 visit.extend(*back);
             }
             Self::IoOpen { types, unsupported } => visit.extend([
@@ -2128,27 +2810,27 @@ impl Value {
                 owner, unsupported, ..
             } => visit.extend([*owner, *unsupported]),
             Self::HeapTypeMethod { owner, .. } => visit.push(*owner),
+            Self::Socket { class, .. } => visit.push(*class),
             Self::RegexScanner {
-                pattern,
-                subject,
-                buffer_view,
-                ..
-            } => {
-                visit.extend([*pattern, *subject]);
-                visit.extend(*buffer_view);
-            }
+                pattern, subject, ..
+            } => visit.extend([*pattern, *subject]),
             Self::RegexPattern(pattern) => visit.push(pattern.source),
             Self::RegexMatch(m) => {
                 visit.extend([m.pattern, m.subject]);
                 visit.extend(m.cached_regs.get().copied());
             }
             Self::File(file) => {
+                visit.extend(file.dictionary);
                 if let super::stdlib::BinaryFile::Descriptor(fd) = file.as_ref() {
                     visit.push(fd.raw);
                 } else if let Some((path, _)) = file.path_metadata() {
                     visit.push(path);
                 }
             }
+            #[cfg(target_os = "linux")]
+            Self::Epoll(_) => {}
+            #[cfg(target_os = "linux")]
+            Self::Mmap { .. } => {}
             Self::None
             | Self::Ellipsis
             | Self::NotImplemented
@@ -2172,32 +2854,47 @@ impl Value {
             | Self::ThreadHandle(_)
             | Self::PrimitiveLock(_)
             | Self::Poll(_)
-            | Self::Socket(_)
             | Self::Native(_)
-            | Self::AttrGetter(_)
             | Self::TupleGetterDoc
             | Self::ReadOnlyMember(_, _)
             | Self::NoDefault
             | Self::PartialPlaceholder
             | Self::TokenMissing
             | Self::ProcessPreparation(_)
-            | Self::GzipReader(_)
             | Self::GzipDecoder(_)
+            | Self::ZstdCompressor(_)
+            | Self::Bz2Compressor(_)
+            | Self::LzmaCompressor(_)
             | Self::ZlibCompressor(_)
             | Self::ProcessHandle { .. } => {}
             #[cfg(unix)]
-            Self::MemoryBio(_)
-            | Self::TlsContext(_)
-            | Self::TlsSession(_)
-            | Self::TlsListener(_)
-            | Self::TlsBioSession(_) => {}
+            Self::MemoryBio(_) | Self::TlsTransport(_) => {}
+            #[cfg(unix)]
+            Self::TlsContext(_, sni) => visit.push(sni.callback),
+            #[cfg(unix)]
+            Self::TlsSession(_, owner) => visit.extend(owner.references()),
+            #[cfg(unix)]
+            Self::TlsBioSession {
+                server_hostname,
+                owner,
+                ..
+            } => {
+                visit.push(*server_hostname);
+                visit.extend(owner.references());
+            }
+            Self::ZstdDecompressor(state) => visit.push(state.unused_data),
+            Self::Bz2Decompressor(state) => visit.push(state.try_borrow()?.unused_data),
+            Self::LzmaDecompressor(state) => visit.push(state.try_borrow()?.unused_data),
             Self::ZlibDecompressor { state, dictionary } => {
                 visit.extend(*dictionary);
-                state.borrow().children(visit);
+                state.try_borrow()?.children(visit);
             }
-            Self::TextFile(file) => visit.extend(file.buffer),
-            Self::BufferedRandom(_, name) => visit.push(*name),
+            Self::BufferedRandom(file, name) => {
+                visit.extend(file.dictionary);
+                visit.push(*name);
+            }
         }
+        Ok(())
     }
 }
 
@@ -2206,6 +2903,59 @@ pub(super) enum DictViewKind {
     Keys,
     Values,
     Items,
+}
+
+/// Set iteration checks size at each pull, even after yielding the last item.
+/// Detach the owner on observed exhaustion and latch an observed size mismatch.
+#[derive(Clone, Copy)]
+pub(super) struct SetIterator {
+    set: Option<Id>,
+    expected_len: Option<usize>,
+    position: usize,
+    remaining: i64,
+}
+
+impl SetIterator {
+    pub(super) fn new(set: Id, len: usize) -> Self {
+        Self {
+            set: Some(set),
+            expected_len: Some(len),
+            position: 0,
+            remaining: len as i64,
+        }
+    }
+
+    pub(super) fn length_hint(&self, ctx: &Context) -> i64 {
+        match self.set {
+            Some(set)
+                if self.expected_len == Some(ctx.stored_entries(ctx.scalar_value(set)).len()) =>
+            {
+                self.remaining
+            }
+            _ => 0,
+        }
+    }
+
+    pub(super) fn next(&mut self, ctx: &Context) -> Result<Option<Id>> {
+        let Some(set) = self.set else {
+            return Ok(None);
+        };
+        let entries = ctx.stored_entries(ctx.scalar_value(set));
+        if self.expected_len != Some(entries.len()) {
+            self.expected_len = None;
+            return Err(Error::new(
+                "RuntimeError",
+                "Set changed size during iteration",
+            ));
+        }
+        let Some((position, key, _)) = entries.at(self.position) else {
+            self.set = None;
+            return Ok(None);
+        };
+        self.position = position + 1;
+        self.remaining -= 1;
+        Ok(Some(key))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -2229,7 +2979,7 @@ impl DictIterator {
         if class == Self::ORDERED {
             &["__iter__", "__next__", "__reduce__"]
         } else {
-            &["__iter__", "__next__"]
+            &["__iter__", "__next__", "__length_hint__"]
         }
     }
 
@@ -2245,11 +2995,15 @@ impl DictIterator {
         classes[usize::from(self.reverse)]
     }
 
-    pub(super) fn class(name: &str) -> Option<&'static str> {
+    pub(super) fn builtin_classes() -> impl Iterator<Item = &'static str> {
         Self::KEYS
             .into_iter()
             .chain(Self::VALUES)
             .chain(Self::ITEMS)
+    }
+
+    pub(super) fn class(name: &str) -> Option<&'static str> {
+        Self::builtin_classes()
             .chain([Self::ORDERED])
             .find(|&class| class == name)
     }
@@ -2285,7 +3039,11 @@ impl DictIterator {
     }
 
     /// Advance the cursor before a value lookup can call back into the iterator.
-    pub(super) fn next(mut self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+    pub(super) fn next_entry_pair(
+        mut self,
+        ctx: &mut Context,
+        owner: Id,
+    ) -> Result<Option<[Id; 2]>> {
         let entry = self.next_entry(ctx, owner);
         *ctx.heap.get_mut(owner) = Value::DictIterator(self);
         let Some((storage, key, mut value)) = entry? else {
@@ -2302,6 +3060,18 @@ impl DictIterator {
             };
             value = ctx.stored_entries(storage)[index].1;
         }
+        Ok(Some([key, value]))
+    }
+
+    /// Plain item cursors read both handles without invoking a Python key lookup.
+    pub(super) fn is_plain_items(self) -> bool {
+        self.order_state.is_none() && matches!(self.kind, DictViewKind::Items)
+    }
+
+    pub(super) fn next(self, ctx: &mut Context, owner: Id) -> Result<Option<Id>> {
+        let Some([key, value]) = self.next_entry_pair(ctx, owner)? else {
+            return Ok(None);
+        };
         Ok(Some(match self.kind {
             DictViewKind::Keys => key,
             DictViewKind::Values => value,
@@ -2416,12 +3186,53 @@ impl DictIterator {
 // visited slot. Both sentinels exceed the largest possible Vec index.
 const UNMARKED: usize = usize::MAX;
 const END: usize = usize::MAX - 1;
+// A read-only clear probe restores this mark before collection or Python code can run.
+const CHECKED_RELEASE: usize = usize::MAX - 2;
+
+/// Minimum allocation allowance for separately owned Python bytes buffers.
+const BYTE_BUFFER_FLOOR: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Finalization {
     None,
     Pending,
-    Done,
+    Dispatched,
+    Finalized,
+}
+
+/// Compact slot state used by marking and sweeping. Mutable borrows invalidate scalar leaves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SlotShape {
+    Vacant,
+    Other,
+    ScalarLeaf,
+    AsciiStr,
+}
+
+impl SlotShape {
+    /// Both scalar shapes can be marked without visiting children.
+    fn is_scalar_leaf(self) -> bool {
+        matches!(self, Self::ScalarLeaf | Self::AsciiStr)
+    }
+
+    fn text(value: &str) -> Self {
+        if value.is_ascii() {
+            Self::AsciiStr
+        } else {
+            Self::ScalarLeaf
+        }
+    }
+
+    /// Record whether a newly occupied slot holds an exact scalar without strong children.
+    fn occupied(value: &Value) -> Self {
+        if let Value::Str(text) = value {
+            Self::text(text)
+        } else if value.scalar_leaf() {
+            Self::ScalarLeaf
+        } else {
+            Self::Other
+        }
+    }
 }
 
 struct Slot {
@@ -2517,7 +3328,7 @@ impl GcOrder {
 pub(super) struct MarkQueue<'a> {
     slots: &'a [Slot],
     traces: &'a [Cell<usize>],
-    scalar_leaves: &'a [bool],
+    slot_shapes: &'a [SlotShape],
     next: usize,
     mode: MarkMode<'a>,
 }
@@ -2525,24 +3336,390 @@ pub(super) struct MarkQueue<'a> {
 enum MarkMode<'a> {
     All,
     SkipScalarLeaves,
+    CycleEdges,
     Ordered(&'a mut GcOrder),
 }
 
-impl MarkQueue<'_> {
-    pub(super) fn push(&mut self, id: Id) {
+/// Receives the strong references retained by a heap value or a root.
+pub(super) trait VisitReferences {
+    fn push(&mut self, id: Id);
+
+    /// Keep the callback type independent of the iterator supplying the roots.
+    fn visitor(&mut self) -> impl FnMut(Id) {
+        |id| self.push(id)
+    }
+
+    fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
+        for id in ids {
+            self.push(*id.borrow());
+        }
+    }
+}
+
+impl<F: FnMut(Id)> VisitReferences for F {
+    fn push(&mut self, id: Id) {
+        self(id);
+    }
+}
+
+/// Reusable edges from the context roots supplied to a full collection.
+#[derive(Default)]
+struct RootTrace {
+    reuse_caller_scopes: bool,
+    roots: Vec<Id>,
+    next_roots: Vec<Id>,
+    watched_containers: Vec<Id>,
+    flags: Vec<u8>,
+    covered: Vec<Id>,
+    covered_runs: Vec<Range<usize>>,
+    checked_runs: bool,
+    frontier: Vec<Id>,
+    valid: bool,
+}
+
+impl RootTrace {
+    const COVERED: u8 = 1;
+    const FRONTIER: u8 = 2;
+    const VOLATILE: u8 = 4;
+    const WATCHED: u8 = 8;
+    // Two bits count completed collection intervals without a write.
+    const QUIET_INTERVAL: u8 = 16;
+    const QUIET_MASK: u8 = 3 * Self::QUIET_INTERVAL;
+    const MIN_CONTAINER: usize = 256;
+    const MIN_RUN_MARKS: usize = 64 * 1024;
+
+    /// Revisit a mutated value through the ordinary marker on later collections.
+    fn changed(&mut self, index: usize) {
+        if let Some(flags) = self.flags.get_mut(index) {
+            if *flags & Self::COVERED != 0 {
+                self.valid = false;
+                *flags |= Self::VOLATILE;
+            }
+            if *flags & (Self::WATCHED | Self::QUIET_MASK) != 0 {
+                *flags &= !(Self::WATCHED | Self::QUIET_MASK);
+            }
+        }
+    }
+
+    /// Discard the previous occupant's membership before a slot can be reused.
+    fn recycled(&mut self, index: usize) {
+        if let Some(flags) = self.flags.get_mut(index) {
+            if *flags & (Self::COVERED | Self::FRONTIER) != 0 {
+                self.valid = false;
+            }
+            *flags = 0;
+        }
+    }
+
+    /// Mark cached values directly and trace the remaining roots normally.
+    fn mark(&mut self, heap: &Heap, roots: impl Iterator<Item = Id>) {
+        // Clearing a frame drops its scope while enclosing calls can retain a large,
+        // unchanged object graph. Revalidate those live roots at the actual sweep.
+        let callers = if std::mem::take(&mut self.reuse_caller_scopes) {
+            heap.execution
+                .frames
+                .split_last()
+                .map_or(&[][..], |(_, callers)| callers)
+        } else {
+            &[]
+        };
+        let mut roots = roots.chain(callers.iter().map(|frame| frame.scope));
+        self.next_roots.clear();
+        while let Some(id) = roots.next() {
+            if self.next_roots.try_reserve(1).is_err() {
+                // This pass traces a different root set. Ignore its previous runs until rebuilt.
+                self.covered_runs.clear();
+                self.checked_runs = false;
+                heap.mark_reference_roots(
+                    self.next_roots.iter().copied().chain([id]).chain(roots),
+                    None,
+                );
+                return;
+            }
+            self.next_roots.push(id);
+        }
+        let prefix = self.add_frame_containers(heap);
+        if self.roots.strip_prefix(self.next_roots.as_slice()) != Some(prefix) {
+            if self.next_roots.try_reserve(prefix.len()).is_ok() {
+                self.next_roots.extend_from_slice(prefix);
+            }
+            std::mem::swap(&mut self.roots, &mut self.next_roots);
+            self.valid = false;
+        }
+        if !self.valid {
+            self.covered_runs.clear();
+            self.checked_runs = false;
+            self.valid = self.rebuild(heap);
+        } else if !self.checked_runs {
+            self.checked_runs = true;
+            // Build the index only when a large trace can amortize the scan.
+            if self.covered.len() >= Self::MIN_RUN_MARKS {
+                self.cache_covered_runs();
+            }
+        }
+        if self.valid {
+            if self.covered_runs.is_empty() {
+                for &id in &self.covered {
+                    heap.traces[id as usize].set(END);
+                }
+            } else {
+                for run in &self.covered_runs {
+                    for trace in &heap.traces[run.clone()] {
+                        trace.set(END);
+                    }
+                }
+            }
+            heap.mark_reference_roots(self.frontier.iter().copied(), None);
+        } else {
+            heap.mark_reference_roots(self.roots.iter().copied(), None);
+        }
+    }
+
+    /// Include rooted containers and borrow the list prefix for comparison with the saved roots.
+    fn add_frame_containers<'h>(&mut self, heap: &'h Heap) -> &'h [Id] {
+        for id in self.watched_containers.drain(..) {
+            let flags = &mut self.flags[id as usize];
+            if *flags & Self::WATCHED != 0 {
+                *flags &= !Self::WATCHED;
+                if *flags & Self::QUIET_MASK == Self::QUIET_MASK {
+                    *flags &= !(Self::VOLATILE | Self::QUIET_MASK);
+                } else {
+                    *flags += Self::QUIET_INTERVAL;
+                }
+            }
+        }
+        let mut largest = (NONE, &[][..]);
+        let mut consider = |id| {
+            if let Value::List(items) = heap.get(id)
+                && items.len() > largest.1.len()
+            {
+                largest = (id, items.as_slice());
+            }
+        };
+        for frame in &heap.execution.frames {
+            let Value::Scope(scope) = heap.get(frame.scope) else {
+                continue;
+            };
+            for &id in scope.names.values() {
+                let value = heap.get(id);
+                let len = match value {
+                    Value::List(items) => {
+                        consider(id);
+                        items.len()
+                    }
+                    Value::Tuple(items) => items.len(),
+                    Value::Dict(entries) => entries.len(),
+                    _ => {
+                        weak_roots::indexed_children(value).for_each(&mut consider);
+                        continue;
+                    }
+                };
+                // Small containers are cheaper to walk as ordinary frame roots.
+                if len >= Self::MIN_CONTAINER {
+                    if let Some(flags) = self.flags.get_mut(id as usize)
+                        && *flags & Self::VOLATILE != 0
+                    {
+                        // A later write cancels this interval. Readmit the container
+                        // only after four quiet intervals to avoid rebuilding on brief pauses.
+                        if *flags & Self::WATCHED == 0
+                            && self.watched_containers.try_reserve(1).is_ok()
+                        {
+                            *flags |= Self::WATCHED;
+                            self.watched_containers.push(id);
+                        }
+                        continue;
+                    }
+                    if self.next_roots.try_reserve(1).is_err() {
+                        return &[];
+                    }
+                    self.next_roots.push(id);
+                }
+            }
+        }
+        // A growing list changes on every append, but its earlier items can still
+        // own the same graph. Root comparison checks the actual handles on every
+        // sweep, including after replacement, deletion or reordering. Leave the
+        // incomplete block to the ordinary marker so appends can reuse the trace.
+        let (owner, items) = largest;
+        let len = items.len() / Self::MIN_CONTAINER * Self::MIN_CONTAINER;
+        if len != 0 && !self.next_roots.contains(&owner) {
+            &items[..len]
+        } else {
+            &[]
+        }
+    }
+
+    /// Record contiguous marks when the same proven roots survive another collection.
+    fn cache_covered_runs(&mut self) {
+        // Bound the scan by the size of the ID list it replaces, and keep a range
+        // only when it represents at least eight marks on average.
+        let max_runs = self.covered.len() / 8;
+        if max_runs == 0 || self.flags.len() > std::mem::size_of_val(self.covered.as_slice()) {
+            return;
+        }
+        let mut start = 0;
+        for group in self.flags.chunk_by(|a, b| (a ^ b) & Self::COVERED == 0) {
+            let end = start + group.len();
+            if group[0] & Self::COVERED != 0 {
+                if self.covered_runs.len() == max_runs || self.covered_runs.try_reserve(1).is_err()
+                {
+                    self.covered_runs.clear();
+                    return;
+                }
+                self.covered_runs.push(start..end);
+            }
+            start = end;
+        }
+    }
+
+    /// Yield the dynamic slots between sorted runs already marked by this collection.
+    fn gaps(runs: &[Range<usize>], slots: usize) -> impl Iterator<Item = Range<usize>> {
+        let mut next = FIRST_DYNAMIC_SLOT;
+        runs.iter()
+            .cloned()
+            .chain(std::iter::once(slots..slots))
+            .map(move |run| {
+                let gap = next..next.max(run.start);
+                next = next.max(run.end);
+                gap
+            })
+    }
+
+    /// Record the reachable values whose outgoing edges change only through the heap.
+    fn rebuild(&mut self, heap: &Heap) -> bool {
+        for id in self.covered.drain(..).chain(self.frontier.drain(..)) {
+            self.flags[id as usize] &= !(Self::COVERED | Self::FRONTIER);
+        }
+        let slots = heap.slots.len();
+        if self
+            .flags
+            .try_reserve(slots.saturating_sub(self.flags.len()))
+            .is_err()
+        {
+            return false;
+        }
+        self.flags.resize(slots, 0);
+        for &root in &self.roots {
+            self.flags[root as usize] &= !Self::VOLATILE;
+        }
+        let mut builder = RootTraceBuilder {
+            heap,
+            flags: &mut self.flags,
+            covered: &mut self.covered,
+            frontier: &mut self.frontier,
+            failed: false,
+        };
+        builder.extend(&self.roots);
+        let mut next = 0;
+        while let Some(&id) = builder.covered.get(next) {
+            if builder.failed || heap.get(id).try_children(&mut builder).is_err() {
+                return false;
+            }
+            next += 1;
+        }
+        !builder.failed
+    }
+}
+
+/// Classify each child once, including when a container holds many identical handles.
+struct RootTraceBuilder<'a> {
+    heap: &'a Heap,
+    flags: &'a mut [u8],
+    covered: &'a mut Vec<Id>,
+    frontier: &'a mut Vec<Id>,
+    failed: bool,
+}
+
+impl VisitReferences for RootTraceBuilder<'_> {
+    fn push(&mut self, id: Id) {
+        let index = id as usize;
+        let flags = &mut self.flags[index];
+        if *flags & (RootTrace::COVERED | RootTrace::FRONTIER) != 0 || self.failed {
+            return;
+        }
+        let value = self.heap.get(id);
+        let direct = self.heap.slot_shapes[index].is_scalar_leaf()
+            || value.directly_stores_children()
+            // Lazy OSError fields can change through another handle.
+            || matches!(value, Value::Raised(error) if error.os_args.is_none())
+            || matches!(
+                value,
+                Value::Module {
+                    module_state: None,
+                    ..
+                }
+            );
+        let (ids, membership) = if direct && *flags & RootTrace::VOLATILE == 0 {
+            (&mut self.covered, RootTrace::COVERED)
+        } else {
+            (&mut self.frontier, RootTrace::FRONTIER)
+        };
+        if ids.try_reserve(1).is_err() {
+            self.failed = true;
+            return;
+        }
+        ids.push(id);
+        *flags |= membership;
+    }
+}
+
+struct FindReferences {
+    targets: [Id; 2],
+    found: bool,
+}
+
+/// Slots whose children may still refer to the newest generator or its newest loop iterator.
+#[derive(Default)]
+struct GeneratorOwners {
+    words: Vec<u64>,
+}
+
+impl GeneratorOwners {
+    /// A new value or mutable borrow can install an edge in a previously checked slot.
+    fn reconsider(&mut self, index: usize) {
+        if let Some(word) = self.words.get_mut(index / 64) {
+            *word |= 1 << (index % 64);
+        }
+    }
+}
+
+impl VisitReferences for FindReferences {
+    fn push(&mut self, id: Id) {
+        self.found |= self.targets.contains(&id);
+    }
+}
+
+/// Mark direct children of surviving cycles without scheduling another trace.
+struct MarkCycleChildren<'a> {
+    traces: &'a [Cell<usize>],
+}
+
+impl VisitReferences for MarkCycleChildren<'_> {
+    fn push(&mut self, id: Id) {
+        self.traces[id as usize].set(END);
+    }
+}
+
+impl VisitReferences for MarkQueue<'_> {
+    // An already-marked edge needs only the caller-side trace check.
+    #[inline(always)]
+    fn push(&mut self, id: Id) {
         let trace = &self.traces[id as usize];
         if trace.get() == UNMARKED {
             match &mut self.mode {
+                MarkMode::CycleEdges if self.slot_shapes[id as usize].is_scalar_leaf() => {}
                 MarkMode::Ordered(order) => {
                     trace.set(END);
-                    if self.slots[id as usize].gc_next.get() == UNMARKED {
-                        order.push(id as usize, self.slots);
+                    let index = id as usize;
+                    let slot = &self.slots[index];
+                    let shape = self.slot_shapes[index];
+                    if slot.gc_next.get() == UNMARKED
+                        && (!shape.is_scalar_leaf() || slot.has_gc_header)
+                    {
+                        order.push(index, self.slots);
                     }
                 }
-                // A complete reachability trace needs no pending visit for an exact scalar.
-                MarkMode::SkipScalarLeaves if self.scalar_leaves[id as usize] => {
-                    trace.set(END);
-                }
+                MarkMode::SkipScalarLeaves => self.mark_unmarked_strong(id as usize),
                 _ => {
                     trace.set(self.next);
                     self.next = id as usize;
@@ -2550,11 +3727,28 @@ impl MarkQueue<'_> {
             }
         }
     }
+}
 
-    pub(super) fn extend<T: std::borrow::Borrow<Id>>(&mut self, ids: impl IntoIterator<Item = T>) {
-        for id in ids {
-            self.push(*id.borrow());
+impl MarkQueue<'_> {
+    /// Record an exact scalar immediately or enqueue a container for a strong trace.
+    fn mark_unmarked_strong(&mut self, index: usize) {
+        let trace = &self.traces[index];
+        if self.slot_shapes[index].is_scalar_leaf() {
+            trace.set(END);
+        } else {
+            trace.set(self.next);
+            self.next = index;
         }
+    }
+
+    /// The strong marker needs only to mark a leaf or enqueue a container.
+    fn visit_strong_children(&mut self, value: &Value) {
+        value.children(&mut |child: Id| {
+            let index = child as usize;
+            if self.traces[index].get() == UNMARKED {
+                self.mark_unmarked_strong(index);
+            }
+        });
     }
 
     fn pop(&mut self) -> Option<Id> {
@@ -2572,27 +3766,33 @@ pub(super) type WeakCallbacks = Vec<(Id, Id)>;
 
 /// Nonzero incoming edges identify unreachable cycles and their descendants.
 /// The workspace is reserved before marking, then reused after callbacks.
+#[derive(Default)]
 struct CycleSet {
     incoming: Vec<usize>,
     work: Vec<usize>,
     cyclic_callbacks: usize,
+    // Existing weakrefs were cleared before this isolate's finalizers ran.
+    new_weakref_to_member: bool,
 }
 
 impl CycleSet {
     fn new(len: usize) -> Result<Self> {
-        let mut incoming = Vec::new();
-        let mut work = Vec::new();
-        incoming
+        let mut cycles = Self::default();
+        cycles.prepare(len)?;
+        Ok(cycles)
+    }
+
+    /// Reserve a cycle graph whose incoming counts have already returned to zero.
+    fn prepare(&mut self, len: usize) -> Result<()> {
+        self.incoming
+            .try_reserve_exact(len.saturating_sub(self.incoming.len()))
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.work.clear();
+        self.work
             .try_reserve_exact(len)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        work.try_reserve_exact(len)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        incoming.resize(len, 0);
-        Ok(Self {
-            incoming,
-            work,
-            cyclic_callbacks: 0,
-        })
+        self.incoming.resize(len, 0);
+        Ok(())
     }
 
     fn members(&self) -> impl Iterator<Item = Id> + '_ {
@@ -2603,21 +3803,34 @@ impl CycleSet {
     }
 }
 
+/// A position in the local names or namespace dictionary of a frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FinalizerBindingSlot {
+    Local(usize),
+    Namespace(usize),
+}
+
 /// Native frames hold temporaries until the next Python statement. A caller's
 /// partial expression remains rooted while evaluating a nested native function.
 pub(super) struct Heap {
+    // Join non-daemon workers before dropping the slots that own their operands.
+    pub(super) workers: super::thread_worker::Registry,
+    root_trace: RootTrace,
     slots: Vec<Slot>,
-    pub(super) allocation_traces: super::allocation_traces::AllocationTraces,
+    pub(super) allocation_traces: AllocationTraces,
     pub(super) loading_linked_constant: bool,
     // Keep the collector's links contiguous so it can scan marks without loading every Value.
     traces: Vec<Cell<usize>>,
-    // Marking reads this compact table before touching the much larger value slots.
-    scalar_leaves: Vec<bool>,
+    // Marking and sweeping consult this compact table before reading the much larger slots.
+    slot_shapes: Vec<SlotShape>,
+    generator_owners: GeneratorOwners,
     gc_order: GcOrder,
-    linked_string_constants: HashMap<i64, Id>,
-    small_ints: HashMap<i64, Id>,
+    linked_constants: HashMap<ConstantSlot, Id>,
     short_bytes: HashMap<Option<u8>, Id>,
+    // Boxed empty and Latin-1 strings are identified by their character index in this heap.
+    short_strings: HashMap<usize, InternedString>,
     full_collection: Option<CycleSet>,
+    prompt_cycles: CycleSet,
     // Native owners identify spellings. Runtime-created strings keep only a weak boxed handle.
     interned: HashMap<crate::StrOwner, InternedString>,
     // ABC registrations are weak edges. Sweep them before recycling a dead class's slot.
@@ -2629,27 +3842,53 @@ pub(super) struct Heap {
     free_head: usize,
     free_count: usize,
     pub(super) immutable_hashes: HashMap<Id, i64>,
-    frames: Vec<Frame>,
+    text_position: Cell<TextPosition>,
+    // Weak loader identities. The executable owns the initializer and any embedded bytes.
+    pub(super) linked_sources: HashMap<Id, super::LinkedSource>,
+    pub(super) execution: ExecutionState,
+    parked_executions: Vec<Option<ExecutionState>>,
+    #[cfg(test)]
+    pub(super) parked_count_probe: Option<Arc<std::sync::atomic::AtomicUsize>>,
     fault_generation: Cell<Option<u32>>,
     fault_workers: RefCell<Option<Weak<()>>>,
     next_collection: usize,
+    byte_buffer_allowance: usize,
     pub(super) gc_settings: Arc<GcSettings>,
+    // This root survives replacement of the gc module attribute.
+    pub(super) gc_garbage: Id,
+    pub(super) gc_callbacks: Id,
     pub(super) gc_schedule: GcSchedule,
     weak: HashMap<Id, Vec<Id>>,
-    // Callback rollback can borrow a handle without extending the object's lifetime.
-    pub(super) borrowed_hooks: Vec<Id>,
-    // Detached workers compare against the original stderr without keeping it alive.
-    pub(super) default_stderr: Option<Id>,
+    weak_roots: weak_roots::RootPaths,
+    retained_paths: weak_roots::RetainedPaths,
+    finalizer_roots: weak_roots::RootPaths,
+    cyclic_finalizers: weak_roots::CycleRetention,
+    // Shutdown and detached workers observe the original streams without keeping them alive.
+    pub(super) standard_outputs: [Option<Id>; 2],
     // A dead proxy is still observable after its registry entry disappears.
     pub(super) has_weak_values: bool,
     collect_next_statement: bool,
-    // Weak handles to buffered output files returned by open().
-    file_writers: Vec<Id>,
+    check_finalizers_next_statement: bool,
+    // Non-rooting handles to files and sockets whose destruction flushes or closes a descriptor.
+    descriptor_owners: Vec<Id>,
     // Weak registrations. The slot remembers prior finalization across resurrection.
     ordinary_finalizers: Vec<Id>,
+    // The unmaterialized sys scope owns these three handles until its next mutation.
+    stream_binding_scope: Cell<Id>,
+    standard_stream_bindings: Cell<[Id; 3]>,
+    // These IDs are not roots. A tracing sweep checks the frame state before recycling slots.
+    unstarted_coroutines: Vec<Id>,
+    scheduled_unawaited: bool,
     // Positions are hints. Each check reads the current binding and native stream edges.
-    finalizer_bindings: Cell<[Option<(usize, usize)>; 2]>,
-    // Weak class handles, compacted before the collector recycles their slots.
+    finalizer_bindings: Cell<[Option<(usize, FinalizerBindingSlot)>; 2]>,
+    /// Last successful (owner, frame, operand) hints for finalizer reachability checks.
+    finalizer_operands: [Cell<Option<(Id, usize, usize)>>; 64],
+    // A recently allocated iterator may be the only holder of an unreferenced generator.
+    last_generator_iterator: Option<Id>,
+    /// Only the newest pair can use ownership observations from earlier allocations.
+    latest_generator: Option<Id>,
+    latest_generator_loop: Option<Id>,
+    // Weak handles in direct-base attachment order, pruned before recycling class slots.
     classes: Vec<Id>,
     // During shutdown, remember if a sweep discarded unflushed Python-backed output.
     pub(super) discarded_shutdown_write: Option<bool>,
@@ -2684,13 +3923,9 @@ pub(super) enum ExpressionPosition {
     #[default]
     Statement,
     Line(u32),
-    Source {
-        offset: ruff_text_size::TextSize,
-        range: ruff_text_size::TextRange,
-    },
 }
 
-struct Frame {
+pub(super) struct Frame {
     owner: FrameOwner,
     scope: Id,
     code: Id,
@@ -2701,22 +3936,208 @@ struct Frame {
     object: Option<Id>,
     inherited: Id,
     active: Id,
+    // A local handler can own the very same exception object as its resumer.
+    has_local_exception: bool,
     // This activation or one of its calls opened a buffered output file.
     created_finalizer: bool,
 }
 
+/// The live Python stack, recursion accounting and error indicator of this execution.
+#[derive(Default)]
+pub(super) struct ExecutionState {
+    frames: Vec<Frame>,
+    pub(super) contexts: Vec<Id>,
+    pub(super) asyncgen_hooks: [Id; 2],
+    // Rollback after an audit callback can borrow a hook without extending its lifetime.
+    pub(super) borrowed_hooks: Vec<Id>,
+    pub(super) coroutine_origin_depth: u32,
+    // Native buffer acquisitions remain outstanding while their execution is parked.
+    pub(super) buffer_exports: Vec<Id>,
+    pub(super) pending: Option<Error>,
+    pub(super) call_depth: usize,
+    // Python alias frames represented by a renderer suspended in a tuple argument callback.
+    pub(super) suspended_typing_frames: usize,
+    // Fallback for targets whose native stack bounds cannot be queried.
+    pub(super) slot_depth: usize,
+    // Empty storage that the next native activation can reuse.
+    spare_frame_roots: Vec<Id>,
+}
+
+impl ExecutionState {
+    fn new(reserved: Option<WorkerStack>) -> Self {
+        let mut frames = reserved.map_or_else(|| Vec::with_capacity(1), |stack| stack.0);
+        frames.push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+        Self {
+            frames,
+            ..Default::default()
+        }
+    }
+
+    fn current(&self) -> &Frame {
+        self.frames.last().unwrap()
+    }
+
+    fn current_mut(&mut self) -> &mut Frame {
+        self.frames.last_mut().unwrap()
+    }
+
+    fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.contexts
+            .iter()
+            .chain(&self.buffer_exports)
+            .copied()
+            .chain(self.asyncgen_hooks)
+            .chain(self.pending.iter().flat_map(Error::roots))
+            .chain(
+                self.frames
+                    .iter()
+                    .flat_map(|frame| std::iter::once(frame.owner.root()).chain(frame.roots())),
+            )
+    }
+
+    /// Clear the error indicator for a callback and keep its objects in the calling frame.
+    pub(super) fn take_rooted_error(&mut self) -> Option<Error> {
+        let error = self.pending.take()?;
+        self.current_mut().live.extend(error.roots());
+        Some(error)
+    }
+}
+
+/// Park one complete execution without moving its Python objects or borrowing the heap
+/// across the native wait. The slot stays valid if other executions resume first.
+pub(super) struct ParkedExecution {
+    context: *mut super::Context,
+    slot: usize,
+}
+
+impl ParkedExecution {
+    /// Wait on native operands. The closure and result cannot carry a Python context borrow.
+    ///
+    /// # Safety
+    /// The caller owns the active context. The native operation must not access it or
+    /// reenter Python. Restore this execution before handling signals or Python results.
+    pub(super) unsafe fn wait<T: Send>(
+        context: *mut super::Context,
+        wait: impl FnOnce() -> T + Send,
+    ) -> Result<T> {
+        // SAFETY: the caller exclusively owns the live context on entry. This borrow ends
+        // when park_execution returns its slot, before the native wait begins.
+        let slot = unsafe { &mut *context }.heap.park_execution()?;
+        let _parked = Self { context, slot };
+        Ok(wait())
+    }
+}
+
+impl Drop for ParkedExecution {
+    fn drop(&mut self) {
+        // SAFETY: the caller has exclusive access again and no Python borrow crossed the wait.
+        unsafe { &mut *self.context }
+            .heap
+            .resume_execution(self.slot);
+    }
+}
+
+impl Heap {
+    fn executions(&self) -> impl Iterator<Item = &ExecutionState> {
+        std::iter::once(&self.execution).chain(self.parked_executions.iter().flatten())
+    }
+
+    /// Roots held by active calls, parked frames, and native worker registrations on this heap.
+    fn execution_roots(&self) -> impl Iterator<Item = Id> + '_ {
+        self.workers
+            .roots()
+            .copied()
+            .chain(self.executions().flat_map(ExecutionState::roots))
+    }
+
+    pub(super) fn buffer_exports(&self) -> impl Iterator<Item = Id> + '_ {
+        self.executions()
+            .flat_map(|state| state.buffer_exports.iter().copied())
+    }
+
+    pub(super) fn borrows_asyncgen_hook(&self, hook: Id) -> bool {
+        self.executions()
+            .any(|state| state.borrowed_hooks.contains(&hook))
+    }
+
+    pub(super) fn context_is_entered(&self, context: Id) -> bool {
+        self.executions()
+            .any(|execution| execution.contexts.contains(&context))
+    }
+
+    fn park_execution(&mut self) -> Result<usize> {
+        debug_assert!(!self.execution.frames.is_empty());
+        let slots = &mut self.parked_executions;
+        let slot = if let Some(vacant) = slots.iter().position(Option::is_none) {
+            vacant
+        } else {
+            slots
+                .try_reserve_exact(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            slots.push(None);
+            slots.len() - 1
+        };
+        slots[slot] = Some(std::mem::take(&mut self.execution));
+        #[cfg(test)]
+        self.record_parked_count();
+        Ok(slot)
+    }
+
+    fn resume_execution(&mut self, slot: usize) {
+        assert!(self.execution.frames.is_empty() && self.execution.pending.is_none());
+        let slots = &mut self.parked_executions;
+        self.execution = slots[slot].take().unwrap();
+        while slots.last().is_some_and(Option::is_none) {
+            slots.pop();
+        }
+        #[cfg(test)]
+        self.record_parked_count();
+    }
+
+    #[cfg(test)]
+    fn record_parked_count(&self) {
+        if let Some(count) = &self.parked_count_probe {
+            count.store(
+                self.parked_executions.iter().flatten().count(),
+                std::sync::atomic::Ordering::Release,
+            );
+        }
+    }
+}
+
+/// Empty frame storage reserved before a native worker is spawned.
+pub(super) struct WorkerStack(Vec<Frame>);
+
+impl WorkerStack {
+    pub(super) fn reserve() -> Result<Self> {
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        Ok(Self(frames))
+    }
+}
+
 impl Frame {
-    fn line(&self, heap: &Heap, location: &Location) -> u32 {
+    pub(super) fn operand(&self, index: usize) -> Option<Id> {
+        self.live.get(index).copied()
+    }
+
+    /// The strong handles owned by this activation, in marking order.
+    pub(super) fn roots(&self) -> impl Iterator<Item = Id> + '_ {
+        [self.scope, self.code, self.active, self.inherited]
+            .into_iter()
+            .chain(self.object)
+            .chain(self.live.iter().copied())
+    }
+
+    pub(super) fn visit(&self, visit: &mut impl VisitReferences) {
+        visit.extend(self.roots());
+    }
+
+    fn line(&self, location: &Location) -> u32 {
         match self.expression {
             ExpressionPosition::Line(line) => line,
-            ExpressionPosition::Source { offset, .. } => {
-                if let Value::Code(code) = heap.get(self.code)
-                    && let Body::Source(program) = &code.body
-                {
-                    return program.expression_line(offset).unwrap_or(location.line);
-                }
-                location.line
-            }
             ExpressionPosition::Statement => location.line,
         }
     }
@@ -2733,6 +4154,7 @@ impl Frame {
             object: None,
             inherited,
             active: inherited,
+            has_local_exception: false,
             created_finalizer: false,
         }
     }
@@ -2778,28 +4200,9 @@ impl Heap {
             return;
         }
         let mut children: HashMap<Id, Vec<Id>> = HashMap::new();
-        for (index, slot) in self.slots.iter().enumerate() {
-            let Some(Value::Class {
-                scope, ancestors, ..
-            }) = slot.value.as_ref()
-            else {
-                continue;
-            };
-            let Value::Scope(data) = self.get(*scope) else {
-                unreachable!()
-            };
-            let bases = match &data.class_namespace {
-                Some(ns) => {
-                    let Value::Tuple(bases) = self.get(ns.bases) else {
-                        continue;
-                    };
-                    bases.as_slice()
-                }
-                // Native AST classes store their single base first in the lineage.
-                None => ancestors.get(..1).unwrap_or_default(),
-            };
-            for &base in bases {
-                children.entry(base).or_default().push(index as Id);
+        for &child in &self.classes {
+            for &base in self.immediate_bases(child) {
+                children.entry(base).or_default().push(child);
             }
         }
         let mut pending = vec![class];
@@ -2823,7 +4226,15 @@ impl Heap {
     }
 
     pub fn new() -> Self {
-        let slots = vec![
+        Self::with_worker_stack(None, Arc::default(), AllocationTraces::default())
+    }
+
+    pub(super) fn with_worker_stack(
+        reserved: Option<WorkerStack>,
+        gc_settings: Arc<GcSettings>,
+        allocation_traces: AllocationTraces,
+    ) -> Self {
+        let mut slots = vec![
             Slot::new(Value::None),
             Slot::new(Value::Bool(false)),
             Slot::new(Value::Bool(true)),
@@ -2831,20 +4242,31 @@ impl Heap {
             Slot::new(Value::NotImplemented),
             Slot::new(Value::Tuple(Vec::new())),
         ];
+        for n in SMALL_INT_MIN..=SMALL_INT_MAX {
+            slots.push(Slot::new(Value::Int(crate::Int::from(n))));
+        }
         let mut heap = Self {
-            traces: vec![Cell::new(UNMARKED); slots.len()],
-            scalar_leaves: slots
+            workers: Default::default(),
+            root_trace: RootTrace::default(),
+            traces: vec![Cell::new(END); slots.len()],
+            generator_owners: GeneratorOwners::default(),
+            slot_shapes: slots
                 .iter()
-                .map(|slot| slot.value.as_ref().is_some_and(Value::scalar_leaf))
+                .map(|slot| {
+                    slot.value
+                        .as_ref()
+                        .map_or(SlotShape::Vacant, SlotShape::occupied)
+                })
                 .collect(),
             slots,
-            allocation_traces: Default::default(),
+            allocation_traces,
             loading_linked_constant: false,
             gc_order: GcOrder::EMPTY,
             full_collection: None,
-            linked_string_constants: HashMap::new(),
-            small_ints: HashMap::new(),
+            prompt_cycles: CycleSet::default(),
+            linked_constants: HashMap::new(),
             short_bytes: HashMap::new(),
+            short_strings: HashMap::new(),
             interned: HashMap::new(),
             abc_registrations: Vec::new(),
             abc_subclass_cache: HashMap::new(),
@@ -2852,27 +4274,49 @@ impl Heap {
             free_head: END,
             free_count: 0,
             immutable_hashes: HashMap::new(),
-            frames: vec![Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE)],
+            text_position: Cell::default(),
+            linked_sources: HashMap::new(),
+            execution: ExecutionState::new(reserved),
+            parked_executions: Vec::new(),
+            #[cfg(test)]
+            parked_count_probe: None,
             fault_generation: Cell::new(None),
             fault_workers: RefCell::new(None),
-            next_collection: 4096,
-            gc_settings: Arc::default(),
+            next_collection: FIRST_DYNAMIC_SLOT + 4096,
+            byte_buffer_allowance: BYTE_BUFFER_FLOOR,
+            gc_settings,
+            gc_garbage: NONE,
+            gc_callbacks: NONE,
             gc_schedule: GcSchedule::default(),
             weak: HashMap::new(),
-            borrowed_hooks: Vec::new(),
-            default_stderr: None,
+            weak_roots: Default::default(),
+            retained_paths: Default::default(),
+            finalizer_roots: Default::default(),
+            cyclic_finalizers: Default::default(),
+            standard_outputs: [None; 2],
             has_weak_values: false,
             collect_next_statement: false,
-            file_writers: Vec::new(),
+            check_finalizers_next_statement: false,
+            descriptor_owners: Vec::new(),
             ordinary_finalizers: Vec::new(),
+            stream_binding_scope: Cell::new(NONE),
+            standard_stream_bindings: Cell::new([NONE; 3]),
+            unstarted_coroutines: Vec::new(),
+            scheduled_unawaited: false,
             finalizer_bindings: Cell::new([None; 2]),
+            finalizer_operands: std::array::from_fn(|_| Cell::new(None)),
+            last_generator_iterator: None,
+            latest_generator: None,
+            latest_generator_loop: None,
             classes: Vec::new(),
             discarded_shutdown_write: None,
             caller_finalizer_field: None,
         };
-        for id in 0..heap.slots.len() {
+        for id in 0..FIRST_SMALL_INT as usize {
             heap.gc_order.push(id, &heap.slots);
         }
+        heap.gc_garbage = heap.alloc_slot_with_trace(Value::List(Vec::new()), false);
+        heap.gc_callbacks = heap.alloc_slot_with_trace(Value::List(Vec::new()), false);
         heap
     }
 
@@ -2885,17 +4329,46 @@ impl Heap {
         }
     }
 
-    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+    /// Access the backing entries, including an index already built by Python dictionary operations.
+    fn dictionary_data(&self, value: Id) -> Option<&super::dictionary::Entries> {
         match self.get(self.dict_storage(value)?) {
             Value::Dict(entries) | Value::DefaultDict { entries, .. } => Some(entries),
             _ => unreachable!("dictionary payload"),
         }
     }
 
+    pub(super) fn dict_entries(&self, value: Id) -> Option<&[(Id, Id)]> {
+        self.dictionary_data(value).map(|entries| &entries[..])
+    }
+
     pub(super) fn dict_named_item(&self, dict: Id, name: &str) -> Option<Id> {
-        self.dict_entries(dict)?.iter().find_map(|&(key, value)| {
-            matches!(self.get(key), Value::Str(k) if k == name).then_some(value)
-        })
+        self.dictionary_data(dict)?.named_item(self, name)
+    }
+
+    /// Remove an occupied table position and publish both lost edges to the collector.
+    pub(super) fn remove_table_entry(&mut self, table: Id, index: usize) -> Result<(Id, Id)> {
+        let (Value::Dict(entries)
+        | Value::DefaultDict { entries, .. }
+        | Value::Set { entries, .. }) = self.get_mut(table)
+        else {
+            unreachable!("dictionary or set payload")
+        };
+        let (key, value) = entries.remove(index)?;
+        self.weak_edge_removed(key);
+        self.weak_edge_removed(value);
+        Ok((key, value))
+    }
+
+    /// Remove one inline instance binding after its owner has selected the storage.
+    pub(super) fn remove_instance_field(&mut self, obj: Id, name: &str) -> bool {
+        let Value::Instance { fields, .. } = self.get_mut(obj) else {
+            unreachable!("instance field storage")
+        };
+        let Some(value) = fields.shift_remove(name) else {
+            return false;
+        };
+        self.weak_edge_removed(value);
+        true
     }
 
     /// Look up native backing fields on either side of ordinary dictionary materialization.
@@ -2916,6 +4389,22 @@ impl Heap {
         self.weak.get(&target).map_or(&[], Vec::as_slice)
     }
 
+    /// Python enumerates its refs and proxies. A native handle shares their
+    /// clearing and slot-reuse rules, but has no Python weakref object.
+    pub fn python_weak_references(&self, target: Id) -> &[Id] {
+        let refs = self.weak_references(target);
+        if let Some((&last, visible)) = refs.split_last()
+            && matches!(self.get(last), Value::Weak(wr) if wr.internal)
+        {
+            return visible;
+        }
+        refs
+    }
+
+    pub fn native_weak_reference(&mut self, target: Id) -> Result<Id> {
+        self.allocate_weak_reference(target, NONE, super::weakref::Kind::Reference, None, true)
+    }
+
     pub fn new_weak_reference(
         &mut self,
         target: Id,
@@ -2923,26 +4412,43 @@ impl Heap {
         kind: super::weakref::Kind,
         subclass: Option<Id>,
     ) -> Result<Id> {
+        self.allocate_weak_reference(target, callback, kind, subclass, false)
+    }
+
+    fn allocate_weak_reference(
+        &mut self,
+        target: Id,
+        callback: Id,
+        kind: super::weakref::Kind,
+        subclass: Option<Id>,
+        internal: bool,
+    ) -> Result<Id> {
         let references = self.weak_references(target);
         if subclass.is_none() && callback == NONE
             && let Some(&id) = references.iter().find(|&&id|
-                matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.callback == NONE))
+                matches!(self.get(id), Value::Weak(wr) if wr.kind == kind && wr.internal == internal && wr.callback == NONE))
         {
             return Ok(id);
         }
         // Callback-free canonical references precede proxies, then callbacks in newest-first order.
-        let index = references
-            .iter()
-            .position(|&id| match self.get(id) {
-                Value::Weak(wr) => {
-                    wr.callback != NONE
-                        || (subclass.is_none()
-                            && callback == NONE
-                            && kind == super::weakref::Kind::Reference)
-                }
-                _ => true,
-            })
-            .unwrap_or(references.len());
+        // One shared native handle, if present, follows every Python wrapper.
+        let index = if internal {
+            references.len()
+        } else {
+            references
+                .iter()
+                .position(|&id| match self.get(id) {
+                    Value::Weak(wr) => {
+                        wr.internal
+                            || wr.callback != NONE
+                            || (subclass.is_none()
+                                && callback == NONE
+                                && kind == super::weakref::Kind::Reference)
+                    }
+                    _ => true,
+                })
+                .unwrap_or(references.len())
+        };
         let mut new_references = Vec::new();
         if let Some(references) = self.weak.get_mut(&target) {
             references.try_reserve(1)
@@ -2956,6 +4462,7 @@ impl Heap {
             target: Some(target),
             callback,
             kind,
+            internal,
             hash: None,
         };
         let id = if let Some(owner) = subclass {
@@ -2967,10 +4474,19 @@ impl Heap {
         } else {
             self.alloc(Value::Weak(reference))
         };
+        self.weak_roots.covers_endpoints = false;
         self.weak
             .entry(target)
             .or_insert(new_references)
             .insert(index, id);
+        if let Some(cycles) = &mut self.full_collection
+            && cycles
+                .incoming
+                .get(target as usize)
+                .is_some_and(|&n| n != 0)
+        {
+            cycles.new_weakref_to_member = true;
+        }
         self.has_weak_values = true;
         // The caller may hold either the target or the new wrapper only as a temporary.
         self.collect_next_statement = true;
@@ -2994,7 +4510,7 @@ impl Heap {
 
     /// Inspect names in surviving frames without invoking Python attribute or mapping hooks.
     fn active_binding_matches(&self, mut predicate: impl FnMut(Id) -> bool) -> bool {
-        self.frames.iter().rev().any(|frame| {
+        self.execution.frames.iter().rev().any(|frame| {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 return false;
             };
@@ -3060,28 +4576,39 @@ impl Heap {
         }
     }
 
+    /// Return the permanent heap slot for a cached Python integer.
+    pub(super) fn cached_integer(value: i64) -> Option<Id> {
+        permanent::small_integer_id(value)
+    }
+
+    pub(super) fn owned_text(&mut self, text: crate::Str) -> Id {
+        if let Some(id) = self.short_string(&text) {
+            return id;
+        }
+        self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
+    }
+
     pub fn alloc(&mut self, value: Value) -> Id {
-        if let Value::Str(text) = &value
-            && let Some(owner) = crate::objects::short_string(text)
-        {
-            return self.intern_literal(owner, true);
+        if let Value::Str(text) = value {
+            return self.owned_text(text);
         }
         if let Value::Int(integer) = &value
-            && let Some(n @ -5..=256) = integer.as_small()
+            && let Some(id) = integer.as_small().and_then(Self::cached_integer)
         {
-            if let Some(&id) = self.small_ints.get(&n) {
-                return id;
-            }
-            let id = self.alloc_slot_with_trace(value, false);
-            self.small_ints.insert(n, id);
             return id;
         }
         match value {
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
+            Value::Bytes(bytes) => self.alloc_bytes(bytes, true),
             Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,
             Value::Class { .. } => {
                 let id = self.alloc_slot(value);
                 self.classes.push(id);
+                id
+            }
+            Value::Socket { .. } => {
+                let id = self.alloc_slot(value);
+                self.register_finalizer(id);
                 id
             }
             value => self.alloc_slot(value),
@@ -3093,17 +4620,91 @@ impl Heap {
         &mut self,
         slot: Id,
         build: impl FnOnce(&mut Self) -> Id,
-    ) -> Id {
+    ) -> Result<Id> {
         let Value::Int(key) = self.get(slot) else {
             unreachable!("compiler constant slot")
         };
-        let key = key.to_i64().expect("compiler constant slot fits in i64");
-        if let Some(&value) = self.linked_string_constants.get(&key) {
-            return value;
+        self.cached_constant(
+            ConstantSlot::Legacy(key.to_i64().expect("compiler slot fits in i64")),
+            |heap| Ok(build(heap)),
+        )
+    }
+
+    /// Nested declarations share the entry that produced their literal table.
+    pub(super) fn compilation_entry(&self, code: &CodeObject) -> Option<Code> {
+        match self.get(code.compilation_constants) {
+            Value::CompilationConstants { entry, .. } => *entry,
+            _ => code.native_entry(),
         }
-        let value = build(self);
-        self.linked_string_constants.insert(key, value);
-        value
+    }
+
+    /// Allocate the shared literal table lazily. Each linked code object roots it directly.
+    pub(super) fn compilation_constants(&mut self, owner: Id) -> Result<Id> {
+        let Value::Code(code) = self.get(owner) else {
+            unreachable!("linked code owner")
+        };
+        if code.compilation_constants != NONE {
+            return Ok(code.compilation_constants);
+        }
+        let pool = self.try_alloc_slot(
+            Value::CompilationConstants {
+                entry: code.native_entry(),
+                slots: HashMap::new(),
+            },
+            false,
+        )?;
+        let Value::Code(code) = self.get_mut(owner) else {
+            unreachable!("linked code owner")
+        };
+        code.compilation_constants = pool;
+        Ok(pool)
+    }
+
+    pub(super) fn constant_at(&self, key: &ConstantSlot) -> Option<Id> {
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(frame) = self.execution.frames.last()
+            && let Value::Code(code) = self.get(frame.code)
+        {
+            return match self.get(code.compilation_constants) {
+                Value::CompilationConstants { slots, .. } => slots.get(slot).copied(),
+                _ => None,
+            };
+        }
+        self.linked_constants.get(key).copied()
+    }
+
+    pub(super) fn cached_constant(
+        &mut self,
+        key: ConstantSlot,
+        build: impl FnOnce(&mut Self) -> Result<Id>,
+    ) -> Result<Id> {
+        if let Some(value) = self.constant_at(&key) {
+            return Ok(value);
+        }
+        if let ConstantSlot::Linked(slot) = key
+            && let Some(owner) = self.execution.frames.last().map(|frame| frame.code)
+            && matches!(self.get(owner), Value::Code(_))
+        {
+            let pool = self.compilation_constants(owner)?;
+            let Value::CompilationConstants { slots, .. } = self.get_mut(pool) else {
+                unreachable!("linked literal table")
+            };
+            slots
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            let value = build(self)?;
+            let Value::CompilationConstants { slots, .. } = self.get_mut(pool) else {
+                unreachable!("linked literal table")
+            };
+            slots.insert(slot, value);
+            return Ok(value);
+        }
+        self.linked_constants
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        let value = build(self)?;
+        self.linked_constants.insert(key, value);
+        Ok(value)
     }
 
     /// Packing an array skips tracking when its elements all have non-GC types.
@@ -3123,17 +4724,29 @@ impl Heap {
         id
     }
 
+    /// Charge buffers larger than a slot to the next statement's collection budget.
+    fn alloc_bytes(&mut self, bytes: Vec<u8>, trace: bool) -> Id {
+        if bytes.capacity() > std::mem::size_of::<Slot>() {
+            self.byte_buffer_allowance =
+                self.byte_buffer_allowance.saturating_sub(bytes.capacity());
+            if self.byte_buffer_allowance == 0 && !self.full_collection_active() {
+                self.collect_next_statement = true;
+            }
+        }
+        self.alloc_slot_with_trace(Value::Bytes(bytes), trace)
+    }
+
     /// Reuse CPython's empty and one-byte singletons when copying known byte data.
     /// Allocating an uninitialized one-byte result (for example, bytes(1)) is distinct.
-    pub(super) fn bytes_from_data(&mut self, bytes: Vec<u8>) -> Id {
-        if bytes.len() > 1 {
-            return self.alloc_slot(Value::Bytes(bytes));
+    pub(super) fn bytes_from_data(&mut self, bytes: impl AsRef<[u8]> + Into<Vec<u8>>) -> Id {
+        if bytes.as_ref().len() > 1 {
+            return self.alloc_bytes(bytes.into(), true);
         }
-        let byte = bytes.first().copied();
+        let byte = bytes.as_ref().first().copied();
         if let Some(&id) = self.short_bytes.get(&byte) {
             return id;
         }
-        let id = self.alloc_slot_with_trace(Value::Bytes(bytes), false);
+        let id = self.alloc_bytes(bytes.into(), false);
         self.short_bytes.insert(byte, id);
         id
     }
@@ -3141,23 +4754,26 @@ impl Heap {
     /// Allocate a distinct string result even when its value is a cached Latin-1 character.
     pub(super) fn fresh_string(&mut self, value: Value) -> Result<Id> {
         debug_assert!(matches!(value, Value::Str(_) | Value::SurrogateStr(_)));
+        self.try_alloc_slot(value, true)
+    }
+
+    pub(super) fn try_alloc_slot(&mut self, value: Value, trace: bool) -> Result<Id> {
         if self.free_head == END {
             self.reserve_slot()
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
-        self.frames
-            .last_mut()
-            .unwrap()
-            .live
-            .try_reserve(1)
-            .map_err(|_| Error::new("MemoryError", ""))?;
-        Ok(self.alloc_slot(value))
+        self.reserve_temporaries(1)?;
+        Ok(self.alloc_slot_with_trace(value, trace))
     }
 
     fn reserve_slot(&mut self) -> std::result::Result<(), std::collections::TryReserveError> {
-        self.scalar_leaves.try_reserve(1)?;
+        self.slot_shapes.try_reserve(1)?;
         self.traces.try_reserve(1)?;
         self.slots.try_reserve(1)
+    }
+
+    pub(super) fn is_gc_tracked(&self, id: Id) -> bool {
+        self.slots[id as usize].gc_tracked(self)
     }
 
     pub(super) fn gc_thresholds(&self) -> [i32; 3] {
@@ -3172,16 +4788,35 @@ impl Heap {
         self.alloc_slot_with_trace(value, true)
     }
 
+    /// Record the birth of a generator before existing containers can refer to its slot.
+    pub(super) fn record_generator_birth(&mut self, generator: Id) {
+        if self.generator_owners.words.is_empty() {
+            return;
+        }
+        self.latest_generator = Some(generator);
+        self.latest_generator_loop = None;
+    }
+
     fn alloc_slot_with_trace(&mut self, value: Value, trace: bool) -> Id {
-        let trace = trace && self.allocation_traces.is_tracing();
         let has_gc_header = value.has_gc_header(self);
-        let scalar_leaf = value.scalar_leaf();
+        let shape = SlotShape::occupied(&value);
+        self.fill_slot(shape, has_gc_header, trace, || value)
+    }
+
+    fn fill_slot(
+        &mut self,
+        shape: SlotShape,
+        has_gc_header: bool,
+        trace: bool,
+        value: impl FnOnce() -> Value,
+    ) -> Id {
+        let trace = trace && self.allocation_traces.is_tracing();
         let index = if self.free_head != END {
             let index = self.free_head;
             self.free_head = self.slots[index].gc_next.replace(UNMARKED);
             self.free_count -= 1;
-            self.scalar_leaves[index] = scalar_leaf;
-            self.slots[index].value = Some(value);
+            self.slot_shapes[index] = shape;
+            self.slots[index].value = Some(value());
             self.slots[index].may_have_buffer_views = false;
             self.slots[index].generation = 0;
             index
@@ -3193,12 +4828,19 @@ impl Heap {
                 self.slots.reserve_exact(1);
                 self.next_collection = self.slots.len();
             }
-            self.scalar_leaves.push(scalar_leaf);
+            self.slot_shapes.push(shape);
             self.traces.push(Cell::new(UNMARKED));
-            self.slots.push(Slot::new(value));
+            self.slots.push(Slot::new(value()));
             self.slots.len() - 1
         };
-        self.gc_order.push(index, &self.slots);
+        if shape == SlotShape::Other {
+            self.generator_owners.reconsider(index);
+        }
+        // Only objects with children or a Python GC header participate in
+        // traversal order. Exact untracked scalars remain live through tracing.
+        if !shape.is_scalar_leaf() || has_gc_header {
+            self.gc_order.push(index, &self.slots);
+        }
         self.slots[index].untracked_tuple.set(false);
         self.slots[index].has_gc_header = has_gc_header;
         if has_gc_header {
@@ -3207,15 +4849,22 @@ impl Heap {
         }
         self.slots[index].finalization = Finalization::None;
         let id = index as Id;
+        if let Some(Value::LoopIterator { source, .. }) = &self.slots[index].value
+            && matches!(self.get(*source), Value::Generator { .. })
+        {
+            self.last_generator_iterator = Some(id);
+            self.latest_generator_loop = (self.latest_generator == Some(*source)).then_some(id);
+        }
+
         if trace {
             if self.loading_linked_constant {
                 self.allocation_traces.record_linked(id);
             } else {
                 self.allocation_traces.record(
                     id,
-                    self.frames.iter().rev().filter_map(|frame| {
+                    self.execution.frames.iter().rev().filter_map(|frame| {
                         let location = frame.location.as_ref()?;
-                        Some((location.file.as_ref(), frame.line(self, location)))
+                        Some((location.file.as_ref(), frame.line(location)))
                     }),
                 );
             }
@@ -3224,40 +4873,49 @@ impl Heap {
         id
     }
 
-    /// A code literal and every occurrence of a Latin-1 character share their Python handle.
-    fn intern_literal(&mut self, owner: crate::StrOwner, static_character: bool) -> Id {
-        if let Some(entry) = self.interned.get_mut(&owner) {
+    /// Return the heap's singleton for the empty string or one Latin-1 character.
+    fn short_string(&mut self, text: &str) -> Option<Id> {
+        let index = crate::objects::short_index(text)?;
+        if let Some(entry) = self.short_strings.get_mut(&index) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
-            return id;
+            return Some(id);
         }
-        let id = self.alloc_slot_with_trace(Value::Str(owner.to_string()), !static_character);
-        self.interned
-            .insert(owner, InternedString { id, literal: true });
-        id
+        let id = self.alloc_slot_with_trace(Value::Str(text.into()), false);
+        self.short_strings
+            .insert(index, InternedString { id, literal: true });
+        Some(id)
+    }
+
+    fn interned_string(&self, text: &str) -> Option<&InternedString> {
+        match crate::objects::short_index(text) {
+            Some(index) => self.short_strings.get(&index),
+            None => self.interned.get(text),
+        }
     }
 
     /// Mark the shared spelling as a live code constant and return its local Python handle.
     pub fn code_name(&mut self, text: &str) -> Id {
+        if let Some(id) = self.short_string(text) {
+            return id;
+        }
         if let Some(entry) = self.interned.get_mut(text) {
             entry.literal = true;
             let id = entry.id;
             self.keep(id);
             return id;
         }
-        if let Some(owner) = crate::objects::short_string(text) {
-            return self.intern_literal(owner, true);
-        }
-        self.intern_literal(
-            crate::sys::intern_owner(&crate::objects::literal_string(text)),
-            false,
-        )
+        let owner = crate::sys::intern_owner(&crate::objects::literal_string(text));
+        let id = self.alloc_slot(Value::Str((*owner).clone()));
+        self.interned
+            .insert(owner, InternedString { id, literal: true });
+        id
     }
 
     pub fn string_literal(&mut self, text: &str) -> Result<Id> {
-        if let Some(owner) = crate::objects::short_string(text) {
-            return Ok(self.intern_literal(owner, true));
+        if let Some(id) = self.short_string(text) {
+            return Ok(id);
         }
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
         if intern && let Some(entry) = self.interned.get_mut(text) {
@@ -3272,14 +4930,14 @@ impl Heap {
             .map_err(|_| crate::Error::memory_error())?;
         value.push_str(text);
         if !intern {
-            return Ok(self.alloc(Value::Str(value)));
+            return Ok(self.alloc(Value::Str(value.into())));
         }
         let owner = crate::objects::try_literal_string(text)?;
         let owner = crate::sys::try_intern_owner(&owner).ok_or_else(crate::Error::memory_error)?;
         self.interned
             .try_reserve(1)
             .map_err(|_| crate::Error::memory_error())?;
-        let id = self.alloc_slot(Value::Str(value));
+        let id = self.alloc_slot(Value::Str(value.into()));
         self.interned
             .insert(owner, InternedString { id, literal: true });
         Ok(id)
@@ -3288,7 +4946,7 @@ impl Heap {
     /// Runtime-compiled ASCII constants are interned for the lifetime of their code.
     pub fn source_string_constant(&mut self, text: &str) -> Option<Id> {
         let intern = text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-        if intern && let Some(entry) = self.interned.get(text) {
+        if intern && let Some(entry) = self.interned_string(text) {
             let id = entry.id;
             self.keep(id);
             return Some(id);
@@ -3296,7 +4954,7 @@ impl Heap {
         let mut value = String::new();
         value.try_reserve_exact(text.len()).ok()?;
         value.push_str(text);
-        let id = self.alloc(Value::Str(value));
+        let id = self.alloc(Value::Str(value.into()));
         Some(if intern {
             self.intern(id, std::iter::empty())
         } else {
@@ -3305,7 +4963,7 @@ impl Heap {
     }
 
     pub fn is_interned(&self, id: Id) -> bool {
-        matches!(self.get(id), Value::Str(s) if self.interned.get(s.as_str()).is_some_and(|entry| entry.id == id))
+        matches!(self.get(id), Value::Str(s) if self.interned_string(s).is_some_and(|entry| entry.id == id))
     }
 
     /// A dead boxed string may still occupy its slot until the next collection.
@@ -3313,7 +4971,7 @@ impl Heap {
         let Value::Str(text) = self.get(id) else {
             unreachable!()
         };
-        if let Some(&entry) = self.interned.get(text.as_str())
+        if let Some(&entry) = self.interned_string(text)
             && (entry.id == id
                 || entry.literal
                 || self.bound_in_active_frame(entry.id)
@@ -3321,6 +4979,13 @@ impl Heap {
         {
             self.keep(entry.id);
             return entry.id;
+        }
+        if let Some(index) = crate::objects::short_index(text) {
+            if self.short_strings.try_reserve(1).is_ok() {
+                self.short_strings
+                    .insert(index, InternedString { id, literal: false });
+            }
+            return id;
         }
         let Ok(owner) = crate::objects::try_literal_string(text) else {
             return id;
@@ -3336,6 +5001,11 @@ impl Heap {
         id
     }
 
+    /// An exact ASCII string has identical UTF-8 byte and Python character offsets.
+    pub(super) fn is_ascii_str(&self, id: Id) -> bool {
+        self.slot_shapes[id as usize] == SlotShape::AsciiStr
+    }
+
     pub fn get(&self, id: Id) -> &Value {
         self.slots[id as usize]
             .value
@@ -3348,16 +5018,56 @@ impl Heap {
         source: Id,
         target: Id,
     ) -> Option<(&Value, &mut Value)> {
+        let target_id = target as usize;
+        self.invalidate_stream_bindings(target_id);
+        if source != target && self.slot_shapes.get(target_id)?.is_scalar_leaf() {
+            self.slots.get(source as usize)?.value.as_ref()?;
+            self.prepare_slot_write(target_id);
+        }
         let [source, target] = self
             .slots
-            .get_disjoint_mut([source as usize, target as usize])
+            .get_disjoint_mut([source as usize, target_id])
             .ok()?;
-        Some((source.value.as_ref()?, target.value.as_mut()?))
+        let source = source.value.as_ref()?;
+        let target = target.value.as_mut()?;
+        self.root_trace.changed(target_id);
+        self.generator_owners.reconsider(target_id);
+        Some((source, target))
+    }
+
+    /// Return the most recently observed bindings while this scope's values remain unchanged.
+    pub(super) fn standard_stream_bindings(&self, scope: Id) -> Option<[Id; 3]> {
+        (self.stream_binding_scope.get() == scope).then(|| self.standard_stream_bindings.get())
+    }
+
+    /// Remember the owning scope separately so a borrowed or recycled slot invalidates all three IDs.
+    pub(super) fn cache_standard_stream_bindings(&self, scope: Id, streams: [Id; 3]) {
+        self.standard_stream_bindings.set(streams);
+        self.stream_binding_scope.set(scope);
+    }
+
+    fn invalidate_stream_bindings(&self, index: usize) {
+        if self.stream_binding_scope.get() as usize == index {
+            self.stream_binding_scope.set(NONE);
+        }
+    }
+
+    fn prepare_slot_write(&mut self, index: usize) {
+        self.root_trace.changed(index);
+        self.invalidate_stream_bindings(index);
+        self.generator_owners.reconsider(index);
+        if !self.slot_shapes[index].is_scalar_leaf() {
+            return;
+        }
+        if index >= FIRST_DYNAMIC_SLOT && self.slots[index].gc_prev.get() == UNMARKED {
+            self.gc_order.push(index, &self.slots);
+        }
+        self.slot_shapes[index] = SlotShape::Other;
     }
 
     pub fn get_mut(&mut self, id: Id) -> &mut Value {
-        // The mutable borrow can replace the value with a different variant.
-        self.scalar_leaves[id as usize] = false;
+        // A mutable borrow can replace an untracked scalar with a container.
+        self.prepare_slot_write(id as usize);
         self.slots[id as usize]
             .value
             .as_mut()
@@ -3365,20 +5075,24 @@ impl Heap {
     }
     pub fn enter(&mut self, scope: Id, code: Id, owner: FrameOwner) {
         let mut activation = Frame::new(scope, code, owner, self.active_exception());
+        activation.live = std::mem::take(&mut self.execution.spare_frame_roots);
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator { frame, .. } = self.get(id) else {
                 unreachable!()
             };
             activation.object = *frame;
         }
-        self.frames.push(activation);
+        self.execution.frames.push(activation);
         if self.fault_frames_current() {
             self.publish_fault_frame(self.python_depth() - 1);
         }
     }
-    /// Release the activation and report whether a returning function may have dropped a writer.
-    pub fn leave(&mut self, value: Id, returning: bool) -> bool {
-        let frame = self.frames.pop().expect("returning native activation");
+    fn pop_native_frame(&mut self) -> Frame {
+        let frame = self
+            .execution
+            .frames
+            .pop()
+            .expect("returning native activation");
         if let FrameOwner::Generator(id) = frame.owner
             && let Some(location) = &frame.location
             && let Value::Generator { lineno, .. } = self.get_mut(id)
@@ -3398,26 +5112,107 @@ impl Heap {
                 self.publish_fault_frame(index);
             }
         }
+        frame
+    }
+
+    /// Root a yielded value or a failed delegate lookup while the generator
+    /// releases its operands. The resumer reserved one slot before entering.
+    pub(super) fn publish_to_resumer(&mut self, result: Result<Id>) -> Result<Id> {
+        let caller = self.execution.frames.len() - 2;
+        let live = &mut self.execution.frames[caller].live;
+        match &result {
+            Ok(value) => live.push(*value),
+            Err(error) => {
+                live.try_reserve(error.roots().count())
+                    .map_err(|_| Error::new("MemoryError", ""))?;
+                live.extend(error.roots());
+            }
+        }
+        result
+    }
+
+    /// A forwarded yield keeps its delegate in the parked frame and its value in the resumer.
+    /// Dropping duplicate operand handles cannot make a finalizer or weak callback runnable.
+    pub(super) fn forwarded_roots_survive(&self, delegate: usize, mark: usize, value: Id) -> bool {
+        if mark.checked_sub(1) != Some(delegate) || self.release_work_pending() {
+            return false;
+        }
+        let [.., caller, frame] = self.execution.frames.as_slice() else {
+            return false;
+        };
+        let Some(delegate) = frame.operand(delegate) else {
+            return false;
+        };
+        caller.live.last() == Some(&value)
+            && frame.live[mark..]
+                .iter()
+                .all(|&id| id == NONE || id == delegate || id == value)
+    }
+
+    pub(super) fn suspend_native_frame(&mut self) -> Frame {
+        let mut frame = self.pop_native_frame();
+        if !frame.has_local_exception {
+            frame.active = NONE;
+        }
+        frame.inherited = NONE;
+        frame
+    }
+
+    pub(super) fn restore_native_frame(&mut self, mut frame: Frame) {
+        if let FrameOwner::Generator(id) = frame.owner
+            && let Value::Generator { frame: cached, .. } = self.get(id)
+        {
+            // gi_frame may have been materialized while this activation was parked.
+            frame.object = *cached;
+        }
+        frame.inherited = self.active_exception();
+        if !frame.has_local_exception {
+            frame.active = frame.inherited;
+        }
+        self.execution.frames.push(frame);
+        if self.fault_frames_current() {
+            self.publish_fault_frame(self.python_depth() - 1);
+        }
+    }
+
+    /// Release the activation and report whether a returning function may have dropped a writer.
+    pub fn leave(&mut self, value: Id, returning: bool) -> bool {
+        let mut frame = self.pop_native_frame();
         let opened = frame.created_finalizer && self.tracks_finalizers();
         if opened {
-            self.frames.last_mut().unwrap().created_finalizer = true;
+            self.execution.current_mut().created_finalizer = true;
         }
         let finalizer_released = opened && returning && self.has_unbound_finalizer(value);
-        if (self.has_weak_values || finalizer_released)
+        let check_coroutines = returning && self.has_unstarted_coroutines();
+        if (self.has_weak_values || finalizer_released || check_coroutines)
             && let Value::Scope(scope) = self.get(frame.scope)
         {
+            let coroutine_released = check_coroutines
+                && scope.parent.is_some()
+                && !scope.in_class_body
+                && scope
+                    .names
+                    .values()
+                    .any(|&id| id != value && self.is_unstarted_coroutine(id));
             let weak_released = self.has_weak_values
                 && frame.live.iter().chain(scope.names.values()).any(|&id| {
                     id != value && self.weak_edge(id) && !self.bound_in_active_frame(id)
                 });
-            if weak_released || finalizer_released {
+            if weak_released || finalizer_released || coroutine_released {
                 // A normal function allocates its scope in the caller before entering.
                 // Once it returns, only an escaped closure or frame can keep that scope alive.
-                if scope.parent.is_some() && scope.class_body.is_none() {
+                if scope.parent.is_some() && !scope.in_class_body {
                     self.release_scope_temporary(frame.scope);
                 }
-                self.collect_next_statement |= weak_released;
+                // Recheck the surviving weak roots after publishing the caller's temporaries.
+                self.check_finalizers_next_statement |= weak_released;
+                self.collect_next_statement |= coroutine_released;
             }
+        }
+        // Bound the retained allocation even after a call with many live temporaries.
+        if self.execution.spare_frame_roots.capacity() == 0 && frame.live.capacity() <= 64 {
+            frame.live.clear();
+            self.execution.spare_frame_roots = frame.live;
         }
         self.keep(value);
         finalizer_released
@@ -3425,7 +5220,7 @@ impl Heap {
 
     /// Drop the caller's temporary reference to a completed function or generator scope.
     pub(super) fn release_scope_temporary(&mut self, scope: Id) {
-        let caller = &mut self.frames.last_mut().unwrap().live;
+        let caller = &mut self.execution.current_mut().live;
         if let Some(index) = caller.iter().position(|&id| id == scope) {
             caller[index] = NONE;
         }
@@ -3433,21 +5228,46 @@ impl Heap {
 
     /// Reserve temporary roots before taking a snapshot that may outlive a Python callback.
     pub(super) fn reserve_temporaries(&mut self, additional: usize) -> Result<()> {
-        self.frames
-            .last_mut()
-            .unwrap()
+        self.execution
+            .current_mut()
             .live
             .try_reserve(additional)
             .map_err(|_| Error::new("MemoryError", ""))
     }
 
     pub fn keep(&mut self, value: Id) {
-        self.frames.last_mut().unwrap().live.push(value);
+        self.execution.current_mut().live.push(value);
+    }
+
+    /// Publishing this result leaves the entire operand stack in its current state.
+    pub(super) fn keeps_single_operand(&self, mark: usize, value: Id) -> bool {
+        self.execution.current().live.get(mark..) == Some(std::slice::from_ref(&value))
+            && !self.release_work_pending()
+    }
+
+    fn release_work_pending(&self) -> bool {
+        self.full_collection_active() || self.collection_requested() || self.scheduled_unawaited
+    }
+
+    /// Place restored lexical and operand roots below the frame's evaluation temporaries.
+    pub(super) fn insert_temporaries(&mut self, mark: usize, roots: &[Id]) {
+        let live = &mut self.execution.current_mut().live;
+        live.splice(mark..mark, roots.iter().copied());
+    }
+
+    /// Insert a root below newer temporaries so they can be released before it.
+    pub(super) fn keep_at(&mut self, mark: usize, value: Id) {
+        self.execution.current_mut().live.insert(mark, value);
+    }
+
+    /// Access a reserved operand slot below the current expression's temporaries.
+    pub(super) fn temporary_root(&mut self, index: usize) -> &mut Id {
+        &mut self.execution.current_mut().live[index]
     }
 
     /// Mark temporary roots that must survive the next iteration of a native loop.
     pub fn temporary_mark(&self) -> usize {
-        self.frames.last().unwrap().live.len()
+        self.execution.current().live.len()
     }
 
     fn finalizer_free_scalar(&self, id: Id) -> bool {
@@ -3514,7 +5334,7 @@ impl Heap {
         {
             return false;
         }
-        let Some(dropped) = self.frames.last().unwrap().live.get(mark..) else {
+        let Some(dropped) = self.execution.current().live.get(mark..) else {
             return false;
         };
         if dropped.len() > 64 {
@@ -3556,12 +5376,80 @@ impl Heap {
         })
     }
 
+    /// Check aliased list and tuple contents once while all the outgoing edges are stable.
+    pub(super) fn clear_owns_finalizer(&self, receiver: Id) -> bool {
+        self.clear_may_release(receiver, |id| {
+            self.slot_shapes[id as usize].is_scalar_leaf() || self.finalizer_free_scalar(id)
+        })
+    }
+
+    fn clear_may_release(&self, receiver: Id, inert: impl Fn(Id) -> bool) -> bool {
+        match self.get(receiver) {
+            Value::List(items) => self.any_releasing_edge(items.iter().copied(), inert),
+            Value::Deque(ring) => self.any_releasing_edge(ring.items.iter().copied(), inert),
+            Value::Dict(entries)
+            | Value::DefaultDict { entries, .. }
+            | Value::Set { entries, .. } => self
+                .any_releasing_edge(entries.iter().flat_map(|&(key, value)| [key, value]), inert),
+            _ => unreachable!("clearable storage"),
+        }
+    }
+
+    fn any_releasing_edge(
+        &self,
+        edges: impl Iterator<Item = Id> + Clone,
+        inert: impl Fn(Id) -> bool,
+    ) -> bool {
+        let marked = Cell::new(false);
+        let found = edges
+            .clone()
+            .any(|id| self.check_release(id, true, &inert, Some(&marked)));
+        if marked.get() {
+            for id in edges {
+                let trace = &self.traces[id as usize];
+                if trace.get() == CHECKED_RELEASE {
+                    trace.set(UNMARKED);
+                }
+            }
+        }
+        found
+    }
+
     fn could_release(&self, id: Id, skip_bound: bool, inert: impl Fn(Id) -> bool) -> bool {
-        if inert(id) || (skip_bound && self.bound_in_active_frame(id)) {
+        self.check_release(id, skip_bound, inert, None)
+    }
+
+    #[inline]
+    fn check_release(
+        &self,
+        id: Id,
+        skip_bound: bool,
+        inert: impl Fn(Id) -> bool,
+        marked: Option<&Cell<bool>>,
+    ) -> bool {
+        if inert(id) {
+            return false;
+        }
+        let trace = &self.traces[id as usize];
+        if marked.is_some_and(Cell::get) && trace.get() == CHECKED_RELEASE {
+            return false;
+        }
+        if skip_bound && self.bound_in_active_frame(id) {
             return false;
         }
         match self.get(id) {
-            Value::List(values) | Value::Tuple(values) => values.iter().any(|&item| !inert(item)),
+            Value::List(values) | Value::Tuple(values) => {
+                if values.iter().any(|&item| !inert(item)) {
+                    return true;
+                }
+                if let Some(marked) = marked
+                    && trace.get() == UNMARKED
+                {
+                    trace.set(CHECKED_RELEASE);
+                    marked.set(true);
+                }
+                false
+            }
             Value::Dict(entries) => !entries.is_empty(),
             _ => true,
         }
@@ -3572,40 +5460,33 @@ impl Heap {
         if !self.tracks_finalizers() {
             return false;
         }
-        let could_own_finalizer = self
-            .frames
-            .last()
-            .unwrap()
-            .live
-            .iter()
-            .skip(mark)
-            .any(|&id| {
-                // A one-argument call roots its operand through a private list.
-                let operand = match self.get(id) {
-                    Value::List(items) if items.len() == 1 => items[0],
-                    _ => id,
-                };
-                // The import registry already keeps this exact module and its globals alive.
-                if matches!(self.get(operand), Value::Module { .. })
-                    && let Value::Dict(entries) = self.get(modules)
-                    && entries.iter().any(|&(_, module)| module == operand)
-                {
-                    return false;
-                }
-                self.could_own_finalizer(operand, false)
-            });
+        let could_own_finalizer = self.execution.current().live.iter().skip(mark).any(|&id| {
+            // A one-argument call roots its operand through a private list.
+            let operand = match self.get(id) {
+                Value::List(items) if items.len() == 1 => items[0],
+                _ => id,
+            };
+            // The import registry already keeps this exact module and its globals alive.
+            if matches!(self.get(operand), Value::Module { .. })
+                && let Value::Dict(entries) = self.get(modules)
+                && entries.iter().any(|&(_, module)| module == operand)
+            {
+                return false;
+            }
+            self.could_own_finalizer(operand, false)
+        });
         if !could_own_finalizer {
             return false;
         }
         self.keep_call_result(mark, result);
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .any(|&writer| {
-                writer != result
+            .any(|&owner| {
+                owner != result
                     && !self.active_binding_matches(|bound| {
                         let mut budget = 8;
-                        self.keeps_finalizer(bound, writer, &mut budget)
+                        self.keeps_finalizer(bound, owner, &mut budget)
                     })
             })
     }
@@ -3615,9 +5496,8 @@ impl Heap {
     pub(super) fn discard_truth_operands(&mut self, mark: usize, modules: Id) -> bool {
         let weak_release = self.has_weak_values
             && self
-                .frames
-                .last()
-                .unwrap()
+                .execution
+                .current()
                 .live
                 .iter()
                 .skip(mark)
@@ -3635,62 +5515,131 @@ impl Heap {
         }
     }
 
+    /// Bound Python arguments are now owned by the entered function's locals.
+    pub(super) fn release_bound_call_operands(&mut self, mark: usize) {
+        let [.., caller, callee] = self.execution.frames.as_mut_slice() else {
+            unreachable!("a bound Python call has both frames")
+        };
+        caller.live.truncate(mark);
+        caller.live.push(callee.owner.root());
+    }
+
     pub fn release_temporaries_since(&mut self, mark: usize) {
-        self.frames.last_mut().unwrap().live.truncate(mark);
+        self.execution.current_mut().live.truncate(mark);
     }
 
     /// Drop an upgraded proxy's temporary root without discarding results returned by its hooks.
     pub(super) fn release_weak_target(&mut self, mark: usize, target: Id) {
-        let root = &mut self.frames.last_mut().unwrap().live[mark];
+        let root = &mut self.execution.current_mut().live[mark];
         debug_assert_eq!(*root, target);
         *root = NONE;
         self.weak_edge_removed(target);
     }
 
     pub fn active_exception(&self) -> Id {
-        self.frames.last().unwrap().active
+        self.execution.current().active
     }
 
     /// Use the caller's exception when no lexical handler encloses this operation.
     pub(super) fn caught_exception(&self, caught: Id) -> Id {
         if caught == NONE {
-            self.frames.last().unwrap().inherited
+            self.execution.current().inherited
         } else {
             caught
         }
     }
 
-    pub fn replace_active(&mut self, exception: Id) -> Id {
-        std::mem::replace(&mut self.frames.last_mut().unwrap().active, exception)
+    pub(super) fn restore_caught(&mut self, caught: Id) {
+        let active = self.caught_exception(caught);
+        let frame = self.execution.current_mut();
+        frame.active = active;
+        frame.has_local_exception = caught != NONE;
     }
 
-    /// Discard a never-entered frame or a compiled comprehension with no exception handlers.
+    pub fn replace_active(&mut self, exception: Id) -> Id {
+        std::mem::replace(&mut self.execution.current_mut().active, exception)
+    }
+
+    /// Release a cold or completed frame. Later close calls see it as exhausted.
     pub(super) fn discard_generator_frame(&mut self, id: Id) {
         let Value::Generator {
             offset,
+            running,
             owner,
             frame,
             scope,
-            iterators,
+
+            native,
             ..
         } = self.get_mut(id)
         else {
             unreachable!("checked generator");
         };
+        *running = false;
         *offset = None;
         *owner = FrameOwner::Module(NONE);
         *frame = None;
         *scope = NONE;
-        iterators.clear();
-        self.disarm_generator_finalizer(id);
+        *native = None;
+        self.disarm_finalizer(id);
+    }
+
+    /// Keep a displaced fast local alive for the lifetime of its materialized frame.
+    pub(super) fn retain_overwritten_local(&mut self, frame: Id, old: Id) -> Result<()> {
+        // The prefix and the canonical short-object caches contain Python singletons.
+        // Other code-owned constants may still be mortal Python objects.
+        let permanent = (old as usize) < FIRST_DYNAMIC_SLOT
+            || match self.get(old) {
+                Value::Bytes(bytes) if bytes.len() <= 1 => {
+                    self.short_bytes.get(&bytes.first().copied()) == Some(&old)
+                }
+                Value::Str(text) if crate::objects::short_index(text).is_some() => {
+                    self.is_interned(old)
+                }
+                Value::Native(name) => super::builtins::is_static_gc_type(name),
+                _ => false,
+            };
+        if permanent {
+            return Ok(());
+        }
+        let Value::PythonFrame {
+            overwritten_fast_locals,
+            ..
+        } = self.get_mut(frame)
+        else {
+            unreachable!()
+        };
+        overwritten_fast_locals
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        overwritten_fast_locals.push(old);
+        Ok(())
+    }
+
+    /// Drop a frame's references only after its execution-state checks succeed.
+    pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
+        self.clear_frame_locals(value)?;
+        let Value::PythonFrame {
+            overwritten_fast_locals,
+            ..
+        } = self.get_mut(value)
+        else {
+            unreachable!()
+        };
+        if !overwritten_fast_locals.is_empty() {
+            *overwritten_fast_locals = Vec::new();
+            self.collect_next_statement = true;
+        }
+        Ok(())
     }
 
     /// Drop the frame's ownership of completed locals without changing captured closure cells.
-    pub(super) fn clear_frame(&mut self, value: Id) -> Result<()> {
+    fn clear_frame_locals(&mut self, value: Id) -> Result<()> {
         let Value::PythonFrame {
             scope,
             unoptimized_locals,
             class_proxy_scope,
+            back,
             ..
         } = *self.get(value)
         else {
@@ -3707,24 +5656,31 @@ impl Heap {
             self.collect_next_statement |= data.closure.extra_locals.take().is_some();
             return Ok(());
         }
-        if scope != NONE && self.frames.iter().any(|frame| frame.scope == scope) {
+        if scope != NONE
+            && self
+                .executions()
+                .flat_map(|execution| &execution.frames)
+                .any(|frame| frame.scope == scope)
+        {
             return Err(Error::new(
                 "RuntimeError",
                 "cannot clear an executing frame",
             ));
         }
-        if let Some((id, offset)) = self
-            .slots
-            .iter()
-            .enumerate()
-            .find_map(|(id, slot)| match &slot.value {
-                Some(Value::Generator {
-                    frame: Some(frame),
-                    offset: Some(offset),
-                    ..
-                }) if *frame == value => Some((id as Id, *offset)),
-                _ => None,
-            })
+        // Ordinary frames retain their caller and cannot be owned by a parked generator.
+        if back.is_none()
+            && let Some((id, offset)) =
+                self.slots
+                    .iter()
+                    .enumerate()
+                    .find_map(|(id, slot)| match &slot.value {
+                        Some(Value::Generator {
+                            frame: Some(frame),
+                            offset: Some(offset),
+                            ..
+                        }) if *frame == value => Some((id as Id, *offset)),
+                        _ => None,
+                    })
         {
             if offset != 0 {
                 return Err(Error::new("RuntimeError", "cannot clear a suspended frame"));
@@ -3739,10 +5695,10 @@ impl Heap {
             };
             data.closure.extra_locals = None;
             if !data.closure.cleared {
-                let closure = &mut *data.closure;
+                let closure = &mut data.closure;
                 closure
                     .declared
-                    .extend(closure.cells.drain().map(|(name, _)| name));
+                    .extend(closure.cells.drain(..).map(|(name, _)| name));
                 closure.cleared = true;
             }
         }
@@ -3758,6 +5714,7 @@ impl Heap {
         };
         *scope = NONE;
         *unoptimized_locals = namespace;
+        self.root_trace.reuse_caller_scopes = true;
         self.collect_next_statement = true;
         Ok(())
     }
@@ -3767,7 +5724,7 @@ impl Heap {
     }
 
     pub fn caller_module_at(&self, depth: usize) -> Option<Id> {
-        let mut owner = self.frames.iter().rev().nth(depth)?.owner;
+        let mut owner = self.execution.frames.iter().rev().nth(depth)?.owner;
         if let FrameOwner::Generator(id) = owner {
             let Value::Generator {
                 owner: function, ..
@@ -3803,46 +5760,82 @@ impl Heap {
 
     pub(super) fn observe_fault_workers(&self, workers: &Arc<()>) {
         self.fault_workers.replace(Some(Arc::downgrade(workers)));
-        self.publish_fault_frames(crate::fault_handler::generation());
+        let generation = crate::fault_handler::generation();
+        if self.fault_generation.get() != Some(generation) {
+            self.publish_fault_frames(generation);
+        }
+    }
+
+    fn filename_display(&self, id: Id) -> Result<std::borrow::Cow<'_, str>> {
+        use std::fmt::Write;
+
+        let value = match self.get(id) {
+            Value::Instance {
+                scalar: Some(text), ..
+            } => self.get(*text),
+            value => value,
+        };
+        match value {
+            Value::Str(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+            Value::SurrogateStr(points) => {
+                let mut label = String::new();
+                for &point in points {
+                    if let Some(ch) = char::from_u32(point) {
+                        label.push(ch);
+                    } else {
+                        write!(label, "\\u{point:04x}").expect("writing to a string");
+                    }
+                }
+                Ok(std::borrow::Cow::Owned(label))
+            }
+            _ => Err(Error::new("TypeError", "expected str")),
+        }
     }
 
     fn publish_fault_frame(&self, index: usize) {
-        let frame = &self.frames[index + 1];
+        let frame = &self.execution.frames[index + 1];
         let Value::Code(code) = self.get(frame.code) else {
             unreachable!("Python frame owns its code");
         };
-        let (Value::Str(filename), Value::Str(name)) =
-            (self.get(code.filename), self.get(code.name))
-        else {
+        let filename = self
+            .filename_display(code.filename)
+            .expect("code filename is text");
+        let Value::Str(name) = self.get(code.name) else {
             unreachable!("code locations and names come from source text");
         };
         let line = frame
             .location
             .as_ref()
             .map_or(code.first_line, |loc| loc.line);
-        crate::fault_handler::frame(index, filename, name, line);
+        crate::fault_handler::frame(index, &filename, name, line);
     }
 
     fn publish_fault_frames(&self, generation: u32) {
         let depth = self.python_depth();
-        for index in depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth {
+        // Rebuild from the leaf. An interrupted refresh can expose a real prefix
+        // of this traceback, but cannot attach older records to the new calls.
+        crate::fault_handler::truncate(0);
+        for index in (depth.saturating_sub(crate::fault_handler::MAX_FRAMES)..depth).rev() {
             self.publish_fault_frame(index);
         }
-        crate::fault_handler::truncate(depth);
         self.fault_generation.set(Some(generation));
     }
 
     /// A new enable period needs all callers, including those already on the stack.
     fn fault_frames_current(&mut self) -> bool {
         let generation = crate::fault_handler::generation();
-        if generation == 0 {
-            let Some(workers) = self.fault_workers.get_mut() else {
-                return false;
-            };
-            if workers.strong_count() == 0 {
-                *self.fault_workers.get_mut() = None;
-                return false;
+        if generation == 0
+            && self
+                .fault_workers
+                .get_mut()
+                .as_ref()
+                .is_none_or(|workers| workers.strong_count() == 0)
+        {
+            *self.fault_workers.get_mut() = None;
+            if self.fault_generation.take().is_some() {
+                crate::fault_handler::truncate(0);
             }
+            return false;
         }
         if self.fault_generation.get() != Some(generation) {
             self.publish_fault_frames(generation);
@@ -3853,47 +5846,49 @@ impl Heap {
 
     /// The first activation is a sentinel outside the Python frame stack.
     pub(super) fn python_depth(&self) -> usize {
-        self.frames.len() - 1
+        self.execution.frames.len() - 1
     }
 
     pub fn current_code(&self) -> Id {
-        self.frames.last().unwrap().code
+        self.execution.current().code
     }
 
     pub fn current_scope(&self) -> Id {
-        self.frames.last().unwrap().scope
+        self.execution.current().scope
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
-    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (&Location, Id)> {
-        self.frames.iter().rev().filter_map(|frame| {
-            frame
-                .location
-                .as_ref()
-                .map(|location| (location, frame.scope))
+    pub(super) fn warning_frames(&self) -> impl Iterator<Item = (Location, Id)> {
+        self.execution.frames.iter().rev().filter_map(|frame| {
+            let mut location = frame.location.clone()?;
+            // The executing expression can be on a later line than the start of its call span.
+            location.line = frame.line(&location);
+            Some((location, frame.scope))
         })
     }
 
     /// Python stack levels start at one and exclude the native root frame.
     pub fn warning_frame(&self, level: i32) -> Option<(Location, Id)> {
-        self.warning_frames()
-            .nth((level.max(1) - 1) as usize)
-            .map(|(location, scope)| (location.clone(), scope))
+        self.warning_frames().nth((level.max(1) - 1) as usize)
+    }
+
+    pub(super) fn take_call_position(&mut self) -> Option<[u32; 4]> {
+        self.execution.current_mut().call_position.take()
     }
 
     pub(super) fn set_call_position(&mut self, position: Option<[u32; 4]>) {
-        self.frames.last_mut().unwrap().call_position = position;
+        self.execution.current_mut().call_position = position;
     }
 
     pub(super) fn replace_expression(
         &mut self,
         position: ExpressionPosition,
     ) -> ExpressionPosition {
-        std::mem::replace(&mut self.frames.last_mut().unwrap().expression, position)
+        std::mem::replace(&mut self.execution.current_mut().expression, position)
     }
 
     pub fn current_location(&self) -> Option<Location> {
-        self.frames.last()?.location.clone()
+        self.execution.frames.last()?.location.clone()
     }
 
     /// Trace the same roots for collection and for a weak interning lookup between collections.
@@ -3901,48 +5896,92 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::SkipScalarLeaves,
         };
         self.mark_roots(globals, &mut pending);
+        #[cfg(target_arch = "x86_64")]
+        self.mark_prefetched(&mut pending);
+        #[cfg(not(target_arch = "x86_64"))]
         while let Some(id) = pending.pop() {
-            self.get(id).children(&mut pending);
+            pending.visit_strong_children(self.get(id));
         }
     }
 
-    fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut MarkQueue<'_>) {
-        pending.extend(globals);
+    /// Trace a batch at a time so the next heap slots and container storage can
+    /// reach the cache before their children are visited. Strong reachability
+    /// is independent of the order in which the queue is drained.
+    #[cfg(target_arch = "x86_64")]
+    fn mark_prefetched(&self, pending: &mut MarkQueue<'_>) {
+        use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
+
+        let mut batch = [NONE; 16];
+        while pending.next != END {
+            let mut len = 0;
+            while let Some(id) = pending.pop() {
+                // SAFETY: SSE is available on x86-64 and the address belongs to a live slot.
+                unsafe {
+                    _mm_prefetch(
+                        std::ptr::from_ref(&self.slots[id as usize]).cast(),
+                        _MM_HINT_T0,
+                    );
+                }
+                batch[len] = id;
+                len += 1;
+                if len == batch.len() {
+                    break;
+                }
+            }
+            for &id in &batch[..len] {
+                let address = match self.get(id) {
+                    Value::Instance { fields, .. } => std::ptr::from_ref(fields.as_ref()).cast(),
+                    Value::Dict(entries) if !entries.is_empty() => entries.as_ptr().cast(),
+                    Value::List(items) | Value::Tuple(items) => {
+                        let Some(last) = items.last() else { continue };
+                        std::ptr::from_ref(last).cast()
+                    }
+                    _ => continue,
+                };
+                // SAFETY: each address points into storage owned by a live container.
+                unsafe {
+                    _mm_prefetch(address, _MM_HINT_T0);
+                }
+            }
+            for &id in &batch[..len] {
+                pending.visit_strong_children(self.get(id));
+            }
+        }
+    }
+
+    fn mark_roots(&self, globals: impl Iterator<Item = Id>, pending: &mut impl VisitReferences) {
+        globals.for_each(pending.visitor());
+        pending.push(self.gc_garbage);
+        pending.push(self.gc_callbacks);
         pending.extend(self.full_collection_members());
-        pending.extend(self.linked_string_constants.values().copied());
-        pending.extend(self.small_ints.values().copied());
+        pending.extend(self.linked_constants.values().copied());
         pending.extend(self.short_bytes.values().copied());
-        pending.extend([NONE, FALSE, TRUE, ELLIPSIS, NOT_IMPLEMENTED, EMPTY_TUPLE]);
         pending.extend(
             self.interned
                 .values()
+                .chain(self.short_strings.values())
                 .filter(|entry| entry.literal)
                 .map(|entry| entry.id),
         );
-        for frame in &self.frames {
-            pending.extend([
-                frame.scope,
-                frame.code,
-                frame.owner.root(),
-                frame.active,
-                frame.inherited,
-            ]);
-            pending.extend(frame.object);
-            pending.extend(&frame.live);
+        pending.extend(self.execution_roots());
+    }
+
+    /// The singleton and small-integer prefix is permanently marked and has no children.
+    fn clear_marks(&self) {
+        for trace in &self.traces[FIRST_DYNAMIC_SLOT..] {
+            trace.set(UNMARKED);
         }
     }
 
     fn reachable(&self, id: Id, roots: impl Iterator<Item = Id>) -> bool {
         self.mark(roots);
         let reachable = self.traces[id as usize].get() != UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         reachable
     }
 
@@ -3967,9 +6006,16 @@ impl Heap {
         let mut cycles = CycleSet::new(self.slots.len())?;
         self.mark_reference_survivors(roots, &mut cycles, None);
         let exports = |slot: &Slot| match slot.value {
-            Some(Value::MemoryView {
-                owner: Some(owner), ..
-            }) => {
+            Some(
+                Value::MemoryView {
+                    owner: Some(owner), ..
+                }
+                | Value::StructUnpackIterator {
+                    buffer: Some(owner),
+                    ..
+                }
+                | Value::RegexScanner { subject: owner, .. },
+            ) => {
                 owner == storage
                     || matches!(self.get(owner),
                     Value::Instance { scalar: Some(backing), .. } | Value::BytesIoBuffer { storage: backing, .. }
@@ -3985,19 +6031,60 @@ impl Heap {
             .zip(&self.traces)
             .filter(|(slot, trace)| trace.get() != UNMARKED && exports(slot))
             .count();
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         self.slots[storage as usize].may_have_buffer_views = live != 0;
         Ok(live)
     }
 
+    pub(super) fn immediate_bases(&self, class: Id) -> &[Id] {
+        let Value::Class {
+            scope, ancestors, ..
+        } = self.get(class)
+        else {
+            // Static types publish their native bases through the context.
+            return &[];
+        };
+        let Value::Scope(data) = self.get(*scope) else {
+            unreachable!()
+        };
+        let Some(ns) = &data.class_namespace else {
+            // Synthetic AST classes store their single direct base first in the lineage.
+            return ancestors.get(..1).unwrap_or_default();
+        };
+        match self.get(ns.bases) {
+            Value::Tuple(bases) => bases,
+            _ => &[],
+        }
+    }
+
+    pub(super) fn register_native_type(&mut self, class: Id) {
+        self.classes.push(class);
+    }
+
+    pub(super) fn registered_types(&self) -> &[Id] {
+        &self.classes
+    }
+
+    pub(super) fn immediate_subclasses(&self, class: Id) -> Vec<Id> {
+        self.classes
+            .iter()
+            .copied()
+            .filter(|&child| self.immediate_bases(child).contains(&class))
+            .collect()
+    }
+
+    pub(super) fn reattach_class(&mut self, class: Id) {
+        self.classes.retain(|&child| child != class);
+        self.classes.push(class);
+    }
+
     /// Every live descendant, including unbound local classes, with parents before children.
     pub(super) fn class_hierarchy(&self, class: Id) -> Vec<Id> {
-        let mut affected = Vec::new();
+        // A resurrected owner is live even after its former parent's weak link expired.
+        let mut affected = vec![(0, class)];
         for &id in &self.classes {
             if let Value::Class { ancestors, .. } = self.get(id)
-                && (id == class || ancestors.contains(&class))
+                && ancestors.contains(&class)
             {
                 affected.push((ancestors.len(), id));
             }
@@ -4014,16 +6101,67 @@ impl Heap {
         self.slots[id as usize].value.as_ref()?.finalizer_class()
     }
 
+    pub(super) fn is_unstarted_coroutine(&self, id: Id) -> bool {
+        matches!(
+            self.get(id),
+            Value::Coroutine { frame, .. }
+                if matches!(self.get(*frame), Value::Generator { offset: Some(0), .. })
+        )
+    }
+
+    /// An expression statement discarded its result. Trace after its temporary roots are gone.
+    pub(super) fn note_discarded_coroutine(&mut self, value: Id) {
+        self.collect_next_statement |=
+            self.has_unstarted_coroutines() && self.is_unstarted_coroutine(value);
+    }
+
+    /// Remember a new coroutine without activating ordinary deallocation checks on each statement.
+    pub(super) fn watch_unstarted_coroutine(&mut self, id: Id) -> Result<()> {
+        self.unstarted_coroutines
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.unstarted_coroutines.push(id);
+        Ok(())
+    }
+
+    pub(super) fn has_unstarted_coroutines(&self) -> bool {
+        !self.unstarted_coroutines.is_empty()
+    }
+
+    pub(super) fn take_unawaited_check(&mut self) -> bool {
+        std::mem::take(&mut self.scheduled_unawaited)
+    }
+
+    /// Schedule only unreachable, still-created coroutines. Cyclic GC preserves its weakref order.
+    fn schedule_unawaited_coroutines(&mut self, cohort: Option<&CycleSet>) {
+        for index in (0..self.unstarted_coroutines.len()).rev() {
+            let id = self.unstarted_coroutines[index];
+            if self.slots[id as usize].finalization == Finalization::None
+                && self.is_unstarted_coroutine(id)
+            {
+                if self.traces[id as usize].get() != UNMARKED
+                    || cohort.is_some_and(|cycles| cycles.incoming[id as usize] == 0)
+                {
+                    continue;
+                }
+                self.register_finalizer(id);
+            }
+            self.unstarted_coroutines.swap_remove(index);
+        }
+    }
+
     pub(super) fn register_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::None {
             self.slots[id as usize].finalization = Finalization::Pending;
             self.ordinary_finalizers.push(id);
-            self.frames.last_mut().unwrap().created_finalizer = true;
+            if let Some(frame) = self.execution.frames.last_mut() {
+                frame.created_finalizer = true;
+            }
         }
     }
 
-    /// Running generators have a live frame. Rearm cleanup only if they suspend again.
-    pub(super) fn disarm_generator_finalizer(&mut self, id: Id) {
+    /// Remove cleanup that a live generator or a closed directory iterator no longer needs.
+    pub(super) fn disarm_finalizer(&mut self, id: Id) {
         if self.slots[id as usize].finalization == Finalization::Pending {
             self.take_finalizer(id, false);
         }
@@ -4041,22 +6179,45 @@ impl Heap {
         !self.ordinary_finalizers.is_empty()
     }
 
-    pub(super) fn pending_full_finalizer(&self) -> Option<Id> {
-        if !self.has_ordinary_finalizers() {
-            return None;
-        }
-        let cohort = self.full_collection.as_ref()?;
-        let mut index = self.gc_order.head;
-        while index != END {
-            let slot = &self.slots[index];
-            if slot.finalization == Finalization::Pending
-                && cohort.incoming.get(index).is_some_and(|&count| count != 0)
-            {
-                return Some(index as Id);
+    /// Finalize original isolate members in encounter order. A previous callback may
+    /// have resumed a generator or changed the class of a later member.
+    pub(super) fn pending_full_finalizer(&mut self) -> Option<Id> {
+        while let Some(index) = self.full_collection.as_mut()?.work.pop() {
+            let id = index as Id;
+            if self.is_pending_finalizer(id) {
+                return Some(id);
             }
-            index = slot.gc_next.get();
+            // Even a plain or never-started generator gets an implicit close in cyclic GC.
+            // Coroutine and async-generator wrappers own their frames' finalization.
+            if !self.finalizer_ran(id)
+                && let Value::Generator { code, .. } = self.get(id)
+                && let Value::Code(code) = self.get(*code)
+                && !code.is_coroutine()
+                && code.definition.flags & imre_ast::code_flags::ASYNC_GENERATOR == 0
+            {
+                self.register_finalizer(id);
+                return Some(id);
+            }
         }
         None
+    }
+
+    pub(super) fn finalizer_ran(&self, id: Id) -> bool {
+        matches!(
+            self.slots[id as usize].finalization,
+            Finalization::Dispatched | Finalization::Finalized
+        )
+    }
+
+    pub(super) fn is_gc_finalized(&self, id: Id) -> bool {
+        self.slots[id as usize].finalization == Finalization::Finalized
+    }
+
+    pub(super) fn mark_gc_finalized(&mut self, id: Id) {
+        let slot = &mut self.slots[id as usize];
+        if slot.has_gc_header {
+            slot.finalization = Finalization::Finalized;
+        }
     }
 
     pub(super) fn take_finalizer(&mut self, id: Id, found: bool) {
@@ -4067,15 +6228,14 @@ impl Heap {
             .unwrap();
         self.ordinary_finalizers.swap_remove(index);
         self.slots[id as usize].finalization = if found {
-            Finalization::Done
+            Finalization::Dispatched
         } else {
             Finalization::None
         };
     }
 
-    /// Look for a short strong path from a current frame to an owner. Recheck every edge:
-    /// assigning an instance field or releasing an operand can invalidate the whole path.
-    fn frame_keeps_instance_owner(&self, owner: Id) -> bool {
+    /// Recheck the stored strong edges, as instance fields and generator exits can change.
+    fn short_path_keeps_owner(&self, root: Id, owner: Id) -> bool {
         fn keeps(heap: &Heap, root: Id, owner: Id, budget: &mut usize) -> bool {
             if *budget == 0 {
                 return false;
@@ -4086,15 +6246,59 @@ impl Heap {
             }
             match heap.get(root) {
                 Value::Method { receiver, .. } => keeps(heap, *receiver, owner, budget),
-                Value::Instance { fields, .. } => fields
-                    .values()
+                Value::LoopIterator { source } => keeps(heap, *source, owner, budget),
+                Value::Map { inputs, .. } | Value::Zip { inputs, .. } => inputs
+                    .iter()
                     .take(*budget)
-                    .any(|&value| keeps(heap, value, owner, budget)),
+                    .any(|&input| keeps(heap, input, owner, budget)),
+                Value::Dict(entries) => entries
+                    .iter()
+                    .take(*budget)
+                    .any(|&(_, value)| keeps(heap, value, owner, budget)),
+                Value::Instance {
+                    fields, dictionary, ..
+                } => {
+                    super::stdlib::io::text_descriptor_chain(heap, root)
+                        .is_some_and(|chain| chain.contains(&owner))
+                        || dictionary
+                            .iter()
+                            .chain(fields.values())
+                            .take(*budget)
+                            .any(|&value| keeps(heap, value, owner, budget))
+                }
+                Value::Generator { scope, native, .. }
+                    if matches!(heap.get(owner), Value::Generator { .. }) =>
+                {
+                    // The generator owns its scope. A still-bound local is a strong
+                    // edge only after the caller has proved a path to this generator.
+                    matches!(heap.get(*scope), Value::Scope(locals)
+                        if (locals.names.values().take(*budget).any(|&id| id == owner)
+                            || locals.names.get(".0").is_some_and(|&iter| keeps(heap, iter, owner, budget))))
+                        || native.as_ref().is_some_and(|saved| {
+                            // The delegate can lie beyond the bounded prefix of frame roots.
+                            saved
+                                .parked_delegate()
+                                .is_some_and(|id| keeps(heap, id, owner, budget))
+                                || saved
+                                    .any_root(*budget, |value| keeps(heap, value, owner, budget))
+                        })
+                }
                 _ => false,
             }
         }
 
-        self.frames.iter().rev().take(8).any(|frame| {
+        let mut budget = 16;
+        keeps(self, root, owner, &mut budget)
+    }
+
+    /// A suspended caller keeps its operands when the current frame releases temporaries.
+    fn caller_keeps_generator(&self, owner: Id) -> bool {
+        matches!(self.get(owner), Value::Generator { .. }) && self.operand_keeps_finalizer(owner, 0)
+    }
+
+    /// Look for a short strong path from a current frame to an owner.
+    fn frame_keeps_owner(&self, owner: Id) -> bool {
+        self.execution.frames.iter().rev().take(8).any(|frame| {
             let locals = match self.get(frame.scope) {
                 Value::Scope(scope) => Some(&scope.names),
                 _ => None,
@@ -4105,32 +6309,45 @@ impl Heap {
                 .rev()
                 .take(8)
                 .chain(locals.into_iter().flat_map(|names| names.values().take(8)))
-                .any(|&root| {
-                    let mut budget = 16;
-                    keeps(self, root, owner, &mut budget)
-                })
-        })
+                .any(|&root| self.short_path_keeps_owner(root, owner))
+        }) || self.caller_keeps_generator(owner)
     }
 
     /// Check the active bindings at previously successful positions and trace their live stream edges.
     fn bound_finalizer_chains(&self) -> [Option<[Id; 3]>; 2] {
         self.finalizer_bindings.get().map(|position| {
             let (frame, slot) = position?;
-            let Value::Scope(scope) = self.get(self.frames.get(frame)?.scope) else {
+            let Value::Scope(scope) = self.get(self.execution.frames.get(frame)?.scope) else {
                 return None;
             };
-            let (_, &owner) = scope.names.get_index(slot)?;
+            let owner = match slot {
+                FinalizerBindingSlot::Local(index) => *scope.names.get_index(index)?.1,
+                FinalizerBindingSlot::Namespace(index) => {
+                    self.dict_entries(scope.namespace?)?.get(index)?.1
+                }
+            };
             Some(super::stdlib::io::text_descriptor_chain(self, owner).unwrap_or([owner; 3]))
         })
     }
 
-    /// Remember where a surviving local keeps the owner so subsequent checks can validate it directly.
+    /// Remember the binding position so later checks can validate its current occupant.
     fn find_finalizer_binding(&self, owner: Id) -> bool {
-        for (frame_index, frame) in self.frames.iter().enumerate().rev() {
+        for (frame_index, frame) in self.execution.frames.iter().enumerate().rev() {
             let Value::Scope(scope) = self.get(frame.scope) else {
                 continue;
             };
-            if let Some(slot) = scope.names.values().position(|&bound| bound == owner) {
+            let slot = scope
+                .names
+                .values()
+                .position(|&bound| bound == owner)
+                .map(FinalizerBindingSlot::Local)
+                .or_else(|| {
+                    self.dict_entries(scope.namespace?)?
+                        .iter()
+                        .position(|&(_, bound)| bound == owner)
+                        .map(FinalizerBindingSlot::Namespace)
+                });
+            if let Some(slot) = slot {
                 let position = Some((frame_index, slot));
                 let [first, _] = self.finalizer_bindings.get();
                 if first != position {
@@ -4138,21 +6355,91 @@ impl Heap {
                 }
                 return true;
             }
-            if let Some(namespace) = scope.namespace
-                && matches!(self.get(namespace), Value::Dict(entries)
-                    if entries.iter().any(|&(_, bound)| bound == owner))
-            {
-                return true;
-            }
         }
         false
     }
 
+    /// Revalidate the iterator hint against the current occupants of both slots.
+    pub(super) fn pending_generator_loop(&self) -> Option<(Id, Id)> {
+        if self.full_collection_active() {
+            return None;
+        }
+        let iterator = self.last_generator_iterator?;
+        let Value::LoopIterator { source } = self.slots.get(iterator as usize)?.value.as_ref()?
+        else {
+            return None;
+        };
+        (self.is_pending_finalizer(*source) && matches!(self.get(*source), Value::Generator { .. }))
+            .then_some((*source, iterator))
+    }
+
+    /// Prove that only the loop iterator can hold the generator and nothing holds the iterator.
+    pub(super) fn generator_loop_is_unowned(
+        &mut self,
+        generator: Id,
+        iterator: Id,
+        globals: impl Iterator<Item = Id>,
+    ) -> bool {
+        let mut incoming = FindReferences {
+            targets: [generator, iterator],
+            found: false,
+        };
+        self.mark_roots(globals, &mut incoming);
+        if incoming.found {
+            return false;
+        }
+        // Most programs never need this ownership census. Grow the cache only at a census.
+        let words = self.slots.len().div_ceil(64);
+        let new_words = words - self.generator_owners.words.len();
+        if self.generator_owners.words.try_reserve(new_words).is_err() {
+            return false;
+        }
+        self.generator_owners.words.resize(words, u64::MAX);
+        let newest = self.latest_generator == Some(generator)
+            && self.latest_generator_loop == Some(iterator);
+        for word in 0..words {
+            let mut candidates = if newest {
+                self.generator_owners.words[word]
+            } else {
+                u64::MAX
+            };
+            while candidates != 0 {
+                let bit = candidates.trailing_zeros();
+                candidates &= candidates - 1;
+                let id = word * 64 + bit as usize;
+                if id >= self.slots.len() {
+                    break;
+                }
+                if id == iterator as usize {
+                    continue;
+                }
+                if self.slot_shapes[id] == SlotShape::Other {
+                    let value = self.get(id as Id);
+                    if value.try_children(&mut incoming).is_err() || incoming.found {
+                        return false;
+                    }
+                    // An older pair says nothing about a newer handle already stored here.
+                    if !newest || !value.directly_stores_children() {
+                        continue;
+                    }
+                }
+                // An unchanged slot excluding both handles also excludes a subsequently
+                // allocated generator or iterator. Revisit it on assignment or reuse.
+                self.generator_owners.words[word] &= !(1 << bit);
+            }
+        }
+        true
+    }
+
     /// Check each registration against the surviving frame bindings and native stream edges.
-    fn frame_keeps_stream_finalizers(&self, stdin: Option<&[Id; 3]>, writers: &[Id]) -> bool {
+    fn frame_keeps_stream_finalizers(
+        &self,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        owners: &[Id],
+    ) -> bool {
         let chains = self.bound_finalizer_chains();
-        self.ordinary_finalizers.iter().chain(writers).all(|owner| {
-            stdin.is_some_and(|input| input.contains(owner))
+        self.ordinary_finalizers.iter().chain(owners).all(|owner| {
+            streams.is_some_and(|roots| roots.contains(owner))
                 || chains.iter().flatten().any(|chain| chain.contains(owner))
                 || self.find_finalizer_binding(*owner)
                 || self.ordinary_finalizers.iter().any(|&stream| {
@@ -4160,17 +6447,23 @@ impl Heap {
                         chain.contains(owner) && self.find_finalizer_binding(stream)
                     })
                 })
+                || chains.iter().flatten().any(|chain| {
+                    matches!(self.get(chain[0]), Value::Instance { fields, .. }
+                        if fields.values().take(16).any(|value| value == owner))
+                })
         })
     }
 
-    pub(super) fn acyclic_finalizer(
-        &self,
+    /// Resolve ordered ownership on the way to the next ordinary destructor.
+    pub(super) fn next_acyclic_finalizer(
+        &mut self,
+        globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
-        stdin: Option<&[Id; 3]>,
+        streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
     ) -> Result<Option<Id>> {
-        // These owners are reachable through the current sys.__stdin__ even in a mixed set.
+        // These owners are reachable through the current standard stream bindings even in a mixed set.
         let mut remaining = self.ordinary_finalizers.len();
-        if let Some(chain) = stdin {
+        if let Some(chain) = streams {
             for (index, &id) in chain.iter().enumerate() {
                 if self.slots[id as usize].finalization == Finalization::Pending
                     && !chain[..index].contains(&id)
@@ -4182,13 +6475,14 @@ impl Heap {
         if remaining == 0 {
             return Ok(None);
         }
-        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(stdin, &[]) {
+        if remaining <= MAX_FRAME_FINALIZERS && self.frame_keeps_stream_finalizers(streams, &[]) {
             return Ok(None);
         }
         // A suspended caller keeps earlier operands live across a nested call.
         // Scan the callers once when only one finalizer needs a reachability check.
         if let [owner] = self.ordinary_finalizers.as_slice()
             && self
+                .execution
                 .frames
                 .iter()
                 .rev()
@@ -4197,14 +6491,52 @@ impl Heap {
         {
             return Ok(None);
         }
-        if remaining == 1
-            && let Some(&owner) = self
-                .ordinary_finalizers
-                .iter()
-                .find(|owner| !stdin.is_some_and(|chain| chain.contains(owner)))
-            && self.frame_keeps_instance_owner(owner)
+        let mut owners = self
+            .ordinary_finalizers
+            .iter()
+            .copied()
+            .filter(|id| !streams.is_some_and(|chain| chain.contains(id)));
+        if (remaining == 1
+            || remaining <= MAX_FRAME_FINALIZERS
+                && owners
+                    .clone()
+                    .all(|id| matches!(self.get(id), Value::Generator { .. })))
+            && owners.all(|id| self.frame_keeps_owner(id))
         {
             return Ok(None);
+        }
+        if (remaining > 1 || !self.cyclic_finalizers.owners.is_empty())
+            && (self.cached_finalizers_kept(globals, streams, None)
+                || (self.learn_finalizer_paths(globals, streams)
+                    && self.cached_finalizers_kept(globals, streams, None)))
+        {
+            return Ok(None);
+        }
+        let mut roots = roots.peekable();
+        let mut context_roots = Vec::new();
+        if self.has_finalizer_cohort() {
+            // Preserve the original root walk, including its remaining suffix if allocation fails.
+            while roots.peek().is_some() && context_roots.try_reserve(1).is_ok() {
+                context_roots.extend(roots.next());
+            }
+            if roots.peek().is_none()
+                && self.retained_paths_keep_owners(context_roots.iter().copied(), false)
+            {
+                return Ok(None);
+            }
+        }
+        // A verified cycle retains its owners even when an unrelated owner needs the
+        // root walk. Count only pending owners that the walk still has to find.
+        let cyclic = self.cyclic_finalizers.verified_owners(self);
+        let needs_root = |id: Id| {
+            !streams.is_some_and(|chain| chain.contains(&id)) && cyclic.binary_search(&id).is_err()
+        };
+        if !cyclic.is_empty() {
+            remaining = self
+                .ordinary_finalizers
+                .iter()
+                .filter(|&&id| needs_root(id))
+                .count();
         }
         // If the roots keep every pending finalizer alive, no finalizer can run.
         // Keep the visited links until the search ends so resetting a partial
@@ -4213,48 +6545,142 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            // Scalar leaves cannot retain a finalizer or participate in a cycle.
+            mode: MarkMode::CycleEdges,
         };
-        self.mark_roots(roots, &mut pending);
+        self.mark_roots(context_roots.into_iter().chain(roots), &mut pending);
         while remaining != 0
             && let Some(id) = pending.pop()
         {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].set(visited);
             visited = id as usize;
-            if slot.finalization == Finalization::Pending
-                && !stdin.is_some_and(|chain| chain.contains(&id))
-            {
+            if slot.finalization == Finalization::Pending && needs_root(id) {
                 remaining -= 1;
             }
             if remaining != 0 {
                 self.get(id).children(&mut pending);
             }
         }
-        let next = if remaining == 0 {
-            Ok(None)
-        } else {
-            CycleSet::new(self.slots.len()).map(|mut cycles| self.identify_cycles(&mut cycles))
-        };
         while let Some(id) = pending.pop() {
             self.traces[id as usize].set(UNMARKED);
         }
+        let next = if remaining == 0 {
+            Ok(None)
+        } else {
+            self.release_unreachable_owners(&mut visited, remaining)
+        };
         while visited != END {
             visited = self.traces[visited].replace(UNMARKED);
         }
         next
     }
 
-    /// Track a file that must flush or close its descriptor when its last owner disappears.
-    pub(super) fn alloc_file_writer(&mut self, file: Value) -> Result<Id> {
-        self.file_writers
+    /// Detaching edges from an unreachable owner leaves the initial live graph intact.
+    /// Only its newly published temporary roots can make more candidates reachable.
+    /// Return to Python with all scratch restored before invoking any callback.
+    fn release_unreachable_owners(
+        &mut self,
+        visited: &mut usize,
+        remaining: usize,
+    ) -> Result<Option<Id>> {
+        let isolated = remaining == 1 && !self.has_weak_values;
+        let candidates = self
+            .unreachable_slots(&[], usize::MAX)
+            .ok_or_else(|| Error::new("MemoryError", ""))?;
+        let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        let next = cycles.prepare(self.slots.len()).and_then(|()| {
+            loop {
+                let (owner, cyclic) = self.identify_indexed_cycles(
+                    &mut cycles,
+                    candidates.iter().copied(),
+                    std::convert::identity,
+                    std::convert::identity,
+                    |id| match self.get(id) {
+                        // With no competing callback, a sole mortal slot has no sibling
+                        // to keep alive during its release. The permanent slots cannot die.
+                        Value::Tuple(items) if isolated => items
+                            .iter()
+                            .filter(|&&item| item as usize >= FIRST_DYNAMIC_SLOT)
+                            .nth(1)
+                            .is_some(),
+                        _ => self.pending_owner_roots(id).is_some(),
+                    },
+                );
+                if cyclic {
+                    if owner.is_none() {
+                        self.cyclic_finalizers =
+                            weak_roots::CycleRetention::from_residual(self, &mut cycles);
+                    }
+                    for &id in &candidates {
+                        cycles.incoming[id] = 0;
+                    }
+                }
+                let Some(owner) = owner else { return Ok(None) };
+                let mark = self.temporary_mark();
+                if !self.release_owner_edge(owner)? {
+                    return Ok(Some(owner));
+                }
+                let mut pending = MarkQueue {
+                    slots: &self.slots,
+                    traces: &self.traces,
+                    slot_shapes: &self.slot_shapes,
+                    next: END,
+                    mode: MarkMode::CycleEdges,
+                };
+                pending.extend(&self.execution.current().live[mark..]);
+                while let Some(id) = pending.pop() {
+                    self.traces[id as usize].set(*visited);
+                    *visited = id as usize;
+                    self.get(id).children(&mut pending);
+                }
+                // A published reference can keep every remaining destructor alive.
+                if self
+                    .ordinary_finalizers
+                    .iter()
+                    .all(|&id| self.traces[id as usize].get() != UNMARKED)
+                {
+                    return Ok(None);
+                }
+            }
+        });
+        self.prompt_cycles = cycles;
+        next
+    }
+
+    /// Retire closed file, socket, and poll handles before tracing unrelated heap objects.
+    pub(super) fn retire_closed_descriptors(&mut self) -> bool {
+        let previous = self.descriptor_owners.len();
+        self.descriptor_owners.retain(|&id| {
+            self.slots[id as usize]
+                .value
+                .as_ref()
+                .is_some_and(Value::owns_open_descriptor)
+        });
+        self.descriptor_owners.len() != previous
+    }
+
+    pub(super) fn track_initialized_descriptor(&mut self, id: Id) -> Result<()> {
+        if !self.descriptor_owners.contains(&id) {
+            self.descriptor_owners
+                .try_reserve(1)
+                .map_err(|_| Error::new("MemoryError", ""))?;
+            self.descriptor_owners.push(id);
+            self.execution.current_mut().created_finalizer = true;
+        }
+        Ok(())
+    }
+
+    /// Track a descriptor whose flush or close is visible when its last owner disappears.
+    pub(super) fn alloc_descriptor_owner(&mut self, value: Value) -> Result<Id> {
+        self.descriptor_owners
             .try_reserve(1)
             .map_err(|_| Error::new("MemoryError", ""))?;
-        let id = self.alloc(file);
-        self.file_writers.push(id);
-        self.frames.last_mut().unwrap().created_finalizer = true;
+        let id = self.alloc(value);
+        self.descriptor_owners.push(id);
+        self.execution.current_mut().created_finalizer = true;
         Ok(id)
     }
 
@@ -4275,6 +6701,7 @@ impl Heap {
         // Frames, operand slots, and fields can all be removed or reused.
         if let Some((frame, operand, field)) = self.caller_finalizer_field
             && self
+                .execution
                 .frames
                 .get(frame)
                 .and_then(|frame| frame.live.get(operand))
@@ -4287,7 +6714,7 @@ impl Heap {
 
         // Earlier operands hold outer expressions such as pending context manager exits.
         // Learn the position while its frame is the immediate caller, before recursion.
-        if let Some((frame_index, caller)) = self.frames.iter().enumerate().rev().nth(1) {
+        if let Some((frame_index, caller)) = self.execution.frames.iter().enumerate().rev().nth(1) {
             for (operand_index, operand) in caller.live.iter().take(8).enumerate() {
                 if let Some(fields) = receiver_fields(operand)
                     && let Some(field) = fields.values().take(8).position(|value| value == owner)
@@ -4303,24 +6730,29 @@ impl Heap {
 
     /// A returned writer or a surviving name keeps a direct owner.
     pub(super) fn has_unbound_finalizer(&self, retained: Id) -> bool {
-        self.file_writers
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
             .any(|&id| id != retained && !self.bound_in_active_frame(id))
     }
 
-    /// A global input stream and a frame-owned stream can keep all registered owners alive.
-    pub(super) fn finalizers_kept_by(&self, input: &[Id; 3]) -> bool {
-        self.file_writers
+    /// Standard streams and frame-owned streams can keep all registered owners alive.
+    pub(super) fn finalizers_kept_by(
+        &self,
+        streams: &crate::dynamic::stdlib::io::StandardStreamRoots,
+    ) -> bool {
+        self.descriptor_owners
             .iter()
             .chain(&self.ordinary_finalizers)
-            .all(|owner| input.contains(owner))
-            || self.frame_keeps_stream_finalizers(Some(input), &self.file_writers)
+            .all(|owner| streams.contains(owner) || self.caller_keeps_generator(*owner))
+            || self.frame_keeps_stream_finalizers(Some(streams), &self.descriptor_owners)
     }
 
-    /// A single interpreter-owned weak reference and its registered module both survive.
-    /// A user-owned reference can itself disappear even while its target stays alive.
-    pub(super) fn weak_module_kept_by(&self, modules: Id, reference: Id) -> bool {
+    /// Both the weak reference and its target must keep a strong path from a surviving root.
+    pub(super) fn weak_values_kept_by(&self, modules: Id, reference: Id) -> bool {
+        if self.cached_weak_roots([modules, reference]) {
+            return true;
+        }
         if self.weak.len() != 1 {
             return self.weak.is_empty();
         }
@@ -4336,27 +6768,27 @@ impl Heap {
     }
 
     pub(super) fn tracks_finalizers(&self) -> bool {
-        !self.file_writers.is_empty() || self.has_ordinary_finalizers()
+        !self.descriptor_owners.is_empty() || self.has_ordinary_finalizers()
     }
 
     /// Count the registrations a root set must cover to avoid a finalizer sweep.
     pub(super) fn tracked_finalizer_count(&self) -> usize {
-        self.file_writers.len() + self.ordinary_finalizers.len()
+        self.descriptor_owners.len() + self.ordinary_finalizers.len()
     }
 
     /// Recheck unbound writers after control flow discards temporary roots.
     pub fn release_unbound_finalizers(&mut self) {
-        self.collect_next_statement |= self.has_unbound_finalizer(NONE);
+        self.check_finalizers_next_statement |= self.has_unbound_finalizer(NONE);
     }
 
     /// Keep the operands needed by later targets after a source assignment releases its old value.
-    pub(super) fn assignment_target(&mut self, live: &[Id], replaced: bool) -> bool {
-        // The private unpack list still owns all items waiting for a target.
+    pub(super) fn assignment_target(&mut self, mark: usize, live: &[Id], replaced: bool) -> bool {
+        // The enclosing expression owns the prefix. Current slots own any pending targets.
         if !replaced || !self.has_unbound_finalizer(NONE) {
             return false;
         }
-        let temporaries = &mut self.frames.last_mut().unwrap().live;
-        temporaries.clear();
+        let temporaries = &mut self.execution.current_mut().live;
+        temporaries.truncate(mark);
         temporaries.extend_from_slice(live);
         true
     }
@@ -4380,24 +6812,61 @@ impl Heap {
         caught: Id,
     ) -> Option<WeakCallbacks> {
         self.publish_statement(live, location, caught);
-        self.collect_if_due(globals)
+        let finalizers = self.take_finalizer_check();
+        if self.take_sweep_request() || finalizers {
+            self.collect(globals)
+        } else {
+            None
+        }
     }
 
     pub(super) fn publish_statement(&mut self, live: &[Id], location: Location, caught: Id) {
-        let active = self.caught_exception(caught);
-        let frame = self.frames.last_mut().unwrap();
-        frame.active = active;
+        self.restore_caught(caught);
+        let frame = self.execution.current_mut();
         let line = location.line;
         frame.location = Some(location);
         frame.expression = ExpressionPosition::Statement;
+        frame.call_position = None;
         frame.live.clear();
         frame.live.extend(live);
         self.set_statement_line(line);
     }
 
+    pub(super) fn set_definition_position(&mut self, range: Option<[u32; 4]>) {
+        self.set_call_position(range);
+        let span = range.map(|[line, end_line, start, end]| {
+            self.set_statement_line(line);
+            self.replace_expression(ExpressionPosition::Statement);
+            TracebackSpan {
+                end_line,
+                start,
+                end,
+                anchor: TracebackAnchor::Hidden,
+            }
+        });
+        self.execution
+            .current_mut()
+            .location
+            .as_mut()
+            .expect("active statement")
+            .span = span;
+    }
+
+    /// Attribute a fault to the operand currently executing in this activation.
+    pub(super) fn use_expression_line(&mut self) {
+        if let Some(frame) = self.execution.frames.last()
+            && let Some(location) = &frame.location
+        {
+            let line = frame.line(location);
+            if line != location.line {
+                self.set_statement_line(line);
+            }
+        }
+    }
+
     /// Update the current source line without crossing a statement boundary.
     pub(super) fn set_statement_line(&mut self, line: u32) {
-        let frame = self.frames.last_mut().unwrap();
+        let frame = self.execution.current_mut();
         frame
             .location
             .as_mut()
@@ -4417,19 +6886,20 @@ impl Heap {
 
     /// A discarded owner or the allocation threshold has requested a sweep.
     pub(super) fn collection_requested(&self) -> bool {
-        self.collect_next_statement || self.watermark_due() || self.gc_schedule.requested()
+        self.collect_next_statement
+            || self.check_finalizers_next_statement
+            || self.watermark_due()
+            || self.gc_schedule.requested()
     }
 
-    /// Reclaim expression temporaries at the heap watermark even with cyclic GC disabled.
-    pub(super) fn collect_if_due(
-        &mut self,
-        globals: impl Iterator<Item = Id>,
-    ) -> Option<WeakCallbacks> {
-        if std::mem::take(&mut self.collect_next_statement) || self.watermark_due() {
-            self.collect(globals)
-        } else {
-            None
-        }
+    /// A potentially unbound finalizer needs its roots checked after publishing the next statement.
+    pub(super) fn take_finalizer_check(&mut self) -> bool {
+        std::mem::take(&mut self.check_finalizers_next_statement)
+    }
+
+    /// Consume a pending heap sweep before assembling its root iterators.
+    pub(super) fn take_sweep_request(&mut self) -> bool {
+        std::mem::take(&mut self.collect_next_statement) || self.watermark_due()
     }
 
     /// Collect early when a streaming consumer cannot reserve its next heap slot.
@@ -4465,17 +6935,19 @@ impl Heap {
     /// A prompt collection models a reference decrement. Preserve cycles until
     /// an automatic or explicit full collection, including cycles created in callbacks.
     pub(super) fn collect(&mut self, globals: impl Iterator<Item = Id>) -> Option<WeakCallbacks> {
-        self.mark_reference_roots(globals, None);
-        let small = self.small_unreachable();
+        let mut trace = std::mem::take(&mut self.root_trace);
+        trace.mark(self, globals);
+        let small = self.unreachable_slots(&trace.covered_runs, 256.max(self.slots.len() / 64));
+        self.root_trace = trace;
         let size = small.as_ref().map_or(self.slots.len(), |slots| slots.len());
-        let Ok(mut cycles) = CycleSet::new(size) else {
-            for trace in &self.traces {
-                trace.set(UNMARKED);
-            }
+        let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        if cycles.prepare(size).is_err() {
+            self.prompt_cycles = cycles;
+            self.clear_marks();
             self.collect_next_statement = true;
             return None;
-        };
-        if let Some(slots) = small {
+        }
+        let cyclic = if let Some(slots) = small {
             self.mark_cycles(
                 &mut cycles,
                 |index| slots[index],
@@ -4484,22 +6956,41 @@ impl Heap {
                         .binary_search(&slot)
                         .expect("unmarked child is a candidate")
                 },
-            );
+            )
         } else {
-            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity);
+            self.mark_cycles(&mut cycles, std::convert::identity, std::convert::identity)
+        };
+        // Peeling an acyclic graph has already cleared every incoming count.
+        if cyclic {
+            cycles.incoming.fill(0);
         }
-        self.sweep()
+        self.prompt_cycles = cycles;
+        let runs = std::mem::take(&mut self.root_trace.covered_runs);
+        let callbacks = self.sweep(&runs);
+        self.root_trace.covered_runs = runs;
+        callbacks
     }
 
-    /// Keep cycle scratch proportional to the garbage when most occupied slots are reachable.
-    fn small_unreachable(&self) -> Option<smallvec::SmallVec<[usize; 256]>> {
+    /// Keep cycle scratch proportional to the garbage using only containers with outgoing edges.
+    fn unreachable_slots(
+        &self,
+        runs: &[Range<usize>],
+        limit: usize,
+    ) -> Option<smallvec::SmallVec<[usize; 256]>> {
         let mut slots = smallvec::SmallVec::new();
-        for (id, trace) in self.traces.iter().enumerate() {
-            if trace.get() == UNMARKED && self.slots[id].value.is_some() {
-                if slots.len() == 256 {
-                    return None;
+        // A sparse candidate graph avoids allocating and scanning counters for the whole heap.
+        for gap in RootTrace::gaps(runs, self.slots.len()) {
+            let shapes = &self.slot_shapes[gap.clone()];
+            for (offset, (mark, shape)) in self.traces[gap.clone()].iter().zip(shapes).enumerate() {
+                if mark.get() == UNMARKED && *shape == SlotShape::Other {
+                    if slots.len() == limit {
+                        return None;
+                    }
+                    if slots.len() == slots.capacity() {
+                        slots.try_reserve(1).ok()?;
+                    }
+                    slots.push(gap.start + offset);
                 }
-                slots.push(id);
             }
         }
         Some(slots)
@@ -4533,13 +7024,27 @@ impl Heap {
         cycles: &mut CycleSet,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) {
-        self.identify_indexed_cycles(cycles, &slot_at, index_of);
-        // Peeling leaves both cycles and their unreachable descendants. Every
-        // strong child of a member is therefore already live or itself a member.
-        for index in cycles.members() {
-            self.traces[slot_at(index as usize)].set(END);
+    ) -> bool {
+        let (_, cyclic) = self.identify_indexed_cycles(
+            cycles,
+            0..cycles.incoming.len(),
+            &slot_at,
+            index_of,
+            |_| false,
+        );
+        if cyclic {
+            let mut children = MarkCycleChildren {
+                traces: &self.traces,
+            };
+            for index in cycles.members() {
+                let id = slot_at(index as usize);
+                self.traces[id].set(END);
+                // Every nonleaf descendant is already a member. Scalar children
+                // have no incoming-count slot in the compact candidate graph.
+                self.get(id as Id).children(&mut children);
+            }
         }
+        cyclic
     }
 
     /// Test a single just-released strong edge. Other pending finalizers, roots and
@@ -4552,17 +7057,105 @@ impl Heap {
         if self.slots[child as usize].finalization != Finalization::Pending {
             return Ok(false);
         }
-        let mut cycles = CycleSet::new(self.slots.len())?;
-        self.mark_reference_survivors(roots, &mut cycles, Some(child));
-        let last = self.traces[child as usize].get() == UNMARKED;
-        for trace in &self.traces {
-            trace.set(UNMARKED);
+        self.released_last_reference(child, roots, Some(child))
+    }
+
+    /// Number of roots needed while this acyclic owner releases its next reference.
+    fn pending_owner_roots(&self, owner: Id) -> Option<usize> {
+        match self.get(owner) {
+            Value::Tuple(items) if items.len() > 1 => Some(items.len() - 1),
+            Value::PythonFrame {
+                scope,
+                back: Some(_),
+                ..
+            } if *scope != NONE => Some(1),
+            _ => None,
         }
+    }
+
+    /// Move the tuple's remaining slots or the frame's caller to the operand stack.
+    fn release_owner_edge(&mut self, owner: Id) -> Result<bool> {
+        let Some(count) = self.pending_owner_roots(owner) else {
+            return Ok(false);
+        };
+        self.reserve_temporaries(count)?;
+        match self.get_mut(owner) {
+            Value::Tuple(items) => {
+                items.pop();
+                let pending = std::mem::take(items);
+                self.execution.current_mut().live.extend(pending);
+            }
+            Value::PythonFrame { scope, back, .. } => {
+                *scope = NONE;
+                let caller = back.take().expect("materialized caller");
+                self.keep(caller);
+            }
+            _ => unreachable!(),
+        }
+        Ok(true)
+    }
+
+    /// Replace a dead list or tuple operand with its owned elements. Popping those roots
+    /// releases elements from the end, including the contents of nested displays.
+    pub(super) fn expand_released_sequence(
+        &mut self,
+        index: usize,
+        roots: impl Iterator<Item = Id>,
+    ) -> bool {
+        let owner = *self.temporary_root(index);
+        if !matches!(self.get(owner), Value::List(items) | Value::Tuple(items) if !items.is_empty())
+        {
+            return false;
+        }
+        *self.temporary_root(index) = NONE;
+        if !self
+            .released_last_reference(owner, roots, None)
+            .unwrap_or(false)
+        {
+            *self.temporary_root(index) = owner;
+            return false;
+        }
+        let (Value::List(items) | Value::Tuple(items)) = self.get_mut(owner) else {
+            unreachable!()
+        };
+        let items = std::mem::take(items);
+        self.release_temporaries_since(index);
+        for item in items {
+            self.keep(item);
+        }
+        true
+    }
+
+    /// Check for references from live frames, finalizers and cycles before deallocation.
+    fn released_last_reference(
+        &self,
+        child: Id,
+        roots: impl Iterator<Item = Id>,
+        releasing: Option<Id>,
+    ) -> Result<bool> {
+        let mut cycles = CycleSet::new(self.slots.len())?;
+        self.mark_reference_survivors(roots, &mut cycles, releasing);
+        let last = self.traces[child as usize].get() == UNMARKED;
+        self.clear_marks();
         Ok(last)
+    }
+
+    pub(super) fn gc_callback(&self, index: usize) -> Option<Id> {
+        let Value::List(callbacks) = self.get(self.gc_callbacks) else {
+            unreachable!("collector-owned callback list")
+        };
+        callbacks.get(index).copied()
     }
 
     pub(super) fn full_collection_active(&self) -> bool {
         self.full_collection.is_some()
+    }
+
+    pub(super) fn in_full_collection(&self, id: Id) -> bool {
+        self.full_collection
+            .as_ref()
+            .and_then(|cycles| cycles.incoming.get(id as usize))
+            .is_some_and(|&count| count != 0)
     }
 
     pub(super) fn full_collection_members(&self) -> impl Iterator<Item = Id> + '_ {
@@ -4571,13 +7164,18 @@ impl Heap {
 
     /// Visit each distinct strong child outside the live graph. The queue skips live
     /// slots automatically; restore its scratch marks before visiting another owner.
-    fn unreachable_children(&self, value: &Value, mut visit: impl FnMut(usize)) {
+    fn unreachable_children(
+        &self,
+        value: &Value,
+        mode: MarkMode<'_>,
+        mut visit: impl FnMut(usize),
+    ) {
         let mut children = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
-            mode: MarkMode::All,
+            mode,
         };
         value.children(&mut children);
         while let Some(id) = children.pop() {
@@ -4600,7 +7198,7 @@ impl Heap {
         let mut pending = MarkQueue {
             slots: &self.slots,
             traces: &self.traces,
-            scalar_leaves: &self.scalar_leaves,
+            slot_shapes: &self.slot_shapes,
             next: END,
             mode: MarkMode::All,
         };
@@ -4618,7 +7216,7 @@ impl Heap {
             self.get(id as Id).children(&mut MarkQueue {
                 slots: &self.slots,
                 traces: &self.traces,
-                scalar_leaves: &self.scalar_leaves,
+                slot_shapes: &self.slot_shapes,
                 next: END,
                 mode: MarkMode::Ordered(&mut scan),
             });
@@ -4649,15 +7247,41 @@ impl Heap {
     /// dead objects that refcounting alone would release from the Python GC count.
     /// The incoming counts must start at zero.
     fn identify_cycles(&self, cycles: &mut CycleSet) -> Option<Id> {
-        self.identify_indexed_cycles(cycles, std::convert::identity, std::convert::identity)
+        let (finalizer, cyclic) = self.identify_indexed_cycles(
+            cycles,
+            0..cycles.incoming.len(),
+            std::convert::identity,
+            std::convert::identity,
+            |_| false,
+        );
+        // Scalars have no outgoing edges and cannot take part in a cycle.
+        // Only the scalars retained by a surviving cycle join its isolate.
+        if cyclic {
+            for id in 0..cycles.incoming.len() {
+                if cycles.incoming[id] != 0 && self.slot_shapes[id] == SlotShape::Other {
+                    self.unreachable_children(
+                        self.slots[id].value.as_ref().unwrap(),
+                        MarkMode::All,
+                        |child| {
+                            if self.slot_shapes[child].is_scalar_leaf() {
+                                cycles.incoming[child] = 1;
+                            }
+                        },
+                    );
+                }
+            }
+        }
+        finalizer
     }
 
     fn identify_indexed_cycles(
         &self,
         cycles: &mut CycleSet,
+        candidates: impl Iterator<Item = usize>,
         slot_at: impl Fn(usize) -> usize,
         index_of: impl Fn(usize) -> usize,
-    ) -> Option<Id> {
+        release_owner: impl Fn(Id) -> bool,
+    ) -> (Option<Id>, bool) {
         let mut first_finalizer = None;
         let CycleSet {
             incoming,
@@ -4665,46 +7289,83 @@ impl Heap {
             ..
         } = cycles;
         unowned.clear();
-        for index in 0..incoming.len() {
+        for index in candidates {
             let id = slot_at(index);
-            if self.traces[id].get() == UNMARKED
-                && let Some(value) = &self.slots[id].value
-            {
-                // Count the candidate itself so that zero denotes a vacant or reachable slot.
-                incoming[index] += 1;
-                self.unreachable_children(value, |child| incoming[index_of(child)] += 1);
+            if self.traces[id].get() == UNMARKED && self.slot_shapes[id] == SlotShape::Other {
+                let value = self.slots[id]
+                    .value
+                    .as_ref()
+                    .expect("occupied cycle candidate");
+                unowned.push(index);
+                self.unreachable_children(value, MarkMode::CycleEdges, |child| {
+                    incoming[index_of(child)] += 1
+                });
             }
         }
-        for (id, count) in incoming.iter_mut().enumerate() {
-            if *count != 0 {
-                *count -= 1;
-                if *count == 0 {
-                    unowned.push(id);
-                }
-            }
+        let mut remaining = unowned.len();
+        unowned.retain(|&index| incoming[index] == 0);
+        // With no edges there is nothing to peel. Preserve the queue's LIFO
+        // finalizer order, including when the compact candidate set is empty.
+        if unowned.len() == remaining {
+            first_finalizer = unowned.iter().rev().find_map(|&index| {
+                let id = slot_at(index);
+                (self.slots[id].finalization == Finalization::Pending).then_some(id as Id)
+            });
+            unowned.clear();
+            return (first_finalizer, false);
         }
+        let mut releasing: Option<(Id, usize)> = None;
         while let Some(index) = unowned.pop() {
+            // Reaching an earlier work item finishes this owner's entire branch.
+            if releasing.is_some_and(|(_, base)| unowned.len() < base) {
+                releasing = None;
+            }
+            remaining -= 1;
             let id = slot_at(index);
             if first_finalizer.is_none() && self.slots[id].finalization == Finalization::Pending {
-                first_finalizer = Some(id as Id);
+                first_finalizer = Some(releasing.map_or(id as Id, |(parent, _)| parent));
             }
-            self.unreachable_children(self.slots[id].value.as_ref().unwrap(), |child| {
-                let child = index_of(child);
-                incoming[child] -= 1;
-                if incoming[child] == 0 {
-                    unowned.push(child);
-                }
-            });
+            if first_finalizer.is_none() && releasing.is_none() && release_owner(id as Id) {
+                releasing = Some((id as Id, unowned.len()));
+            }
+            self.unreachable_children(
+                self.slots[id].value.as_ref().unwrap(),
+                MarkMode::CycleEdges,
+                |child| {
+                    let index = index_of(child);
+                    incoming[index] -= 1;
+                    if incoming[index] == 0 {
+                        unowned.push(index);
+                    } else if first_finalizer.is_none()
+                        && let Some((owner, _)) = releasing
+                        && self.slots[child].finalization == Finalization::Pending
+                    {
+                        // A second dead reference postpones the child past its owner's
+                        // branch. Release through the owner while its siblings are live.
+                        first_finalizer = Some(owner);
+                    }
+                },
+            );
         }
-        first_finalizer
+        (first_finalizer, remaining != 0)
     }
 
-    /// Age participating slots before Python callbacks can allocate into a recycled slot.
-    fn promote_generation(&mut self, generation: u8) {
+    /// Age participating slots and arm cyclic stream finalizers before running callbacks.
+    fn prepare_collection_callbacks(&mut self, generation: u8, cycles: &CycleSet) {
         let next = (generation + 1).min(2);
-        for slot in &mut self.slots {
+        for (id, &incoming) in cycles.incoming.iter().enumerate() {
+            let slot = &mut self.slots[id];
             if slot.generation <= generation {
                 slot.generation = next;
+            }
+            // Cyclic GC calls the inherited IOBase finalizer even when the exact
+            // type's ordinary deallocator bypasses it.
+            if incoming != 0
+                && slot.finalization == Finalization::None
+                && let Some(class) = slot.value.as_ref().and_then(Value::finalizer_class)
+                && self.get(class).is_exact_memory_stream()
+            {
+                self.register_finalizer(id as Id);
             }
         }
     }
@@ -4761,11 +7422,26 @@ impl Heap {
                 .count();
             self.gc_schedule.record_survivors(generation, survivors);
         }
-        self.promote_generation(generation);
-        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None);
+        self.prepare_collection_callbacks(generation, &cycles);
+        // mark_full placed the unreachable objects at the tail in encounter order.
+        // Reuse the cycle workspace as a stack so callbacks can mutate the heap
+        // without making us revisit earlier members or follow a recycled link.
+        cycles.work.clear();
+        let mut id = self.gc_order.tail;
+        while id != END && self.traces[id].get() == UNMARKED {
+            if cycles.incoming[id] != 0 {
+                cycles.work.push(id);
+            }
+            id = self.slots[id].gc_prev.get();
+        }
+        // The per-base subclass links are weak references too. A callback or a
+        // finalizer can ask for __subclasses__ before the isolated objects are swept.
+        self.classes.retain(|&id| cycles.incoming[id as usize] == 0);
+        self.schedule_unawaited_coroutines(Some(&cycles));
+        let mut callbacks = self.clear_weak_targets(Some(&cycles.incoming), None, true);
         cycles.cyclic_callbacks = callbacks.len();
         self.mark(cycles.members());
-        if let Some(acyclic) = self.sweep() {
+        if let Some(acyclic) = self.sweep(&[]) {
             callbacks.extend(acyclic);
         }
         self.full_collection = Some(cycles);
@@ -4809,13 +7485,11 @@ impl Heap {
                 // Weakrefs in the owner's dictionary are still live during its deallocation.
                 self.mark(std::iter::once(owner));
             }
-            self.clear_weak_targets(None, Some(owner))
+            self.clear_weak_targets(None, Some(owner), true)
         } else {
             Vec::new()
         };
-        for trace in &self.traces {
-            trace.set(UNMARKED);
-        }
+        self.clear_marks();
         Ok(callbacks)
     }
 
@@ -4823,21 +7497,22 @@ impl Heap {
         &mut self,
         cyclic: Option<&[usize]>,
         dealloc: Option<Id>,
+        notify: bool,
     ) -> WeakCallbacks {
         // Clear non-owning handles before any dead target slot can be reused. Dead wrappers
         // never receive callbacks, and every live wrapper is cleared before any callback runs.
         let mut callbacks = Vec::new();
-        let live = &mut self.frames.last_mut().unwrap().live;
+        let live = &mut self.execution.current_mut().live;
         self.weak.retain(|&target, refs| {
             if dealloc.is_some_and(|owner| owner != target) {
                 return true;
             }
             if let Some(cyclic) = cyclic {
-                if cyclic[target as usize] == 0 {
+                if cyclic.get(target as usize).copied().unwrap_or(0) == 0 {
                     // A weakref in the isolate must lose even a live referent. A
                     // later finalizer can resurrect the wrapper and observe it.
                     refs.retain(|&id| {
-                        if cyclic[id as usize] == 0 {
+                        if cyclic.get(id as usize).copied().unwrap_or(0) == 0 {
                             return true;
                         }
                         let weak = self.slots[id as usize]
@@ -4870,9 +7545,10 @@ impl Heap {
                         != NONE
                 })
                 .count();
-            let dispatch = callbacks.try_reserve(count).is_ok()
+            let dispatch = notify
+                && callbacks.try_reserve(count).is_ok()
                 && live.try_reserve(count.saturating_mul(2)).is_ok();
-            if !dispatch {
+            if notify && !dispatch {
                 eprintln!("Exception ignored while clearing object weakrefs: MemoryError");
             }
             for &id in refs.iter() {
@@ -4925,30 +7601,112 @@ impl Heap {
     pub(super) fn finish_full_collection(
         &mut self,
         globals: impl Iterator<Item = Id>,
+        ran_python: bool,
     ) -> (usize, Option<WeakCallbacks>) {
         let mut cycles = self
             .full_collection
             .take()
             .expect("finishing active collection");
-        // A callback can release other roots or allocate a new cycle. Those objects are
-        // outside this collection, but their strong edges can keep original candidates alive.
-        let outside = self.slots.iter().enumerate().filter_map(|(id, slot)| {
-            (slot.value.is_some() && cycles.incoming.get(id).copied().unwrap_or(0) == 0)
-                .then_some(id as Id)
-        });
-        self.mark(globals.chain(outside));
-        cycles.incoming.fill(0);
-        self.identify_cycles(&mut cycles);
-        let count = cycles
-            .members()
-            .filter(|&id| self.slots[id as usize].gc_tracked(self))
-            .count();
-        let callbacks = self.sweep();
+        let save_all = self
+            .gc_settings
+            .debug
+            .load(std::sync::atomic::Ordering::Relaxed)
+            & super::gc_schedule::DEBUG_SAVEALL
+            != 0;
+        let mut survivors = std::mem::take(&mut self.prompt_cycles);
+        if ran_python
+            && (save_all || cycles.new_weakref_to_member)
+            && survivors.prepare(self.slots.len()).is_ok()
+        {
+            // A finalizer's dead call frame may still hold self. Only outside owners
+            // that survive refcounting can keep members of the original isolate alive.
+            self.mark_reference_roots(globals, None);
+            self.identify_cycles(&mut survivors);
+            self.mark(
+                survivors
+                    .members()
+                    .filter(|&id| cycles.incoming.get(id as usize).copied().unwrap_or(0) == 0),
+            );
+            for (id, member) in cycles.incoming.iter_mut().enumerate() {
+                if self.traces[id].get() != UNMARKED || survivors.incoming[id] == 0 {
+                    *member = 0;
+                }
+            }
+            survivors.incoming.fill(0);
+        } else {
+            // Preserve the ordinary collection’s outside owners. A callback can release
+            // other roots or allocate a new cycle outside this collection.
+            let outside = self.slots.iter().enumerate().filter_map(|(id, slot)| {
+                (slot.value.is_some() && cycles.incoming.get(id).copied().unwrap_or(0) == 0)
+                    .then_some(id as Id)
+            });
+            self.mark(globals.chain(outside));
+            cycles.incoming.fill(0);
+            self.identify_cycles(&mut cycles);
+        }
+        self.prompt_cycles = survivors;
+        if cycles.new_weakref_to_member {
+            // Finalizers can publish new weakrefs before the last resurrection check.
+            self.clear_weak_targets(Some(&cycles.incoming), None, false);
+        }
+        let count = if save_all {
+            self.save_unreachable(&mut cycles)
+        } else {
+            cycles
+                .members()
+                .filter(|&id| self.is_gc_tracked(id))
+                .count()
+        };
+        let callbacks = self.sweep(&[]);
         // Slots can now be reused. Keep the collection guard until any callbacks
         // from the final sweep return, without retaining stale candidate IDs.
         cycles.incoming.clear();
         self.full_collection = Some(cycles);
         (count, callbacks)
+    }
+
+    /// Publish precisely the tracked members of the final isolate, in collector order.
+    /// Mark the newly installed edges before the existing sweep can reuse their slots.
+    fn save_unreachable(&mut self, cycles: &mut CycleSet) -> usize {
+        // The peel queue is empty after cycle identification. Reuse it to
+        // preserve collector order without borrowing the public list mid-scan.
+        debug_assert!(cycles.work.is_empty());
+        let mut id = self.gc_order.head;
+        while id != END {
+            if cycles.incoming.get(id).copied().unwrap_or(0) != 0 && self.slots[id].gc_tracked(self)
+            {
+                cycles.work.push(id);
+            }
+            id = self.slots[id].gc_next.get();
+        }
+        if !cycles.work.is_empty() {
+            let Value::List(items) = self.get_mut(self.gc_garbage) else {
+                unreachable!("collector-owned list")
+            };
+            let mut saved = 0;
+            for &id in &cycles.work {
+                if items.try_reserve(1).is_err() {
+                    break;
+                }
+                items.push(id as Id);
+                saved += 1;
+            }
+            // Only the new owning edges need marking. This replaces the
+            // scalar-descendant scan used to retain the pre-finalization isolate.
+            self.mark(cycles.work[..saved].iter().map(|&id| id as Id));
+        }
+        cycles.work.len()
+    }
+
+    /// The initial sweep has already released acyclic garbage. If no callbacks ran
+    /// and the isolate is empty, only the final sweep's byte-buffer budget reset remains.
+    pub(super) fn finish_empty_collection(&mut self) -> bool {
+        if self.full_collection_members().next().is_some() {
+            return false;
+        }
+        self.byte_buffer_allowance = BYTE_BUFFER_FLOOR;
+        self.end_full_collection();
+        true
     }
 
     pub(super) fn end_full_collection(&mut self) {
@@ -4964,7 +7722,66 @@ impl Heap {
                 .any(|value| super::stdlib::io::pending_callback_write(self, value))
     }
 
-    fn sweep(&mut self) -> Option<WeakCallbacks> {
+    /// Revisit buffer sizes only when the buffers themselves requested a sweep.
+    #[cold]
+    fn retained_byte_allowance(&self) -> usize {
+        self.slots
+            .iter()
+            .filter_map(|slot| match &slot.value {
+                Some(Value::Bytes(bytes)) => Some(bytes.capacity()),
+                _ => None,
+            })
+            .fold(0, usize::saturating_add)
+            .max(BYTE_BUFFER_FLOOR)
+    }
+
+    /// Recycle unmarked slots in a span which can contain unreachable values.
+    fn sweep_slots(&mut self, span: Range<usize>) {
+        // Vacant slots supply their own free-list links. A sweep can therefore
+        // retire the entire unreachable graph even if the allocator refuses growth.
+        for id in span {
+            if self.traces[id].replace(UNMARKED) == UNMARKED
+                && self.slot_shapes[id] != SlotShape::Vacant
+            {
+                let shape = std::mem::replace(&mut self.slot_shapes[id], SlotShape::Vacant);
+                if self.slots[id].gc_prev.get() != UNMARKED {
+                    self.gc_order.remove(id, &self.slots);
+                }
+                // Only compound values can own a recorded Python hash.
+                if !shape.is_scalar_leaf() {
+                    if self.latest_generator == Some(id as Id) {
+                        self.latest_generator = None;
+                        self.latest_generator_loop = None;
+                    } else if self.latest_generator_loop == Some(id as Id) {
+                        self.latest_generator_loop = None;
+                    }
+                    self.immutable_hashes.remove(&(id as Id));
+                }
+                if self.text_position.get().slot == id as Id {
+                    self.text_position.set(TextPosition::default());
+                }
+                self.root_trace.recycled(id);
+                self.invalidate_stream_bindings(id);
+                let slot = &mut self.slots[id];
+                if slot.has_gc_header {
+                    self.gc_schedule.freed();
+                }
+                slot.value = None;
+                slot.gc_next.set(self.free_head);
+                self.free_head = id;
+                self.free_count += 1;
+            }
+        }
+    }
+
+    fn sweep(&mut self, runs: &[Range<usize>]) -> Option<WeakCallbacks> {
+        let first = self.ordinary_finalizers.len();
+        self.schedule_unawaited_coroutines(None);
+        if first < self.ordinary_finalizers.len() {
+            self.scheduled_unawaited = true;
+            // The warning hook can retain its source, including the arguments in the frame.
+            self.mark(self.ordinary_finalizers[first..].iter().copied());
+        }
         // Finalizers have had their chance to flush or resurrect the writer. Check its
         // actual buffer before recycling any slot, including its raw stream or class.
         if self.discarded_shutdown_write == Some(false)
@@ -4978,10 +7795,13 @@ impl Heap {
         {
             self.discarded_shutdown_write = Some(true);
         }
-        self.default_stderr = self
-            .default_stderr
-            .filter(|&id| self.traces[id as usize].get() != UNMARKED);
-        for id in &mut self.borrowed_hooks {
+        for stream in &mut self.standard_outputs {
+            *stream = stream.filter(|&id| self.traces[id as usize].get() != UNMARKED);
+        }
+        for id in std::iter::once(&mut self.execution)
+            .chain(self.parked_executions.iter_mut().flatten())
+            .flat_map(|state| &mut state.borrowed_hooks)
+        {
             if self.traces[*id as usize].get() == UNMARKED {
                 *id = NONE;
             }
@@ -4990,18 +7810,18 @@ impl Heap {
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
         self.classes
             .retain(|&id| self.traces[id as usize].get() != UNMARKED);
-        self.file_writers.retain(|&id| {
+        self.descriptor_owners.retain(|&id| {
             let slot = &self.slots[id as usize];
             self.traces[id as usize].get() != UNMARKED
-                && match &slot.value {
-                    Some(Value::TextFile(file)) => !file.closed(),
-                    Some(Value::File(file)) => !file.closed(),
-                    _ => false,
-                }
+                && slot.value.as_ref().is_some_and(Value::owns_open_descriptor)
         });
-        self.interned
-            .retain(|_, entry| self.traces[entry.id as usize].get() != UNMARKED);
-        let callbacks = self.clear_weak_targets(None, None);
+        let marked_string =
+            |entry: &InternedString| self.traces[entry.id as usize].get() != UNMARKED;
+        self.interned.retain(|_, entry| marked_string(entry));
+        self.short_strings.retain(|_, entry| marked_string(entry));
+        let callbacks = self.clear_weak_targets(None, None, true);
+        self.linked_sources
+            .retain(|&owner, _| self.traces[owner as usize].get() != UNMARKED);
         self.abc_registrations.retain(|&[owner, member]| {
             self.traces[owner as usize].get() != UNMARKED
                 && self.traces[member as usize].get() != UNMARKED
@@ -5012,27 +7832,26 @@ impl Heap {
         });
         self.allocation_traces
             .retain_live(|id| self.traces[id as usize].get() != UNMARKED);
-        // Vacant slots supply their own free-list links. A sweep can therefore
-        // retire the entire unreachable graph even if the allocator refuses growth.
-        for id in 0..self.slots.len() {
-            let slot = &self.slots[id];
-            if self.traces[id].replace(UNMARKED) == UNMARKED && slot.value.is_some() {
-                self.gc_order.remove(id, &self.slots);
-                let slot = &mut self.slots[id];
-                if slot.has_gc_header {
-                    self.gc_schedule.freed();
-                }
-                slot.value = None;
-                self.immutable_hashes.remove(&(id as Id));
-                slot.gc_next.set(self.free_head);
-                self.free_head = id;
-                self.free_count += 1;
+        for gap in RootTrace::gaps(runs, self.slots.len()) {
+            self.sweep_slots(gap);
+        }
+        for run in runs {
+            for mark in
+                &self.traces[run.start.max(FIRST_DYNAMIC_SLOT)..run.end.max(FIRST_DYNAMIC_SLOT)]
+            {
+                mark.set(UNMARKED);
             }
         }
+        self.byte_buffer_allowance = if self.byte_buffer_allowance == 0 {
+            self.retained_byte_allowance()
+        } else {
+            BYTE_BUFFER_FLOOR
+        };
         // A refused growth request can lower the usual collection floor.
-        let floor = self.next_collection.min(4096);
-        self.next_collection = (self.slots.len() - self.free_count)
-            .saturating_mul(2)
+        let floor = self.next_collection.min(FIRST_DYNAMIC_SLOT + 4096);
+        let live = self.slots.len() - FIRST_DYNAMIC_SLOT - self.free_count;
+        self.next_collection = FIRST_DYNAMIC_SLOT
+            .saturating_add(live.saturating_mul(2))
             .max(floor);
         (!callbacks.is_empty()).then_some(callbacks)
     }
@@ -5041,6 +7860,595 @@ impl Heap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_syntax_error_traces_the_same_members_as_its_raised_instance() {
+        fn assert_send<T: Send>() {}
+        assert_send::<ExecutionState>();
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mark = ctx.heap.temporary_mark();
+        let mut error = Error::new("SyntaxError", "test");
+        ctx.retain_syntax_fields(&mut error, [NONE; 9]).unwrap();
+        let raised = ctx.heap.alloc(Value::Raised(error.clone()));
+        let filename = ctx.heap.alloc(Value::List(Vec::new()));
+        assert!(ctx.update_syntax_member(raised, "filename", filename));
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.execution.pending = Some(error);
+        ctx.collect_generation(2).unwrap();
+        let fields = ctx
+            .syntax_members(ctx.heap.execution.pending.as_ref().unwrap())
+            .unwrap();
+        assert_eq!(fields[1], filename);
+        assert!(matches!(ctx.heap.get(filename), Value::List(_)));
+    }
+
+    #[test]
+    fn parked_executions_keep_their_context_variable_bindings() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("value");
+        let var = ctx.alloc(Value::ContextVar {
+            name,
+            name_hash: 0,
+            default: Some(NONE),
+            repr_active: Default::default(),
+        });
+        let get = ctx.lookup_attr(var, "get").unwrap();
+        let set = ctx.lookup_attr(var, "set").unwrap();
+        let reset = ctx.lookup_attr(var, "reset").unwrap();
+        let token = ctx.call(set, vec![TRUE], vec![]).unwrap();
+
+        let slot = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
+        ctx.call(set, vec![FALSE], vec![]).unwrap();
+        assert_eq!(
+            ctx.call(reset, vec![token], vec![]).unwrap_err().kind,
+            "ValueError"
+        );
+        ctx.heap.execution = ExecutionState::default();
+        ctx.heap.resume_execution(slot);
+
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), TRUE);
+        ctx.call(reset, vec![token], vec![]).unwrap();
+        assert_eq!(ctx.call(get, vec![], vec![]).unwrap(), NONE);
+    }
+
+    #[test]
+    fn parked_asyncgen_hooks_keep_their_callables_and_clear_dead_rollback_slots() {
+        let mut ctx = super::super::ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let sys = ctx.module("sys").unwrap();
+        let set = ctx.lookup_attr(sys, "set_asyncgen_hooks").unwrap();
+        let set_depth = ctx
+            .lookup_attr(sys, "set_coroutine_origin_tracking_depth")
+            .unwrap();
+        let mark = ctx.heap.temporary_mark();
+        let receiver = ctx.alloc(Value::List(Vec::new()));
+        let hook = ctx.lookup_attr(receiver, "append").unwrap();
+        let watch = ctx.heap.native_weak_reference(hook).unwrap();
+        ctx.call(set, vec![hook], vec![]).unwrap();
+        let depth = ctx.int(3);
+        ctx.call(set_depth, vec![depth], vec![]).unwrap();
+
+        // An audit callback can park with a borrowed handle to a displaced finalizer.
+        let previous = ctx.lookup_attr(receiver, "clear").unwrap();
+        ctx.heap.execution.borrowed_hooks.push(previous);
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(watch);
+
+        let slot = ctx.heap.park_execution().unwrap();
+        ctx.heap.execution = ExecutionState::new(None);
+        assert_eq!(ctx.heap.execution.asyncgen_hooks, [NONE; 2]);
+        assert_eq!(ctx.heap.execution.coroutine_origin_depth, 0);
+        assert!(ctx.heap.execution.borrowed_hooks.is_empty());
+        assert!(ctx.heap.borrows_asyncgen_hook(previous));
+        ctx.collect_unreachable();
+        ctx.heap.execution = ExecutionState::default();
+        ctx.heap.resume_execution(slot);
+
+        assert_eq!(ctx.heap.execution.asyncgen_hooks, [hook, NONE]);
+        assert_eq!(ctx.heap.execution.coroutine_origin_depth, 3);
+        assert_eq!(ctx.heap.execution.borrowed_hooks.pop(), Some(NONE));
+        assert_eq!(
+            ctx.heap.get(watch).weak_reference().unwrap().target,
+            Some(hook)
+        );
+        ctx.call(hook, vec![TRUE], vec![]).unwrap();
+        assert!(matches!(ctx.heap.get(receiver), Value::List(items) if items == &[TRUE]));
+        ctx.call(set, vec![NONE], vec![]).unwrap();
+        ctx.collect_unreachable();
+        assert_eq!(ctx.heap.get(watch).weak_reference().unwrap().target, None);
+    }
+
+    #[test]
+    fn parked_buffer_exports_release_with_their_execution() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mut parked = Vec::new();
+        for byte in [1, 2] {
+            let temporaries = ctx.heap.temporary_mark();
+            let storage = ctx.alloc(Value::ByteArray(vec![byte]));
+            let view = ctx.new_memoryview(storage).unwrap();
+            let mark = ctx.begin_buffer_export(view);
+            ctx.begin_buffer_export(storage);
+            ctx.heap.release_temporaries_since(temporaries);
+            let slot = ctx.heap.park_execution().unwrap();
+            parked.push((slot, storage, view, mark));
+            ctx.heap.execution = ExecutionState::new(None);
+        }
+
+        // The two export lists are the only roots left for these views.
+        ctx.collect_generation(2).unwrap();
+        for &(_, storage, view, _) in &parked {
+            assert!(ctx.buffer_is_exported(storage).unwrap());
+            let release = ctx.lookup_attr(view, "release").unwrap();
+            assert_eq!(
+                ctx.call(release, vec![], vec![]).unwrap_err().kind,
+                "BufferError"
+            );
+        }
+        ctx.heap.execution = ExecutionState::default();
+
+        // Finish the first acquisition before the second execution resumes.
+        for (slot, storage, view, mark) in parked {
+            ctx.heap.resume_execution(slot);
+            assert_eq!(ctx.heap.execution.buffer_exports, [view, storage]);
+            let release = ctx.lookup_attr(view, "release").unwrap();
+            assert_eq!(
+                ctx.call(release, vec![], vec![]).unwrap_err().kind,
+                "BufferError"
+            );
+            ctx.heap.execution.buffer_exports.truncate(mark);
+            assert_eq!(ctx.call(release, vec![], vec![]).unwrap(), NONE);
+            assert!(!ctx.buffer_is_exported(storage).unwrap());
+            ctx.heap.execution = ExecutionState::default();
+        }
+        assert_eq!(ctx.heap.buffer_exports().count(), 0);
+    }
+
+    #[test]
+    fn parked_bound_methods_restore_their_own_call_depth() {
+        use super::super::calls::RegisteredCall;
+
+        unsafe extern "C" fn return_self(raw: *mut Context, scope: Id) -> Id {
+            // SAFETY: the registered entry runs with exclusive access to its bound scope.
+            let ctx = unsafe { &mut *raw };
+            let receiver = ctx.lookup(scope, "self").unwrap();
+            let state = ctx.lookup_attr(receiver, "shared").unwrap();
+            let append = ctx.lookup_attr(state, "append").unwrap();
+            ctx.call(append, vec![ctx.heap.execution.asyncgen_hooks[0]], vec![])
+                .unwrap();
+            receiver
+        }
+
+        fn check_depth(ctx: &Context, depth: usize) {
+            assert_eq!(ctx.heap.python_depth(), depth);
+            let remaining = crate::sys::recursion_limit() as usize - depth;
+            ctx.check_call_depth(remaining - 1).unwrap();
+            assert_eq!(
+                ctx.check_call_depth(remaining).unwrap_err().kind,
+                "RecursionError"
+            );
+        }
+
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let globals = ctx.scope("methods", None);
+        let namespace = ctx.scope("methods", Some(globals));
+        let class = ctx
+            .allocate_class("Reader".into(), namespace, vec![])
+            .unwrap();
+        let shared = ctx.alloc(Value::List(Vec::new()));
+        let mut expected = Vec::new();
+        let mut parked = Vec::new();
+        for (method, line, depth) in [("outer", 11, 1), ("inner", 23, 2)] {
+            check_depth(&ctx, 0);
+            assert_eq!(ctx.heap.active_exception(), NONE);
+            let name = ctx.text(method);
+            let signature = ctx.text(r#"{"positional":["self"]}"#);
+            let file = ctx.text("methods.py");
+            let code = ctx.prelinked_code(
+                Body::Native(return_self, NONE),
+                globals,
+                name,
+                signature,
+                (name, NONE),
+                (file, line),
+            );
+            let function = ctx
+                .define_function(code, globals, name, NONE, name, NONE, NONE, false)
+                .unwrap();
+            ctx.set_attr(class, method, function).unwrap();
+            let receiver = ctx.instance(class, None);
+            ctx.set_attr(receiver, "shared", shared).unwrap();
+            let bound = ctx.lookup_attr(receiver, method).unwrap();
+            ctx.heap.execution.asyncgen_hooks[0] = bound;
+            expected.extend(std::iter::repeat_n(bound, depth));
+            let inherited = ctx.alloc(Value::Raised(Error::new("LookupError", method)));
+            ctx.heap.restore_caught(inherited);
+            let mut entries = Vec::new();
+            for _ in 0..depth {
+                let call = ctx.prepare_call(bound, vec![].into(), vec![]).unwrap();
+                let RegisteredCall::Native(entry) = call else {
+                    panic!("expected a registered method");
+                };
+                entries.push(entry);
+            }
+            check_depth(&ctx, depth);
+            assert_eq!(ctx.heap.active_exception(), inherited);
+            let caught = ctx.alloc(Value::Raised(Error::new("ValueError", method)));
+            let location = Location {
+                file: "methods.py".into(),
+                line,
+                span: None,
+            };
+            ctx.heap.publish_statement(&[], location, caught);
+            let frame = ctx.active_frame(0).unwrap().unwrap();
+            let slot = ctx.heap.park_execution().unwrap();
+            parked.push((slot, entries, receiver, inherited, caught, frame));
+            ctx.heap.execution = ExecutionState::new(None);
+        }
+        // The heap must trace both parked stacks, even when the first one resumes first.
+        ctx.collect_unreachable();
+        ctx.heap.execution = ExecutionState::default();
+        for (slot, mut entries, receiver, inherited, caught, frame) in parked {
+            ctx.heap.resume_execution(slot);
+            check_depth(&ctx, entries.len());
+            assert_eq!(ctx.active_frame(0).unwrap(), Some(frame));
+            assert_eq!(ctx.heap.active_exception(), caught);
+            while let Some(entry) = entries.pop() {
+                // SAFETY: the selected bound frame stays in its owning Context through return.
+                assert_eq!(unsafe { entry.run(&raw mut ctx) }.unwrap(), receiver);
+                check_depth(&ctx, entries.len());
+                assert_eq!(ctx.heap.active_exception(), inherited);
+            }
+            ctx.heap.execution = ExecutionState::default();
+        }
+        assert!(matches!(ctx.heap.get(shared), Value::List(items) if items == &expected));
+    }
+
+    #[test]
+    fn worker_bootstrap_uses_its_interpreters_gc_and_tracing_settings() {
+        let main = crate::dynamic::ffi::new_context(
+            serde_json::json!({"python_version": "3.14"}),
+            std::iter::empty::<String>(),
+        );
+        let parent = &main.heap;
+        let independent = Heap::new();
+        parent.set_gc_thresholds(&[1]);
+        parent.allocation_traces.start(3);
+        let heap = Heap::with_worker_stack(
+            Some(WorkerStack::reserve().unwrap()),
+            Arc::clone(&parent.gc_settings),
+            parent.allocation_traces.worker(),
+        );
+        let worker = crate::dynamic::ffi::new_worker_context(main.interpreter.clone(), heap);
+        assert!(worker.threads.private_context);
+        assert!(Arc::ptr_eq(&worker.config, &main.config));
+        assert!(Arc::ptr_eq(&main.interpreter, &worker.interpreter));
+        assert!(worker.heap.gc_schedule.requested());
+        assert!(worker.heap.allocation_traces.get(worker.argv).is_some());
+        assert!(parent.allocation_traces.get(worker.argv).is_none());
+        assert!(!independent.allocation_traces.is_tracing());
+        assert_ne!(independent.gc_thresholds()[0], 1);
+    }
+
+    #[test]
+    fn keep_one_operand_requires_the_same_slot_and_no_pending_release() {
+        let mut heap = Heap::new();
+        heap.keep(TRUE);
+        let mark = heap.temporary_mark();
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        heap.keep(TRUE);
+        assert!(heap.keeps_single_operand(mark, TRUE));
+        assert!(!heap.keeps_single_operand(mark, FALSE));
+        heap.keep(TRUE);
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        heap.release_temporaries_since(mark + 1);
+        heap.check_finalizers_next_statement = true;
+        assert!(!heap.keeps_single_operand(mark, TRUE));
+        assert!(heap.take_finalizer_check());
+        assert!(heap.keeps_single_operand(mark, TRUE));
+    }
+
+    #[test]
+    fn forwarded_yield_releases_only_published_or_retained_handles() {
+        let mut heap = Heap::new();
+        let delegate = heap.alloc(Value::List(Vec::new()));
+        let yielded = heap.alloc(Value::List(Vec::new()));
+        let finalizer = heap.alloc(Value::List(Vec::new()));
+        let weak_target = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(finalizer);
+        let reference = heap.native_weak_reference(weak_target).unwrap();
+        assert!(heap.take_sweep_request());
+        heap.release_temporaries_since(0);
+        heap.keep(reference);
+        heap.execution
+            .frames
+            .push(Frame::new(NONE, NONE, FrameOwner::Module(NONE), NONE));
+
+        heap.keep(delegate);
+        let mark = heap.temporary_mark();
+        heap.keep(delegate);
+        heap.keep(NONE);
+        heap.keep(yielded);
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.publish_to_resumer(Ok(yielded)).unwrap();
+        assert!(heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(!heap.forwarded_roots_survive(0, 0, yielded));
+        assert!(!heap.forwarded_roots_survive(100, 101, yielded));
+
+        for other in [finalizer, weak_target] {
+            let before = heap.temporary_mark();
+            heap.keep(other);
+            assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+            assert_eq!(heap.execution.current().live.last(), Some(&other));
+            heap.release_temporaries_since(before);
+        }
+
+        heap.check_finalizers_next_statement = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(heap.take_finalizer_check());
+        heap.collect_next_statement = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        assert!(heap.take_sweep_request());
+        let next_collection = heap.next_collection;
+        heap.next_collection = heap.slots.len();
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.next_collection = next_collection;
+        heap.gc_settings.set_thresholds(&[1]);
+        heap.gc_schedule.allocated(&heap.gc_settings, false);
+        heap.gc_schedule.allocated(&heap.gc_settings, false);
+        assert!(heap.gc_schedule.requested());
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.gc_schedule.start_collection(0);
+        heap.scheduled_unawaited = true;
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.scheduled_unawaited = false;
+        heap.full_collection = Some(CycleSet::default());
+        assert!(!heap.forwarded_roots_survive(0, mark, yielded));
+        heap.end_full_collection();
+        assert!(heap.forwarded_roots_survive(0, mark, yielded));
+        heap.release_temporaries_since(mark);
+        assert_eq!(heap.execution.frames[1].live.as_slice(), &[delegate]);
+        assert_eq!(
+            heap.execution.frames[0].live.as_slice(),
+            &[reference, yielded]
+        );
+        assert!(heap.is_pending_finalizer(finalizer));
+        assert_eq!(heap.weak_references(weak_target), &[reference]);
+    }
+
+    #[test]
+    fn mutable_container_access_invalidates_an_older_generator_owner_check() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let container = heap.alloc(Value::List(Vec::new()));
+        let new_loop = |heap: &mut Heap| {
+            let generator = heap.alloc(Value::Generator {
+                owner: FrameOwner::Module(NONE),
+                frame: None,
+                name: NONE,
+                qualname: NONE,
+                lineno: 0,
+                code: NONE,
+                scope: NONE,
+
+                native: None,
+                offset: Some(0),
+                running: false,
+            });
+            heap.record_generator_birth(generator);
+            let iterator = heap.alloc(Value::LoopIterator { source: generator });
+            (generator, iterator)
+        };
+        let (first, first_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(first, first_iterator, std::iter::empty()));
+        let (second, second_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        assert_eq!(heap.latest_generator_loop, Some(second_iterator));
+        let index = container as usize;
+        assert_eq!(
+            heap.generator_owners.words[index / 64] & (1 << (index % 64)),
+            0
+        );
+        let (_, Value::List(items)) = heap.source_and_target(first, container).unwrap() else {
+            unreachable!();
+        };
+        items.push(second_iterator);
+        assert!(!heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.clear();
+        assert!(heap.generator_loop_is_unowned(second, second_iterator, std::iter::empty()));
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.push(first);
+        let (third, third_iterator) = new_loop(&mut heap);
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+        assert!(!heap.generator_loop_is_unowned(first, first_iterator, std::iter::empty()));
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.clear();
+        items.push(third);
+        assert!(heap.generator_loop_is_unowned(first, first_iterator, std::iter::empty()));
+        assert!(!heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+
+        let Value::List(items) = heap.get_mut(container) else {
+            unreachable!()
+        };
+        items.clear();
+        let discarded = heap.alloc(Value::List(Vec::new()));
+        heap.release_temporaries_since(mark);
+        assert!(heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+        heap.collect([third, third_iterator].into_iter());
+        let replacement = heap.alloc(Value::List(vec![third_iterator]));
+        assert_eq!(replacement, discarded);
+        heap.release_temporaries_since(mark);
+        assert!(!heap.generator_loop_is_unowned(third, third_iterator, std::iter::empty()));
+    }
+
+    #[test]
+    fn boxed_short_interning_uses_only_the_heap_slot() {
+        let native = crate::objects::literal_string("é");
+        let count = crate::StrOwner::strong_count(&native);
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+
+        // An explicitly distinct result can be weakly interned until a literal adopts it.
+        let distinct = || Value::Str("é".into());
+        let mortal = heap.fresh_string(distinct()).unwrap();
+        assert_eq!(heap.intern(mortal, std::iter::empty()), mortal);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let next = heap.fresh_string(distinct()).unwrap();
+        assert!(!heap.is_interned(next));
+        assert_eq!(heap.intern(next, std::iter::empty()), next);
+        assert_eq!(heap.string_literal("é").unwrap(), next);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        assert_eq!(heap.code_name("é"), next);
+        assert_eq!(heap.alloc(distinct()), next);
+
+        let again = crate::sys::intern_owner(&native);
+        assert!(crate::StrOwner::ptr_eq(&again, &native));
+        drop(again);
+        assert_eq!(crate::StrOwner::strong_count(&native), count);
+    }
+
+    #[test]
+    fn small_integer_identity_survives_collection() {
+        let mut heap = Heap::new();
+        let values = SMALL_INT_MIN..=SMALL_INT_MAX;
+        let ids: Vec<_> = values
+            .clone()
+            .map(|n| heap.alloc(Value::Int(crate::Int::from(n))))
+            .collect();
+        heap.collect(std::iter::empty());
+        for (n, id) in values.zip(ids) {
+            assert!(matches!(heap.get(id), Value::Int(value) if value.as_small() == Some(n)));
+            assert_eq!(heap.alloc(Value::Int(crate::Int::from(n))), id);
+        }
+    }
+
+    #[test]
+    fn standard_stream_bindings_expire_on_scope_writes_and_recycling() {
+        let mut heap = Heap::new();
+        let source = heap.alloc(Value::List(Vec::new()));
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(Scope::new(
+            String::new(),
+            None,
+        ))));
+        let streams = [source, NONE, source];
+        heap.cache_standard_stream_bindings(scope, streams);
+        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
+        assert_eq!(heap.standard_stream_bindings(source), None);
+        heap.get_mut(source);
+        assert_eq!(heap.standard_stream_bindings(scope), Some(streams));
+
+        heap.get_mut(scope);
+        assert_eq!(heap.standard_stream_bindings(scope), None);
+        heap.cache_standard_stream_bindings(scope, streams);
+        heap.source_and_target(source, scope).unwrap();
+        assert_eq!(heap.standard_stream_bindings(scope), None);
+
+        heap.cache_standard_stream_bindings(scope, streams);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert_eq!(heap.alloc(Value::List(Vec::new())), scope);
+        assert_eq!(heap.standard_stream_bindings(scope), None);
+    }
+
+    #[test]
+    fn namespace_finalizer_bindings_follow_the_current_value() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        let namespace = heap.alloc(Value::Dict(vec![(TRUE, owner)].into()));
+        let mut scope = Scope::new(String::new(), None);
+        scope.namespace = Some(namespace);
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+        heap.execution.frames[0].scope = scope;
+
+        assert!(heap.find_finalizer_binding(owner));
+        assert_eq!(heap.bound_finalizer_chains(), [Some([owner; 3]), None]);
+        *heap.get_mut(namespace) = Value::Dict(vec![(FALSE, replacement)].into());
+        assert_eq!(
+            heap.bound_finalizer_chains(),
+            [Some([replacement; 3]), None]
+        );
+        *heap.get_mut(namespace) = Value::Dict(Default::default());
+        assert_eq!(heap.bound_finalizer_chains(), [None; 2]);
+    }
+
+    #[test]
+    fn checking_a_finalizer_preserves_a_byte_buffer_sweep() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        heap.release_temporaries_since(mark);
+        heap.release_unbound_finalizers();
+        assert!(heap.take_finalizer_check());
+        assert!(!heap.take_sweep_request());
+
+        heap.release_unbound_finalizers();
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"allocated");
+        heap.alloc(Value::Bytes(buffer));
+        assert!(heap.take_finalizer_check());
+        assert!(heap.take_sweep_request());
+    }
+
+    #[test]
+    fn an_empty_generation_resets_the_retained_byte_budget() {
+        let mut ctx = super::super::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        ctx.collect_generation(2).unwrap();
+
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"retained");
+        let owner = ctx.heap.alloc(Value::Bytes(buffer));
+        ctx.heap.keep(owner);
+        assert!(ctx.heap.take_sweep_request());
+        assert_eq!(ctx.collect_generation(2).unwrap(), 0);
+        assert!(matches!(ctx.heap.get(owner), Value::Bytes(bytes) if bytes == b"retained"));
+
+        let mut next = Vec::with_capacity(BYTE_BUFFER_FLOOR);
+        next.extend_from_slice(b"again");
+        ctx.heap.alloc(Value::Bytes(next));
+        assert!(ctx.heap.take_sweep_request());
+    }
+
+    #[test]
+    fn byte_buffer_pressure_tracks_retained_capacity() {
+        let mut heap = Heap::new();
+        let mut buffer = Vec::with_capacity(BYTE_BUFFER_FLOOR * 2);
+        buffer.extend_from_slice(b"live");
+        let capacity = buffer.capacity();
+        let live = heap.alloc(Value::Bytes(buffer));
+        assert!(heap.collection_requested());
+        heap.execution.current_mut().live.clear();
+        assert!(heap.take_sweep_request());
+        heap.collect([live].into_iter());
+        assert_eq!(heap.byte_buffer_allowance, capacity);
+
+        let mut buffer = Vec::with_capacity(capacity);
+        buffer.extend_from_slice(b"dead");
+        let dead = heap.bytes_from_data(buffer);
+        heap.execution.current_mut().live.clear();
+        assert!(heap.take_sweep_request());
+        heap.collect([live].into_iter());
+        assert!(heap.slots[dead as usize].value.is_none());
+        assert!(matches!(heap.get(live), Value::Bytes(bytes) if bytes == b"live"));
+        assert_eq!(heap.byte_buffer_allowance, capacity);
+    }
 
     #[test]
     fn reusing_an_object_slot_replaces_its_allocation_trace() {
@@ -5064,6 +8472,23 @@ mod tests {
     }
 
     #[test]
+    fn ascii_offsets_require_an_unchanged_string() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let text = heap.alloc(Value::Str("cat".repeat(200).into()));
+        assert!(heap.is_ascii_str(text));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        let next = heap.alloc(Value::Str("猫".repeat(200).into()));
+        assert_eq!(next, text);
+        assert!(!heap.is_ascii_str(next));
+        let writable = heap.alloc(Value::Str("dog".repeat(200).into()));
+        assert!(heap.is_ascii_str(writable));
+        *heap.get_mut(writable) = Value::Str("café".repeat(200).into());
+        assert!(!heap.is_ascii_str(writable));
+    }
+
+    #[test]
     fn tracing_a_replaced_scalar_visits_its_new_children() {
         let mut heap = Heap::new();
         let mark = heap.temporary_mark();
@@ -5076,6 +8501,31 @@ mod tests {
         assert!(heap.slots[child as usize].value.is_some());
         heap.collect(std::iter::empty());
         assert!(heap.slots[child as usize].value.is_none());
+    }
+
+    #[test]
+    fn prompt_collection_keeps_scalar_children_of_a_cycle() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let cycle = heap.alloc(Value::Str("initially a scalar".into()));
+        let mut children = vec![cycle];
+        for index in 0..300 {
+            children.push(heap.alloc(Value::Str(format!("field-{index}").into())));
+        }
+        let leaf = children[1];
+        let (_, target) = heap.source_and_target(leaf, cycle).unwrap();
+        *target = Value::List(children);
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+        assert!(matches!(heap.get(leaf), Value::Str(text) if text == "field-0"));
+
+        let Value::List(children) = heap.get_mut(cycle) else {
+            unreachable!();
+        };
+        children.clear();
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[leaf as usize].value.is_none());
+        assert!(heap.slots[cycle as usize].value.is_none());
     }
 
     #[test]
@@ -5127,6 +8577,218 @@ mod tests {
     }
 
     #[test]
+    fn full_collection_rechecks_mutated_root_edges_and_reused_slots() {
+        let mut heap = Heap::new();
+        let original = heap.alloc(Value::List(Vec::new()));
+        let root = heap.alloc(Value::List(vec![original]));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.valid);
+
+        let replacement = heap.alloc(Value::List(Vec::new()));
+        let (_, target) = heap.source_and_target(original, root).unwrap();
+        *target = Value::List(vec![replacement]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[original as usize].value.is_none());
+        assert!(heap.slots[replacement as usize].value.is_some());
+
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(reused, original);
+        *heap.get_mut(root) = Value::List(vec![reused]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[replacement as usize].value.is_none());
+        heap.collect([reused].into_iter());
+        assert!(heap.slots[root as usize].value.is_none());
+        assert!(heap.slots[reused as usize].value.is_some());
+    }
+
+    #[test]
+    fn cached_mark_runs_follow_changes_to_their_root() {
+        let mut heap = Heap::new();
+        let mut children: Vec<_> = (0..RootTrace::MIN_RUN_MARKS)
+            .map(|_| heap.alloc(Value::List(Vec::new())))
+            .collect();
+        let hole = children.remove(children.len() / 2);
+        let root = heap.alloc(Value::Tuple(children.clone()));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        let middle = heap.alloc(Value::List(Vec::new()));
+        let tail = heap.alloc(Value::List(Vec::new()));
+        assert_eq!(middle, hole);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[middle as usize].value.is_none());
+        assert!(heap.slots[tail as usize].value.is_none());
+        assert!(
+            heap.traces[FIRST_DYNAMIC_SLOT..]
+                .iter()
+                .all(|mark| mark.get() == UNMARKED)
+        );
+        assert!(
+            heap.root_trace
+                .covered_runs
+                .iter()
+                .any(|run| run.contains(&(children[0] as usize)))
+        );
+        assert!(
+            children
+                .iter()
+                .all(|&id| heap.slots[id as usize].value.is_some())
+        );
+
+        *heap.get_mut(root) = Value::Tuple(Vec::new());
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.covered_runs.is_empty());
+        assert!(
+            children
+                .iter()
+                .all(|&id| heap.slots[id as usize].value.is_none())
+        );
+        let reused = heap.alloc(Value::List(Vec::new()));
+        assert!(children.contains(&reused));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[reused as usize].value.is_none());
+    }
+
+    #[test]
+    fn cached_frame_containers_follow_the_current_binding_and_children() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let original = heap.alloc(Value::Tuple(vec![child; 256]));
+        *heap.get_mut(child) = Value::List(vec![original]);
+        let mut frame = Scope::new(String::new(), None);
+        frame.names.insert(crate::Str::new("items"), original);
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
+        heap.execution.frames[0].scope = scope;
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.root_trace.roots.contains(&original));
+        assert!(heap.slots[child as usize].value.is_some());
+
+        let replacement = heap.alloc(Value::List(vec![NONE; 256]));
+        let Value::Scope(frame) = heap.get_mut(scope) else {
+            unreachable!()
+        };
+        *frame.names.get_mut("items").unwrap() = replacement;
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(!heap.root_trace.roots.contains(&original));
+        assert!(heap.root_trace.roots.contains(&replacement));
+        // Prompt collections retain the unbound cycle until cyclic GC runs.
+        assert!(heap.slots[original as usize].value.is_some());
+        heap.begin_collection(std::iter::empty(), 2).unwrap();
+        heap.finish_full_collection(std::iter::empty(), false);
+        assert!(heap.slots[original as usize].value.is_none());
+        assert!(heap.slots[child as usize].value.is_none());
+
+        let latest = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(replacement) = Value::List(vec![latest; 256]);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[latest as usize].value.is_some());
+        assert!(!heap.root_trace.roots.contains(&replacement));
+
+        for _ in 0..8 {
+            let Value::List(items) = heap.get_mut(replacement) else {
+                unreachable!();
+            };
+            items[0] = latest;
+            heap.collect(std::iter::empty());
+            assert!(!heap.root_trace.roots.contains(&replacement));
+        }
+        for _ in 0..4 {
+            heap.collect(std::iter::empty());
+        }
+        assert!(heap.root_trace.roots.contains(&replacement));
+        let final_child = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(replacement) = Value::List(vec![final_child; 256]);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[latest as usize].value.is_none());
+        assert!(heap.slots[final_child as usize].value.is_some());
+        assert!(!heap.root_trace.roots.contains(&replacement));
+        heap.execution.frames[0].scope = NONE;
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[replacement as usize].value.is_none());
+        assert!(heap.slots[final_child as usize].value.is_none());
+    }
+
+    #[test]
+    fn growing_frame_list_rechecks_the_retained_prefix() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let owner = heap.alloc(Value::List(vec![child; RootTrace::MIN_CONTAINER]));
+        let mut frame = Scope::new(String::new(), None);
+        frame.names.insert(crate::Str::new("items"), owner);
+        heap.execution.frames[0].scope =
+            heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(frame)));
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+
+        let tail = heap.alloc(Value::List(Vec::new()));
+        let Value::List(items) = heap.get_mut(owner) else {
+            unreachable!()
+        };
+        items.push(tail);
+        heap.release_temporaries_since(0);
+        heap.collect(std::iter::empty());
+        assert!(heap.root_trace.roots.contains(&child));
+        assert!(heap.slots[tail as usize].value.is_some());
+
+        let Value::List(items) = heap.get_mut(owner) else {
+            unreachable!()
+        };
+        items[..RootTrace::MIN_CONTAINER].fill(NONE);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[child as usize].value.is_none());
+        assert!(heap.slots[tail as usize].value.is_some());
+    }
+
+    #[test]
+    fn full_collection_follows_new_children_of_a_volatile_descendant() {
+        let mut heap = Heap::new();
+        let child = heap.alloc(Value::List(Vec::new()));
+        let root = heap.alloc(Value::Tuple(vec![child]));
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+
+        let first = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(child) = Value::List(vec![first]);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.root_trace.frontier.contains(&child));
+
+        let second = heap.alloc(Value::List(Vec::new()));
+        *heap.get_mut(child) = Value::List(vec![second]);
+        assert!(heap.root_trace.valid);
+        heap.release_temporaries_since(0);
+        heap.collect([root].into_iter());
+        assert!(heap.slots[first as usize].value.is_none());
+        assert!(heap.slots[second as usize].value.is_some());
+    }
+
+    #[test]
+    fn reuse_frame_storage_after_releasing_temporary_roots() {
+        let mut heap = Heap::new();
+        heap.enter(NONE, NONE, FrameOwner::Function(NONE));
+        let temporary = heap.alloc(Value::List(Vec::new()));
+        let allocation = heap.execution.current().live.as_ptr();
+        heap.leave(NONE, true);
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[temporary as usize].value.is_none());
+
+        heap.enter(NONE, NONE, FrameOwner::Function(NONE));
+        assert_eq!(heap.temporary_mark(), 0);
+        assert_eq!(heap.execution.current().live.as_ptr(), allocation);
+        heap.reserve_temporaries(1024).unwrap();
+        heap.leave(NONE, true);
+        assert_eq!(heap.execution.spare_frame_roots.capacity(), 0);
+    }
+
+    #[test]
     fn reuse_vacant_slots_without_disturbing_survivors() {
         let mut heap = Heap::new();
         let keep = heap.alloc(Value::List(Vec::new()));
@@ -5137,9 +8799,11 @@ mod tests {
         heap.collect(std::iter::empty());
         // A second sweep must leave the free chain intact.
         heap.collect(std::iter::empty());
-        assert_eq!(heap.alloc(Value::Tuple(vec![keep])), parent);
-        assert_eq!(heap.alloc(Value::List(vec![parent])), child);
-        heap.release_temporaries_since(mark);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1024))), parent);
+        *heap.get_mut(parent) = Value::Tuple(vec![keep]);
+        assert_eq!(heap.alloc(Value::Int(crate::Int::from(1025))), child);
+        *heap.source_and_target(keep, child).unwrap().1 = Value::List(vec![parent]);
+        heap.release_temporaries_since(0);
         heap.collect([child].into_iter());
         assert!(matches!(heap.get(parent), Value::Tuple(items) if items == &[keep]));
         assert_eq!(heap.free_count, 0);
@@ -5163,7 +8827,7 @@ mod tests {
         heap.keep(arguments);
         heap.keep(types);
         assert!(heap.discard_scalar_call(mark, TRUE, arguments, NONE));
-        assert_eq!(&heap.frames.last().unwrap().live[mark..], &[TRUE]);
+        assert_eq!(&heap.execution.current().live[mark..], &[TRUE]);
 
         let Value::List(items) = heap.get_mut(arguments) else {
             unreachable!()
@@ -5205,7 +8869,7 @@ mod tests {
                 ctx.heap.discard_scalar_call(mark, result, args, method),
                 release
             );
-            let live = &ctx.heap.frames.last().unwrap().live[mark..];
+            let live = &ctx.heap.execution.current().live[mark..];
             if release {
                 assert_eq!(live, &[result]);
             } else {
@@ -5226,6 +8890,7 @@ mod tests {
             origin: None,
             initializing: false,
             module_state: None,
+            module_slots: None,
             constructor: None,
         });
         let modules = heap.alloc(Value::Dict(vec![(NONE, module)].into()));
@@ -5237,16 +8902,53 @@ mod tests {
     }
 
     #[test]
+    fn a_bound_owners_field_must_still_retain_the_finalizer() {
+        use super::super::{ffi, stdlib};
+
+        let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let scope = ctx.scope("__main__", None);
+        ctx.heap.execution.current_mut().scope = scope;
+        let class = ctx.builtin("object");
+        let root = ctx.instance(class, None);
+        let owner = ctx.alloc(Value::List(Vec::new()));
+        ctx.heap.register_finalizer(root);
+        let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
+            unreachable!()
+        };
+        bindings.names.insert("root".into(), root);
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), owner);
+
+        let input = stdlib::io::rooted_standard_streams(&ctx);
+        assert!(ctx.heap.frame_keeps_stream_finalizers(input.as_ref(), &[]));
+        assert!(
+            ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
+
+        let Value::Instance { fields, .. } = ctx.heap.get_mut(root) else {
+            unreachable!()
+        };
+        fields.insert("resource".into(), NONE);
+        assert!(
+            !ctx.heap
+                .frame_keeps_stream_finalizers(input.as_ref(), &[owner])
+        );
+    }
+
+    #[test]
     fn every_finalizer_must_survive_the_released_operands() {
         use super::super::{ffi, stdlib};
 
         let mut ctx = ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
         let scope = ctx.scope("__main__", None);
-        ctx.heap.frames.last_mut().unwrap().scope = scope;
+        ctx.heap.execution.current_mut().scope = scope;
         let owner = ctx.alloc(Value::List(Vec::new()));
         let writer = ctx.alloc(Value::List(Vec::new()));
         ctx.heap.register_finalizer(owner);
-        let input = stdlib::io::rooted_input_chain(&ctx);
+        let input = stdlib::io::rooted_standard_streams(&ctx);
 
         let Value::Scope(bindings) = ctx.heap.get_mut(scope) else {
             unreachable!()
@@ -5277,7 +8979,7 @@ mod tests {
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
         );
         let replacement = ctx.scope("replacement", None);
-        ctx.heap.frames.last_mut().unwrap().scope = replacement;
+        ctx.heap.execution.current_mut().scope = replacement;
         assert!(
             !ctx.heap
                 .frame_keeps_stream_finalizers(input.as_ref(), &[writer])
@@ -5315,6 +9017,142 @@ mod tests {
             heap.released_last_finalizer_ref(child, [].into_iter())
                 .unwrap()
         );
+    }
+
+    #[test]
+    fn prompt_finalizers_recheck_both_unindexed_edges_of_a_cycle() {
+        for break_cycle in [false, true] {
+            let mut heap = Heap::new();
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            let cell = heap.alloc(Value::Cell(None));
+            let mut scope = Scope::new(String::new(), Some(owner));
+            scope.class_cell = Some(cell);
+            let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+            *heap.get_mut(cell) = Value::Cell(Some(scope));
+            heap.release_temporaries_since(0);
+
+            let check = |heap: &mut Heap| {
+                heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                    .unwrap()
+            };
+            assert_eq!(check(&mut heap), None);
+            assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[owner]);
+
+            let Value::Scope(scope) = heap.get_mut(scope) else {
+                unreachable!()
+            };
+            if break_cycle {
+                scope.class_cell = None;
+            } else {
+                scope.parent = None;
+            }
+            assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+            assert_eq!(check(&mut heap), Some(owner));
+        }
+    }
+
+    #[test]
+    fn prompt_finalizers_recheck_a_cycle_and_its_path_to_the_owner() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let child = heap.alloc(Value::List(vec![owner]));
+        let ring = heap.alloc(Value::List(vec![child]));
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        items.push(ring);
+        heap.release_temporaries_since(0);
+        let check = |heap: &mut Heap| {
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap()
+        };
+        assert_eq!(check(&mut heap), None);
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[owner]);
+        assert_eq!(check(&mut heap), None);
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.insert(0, NONE);
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), None);
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.clear();
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), Some(owner));
+
+        let Value::List(items) = heap.get_mut(child) else {
+            unreachable!()
+        };
+        items.push(owner);
+        assert_eq!(check(&mut heap), None);
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        items.pop();
+        assert_eq!(check(&mut heap), Some(owner));
+    }
+
+    #[test]
+    fn a_rooted_cycle_owner_cannot_account_for_a_different_pending_owner() {
+        let mut heap = Heap::new();
+        let retained = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(retained);
+        let Value::List(edges) = heap.get_mut(retained) else {
+            unreachable!()
+        };
+        edges.push(retained);
+        heap.release_temporaries_since(0);
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap(),
+            None
+        );
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), &[retained]);
+
+        let dying = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(dying);
+        heap.release_temporaries_since(0);
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [retained].into_iter(), None)
+                .unwrap(),
+            Some(dying)
+        );
+    }
+
+    #[test]
+    fn cycle_proof_locates_siblings_in_one_wide_parent() {
+        let mut heap = Heap::new();
+        let ring = heap.alloc(Value::List(Vec::new()));
+        let mut items = vec![NONE; 16_384];
+        items[0] = ring;
+        let mut owners = Vec::new();
+        for slot in items.iter_mut().rev().take(32) {
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            owners.push(owner);
+            *slot = owner;
+        }
+        *heap.get_mut(ring) = Value::List(items);
+        heap.release_temporaries_since(0);
+        let check = |heap: &mut Heap| {
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                .unwrap()
+        };
+        assert_eq!(check(&mut heap), None);
+        owners.sort_unstable();
+        assert_eq!(heap.cyclic_finalizers.verified_owners(&heap), owners);
+        let Value::List(items) = heap.get_mut(ring) else {
+            unreachable!()
+        };
+        let released = std::mem::replace(items.last_mut().unwrap(), NONE);
+        assert!(heap.cyclic_finalizers.verified_owners(&heap).is_empty());
+        assert_eq!(check(&mut heap), Some(released));
     }
 
     #[test]
@@ -5360,8 +9198,11 @@ mod tests {
         heap.release_temporaries_since(mark);
 
         // Only one distinct pending owner is proven by this chain.
-        let chain = [input, buffer, input];
-        let check = |roots| heap.acyclic_finalizer(roots, Some(&chain)).unwrap();
+        let chain = [input, buffer, input, NONE, input];
+        let mut check = |roots| {
+            heap.next_acyclic_finalizer([NONE; 2], roots, Some(&chain))
+                .unwrap()
+        };
         assert_eq!(check(vec![input].into_iter()), Some(dead));
         assert_eq!(check(vec![input, dead].into_iter()), None);
         assert_eq!(check(vec![input].into_iter()), Some(dead));
@@ -5373,6 +9214,7 @@ mod tests {
         let name = heap.alloc(Value::Str("key".into()));
         let key = heap.alloc(Value::ContextVar {
             name,
+            name_hash: crate::python_hash::text("key"),
             default: None,
             repr_active: std::cell::Cell::new(false),
         });
@@ -5411,7 +9253,7 @@ mod reachability_tests {
         let mark = heap.temporary_mark();
         let original = heap.alloc(Value::List(Vec::new()));
         heap.begin_collection(std::iter::empty(), 2).unwrap();
-        heap.finish_full_collection(std::iter::empty());
+        heap.finish_full_collection(std::iter::empty(), false);
         heap.end_full_collection();
         assert_eq!(heap.slots[original as usize].generation, 2);
 
@@ -5455,20 +9297,26 @@ mod reachability_tests {
         heap.collect(std::iter::empty());
 
         // The callback publishes one original cycle and creates a different one.
-        assert_eq!(heap.finish_full_collection([survivor].into_iter()).0, 1);
+        assert_eq!(
+            heap.finish_full_collection([survivor].into_iter(), true).0,
+            1
+        );
         heap.end_full_collection();
         assert!(heap.slots[doomed as usize].value.is_none());
         for owner in [survivor, child, new_cycle] {
             assert!(heap.slots[owner as usize].value.is_some());
         }
         heap.begin_collection(std::iter::empty(), 2).unwrap();
-        assert_eq!(heap.finish_full_collection(std::iter::empty()).0, 3);
+        assert_eq!(heap.finish_full_collection(std::iter::empty(), false).0, 3);
     }
 
     #[test]
-    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers_at_both_sizes() {
-        for garbage in [4, 256, 257] {
+    fn prompt_cycles_preserve_descendants_and_release_acyclic_peers() {
+        for (garbage, live) in [(4, 0), (256, 0), (257, 0), (300, 20_000), (400, 20_000)] {
             let mut heap = Heap::new();
+            for _ in 0..live {
+                heap.alloc(Value::List(Vec::new()));
+            }
             let mark = heap.temporary_mark();
             let dead: Vec<_> = (0..garbage)
                 .map(|_| heap.alloc(Value::List(Vec::new())))

@@ -10,6 +10,20 @@ thread_local! {
     static MODULES: RefCell<Vec<StrOwner>> = const { RefCell::new(Vec::new()) };
 }
 
+/// Keep native calls on growable stack segments while they enter Python frames.
+pub(crate) fn on_call_stack<T>(call: impl FnOnce() -> T) -> T {
+    stacker::maybe_grow(1024 * 1024, 4 * 1024 * 1024, call)
+}
+
+/// The synchronous checked entry borrows its caller's arguments and writes its result there.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_on_call_stack(
+    entry: extern "C" fn(*mut std::ffi::c_void),
+    frame: *mut std::ffi::c_void,
+) {
+    on_call_stack(|| entry(frame));
+}
+
 /// Count an attempted entry until its normal or exceptional cleanup leaves the frame.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_recursion_enter() {
@@ -24,6 +38,15 @@ pub extern "C" fn imre_recursion_enter() {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_recursion_leave() {
     DEPTH.set(DEPTH.get() - 1);
+}
+
+/// Run a checked callback whose compiled body does not count its own frame.
+pub(crate) fn with_recursion_frame<T>(call: impl FnOnce() -> T) -> Option<T> {
+    imre_recursion_enter();
+    let result = (crate::objects::exceptions::imre_error_pending() == 0).then(call);
+    // Both an entry rejected at the limit and a callback raising an exception leave here.
+    imre_recursion_leave();
+    result
 }
 
 /// Enter a Python source frame whose module name can be inspected by a callee.

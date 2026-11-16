@@ -1,7 +1,8 @@
 """Discover interactive examples and compare their output in native programs."""
 
 from collections.abc import Iterator
-from _imre_doctest import ascii_output, execute
+from typing import Callable
+from _imre_doctest import exception_name, execute
 import unittest
 
 DONT_ACCEPT_TRUE_FOR_1 = 1
@@ -55,18 +56,6 @@ def _spaces(line: str) -> int:
     while i < len(line) and line[i] == " ":
         i += 1
     return i
-
-
-def _expand_tabs(line: str) -> str:
-    if line.find("\t") < 0:
-        return line
-    result = ""
-    for char in line:
-        if char == "\t":
-            result += " " * (8 - len(result) % 8)
-        else:
-            result += char
-    return result
 
 
 def _prompt(line: str, indent: int, name: str, lineno: int) -> str:
@@ -135,7 +124,7 @@ class DocTestParser:
         return test
 
     def get_examples(self, string: str, name: str = "<string>") -> list[Example]:
-        lines = [_expand_tabs(line) for line in string.split("\n")]
+        lines = string.expandtabs().split("\n")
         examples: list[Example] = []
         i = 0
         while i < len(lines):
@@ -195,9 +184,13 @@ def _ellipsis(want: str, got: str) -> bool:
 
 
 class OutputChecker:
+    def _toAscii(self, s: str) -> str:
+        """Convert string to hex-escaped ASCII string."""
+        return str(s.encode("ASCII", "backslashreplace"), "ASCII")
+
     def check_output(self, want: str, got: str, optionflags: int) -> bool:
-        want = ascii_output(want)
-        got = ascii_output(got)
+        got = self._toAscii(got)
+        want = self._toAscii(want)
         if want == got:
             return True
         if not optionflags & 1 and ((want == "1\n" and got == "True\n") or
@@ -216,11 +209,43 @@ class OutputChecker:
 
 
 class DocTestFailure(Exception):
-    pass
+    """A DocTest example has failed in debugging mode.
+
+    The exception instance has variables:
+
+    - test: the DocTest object being run
+
+    - example: the Example object that failed
+
+    - got: the actual output
+    """
+    def __init__(self, test, example, got):
+        self.test = test
+        self.example = example
+        self.got = got
+
+    def __str__(self):
+        return str(self.test)
 
 
 class UnexpectedException(Exception):
-    pass
+    """A DocTest example has encountered an unexpected exception
+
+    The exception instance has variables:
+
+    - test: the DocTest object being run
+
+    - example: the Example object that failed
+
+    - exc_info: the exception info
+    """
+    def __init__(self, test, example, exc_info):
+        self.test = test
+        self.example = example
+        self.exc_info = exc_info
+
+    def __str__(self):
+        return str(self.test)
 
 
 def _optionflags(example: Example, flags: int = 0) -> int:
@@ -232,61 +257,101 @@ def _optionflags(example: Example, flags: int = 0) -> int:
     return flags
 
 
-def _check_example(test: DocTest, example: Example, got: str, error: str,
-                   failures: list[str], debug: bool) -> None:
-    _check_output(f"{test.name}, line {example.lineno + 1}", example, got, error,
-                  failures, debug, OutputChecker(), _optionflags(example))
+def _example_location(test: DocTest, example: Example) -> str:
+    if test.filename:
+        base = test.lineno
+        line = "?" if base is None else str(base + example.lineno + 1)
+        return f'File "{test.filename}", line {line}, in {test.name}'
+    return f"Line {example.lineno + 1}, in {test.name}"
 
 
 def _strip_exception_details(message: str) -> str:
     return message.partition("\n")[0].partition(":")[0].split(".")[-1]
 
 
-def _check_output(location: str, example: Example, got: str, error: str,
+def _check_output(test: DocTest, example: Example, got: str, error: str,
                   failures: list[str], debug: bool, checker: OutputChecker, flags: int,
-                  quiet: bool = False) -> bool:
-    want = example.want
+                  quiet: bool = False, exc_info: object = None) -> bool:
+    expected = example.exc_msg
     if error:
-        expected = example.exc_msg
         if expected is not None:
             if checker.check_output(expected, error, flags):
                 return True
-            if flags & 32 and checker.check_output(
+            if flags & IGNORE_EXCEPTION_DETAIL and checker.check_output(
                 _strip_exception_details(expected), _strip_exception_details(error), flags
             ):
                 return True
-        got = error
-    elif checker.check_output(want, got, flags):
+    elif checker.check_output(example.want, got, flags):
         return True
     if quiet:
         return False
-    message = f"{location}\nFailed example:\n{example.source}"
-    if error and example.exc_msg is None:
+    if debug:
+        if error and expected is None:
+            raise UnexpectedException(test, example, exc_info)
+        if exc_info is not None:
+            from traceback import format_exception
+            got += "".join(format_exception(*exc_info))
+        raise DocTestFailure(test, example, got)
+    message = f"{_example_location(test, example)}\nFailed example:\n{example.source}"
+    if error and expected is None:
         message += "Exception raised:\n" + error
     else:
-        message += f"Expected:\n{want}Got:\n{got}"
-    if debug:
-        if error and example.exc_msg is None:
-            raise UnexpectedException(message)
-        raise DocTestFailure(message)
+        message += f"Expected:\n{example.want}Got:\n{error or got}"
     failures.append(message)
     return False
 
 
-def _exception_line(error: Exception) -> str:
-    name = repr(error).partition("(")[0]
+def _exception_line(error: BaseException) -> str:
     message = str(error)
+    name = exception_name(error)
     if message:
         return name + ": " + message + "\n"
     return name + "\n"
 
 
-class DocTestCase(unittest.TestCase):
-    _dt_test: DocTest
+def _call_hook(hook: Callable[[DocTest], None] | None, test: DocTest) -> None:
+    if hook is not None:
+        hook(test)
 
-    def __init__(self, test: DocTest) -> None:
+
+class DocTestCase(unittest.TestCase):
+    _dt_setUp = None
+    _dt_tearDown = None
+    _dt_test: DocTest
+    _dt_globs: dict[str, object]
+    _dt_optionflags: int
+    _dt_checker: OutputChecker | None
+
+    def __init__(self, test: DocTest, optionflags: int = 0,
+                 setUp: Callable[[DocTest], None] | None = None,
+                 tearDown: Callable[[DocTest], None] | None = None,
+                 checker: OutputChecker | None = None) -> None:
         super().__init__()
+        self._dt_optionflags = optionflags
+        self._dt_checker = checker
         self._dt_test = test
+        self._dt_globs = {}
+        self._dt_setUp = setUp
+        self._dt_tearDown = tearDown
+
+    def setUp(self) -> None:
+        test = self._dt_test
+        self._dt_globs = test.globs.copy()
+        _call_hook(self._dt_setUp, test)
+
+    def tearDown(self) -> None:
+        self._tear_down(False)
+
+    def _tear_down(self, restore_on_error: bool) -> None:
+        test = self._dt_test
+        restore = restore_on_error
+        try:
+            _call_hook(self._dt_tearDown, test)
+            restore = True
+        finally:
+            if restore:
+                test.globs.clear()
+                test.globs.update(self._dt_globs)
 
     def id(self) -> str:
         return self._dt_test.name
@@ -295,11 +360,18 @@ class DocTestCase(unittest.TestCase):
         return 1
 
     def runTest(self) -> None:
-        for example in self._dt_test.examples:
-            if not _optionflags(example) & SKIP:
-                execute(self._dt_test, False)
-                return
-        raise unittest.SkipTest("all examples were skipped")
+        execute(self._dt_test, False, self._dt_optionflags, self._dt_checker)
 
     def debug(self) -> None:
-        execute(self._dt_test, True)
+        self.setUp()
+        execute(self._dt_test, True, self._dt_optionflags, self._dt_checker)
+        self.tearDown()
+
+
+def _suite_from_tests(tests: list[DocTest], make_case: Callable[[DocTest], DocTestCase]) -> _DocTestSuite:
+    suite = _DocTestSuite()
+    for test in tests:
+        if len(test.examples) == 0:
+            continue
+        suite.addTest(make_case(test))
+    return suite

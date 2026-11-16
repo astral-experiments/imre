@@ -12,6 +12,8 @@ class BrokenHash:
         raise ValueError("hash called")
 
 
+assert Nested.MissingHash.__module__ == "keys"
+assert Nested.MissingHash.__qualname__ == "Nested.MissingHash"
 assert keyword.iskeyword is iskeyword
 assert keyword.issoftkeyword is issoftkeyword
 assert iskeyword is not issoftkeyword

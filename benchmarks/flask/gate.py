@@ -220,7 +220,6 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--reference-only", action="store_true")
     parser.add_argument("--prove-native", action="store_true", help="attest the native executable, sockets and process tree on Linux")
-    parser.add_argument("--runtime-imports", action="store_true", help="also try native runtime imports at O0 and O3")
     parser.add_argument("--compiler", type=Path)
     parser.add_argument("--runtime", type=Path)
     add_build_timeout(parser)
@@ -230,8 +229,8 @@ def main():
         parser.error(f"run the gate with CPython {expected['python']}")
     if not args.reference_only and not (args.compiler and args.runtime):
         parser.error("supply --compiler and --runtime, or explicitly select --reference-only")
-    if args.reference_only and (args.prove_native or args.runtime_imports):
-        parser.error("--prove-native and --runtime-imports require a native compiler and runtime")
+    if args.reference_only and args.prove_native:
+        parser.error("--prove-native requires a native compiler and runtime")
     report = {"python": sys.version.split()[0], "app_sha256": digest(HERE / "tiny_flask_app.py"), "modes": {}}
     if report["app_sha256"] != expected["app_sha256"]:
         parser.error("the app differs from the recorded reference")
@@ -259,8 +258,6 @@ def main():
             compiler, runtime = args.compiler.resolve(), args.runtime.resolve()
             report.update(compiler_sha256=digest(compiler), runtime_sha256=digest(runtime))
             modes = [("normal", []), ("reachable", ["--reachable-only"])]
-            if args.runtime_imports:
-                modes.append(("runtime-imports", ["--runtime-imports"]))
             for name, flags in modes:
                 for opt in (0, 3):
                     mode = f"{name}-O{opt}"

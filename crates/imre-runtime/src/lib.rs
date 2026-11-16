@@ -1,7 +1,7 @@
 //! Runtime for checked Imre IR on 64-bit hosts.
 //!
 //! Integer handles are either signed 63-bit values tagged with a low one bit, or
-//! live `Shared<BigInt>` pointers to values outside that range. This canonical form
+//! standalone or packed owners of digits outside that range. This canonical form
 //! is always nonzero and lets compiler range proofs imply representation;
 //! extension adapters must normalize incoming integers before exposing them to
 //! generated code.
@@ -37,11 +37,16 @@ mod extensions;
 mod fault_handler;
 mod floats;
 mod format_grammar;
+mod input;
 mod shared;
 #[cfg(unix)]
 mod signals;
+use imre_ast::source_arguments;
 mod string_cursor;
 mod string_owner;
+mod sumprod;
+mod tee;
+mod zstd_streams;
 use shared::Shared;
 type ObjectOwner = Shared<objects::Object>;
 type ListOwner = Shared<List>;
@@ -54,6 +59,8 @@ mod objects;
 mod python_hash;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod run_start;
+
+mod prefix_words;
 
 use objects::exceptions::{Error, Kind, Result, finish};
 
@@ -79,6 +86,14 @@ pub const MAX_LIST_LEN: usize = (isize::MAX as usize) / 8;
 #[repr(transparent)]
 struct Int(usize);
 
+/// Standalone immutable digits leave bit three free for a packed prefix slot.
+#[repr(C, align(16))]
+struct HeapInt(BigInt);
+
+fn wide_owner(value: BigInt) -> Shared<HeapInt> {
+    Shared::new(HeapInt(value))
+}
+
 const _: () =
     assert!(size_of::<Int>() == 8 && align_of::<Int>() == 8 && MAX_LIST_LEN <= MAX_SMALL as usize);
 
@@ -97,14 +112,14 @@ impl Int {
         {
             return small;
         }
-        Self(Shared::into_raw(Shared::new(value)) as usize)
+        Self(Shared::into_raw(wide_owner(value)) as usize)
     }
 
     fn try_new(value: BigInt) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
         if let Some(small) = value.to_i64().and_then(Self::small) {
             return Ok(small);
         }
-        Shared::try_new(value).map(|owner| Self(Shared::into_raw(owner) as usize))
+        Shared::try_new(HeapInt(value)).map(|owner| Self(Shared::into_raw(owner) as usize))
     }
 
     fn try_from_i64(value: i64) -> std::result::Result<Self, allocator_api2::alloc::AllocError> {
@@ -125,26 +140,81 @@ impl Int {
     }
 
     /// Borrows the allocation while the owning handle remains live.
+    #[inline]
     fn big(&self) -> Cow<'_, BigInt> {
         if let Some(value) = self.as_small() {
             Cow::Owned(BigInt::from(value))
+        } else if self.0 & prefix_words::TAG != 0 {
+            Cow::Owned(prefix_words::number(self))
         } else {
-            // SAFETY: Int's invariant owns a live Shared<BigInt> for an untagged handle.
-            Cow::Borrowed(unsafe { &*(self.0 as *const BigInt) })
+            // SAFETY: this aligned word owns standalone immutable digits.
+            Cow::Borrowed(unsafe { &(*(self.0 as *const HeapInt)).0 })
         }
+    }
+
+    fn is_prefix(&self) -> bool {
+        self.0 & (prefix_words::TAG | 1) == prefix_words::TAG
+    }
+
+    fn bits(&self) -> u64 {
+        if let Some(n) = self.as_small() {
+            u64::from(u64::BITS - n.unsigned_abs().leading_zeros())
+        } else if self.is_prefix() {
+            prefix_words::bits(self)
+        } else {
+            self.big().bits()
+        }
+    }
+
+    /// Count the set bits in the absolute value, including for negative integers.
+    fn bit_count(&self) -> Self {
+        let count = if let Some(value) = self.as_small() {
+            u64::from(value.unsigned_abs().count_ones())
+        } else {
+            self.big().magnitude().count_ones()
+        };
+        Self::from_usize(count as usize)
     }
 
     /// Counts magnitude bits, excluding the sign and leading zeroes.
     fn bit_length(&self) -> Self {
-        let bits = self.as_small().map_or_else(
-            || self.big().bits(),
-            |n| u64::from(u64::BITS - n.unsigned_abs().leading_zeros()),
-        );
-        Self::from_usize(bits as usize)
+        Self::from_usize(self.bits() as usize)
+    }
+
+    /// Add tagged operands directly, including when only one input is wide.
+    fn add(&self, other: &Self) -> Self {
+        match (self.as_small(), other.as_small()) {
+            // The full sum of two signed 63-bit values fits i64.
+            (Some(a), Some(b)) => Self::from(a + b),
+            // The numerical backing is immutable. Boxed operations give each
+            // result its own Python object independently of these shared digits.
+            (Some(0), None) => other.clone(),
+            (None, Some(0)) => self.clone(),
+            (Some(a), None) => Self::new(other.big().as_ref() + a),
+            (None, Some(b)) => Self::new(self.big().as_ref() + b),
+            (None, None) => Self::new(self.big().as_ref() + other.big().as_ref()),
+        }
+    }
+
+    /// Every C int fits in the immediate representation of a canonical integer.
+    fn to_c_int(&self) -> Result<libc::c_int> {
+        self.as_small()
+            .and_then(|n| libc::c_int::try_from(n).ok())
+            .ok_or_else(|| {
+                Error::new(
+                    Kind::OverflowError,
+                    "Python int too large to convert to C int",
+                )
+            })
     }
 
     fn to_i64(&self) -> Option<i64> {
         self.as_small().or_else(|| self.big().to_i64())
+    }
+
+    /// Convert a SystemExit integer code to the native process status.
+    fn exit_status(&self) -> i32 {
+        self.to_i64().unwrap_or(-1) as i32
     }
 
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -185,7 +255,13 @@ impl Clone for Int {
     fn clone(&self) -> Self {
         if self.as_small().is_none() {
             // SAFETY: the original Int owns a live strong reference.
-            unsafe { Shared::increment_strong_count(self.0 as *const BigInt) };
+            unsafe {
+                if self.0 & prefix_words::TAG != 0 {
+                    prefix_words::retain(self.0);
+                } else {
+                    Shared::increment_strong_count(self.0 as *const HeapInt);
+                }
+            }
         }
         Self(self.0)
     }
@@ -195,7 +271,13 @@ impl Drop for Int {
     fn drop(&mut self) {
         if self.as_small().is_none() {
             // SAFETY: this Int owns exactly the reference being released.
-            unsafe { Shared::decrement_strong_count(self.0 as *const BigInt) };
+            unsafe {
+                if self.0 & prefix_words::TAG != 0 {
+                    prefix_words::release(self.0);
+                } else {
+                    Shared::decrement_strong_count(self.0 as *const HeapInt);
+                }
+            }
         }
     }
 }
@@ -229,6 +311,25 @@ impl<T> StorageCell<T> {
         read(unsafe { &*self.0.get() })
     }
 
+    /// Read two operands, borrowing their storage once if they are aliases.
+    ///
+    /// # Safety
+    /// The same requirements as `with` apply to both cells. In particular,
+    /// `read` must not reenter either cell or let a storage pointer escape.
+    unsafe fn with_pair<R>(&self, other: &Self, read: impl FnOnce(&T, &T) -> R) -> R {
+        // SAFETY: only distinct cells are entered together. For aliases the two
+        // operands share the immutable reference from a single call to with.
+        unsafe {
+            self.with(|left| {
+                if std::ptr::eq(self, other) {
+                    read(left, left)
+                } else {
+                    other.with(|right| read(left, right))
+                }
+            })
+        }
+    }
+
     /// # Safety
     /// No other reference to this storage may be live. The closure must not
     /// reenter an operation on this cell, and no storage reference or buffer
@@ -242,20 +343,54 @@ impl<T> StorageCell<T> {
 }
 
 /// An opaque, nonmoving list allocation. Only a proven readonly loop borrows its buffer.
-pub struct List(
-    StorageCell<Vec<Int>>,
-    // Capacity charged to this list in the thread's speculative buffer budget.
-    Cell<usize>,
-);
+pub struct List(IntListStorage);
+
+// Lower bits count slots charged to the bounded speculative capacity budget.
+// The high bit proves that every element is a tagged signed 32-bit integer.
+const ALL_I32_LIST_VALUES: usize = 1 << (usize::BITS - 1);
+
+struct IntListStorage {
+    words: StorageCell<Vec<Int>>,
+    flags: Cell<usize>,
+}
+
+impl IntListStorage {
+    #[inline(always)]
+    unsafe fn with<R>(&self, read: impl FnOnce(&Vec<Int>) -> R) -> R {
+        // SAFETY: the caller supplies the nonreentrant storage borrow.
+        unsafe { self.words.with(read) }
+    }
+
+    unsafe fn with_pair<R>(&self, other: &Self, read: impl FnOnce(&Vec<Int>, &Vec<Int>) -> R) -> R {
+        // SAFETY: the caller roots both lists through the read.
+        unsafe { self.words.with_pair(&other.words, read) }
+    }
+
+    #[inline(always)]
+    /// Every mutation, including one through an alias, ends the width proof.
+    unsafe fn with_mut<R>(&self, write: impl FnOnce(&mut Vec<Int>) -> R) -> R {
+        let flags = self.flags.get();
+        if flags & ALL_I32_LIST_VALUES != 0 {
+            self.flags.set(flags & !ALL_I32_LIST_VALUES);
+        }
+        // SAFETY: the caller supplies the exclusive nonreentrant borrow.
+        unsafe { self.words.with_mut(write) }
+    }
+}
 
 impl List {
     fn new(values: Vec<Int>) -> Self {
-        Self(StorageCell::new(values), Cell::new(0))
+        Self(IntListStorage {
+            words: StorageCell::new(values),
+            flags: Cell::new(0),
+        })
     }
 
     fn release_range_hint(&self) {
-        let slots = self.1.replace(0);
+        let flags = self.0.flags.get();
+        let slots = flags & !ALL_I32_LIST_VALUES;
         if slots != 0 {
+            self.0.flags.set(flags & ALL_I32_LIST_VALUES);
             let _ = RANGE_HINT_SLOTS.try_with(|used| used.set(used.get() - slots));
         }
     }
@@ -263,17 +398,21 @@ impl List {
 
 // An unallocated Vec never reads, writes, or frees this address. A real push
 // replaces it with an allocation, even if a later pop empties the list again.
-static SORTING_EMPTY: Int = Int(1);
+struct SortMarker<T>(T);
 
-fn sorting_empty_ints() -> Vec<Int> {
-    let marker = std::ptr::from_ref(&SORTING_EMPTY).cast_mut();
-    // SAFETY: a zero-capacity Vec only requires a nonnull pointer aligned for Int.
-    unsafe { Vec::from_raw_parts(marker, 0, 0) }
+impl<T> SortMarker<T> {
+    fn empty(&'static self) -> Vec<T> {
+        let marker = std::ptr::from_ref(&self.0).cast_mut();
+        // SAFETY: a zero-capacity Vec only requires a nonnull pointer aligned for T.
+        unsafe { Vec::from_raw_parts(marker, 0, 0) }
+    }
+
+    fn is_untouched(&self, values: &[T]) -> bool {
+        std::ptr::eq(values.as_ptr(), &self.0)
+    }
 }
 
-fn is_sorting_empty_ints(values: &[Int]) -> bool {
-    std::ptr::eq(values.as_ptr(), &SORTING_EMPTY)
-}
+static SORTING_EMPTY: SortMarker<Int> = SortMarker(Int(1));
 
 const MAX_REUSED_LIST_CAPACITY: usize = 32_768;
 const MAX_LIVE_RANGE_HINT_SLOTS: usize = 2 * MAX_REUSED_LIST_CAPACITY;
@@ -307,7 +446,7 @@ fn cached_list(values: &mut Vec<Int>) -> Option<ListOwner> {
         .ok()
         .flatten()?;
     let list = ListOwner::get_mut(&mut owner).expect("cached list header is unique");
-    let storage = list.0.0.get_mut();
+    let storage = list.0.words.0.get_mut();
     debug_assert!(storage.is_empty() && storage.capacity() == 0);
     std::mem::swap(storage, values);
     Some(owner)
@@ -319,9 +458,12 @@ fn try_new_list(
     cached_list(&mut values).map_or_else(|| ListOwner::try_new(List::new(values)), Ok)
 }
 
-fn new_list(mut values: Vec<Int>) -> *const List {
-    let owner = cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)));
-    ListOwner::into_raw(owner)
+fn new_list_owner(mut values: Vec<Int>) -> ListOwner {
+    cached_list(&mut values).unwrap_or_else(|| ListOwner::new(List::new(values)))
+}
+
+fn new_list(values: Vec<Int>) -> *const List {
+    ListOwner::into_raw(new_list_owner(values))
 }
 
 /// Consumes a list owner, caching at most two headers whose identities can no
@@ -332,9 +474,7 @@ fn recycle_list_header(mut owner: ListOwner) {
     let Some(list) = ListOwner::get_mut(&mut owner) else {
         return;
     };
-    list.release_range_hint();
-    let values = std::mem::take(list.0.0.get_mut());
-    drop(List::new(values));
+    drop(std::mem::replace(list, List::new(Vec::new())));
     let evicted = LIST_HEADERS.try_with(|headers| {
         let Ok(mut headers) = headers.try_borrow_mut() else {
             return Some(owner);
@@ -401,14 +541,15 @@ fn recycle_list_buffer(values: &mut Vec<Int>) {
 }
 
 impl Drop for List {
-    /// A vectorizable tag reduction skips element cleanup when every integer is
+    /// A producer proof or a tag reduction skips cleanup when every integer is
     /// immediate. Any BigInt leaves the ordinary Vec drop path responsible for
     /// releasing all owners, including repeated references to the same integer.
     fn drop(&mut self) {
         self.release_range_hint();
-        let values = self.0.0.get_mut();
-        let common_tags = values.iter().fold(1_usize, |tags, value| tags & value.0);
-        if common_tags & 1 != 0 {
+        let values = self.0.words.0.get_mut();
+        if self.0.flags.get() & ALL_I32_LIST_VALUES != 0
+            || values.iter().fold(1_usize, |tags, value| tags & value.0) & 1 != 0
+        {
             // SAFETY: a low one bit proves each Int owns no allocation, so its
             // destructor has no effect. Exclusive List destruction owns the Vec;
             // clearing its length permits bounded buffer reuse without owners.
@@ -427,6 +568,21 @@ pub type Str = compact_str::CompactString;
 pub type Bytes = Vec<u8>;
 /// CPython's variable-size bytes header, cached hash and trailing NUL also need to fit.
 pub(crate) const MAX_BYTES_LEN: usize = isize::MAX as usize - (4 * size_of::<usize>() + 1);
+
+/// Reserve initialized I/O storage without touching each page before a read.
+pub(crate) fn zeroed_io_buffer(size: usize) -> Result<Vec<u8>> {
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+    let layout = std::alloc::Layout::array::<u8>(size).map_err(|_| Error::allocation())?;
+    // SAFETY: size is nonzero and layout describes exactly size bytes.
+    let data = unsafe { std::alloc::alloc_zeroed(layout) };
+    if data.is_null() {
+        return Err(Error::allocation());
+    }
+    // SAFETY: this initialized allocation has the layout Vec<u8> uses for size bytes.
+    Ok(unsafe { Vec::from_raw_parts(data, size, size) })
+}
 
 /// Release unused byte capacity when possible, preserving data if allocation fails.
 ///
@@ -591,40 +747,28 @@ fn stdio_settings() -> &'static StdioSettings {
     })
 }
 
-/// Use raw output fds and write-through text streams from the first output operation.
+/// Capture a fixed entry's streams from its startup descriptors. A negative
+/// `utf8_mode` uses the runtime's environment and locale settings.
 #[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_unbuffered_init() {
-    STDIO_SETTINGS.get_or_init(|| StdioSettings {
-        stdout_capacity: 0,
-        stderr_capacity: 0,
-        stdout_line_buffered: false,
-    });
-}
-
-/// Capture buffering from the startup descriptors before user code can replace them.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_init() {
-    prepare_stdio(false, None);
-}
-
-/// Isolated and environment-ignoring commands still select UTF-8 mode from their startup locale.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_isolated_init() {
-    prepare_stdio(true, None);
-}
-
-/// Initialize streams with the effective flags of a native Python command.
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_stdio_command_init(isolated: u32, utf8: u32) {
-    prepare_stdio(isolated != 0, Some(utf8 != 0));
-}
-
-fn prepare_stdio(isolated: bool, utf8: Option<bool>) {
-    python_hash::initialize(isolated);
-    initialize_io();
+pub extern "C" fn imre_stdio_start(ignore_environment: u32, utf8_mode: i32, unbuffered: u32) {
     signals::initialize_interrupt();
-    sys::initialize_encoding(isolated, utf8);
+    prepare_stdio(
+        ignore_environment != 0,
+        (utf8_mode >= 0).then_some(utf8_mode != 0),
+        unbuffered != 0,
+    );
     stdio_settings();
+}
+
+fn prepare_stdio(ignore_environment: bool, utf8: Option<bool>, unbuffered: bool) {
+    if unbuffered {
+        STDIO_SETTINGS.get_or_init(|| StdioSettings {
+            stdout_capacity: 0,
+            stderr_capacity: 0,
+            stdout_line_buffered: false,
+        });
+    }
+    sys::initialize_encoding(ignore_environment, utf8);
 }
 
 impl<W: Write> Output<W> {
@@ -697,22 +841,57 @@ impl<W: Write> BinaryOutput<W> {
         }
     }
 
-    #[cold]
-    fn write_all_slow(&mut self, mut bytes: &[u8]) -> io::Result<()> {
-        let supplied = bytes.len();
-        if let Err(error) = self.flush_buffer() {
-            return self.buffer_after_error(bytes, 0, error);
+    fn try_buffer(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty()
+            || (bytes.len() < self.buffer.capacity()
+                && bytes.len() <= self.buffer.capacity() - self.buffer.len())
+        {
+            self.buffer.extend_from_slice(bytes);
+            return true;
         }
-        while !bytes.is_empty() && bytes.len() >= self.buffer.capacity() {
-            match self.inner.write(bytes) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => bytes = &bytes[count..],
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return self.buffer_after_error(bytes, supplied - bytes.len(), error),
+        false
+    }
+
+    /// Make at most one raw write, committing its count before the caller checks signals.
+    /// A nonblocking write can instead accept the remaining input into the buffer.
+    fn write_step(
+        &mut self,
+        bytes: &[u8],
+        sent: &mut usize,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<bool> {
+        let remaining = &bytes[*sent..];
+        let result = if self.buffer.is_empty() {
+            write(&mut self.inner, remaining).and_then(nonzero_write)
+        } else {
+            self.flush_step(write).map(|()| 0)
+        };
+        match result {
+            Ok(count) => {
+                *sent += count;
+                Ok(true)
+            }
+            Err(error) => {
+                self.buffer_after_error(remaining, *sent, error)?;
+                *sent = bytes.len();
+                Ok(false)
             }
         }
-        self.buffer.extend_from_slice(bytes);
-        Ok(())
+    }
+
+    #[cold]
+    fn write_all_slow(&mut self, bytes: &[u8]) -> io::Result<()> {
+        let mut sent = 0;
+        loop {
+            if let Err(error) = self.write_step(bytes, &mut sent, Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
+            }
+            if self.try_buffer(&bytes[sent..]) {
+                return Ok(());
+            }
+        }
     }
 
     /// After a nonblocking write stalls, keep as much of the new input as fits
@@ -736,18 +915,37 @@ impl<W: Write> BinaryOutput<W> {
         Ok(())
     }
 
+    /// Flush a single prefix. A handler may raise before the next flush.
+    fn flush_step(
+        &mut self,
+        write: impl FnOnce(&mut W, &[u8]) -> io::Result<usize>,
+    ) -> io::Result<()> {
+        let count = nonzero_write(write(&mut self.inner, &self.buffer[self.written..])?)?;
+        self.written += count;
+        if self.written == self.buffer.len() {
+            self.buffer.clear();
+            self.written = 0;
+        }
+        Ok(())
+    }
+
     fn flush_buffer(&mut self) -> io::Result<()> {
-        while self.written < self.buffer.len() {
-            match self.inner.write(&self.buffer[self.written..]) {
-                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
-                Ok(count) => self.written += count,
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(error) => return Err(error),
+        while !self.buffer.is_empty() {
+            if let Err(error) = self.flush_step(Write::write)
+                && error.kind() != io::ErrorKind::Interrupted
+            {
+                return Err(error);
             }
         }
-        self.buffer.clear();
-        self.written = 0;
         Ok(())
+    }
+}
+
+fn nonzero_write(count: usize) -> io::Result<usize> {
+    if count == 0 {
+        Err(io::ErrorKind::WriteZero.into())
+    } else {
+        Ok(count)
     }
 }
 
@@ -759,10 +957,7 @@ impl<W: Write> Write for BinaryOutput<W> {
 
     #[inline]
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
-        if bytes.len() < self.buffer.capacity()
-            && bytes.len() <= self.buffer.capacity() - self.buffer.len()
-        {
-            self.buffer.extend_from_slice(bytes);
+        if self.try_buffer(bytes) {
             return Ok(());
         }
         self.write_all_slow(bytes)
@@ -835,7 +1030,7 @@ fn fail(kind: &str, message: &str) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_finish_stdio() -> i32 {
     let stderr = sys::flush_stderr();
-    objects::exceptions::status_after_flush(0, flush_stdout(), stderr)
+    objects::exceptions::finish_native_stdio(0, flush_stdout(), stderr)
 }
 
 /// Reads a compiler-provided UTF-8 byte span without taking ownership.
@@ -876,22 +1071,7 @@ pub unsafe extern "C" fn imre_int_literal(data: *const u8, length: usize) -> usi
 
 /// Parse the spelling of a source integer, including signed literals stored in
 /// an argparse schema. Runtime conversion of a string argument stays decimal.
-fn parse_integer_literal(literal: &str) -> Option<BigInt> {
-    let literal = literal.replace('_', "");
-    let (literal, negative) = literal
-        .strip_prefix('-')
-        .map_or((literal.as_str(), false), |s| (s, true));
-    let (digits, radix) = if literal.starts_with("0x") || literal.starts_with("0X") {
-        (&literal[2..], 16)
-    } else if literal.starts_with("0o") || literal.starts_with("0O") {
-        (&literal[2..], 8)
-    } else if literal.starts_with("0b") || literal.starts_with("0B") {
-        (&literal[2..], 2)
-    } else {
-        (literal, 10)
-    };
-    BigInt::parse_bytes(digits.as_bytes(), radix).map(|value| if negative { -value } else { value })
-}
+use imre_ast::numbers::parse_integer_literal;
 
 /// # Safety
 /// Both arguments must be live integer handles; the result is a new reference.
@@ -904,31 +1084,20 @@ pub unsafe extern "C" fn imre_int_binary(a: usize, b: usize, op: u32) -> usize {
 
 /// Arithmetic shared by fixed-layout and runtime-discovered Python modules.
 fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
+    if op == 0 {
+        return Ok(a.add(b));
+    }
     if matches!(op, 8 | 9) {
         return integer_shift(a, b, op == 8);
     }
     if let (Some(x), Some(y)) = (a.as_small(), b.as_small()) {
         let result = match op {
-            0 => x.checked_add(y),
             1 => x.checked_sub(y),
             2 => x.checked_mul(y),
             5 => Some(x & y),
             6 => Some(x | y),
             7 => Some(x ^ y),
-            3 | 4 => {
-                if y == 0 {
-                    return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
-                }
-                let (q, r) = (x / y, x % y);
-                let adjust = r != 0 && (r < 0) != (y < 0);
-                Some(if op == 3 {
-                    q - i64::from(adjust)
-                } else if adjust {
-                    r + y
-                } else {
-                    r
-                })
-            }
+            3 | 4 => return floor_division_result(&x, &y, op).map(Int::from),
             _ => fail("SystemError", "invalid integer operation"),
         };
         if let Some(value) = result.and_then(Int::small) {
@@ -937,29 +1106,167 @@ fn integer_binary(a: &Int, b: &Int, op: u32) -> Result<Int> {
     }
     let (a, b) = (a.big(), b.big());
     let result = match op {
-        0 => a.as_ref() + b.as_ref(),
         1 => a.as_ref() - b.as_ref(),
         2 => a.as_ref() * b.as_ref(),
         5 => a.as_ref() & b.as_ref(),
         6 => a.as_ref() | b.as_ref(),
         7 => a.as_ref() ^ b.as_ref(),
-        3 | 4 => {
-            if b.is_zero() {
-                return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
-            }
-            let (q, r) = (a.as_ref() / b.as_ref(), a.as_ref() % b.as_ref());
-            let adjust = !r.is_zero() && r.is_negative() != b.is_negative();
-            if op == 3 {
-                q - BigInt::from(u8::from(adjust))
-            } else if adjust {
-                r + b.as_ref()
-            } else {
-                r
-            }
-        }
+        3 | 4 => floor_division_result(a.as_ref(), b.as_ref(), op)?,
         _ => fail("SystemError", "invalid integer operation"),
     };
     Ok(Int::new(result))
+}
+
+/// Python's remainder has the divisor's sign for both tagged and wide integers.
+fn floor_divmod<T: num_integer::Integer>(a: &T, b: &T) -> Result<(T, T)> {
+    if b.is_zero() {
+        return Err(Error::new(Kind::ZeroDivisionError, "division by zero"));
+    }
+    Ok(a.div_mod_floor(b))
+}
+
+fn floor_division_result<T: num_integer::Integer>(a: &T, b: &T, op: u32) -> Result<T> {
+    let (quotient, remainder) = floor_divmod(a, b)?;
+    Ok(if op == 3 { quotient } else { remainder })
+}
+
+impl Int {
+    fn divmod(&self, divisor: &Self) -> Result<(Self, Self)> {
+        if let (Some(a), Some(b)) = (self.as_small(), divisor.as_small()) {
+            let (q, r) = floor_divmod(&a, &b)?;
+            return Ok((Self::from(q), Self::from(r)));
+        }
+        let (q, r) = floor_divmod(self.big().as_ref(), divisor.big().as_ref())?;
+        Ok((Self::new(q), Self::new(r)))
+    }
+}
+
+/// Validate indexed selection arguments before narrowing the requested count.
+fn selection_fits(n: &BigInt, k: &BigInt) -> Result<bool> {
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "n must be a non-negative integer",
+        ));
+    }
+    if k.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "k must be a non-negative integer",
+        ));
+    }
+    Ok(k <= n)
+}
+
+/// Compute math.comb for either entry point after both arguments have been indexed.
+fn integer_comb(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
+        return Ok(Int::from(0));
+    }
+    let complement = n.as_ref() - k.as_ref();
+    let steps = k.into_owned().min(complement).to_i64().ok_or_else(|| {
+        Error::new(
+            Kind::OverflowError,
+            "min(n - k, k) must not exceed 9223372036854775807",
+        )
+    })?;
+    // C(n, d) = C(n, d - 1) * (n - d + 1) / d. The division is exact,
+    // and the unbounded product does not need a GCD to prevent overflow.
+    let mut factor = n.into_owned();
+    let mut result = BigInt::from(1);
+    for divisor in 1..=steps {
+        result *= &factor;
+        result /= divisor;
+        factor -= 1;
+    }
+    Ok(Int::new(result))
+}
+
+/// # Safety
+/// Both arguments borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_comb(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both arguments for this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_comb(&n, &k).map(Int::into_raw), 1)
+}
+
+/// Multiply comparable-sized partial products, keeping a leaf in one word
+/// whenever the bit length of its largest factor guarantees that it fits.
+fn factorial_product(lo: u64, hi: u64) -> BigInt {
+    let count = hi - lo + 1;
+    let bits_per_factor = u64::BITS - hi.leading_zeros();
+    if count <= u64::from(u64::BITS / bits_per_factor) {
+        return BigInt::from((lo..=hi).product::<u64>());
+    }
+    let mid = lo + (hi - lo) / 2;
+    factorial_product(lo, mid) * factorial_product(mid + 1, hi)
+}
+
+/// Multiply k descending factors, reusing the factorial product for word-sized endpoints.
+fn falling_product(n: &BigInt, k: u64) -> BigInt {
+    if k == 0 {
+        return BigInt::from(1);
+    }
+    if k == 1 {
+        return n.clone();
+    }
+    if let Some(hi) = n.to_u64() {
+        return factorial_product(hi - (k - 1), hi);
+    }
+    let half = k / 2;
+    falling_product(n, half) * falling_product(&(n - half), k - half)
+}
+
+fn integer_perm(n: &Int, k: &Int) -> Result<Int> {
+    let (n, k) = (n.big(), k.big());
+    if !selection_fits(&n, &k)? {
+        return Ok(Int::from(0));
+    }
+    let k = k
+        .to_i64()
+        .ok_or_else(|| Error::new(Kind::OverflowError, "k must not exceed 9223372036854775807"))?;
+    Ok(Int::new(falling_product(&n, k as u64)))
+}
+
+/// # Safety
+/// Both operands borrow live integer handles. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_perm(n: usize, k: usize) -> usize {
+    // SAFETY: the generated caller roots both operands across this call.
+    let (n, k) = unsafe { (Int::borrow(n), Int::borrow(k)) };
+    finish(integer_perm(&n, &k).map(Int::into_raw), 1)
+}
+
+fn integer_factorial(n: &Int) -> Result<Int> {
+    let n = n.big();
+    if n.is_negative() {
+        return Err(Error::new(
+            Kind::ValueError,
+            "factorial() not defined for negative values",
+        ));
+    }
+    let max = std::ffi::c_long::MAX;
+    let n = n
+        .to_u64()
+        .filter(|&value| value <= max as u64)
+        .ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                format!("factorial() argument should not exceed {max}"),
+            )
+        })?;
+    Ok(Int::new(factorial_product(1, n.max(1))))
+}
+
+/// # Safety
+/// The caller borrows a live integer handle. A successful return owns its integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_math_factorial(n: usize) -> usize {
+    // SAFETY: the generated caller keeps the operand alive across the call.
+    let n = unsafe { Int::borrow(n) };
+    finish(integer_factorial(&n).map(Int::into_raw), 1)
 }
 
 /// Validates the count before zero shortcuts. Unbounded right shifts retain
@@ -1013,6 +1320,16 @@ fn integer_shift(value: &Int, count: &Int, left: bool) -> Result<Int> {
         ));
     }
     Ok(Int::new(value.as_ref() << shift as usize))
+}
+
+/// Return the population count of the magnitude of a canonical integer.
+///
+/// # Safety
+/// The argument must be a rooted, canonical integer handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_bit_count(value: usize) -> usize {
+    // SAFETY: the caller roots the handle through this nonreentrant read.
+    unsafe { Int::borrow(value) }.bit_count().into_raw()
 }
 
 /// Returns the number of bits in the magnitude of a canonical integer.
@@ -1247,6 +1564,9 @@ pub unsafe extern "C" fn imre_int_parse(value: *const Str) -> usize {
 }
 
 fn decimal_word(original: &str) -> Result<usize> {
+    if let Some(digit) = integer_text::single_decimal_digit(original) {
+        return Ok(Int::from(i64::from(digit)).into_raw());
+    }
     parse_decimal_int_with_limit(original, integer_text::decimal_digit_limit())?
         .map(Int::into_raw)
         .ok_or_else(|| integer_text::invalid_literal(original))
@@ -1549,16 +1869,46 @@ fn parse_decimal_int_with_limit(original: &str, limit: u32) -> Result<Option<Int
         .map_err(|_| Error::allocation())
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn imre_input() -> *const Str {
+fn finish_input(line: Result<String>) -> *const Str {
     finish(
-        sys::read_input_line().and_then(|line| {
+        line.and_then(|line| {
             StrOwner::try_new(Str::from(line))
                 .map(StrOwner::into_raw)
                 .map_err(|_| Error::allocation())
         }),
         std::ptr::null(),
     )
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_input() -> *const Str {
+    finish_input(objects::stdio::input(None))
+}
+
+/// Return an owned TextIO to the compiler's temporary scope before str(prompt).
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_input_select_stdout() -> *const objects::Object {
+    finish(
+        objects::stdio::select_input_output().map(ObjectOwner::into_raw),
+        std::ptr::null(),
+    )
+}
+
+/// # Safety
+/// The caller keeps the selected native stdout and converted string alive.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_input_finish(
+    output: *const objects::Object,
+    prompt: *const Str,
+) -> *const Str {
+    // SAFETY: both borrowed words have the native layouts declared above.
+    let (file, prompt) = unsafe {
+        (
+            ObjectOwner::acquire_word(output as usize),
+            StrOwner::acquire_word(prompt as usize),
+        )
+    };
+    finish_input(objects::stdio::input_with_output(file, prompt))
 }
 
 #[unsafe(no_mangle)]
@@ -1683,8 +2033,9 @@ pub unsafe extern "C" fn imre_list_clear(list: *const List) {
     let list = unsafe { &*list };
     // SAFETY: no element is destroyed while the storage is borrowed.
     let previous = unsafe {
-        list.0
-            .with_mut(|values| (!is_sorting_empty_ints(values)).then(|| std::mem::take(values)))
+        list.0.with_mut(|values| {
+            (!SORTING_EMPTY.is_untouched(values)).then(|| std::mem::take(values))
+        })
     };
     if let Some(mut values) = previous {
         list.release_range_hint();
@@ -1814,7 +2165,7 @@ pub unsafe extern "C" fn imre_list_borrow_index_proven(list: *const List, at: us
 pub unsafe extern "C" fn imre_list_data_readonly(list: *const List) -> *const usize {
     // SAFETY: the whole-loop proof keeps these initialized elements live and
     // in place. Int is transparent over usize, so the pointer and stride agree.
-    unsafe { (&*(*list).0.0.get()).as_ptr().cast() }
+    unsafe { (&*(*list).0.words.0.get()).as_ptr().cast() }
 }
 
 /// Normalize an index into a rooted fixed-size integer buffer. Zero denotes
@@ -2011,7 +2362,130 @@ pub unsafe extern "C" fn imre_list_append(list: *const List, value: usize) -> i3
         let owner = &*list;
         owner
             .0
-            .with_mut(|list| i32::from(try_append_int(list, &value, &owner.1)))
+            .with_mut(|list| i32::from(try_append_int(list, &value, &owner.0.flags)))
+    }
+}
+
+/// Spare storage borrowed by a checked loop that appends immediate integers.
+#[repr(C)]
+pub struct ListAppendWindow {
+    owner: *const List,
+    next: *mut Int,
+    end: *mut Int,
+}
+
+/// Records the allocation of a rooted list whose last word is immediate.
+///
+/// # Safety
+/// The exact list must end in an immediate integer. Keep it rooted and do not
+/// resize or inspect it through another handle
+/// until the written prefix has been committed. The window must be writable.
+unsafe fn open_list_append_window(list: *const List, window: *mut ListAppendWindow) {
+    // SAFETY: the caller holds the exact list across this window.
+    unsafe {
+        (&*list).0.with_mut(|words| {
+            let data = words.as_mut_ptr();
+            window.write(ListAppendWindow {
+                owner: list,
+                next: data.add(words.len()),
+                end: data.add(words.capacity()),
+            });
+        });
+    }
+}
+
+/// Opens the existing allocation only when it covers the loop's upper write bound.
+///
+/// # Safety
+/// The exact list must be rooted and the writable window closed. On success
+/// only immediate integers may be written before the initialized prefix is committed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_try_open_append_window(
+    list: *const List,
+    remaining: usize,
+    window: *mut ListAppendWindow,
+) -> i32 {
+    // SAFETY: the caller proves exclusive access for the duration of this window.
+    unsafe {
+        let Some(owner) = list.as_ref() else { return 0 };
+        owner.0.with_mut(|words| {
+            if words.capacity() - words.len() < remaining
+                || !words
+                    .last()
+                    .and_then(Int::as_small)
+                    .is_some_and(|value| i32::try_from(value).is_ok())
+            {
+                return 0;
+            }
+            let data = words.as_mut_ptr();
+            window.write(ListAppendWindow {
+                owner: list,
+                next: data.add(words.len()),
+                end: data.add(words.capacity()),
+            });
+            1
+        })
+    }
+}
+
+/// Appends through the ordinary list API, then borrows the resulting allocation.
+///
+/// # Safety
+/// Both handles must be live. The writable window must be closed and the list
+/// must remain rooted and exclusively accessed until its window is committed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_append_open_window(
+    list: *const List,
+    word: usize,
+    window: *mut ListAppendWindow,
+) -> i32 {
+    // SAFETY: the caller supplies rooted values and a closed writable window.
+    unsafe {
+        let status = imre_list_append(list, word);
+        if status != 0 && word & 1 != 0 {
+            open_list_append_window(list, window);
+        }
+        status
+    }
+}
+
+/// Reads the ordinary last element and borrows the allocation for an immediate tail.
+/// Returns an owned nonzero integer word, or raw zero with a pending index error.
+///
+/// # Safety
+/// The list and closed window must be live. After a successful immediate read,
+/// keep the list rooted and use the window until publishing any buffered words.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_tail_open_window(
+    list: *const List,
+    window: *mut ListAppendWindow,
+) -> usize {
+    // SAFETY: usize::MAX is the canonical tagged representation of -1.
+    unsafe {
+        let word = imre_list_get(list, usize::MAX);
+        if word & 1 != 0 {
+            open_list_append_window(list, window);
+        }
+        word
+    }
+}
+
+/// Publishes the initialized prefix of a list's borrowed spare capacity.
+///
+/// # Safety
+/// The matching list and allocation must still be live. Every word from the
+/// end of the previously visible prefix up to next must be an initialized immediate integer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_commit_append_window(window: *mut ListAppendWindow) {
+    // SAFETY: the checked loop only writes initialized, tagged immediate integers.
+    unsafe {
+        let view = &mut *window;
+        (&*view.owner).0.with_mut(|words| {
+            let data = words.as_mut_ptr();
+            let initialized = usize::try_from(view.next.offset_from(data)).unwrap();
+            assert!((words.len()..=words.capacity()).contains(&initialized));
+            words.set_len(initialized);
+        });
     }
 }
 
@@ -2037,8 +2511,8 @@ pub unsafe extern "C" fn imre_list_append_pair(
             if list.capacity() - list.len() < 2 {
                 // The first source append can fit even if growing for the second fails.
                 return i32::from(
-                    try_append_int(list, &first, &owner.1)
-                        && try_append_int(list, &second, &owner.1),
+                    try_append_int(list, &first, &owner.0.flags)
+                        && try_append_int(list, &second, &owner.0.flags),
                 );
             }
             let length = list.len();
@@ -2121,6 +2595,48 @@ pub unsafe extern "C" fn imre_list_sum(list: *const List, start: usize) -> usize
     unsafe { imre_int_binary(start, subtotal.0, 0) }
 }
 
+/// Materializes the running totals of a rooted integer list into one output buffer.
+///
+/// # Safety
+/// The list and the optional nonzero canonical integer handle must stay live for the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_accumulate(list: *const List, initial: usize) -> *const List {
+    // SAFETY: a nonzero initial argument borrows the caller's rooted integer.
+    let initial = (initial != 0).then(|| unsafe { Int::borrow(initial) });
+    // SAFETY: the exact source stays rooted and integer addition cannot invoke Python.
+    let values = unsafe {
+        (&*list)
+            .0
+            .with(|items| integer_prefixes(items, initial.as_deref()))
+    };
+    match values.and_then(|v| ListOwner::try_new(List::new(v)).map_err(|_| Error::allocation())) {
+        Ok(list) => ListOwner::into_raw(list),
+        Err(error) => error.returning(std::ptr::null()),
+    }
+}
+
+fn integer_prefixes(items: &[Int], initial: Option<&Int>) -> Result<Vec<Int>> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(items.len() + usize::from(initial.is_some()))
+        .map_err(|_| Error::allocation())?;
+    let mut items = items.iter();
+    if let Some(first) = initial.or_else(|| items.next()) {
+        values.push(first.clone());
+        while let Some(item) = items.next() {
+            let previous = values.last().unwrap();
+            let total = previous.add(item);
+            let consecutive_wide = (previous.0 | total.0) & 1 == 0;
+            values.push(total);
+            if consecutive_wide {
+                prefix_words::extend(&mut values, items.as_slice())?;
+                break;
+            }
+        }
+    }
+    Ok(values)
+}
+
 /// Shares exact reduction between whole lists and normalized slice selections.
 /// Cloning the borrowed iterator permits a checked fast pass without acquiring
 /// element owners; neither pass can mutate the source or call user code.
@@ -2145,6 +2661,11 @@ fn sum_ints<'a>(values: impl Iterator<Item = &'a Int> + Clone) -> Int {
             // [-2^62+2^31, 2^62-2^32+1], including every prefix.
             return Int::small(sum).unwrap();
         }
+    }
+    if values.clone().any(Int::is_prefix)
+        && let Some(sum) = prefix_words::sum(values.clone())
+    {
+        return sum;
     }
     values.fold(Int::small(0).unwrap(), |sum, value| {
         // SAFETY: both owned/borrowed canonical integers remain live for addition.
@@ -2203,7 +2724,7 @@ pub unsafe extern "C" fn imre_list_reserve_range(
     // SAFETY: the caller roots the list for this nonreentrant reservation.
     let list = unsafe { &*list };
     let displaced = RANGE_HINT_SLOTS.try_with(|used| {
-        let other_slots = used.get() - list.1.get();
+        let other_slots = used.get() - (list.0.flags.get() & !ALL_I32_LIST_VALUES);
         let available = MAX_LIVE_RANGE_HINT_SLOTS - other_slots;
         if capacity > available {
             return Vec::new();
@@ -2214,7 +2735,7 @@ pub unsafe extern "C" fn imre_list_reserve_range(
             list.0.with_mut(|values| {
                 if !values.is_empty()
                     || values.capacity() >= capacity
-                    || is_sorting_empty_ints(values)
+                    || SORTING_EMPTY.is_untouched(values)
                 {
                     return Vec::new();
                 }
@@ -2226,13 +2747,32 @@ pub unsafe extern "C" fn imre_list_reserve_range(
                 if slots > available {
                     return buffer;
                 }
-                list.1.set(slots);
+                list.0.flags.set(slots);
                 used.set(other_slots + slots);
                 std::mem::replace(values, buffer)
             })
         }
     });
     drop(displaced);
+}
+
+/// Check the tag and i32 range with a single vectorizable reduction.
+#[inline(always)]
+fn all_tagged_i32(values: &[Int]) -> bool {
+    // Subtract the tagged i32 minimum from each word. Valid words become
+    // even offsets in 0..=2*u32::MAX; boxed handles give odd offsets.
+    let bias = u32::MAX as usize;
+    let bits = values
+        .iter()
+        .fold(0, |bits, value| bits | value.0.wrapping_add(bias));
+    bits & !(bias << 1) == 0
+}
+
+/// Scan four tagged words per vector when AVX2 is available.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+fn all_tagged_i32_avx2(values: &[Int]) -> bool {
+    all_tagged_i32(values)
 }
 
 /// Guards native arithmetic in a loop that cannot replace this list's elements.
@@ -2260,20 +2800,28 @@ pub unsafe extern "C" fn imre_list_all_i32(
     let Some(trips) = (unsafe { small_range_trips(start, stop, step) }) else {
         return 0;
     };
+    // SAFETY: the handle is rooted and the null case returned above.
+    let storage = unsafe { &(*list).0 };
+    if storage.flags.get() & ALL_I32_LIST_VALUES != 0 {
+        return 1;
+    }
     // SAFETY: this read cannot reenter or retain a storage reference.
     let valid = unsafe {
-        (&*list).0.with(|values| {
+        storage.with(|values| {
             if values.len().div_ceil(4) > trips {
                 return false;
             }
-            // Biasing moves the tagged i32 interval into the low 33 bits.
-            // Its one extra lower endpoint has an even tag and is rejected by
-            // the second term. An integer OR reduction exposes SIMD lowering.
-            values.iter().fold(0_usize, |invalid, value| {
-                invalid | (value.0.wrapping_add(1_usize << 32) >> 33) | (!value.0 & 1)
-            }) == 0
+            #[cfg(target_arch = "x86_64")]
+            if values.len() >= 32 && std::arch::is_x86_feature_detected!("avx2") {
+                // SAFETY: the runtime feature check permits AVX2 in this function.
+                return all_tagged_i32_avx2(values);
+            }
+            all_tagged_i32(values)
         })
     };
+    if valid {
+        storage.flags.set(storage.flags.get() | ALL_I32_LIST_VALUES);
+    }
     u32::from(valid)
 }
 
@@ -2283,13 +2831,12 @@ pub unsafe extern "C" fn imre_list_all_i32(
 pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *const List {
     // SAFETY: the caller roots the count; integer conversion cannot reenter.
     let count = unsafe { Int::borrow(count) };
-    let count = count
-        .as_small()
-        .map(|value| value as isize)
-        .or_else(|| count.big().to_isize());
-    let Some(count) = count else {
-        return Error::new(Kind::OverflowError, "list repeat count is too large")
-            .returning(std::ptr::null());
+    let Some(count) = signed_index(&count) else {
+        return Error::new(
+            Kind::OverflowError,
+            "cannot fit 'int' into an index-sized integer",
+        )
+        .returning(std::ptr::null());
     };
     if count <= 0 {
         return imre_list_new();
@@ -2303,7 +2850,7 @@ pub unsafe extern "C" fn imre_list_repeat(list: *const List, count: usize) -> *c
                 .len()
                 .checked_mul(count)
                 .filter(|&length| length <= isize::MAX as usize / size_of::<Int>())
-                .ok_or_else(|| Error::new(Kind::MemoryError, "list is too large"))?;
+                .ok_or_else(Error::memory_error)?;
             let mut result = Vec::new();
             result
                 .try_reserve_exact(length)
@@ -2501,7 +3048,7 @@ mod tests {
 
     #[test]
     fn paired_append_preserves_order_and_independent_bigint_owners() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let big_word = Shared::as_ptr(&big) as usize;
         let negative = Int::small(-7).unwrap().0;
@@ -2593,8 +3140,8 @@ mod tests {
 
     #[test]
     fn list_sum_borrows_aliased_inputs_and_owns_results_after_mutation() {
-        let positive = Shared::new(BigInt::from(1) << 120_u32);
-        let negative = Shared::new(-positive.as_ref());
+        let positive = crate::wide_owner(BigInt::from(1) << 120_u32);
+        let negative = wide_owner(-&positive.0);
         let positive_weak = Shared::downgrade(&positive);
         let negative_weak = Shared::downgrade(&negative);
         let list = ListOwner::new(List::new(vec![
@@ -2608,7 +3155,7 @@ mod tests {
         // mutation occurs between reductions, after all storage borrows end.
         let result = unsafe {
             let result = Int(imre_list_sum(ListOwner::as_ptr(&list), start));
-            assert_eq!(result.big().as_ref(), &(positive.as_ref() + 7));
+            assert_eq!(result.big().as_ref(), &(&positive.0 + 7));
             assert_eq!(Shared::strong_count(&positive), 2);
             assert_eq!(Shared::strong_count(&negative), 2);
             assert_eq!(
@@ -2623,7 +3170,7 @@ mod tests {
         drop(list);
         assert_eq!(Shared::strong_count(&positive), 1);
         assert_eq!(Shared::strong_count(&negative), 1);
-        let expected = positive.as_ref() + 7;
+        let expected = &positive.0 + 7;
         drop(positive);
         drop(negative);
         assert!(positive_weak.upgrade().is_none());
@@ -2666,7 +3213,7 @@ mod tests {
     #[test]
     fn list_header_reuse_releases_elements_and_keeps_buffers_separate() {
         std::thread::spawn(|| {
-            let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+            let big = crate::wide_owner(BigInt::from(1_u8) << 200_u32);
             let weak = Shared::downgrade(&big);
             let integer = Int(Shared::into_raw(big) as usize);
             let list = new_list(vec![integer.clone(), integer]);
@@ -2747,7 +3294,7 @@ mod tests {
         struct Teardown(Arc<AtomicBool>);
         impl Drop for Teardown {
             fn drop(&mut self) {
-                let big = Shared::new(BigInt::from(1_u8) << 200_u32);
+                let big = crate::wide_owner(BigInt::from(1_u8) << 200_u32);
                 let weak = Shared::downgrade(&big);
                 let list = new_list(vec![Int(Shared::into_raw(big) as usize)]);
                 // SAFETY: this sole owner must be released even after cache TLS
@@ -2793,7 +3340,7 @@ mod tests {
 
     #[test]
     fn growing_a_list_reuses_storage_and_moves_its_bigint_owners() {
-        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&bigint);
         let mut values = Vec::with_capacity(4);
         values.push(Int(Shared::into_raw(bigint) as usize));
@@ -2903,7 +3450,7 @@ mod tests {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let bigint = Shared::new(BigInt::from(1_u128 << 100));
+        let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&bigint);
         let mut values = Vec::with_capacity(8);
         values.push(Int(Shared::into_raw(bigint) as usize));
@@ -2947,7 +3494,7 @@ mod tests {
     #[test]
     fn list_drop_preserves_bigint_owners_at_vector_boundaries() {
         for position in [0, 1, 7, 8, 15, 16, 32] {
-            let bigint = Shared::new(BigInt::from(1_u128 << 100));
+            let bigint = crate::wide_owner(BigInt::from(1_u128 << 100));
             let weak = Shared::downgrade(&bigint);
             let mut values = (0..33)
                 .map(|value| Int::small(value - 16).unwrap())
@@ -2968,6 +3515,45 @@ mod tests {
                 .map(|value| Int::small(value).unwrap())
                 .collect();
             drop(List::new(values));
+        }
+    }
+
+    #[test]
+    fn list_repeat_checks_the_multiplier_before_the_allocation() {
+        let empty = List::new(Vec::new());
+        let elements = List::new(vec![Int::from(3), Int::from(7)]);
+        let beyond_index = BigInt::from(1) << 160usize;
+        for count in [beyond_index.clone(), -beyond_index] {
+            let count = Int::new(count);
+            // SAFETY: both operands are live. Taking the error transfers its owner.
+            unsafe {
+                assert!(imre_list_repeat(&empty, count.0).is_null());
+                let error = imre_error_take();
+                assert!(!error.is_null());
+                assert_eq!(imre_exception_matches(error, Kind::OverflowError as u32), 1);
+                let message = StrOwner::from_raw(imre_exception_message(error));
+                assert_eq!(
+                    message.as_str(),
+                    "cannot fit 'int' into an index-sized integer"
+                );
+                objects::imre_object_release(error);
+            }
+        }
+        let count = Int::from(1i64 << 60);
+        // SAFETY: the empty list produces an owned empty result; the nonempty
+        // list would need more than isize::MAX bytes and never allocates it.
+        unsafe {
+            let result = imre_list_repeat(&empty, count.0);
+            assert!(!result.is_null());
+            assert_eq!(imre_list_len(result), Int::from(0).0);
+            imre_list_release(result);
+            assert!(imre_list_repeat(&elements, count.0).is_null());
+            let error = imre_error_take();
+            assert!(!error.is_null());
+            assert_eq!(imre_exception_matches(error, Kind::MemoryError as u32), 1);
+            let message = StrOwner::from_raw(imre_exception_message(error));
+            assert!(message.is_empty());
+            objects::imre_object_release(error);
         }
     }
 
@@ -3224,14 +3810,14 @@ mod tests {
                 objects::imre_object_release(error);
             }
         }
-        let owner = Shared::new(BigInt::from(1) << 130_u32);
+        let owner = crate::wide_owner(BigInt::from(1) << 130_u32);
         let value = Int(Shared::into_raw(owner.clone()) as usize);
         let zero = Int::small(0).unwrap();
         // SAFETY: zero shifting returns an independent owner of the live input.
         let copy = Int(unsafe { imre_int_binary(value.0, zero.0, 8) });
         assert_eq!(Shared::strong_count(&owner), 3);
         drop(value);
-        assert_eq!(copy.big().as_ref(), owner.as_ref());
+        assert_eq!(copy.big().as_ref(), &owner.0);
         drop(copy);
         assert_eq!(Shared::strong_count(&owner), 1);
         assert_eq!(imre_error_pending(), 0);
@@ -3282,6 +3868,7 @@ mod tests {
             }
             assert_eq!(imre_list_all_i32(list, zero.0, one.0, one.0), 0);
             assert_eq!(imre_list_all_i32(list, zero.0, nine.0, one.0), 1);
+            assert_eq!(imre_list_all_i32(list, zero.0, one.0, one.0), 1);
             assert_eq!(imre_list_all_i32(list, nine.0, zero.0, negative.0), 1);
             assert_eq!(imre_list_all_i32(list, zero.0, zero.0, one.0), 0);
             assert_eq!(imre_list_all_i32(list, zero.0, nine.0, zero.0), 0);
@@ -3371,7 +3958,7 @@ mod tests {
 
     #[test]
     fn decoded_indices_acquire_before_replacing_the_only_stored_owner() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let word = Shared::as_ptr(&big) as usize;
         let list = imre_list_new();
@@ -3401,8 +3988,8 @@ mod tests {
 
     #[test]
     fn borrowed_indices_and_list_copy_preserve_bigint_owners() {
-        let source = Shared::new(BigInt::from(1_u128 << 100));
-        let displaced = Shared::new(BigInt::from(1_u128 << 120));
+        let source = crate::wide_owner(BigInt::from(1_u128 << 100));
+        let displaced = crate::wide_owner(BigInt::from(1_u128 << 120));
         let source_weak = Shared::downgrade(&source);
         let displaced_weak = Shared::downgrade(&displaced);
         let list = imre_list_new();
@@ -3449,8 +4036,47 @@ mod tests {
     }
 
     #[test]
+    fn append_windows_publish_small_words_and_keep_owned_bigint_reads() {
+        let list = imre_list_new();
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
+        let weak = Shared::downgrade(&big);
+        let mut window = ListAppendWindow {
+            owner: std::ptr::null(),
+            next: std::ptr::null_mut(),
+            end: std::ptr::null_mut(),
+        };
+        // SAFETY: the list stays rooted. Only the open window touches its
+        // reserved allocation until the initialized prefix has been committed.
+        unsafe {
+            (&*list).0.with_mut(|words| words.reserve(4));
+            assert_eq!(imre_list_append_open_window(list, 1, &mut window), 1);
+            assert_eq!(window.owner, list);
+            assert_ne!(window.next, window.end);
+            window.next.write(Int::small(7).unwrap());
+            window.next = window.next.add(1);
+            imre_list_commit_append_window(&mut window);
+            window.owner = std::ptr::null();
+            assert_eq!(imre_list_tail_open_window(list, &mut window), 15);
+            assert_eq!(window.owner, list);
+            imre_list_commit_append_window(&mut window);
+            window.owner = std::ptr::null();
+            let word = Shared::as_ptr(&big) as usize;
+            assert_eq!(imre_list_append_open_window(list, word, &mut window), 1);
+            assert!(window.owner.is_null());
+            let tail = imre_list_tail_open_window(list, &mut window);
+            assert_eq!(tail, word);
+            assert!(window.owner.is_null());
+            drop(big);
+            imre_list_release(list);
+            assert!(weak.upgrade().is_some());
+            imre_int_release(tail);
+            assert!(weak.upgrade().is_none());
+        }
+    }
+
+    #[test]
     fn proven_list_reads_borrow_boundary_values_without_acquiring_owners() {
-        let big = Shared::new(BigInt::from(1_u128 << 100));
+        let big = crate::wide_owner(BigInt::from(1_u128 << 100));
         let weak = Shared::downgrade(&big);
         let list = imre_list_new();
         // SAFETY: the empty view is never dereferenced. All later reads are

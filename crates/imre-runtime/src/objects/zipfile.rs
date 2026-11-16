@@ -16,6 +16,15 @@ mod source;
 pub(in crate::objects) use member::Member;
 use source::Source;
 
+/// The ZIP importer indexes readable members regardless of their declared extraction version.
+#[derive(Clone, Copy)]
+pub(super) enum DirectoryMode {
+    ZipFile {
+        empty_unicode_path: fn() -> Result<()>,
+    },
+    ZipImport,
+}
+
 pub(super) struct Info {
     filename: StrOwner,
     original: StrOwner,
@@ -118,6 +127,7 @@ impl Object {
 }
 
 pub(crate) struct Archive {
+    mode: DirectoryMode,
     source: Option<Source>,
     filename: Option<StrOwner>,
     filelist: ObjectOwner,
@@ -131,16 +141,21 @@ fn store(storage: Storage) -> Result<ObjectOwner> {
 impl Archive {
     /// Open a filesystem archive for CRC-checked metadata member reads.
     pub(crate) fn open_path(path: &str) -> Result<Self> {
-        Self::open_with(
-            Source::open(path)?,
-            Some(StrOwner::new(path.into())),
-            || Ok(()),
+        Self::open_path_with(
+            path,
+            DirectoryMode::ZipFile {
+                empty_unicode_path: || Ok(()),
+            },
         )
+    }
+
+    fn open_path_with(path: &str, mode: DirectoryMode) -> Result<Self> {
+        Self::open_with(Source::open(path)?, Some(StrOwner::new(path.into())), mode)
     }
 
     /// Retain the central directory after closing the descriptor used to index it.
     pub(crate) fn index_import(path: &str) -> Result<Self> {
-        let mut archive = Self::open_path(path)?;
+        let mut archive = Self::open_path_with(path, DirectoryMode::ZipImport)?;
         archive.source = None;
         Ok(archive)
     }
@@ -178,15 +193,17 @@ impl Archive {
     }
 
     fn open(source: Source, filename: Option<StrOwner>) -> Result<Self> {
-        Self::open_with(source, filename, warn_empty_unicode_path)
+        Self::open_with(
+            source,
+            filename,
+            DirectoryMode::ZipFile {
+                empty_unicode_path: warn_empty_unicode_path,
+            },
+        )
     }
 
-    fn open_with(
-        source: Source,
-        filename: Option<StrOwner>,
-        empty_unicode_path: fn() -> Result<()>,
-    ) -> Result<Self> {
-        let entries = source.directory(empty_unicode_path)?;
+    fn open_with(source: Source, filename: Option<StrOwner>, mode: DirectoryMode) -> Result<Self> {
+        let entries = source.directory(mode)?;
         let mut list = Words::new(5);
         let mut by_name = HashMap::new();
         list.values
@@ -203,6 +220,7 @@ impl Archive {
             list.values.push(ObjectOwner::into_raw(object) as usize);
         }
         Ok(Self {
+            mode,
             source: Some(source),
             filename,
             filelist: store(list.into_storage())?,
@@ -443,7 +461,7 @@ pub unsafe extern "C" fn imre_zip_member(
     )
 }
 
-/// Read one complete member, including validation of its full uncompressed CRC.
+/// Read a member according to the mode used to construct its central directory.
 ///
 /// # Safety
 /// Root both handles. The discriminator selects a str (0) or ZipInfo (1) key.
@@ -453,9 +471,16 @@ pub unsafe extern "C" fn imre_zip_read(
     key: *const c_void,
     is_info: u32,
 ) -> *const Bytes {
-    let result =
-        // SAFETY: the caller supplies an archive that stays live for the metadata query.
-        unsafe { with_archive(archive, |a| a.member(key, is_info)) }.and_then(|mut m| m.read(None));
+    // SAFETY: both handles stay rooted and the discriminator selects the key representation.
+    let result = unsafe {
+        with_archive(archive, |a| {
+            if is_info == 0 && matches!(a.mode, DirectoryMode::ZipImport) {
+                a.import_data(&*key.cast::<Str>())
+            } else {
+                a.member(key, is_info)?.read(None)
+            }
+        })
+    };
     finish(
         result.map(|b| crate::BytesOwner::into_raw(crate::BytesOwner::new(b))),
         std::ptr::null(),

@@ -8,7 +8,7 @@ use std::hash::{Hash, Hasher};
 use super::{Error, Kind, Object, Result, Storage, StorageCell, Str, object};
 use crate::objects::exceptions::string_repr;
 use crate::objects::records::tuples::tuple_from_words;
-use crate::objects::text::{lowercase, lowercase_chars};
+use crate::objects::text::{Case, case_map, lowercase_chars};
 use crate::objects::words::{OwnedWord, WordKind};
 
 pub(in crate::objects) struct PurePath {
@@ -58,15 +58,18 @@ fn win_split(s: &str) -> (&str, &str, &str) {
     ("", "", s)
 }
 
-fn replace_separator(source: &str, from: char, to: char) -> Result<Str> {
-    // Both separators are single-byte ASCII, so the result has exactly the input length.
-    let mut text = Str::try_with_capacity(source.len()).map_err(|_| Error::allocation())?;
-    for piece in source.split_inclusive(from) {
-        if let Some(piece) = piece.strip_suffix(from) {
-            text.push_str(piece);
-            text.push(to);
-        } else {
-            text.push_str(piece);
+/// Translate equal-width ASCII path separators directly in a copy of the spelling.
+fn replace_separator(source: &str, windows: bool) -> Result<Str> {
+    let (from, to) = if windows {
+        (b'/', b'\\')
+    } else {
+        (b'\\', b'/')
+    };
+    let mut text = Str::try_new(source).map_err(|_| Error::allocation())?;
+    // SAFETY: replacing one ASCII byte with another preserves UTF-8 and its length.
+    for byte in unsafe { text.as_mut_str().as_bytes_mut() } {
+        if *byte == from {
+            *byte = to;
         }
     }
     Ok(text)
@@ -92,15 +95,17 @@ fn copy_components<'a>(parts: impl Iterator<Item = &'a str>) -> Result<Vec<Str>>
 fn win_join(raw: &[StrOwner]) -> Result<Str> {
     let (mut drive, mut root, mut tail) = ("", "", Str::default());
     for part in raw {
-        let input = replace_separator(part, '/', '\\')?;
-        let (d, r, t) = win_split(&input);
+        let normalized = part
+            .contains('/')
+            .then(|| replace_separator(part, true))
+            .transpose()?;
+        let (d, r, t) = win_split(normalized.as_deref().unwrap_or(part));
         // ntpath.join compares the original drive spellings, including separators.
         let d = &part[..d.len()];
         if !r.is_empty()
             || (!d.is_empty()
                 && d != drive
-                && lowercase(d).map_err(|_| Error::allocation())?
-                    != lowercase(drive).map_err(|_| Error::allocation())?)
+                && case_map(d, Case::Lower)? != case_map(drive, Case::Lower)?)
         {
             if !d.is_empty() || drive.is_empty() {
                 drive = d;
@@ -120,7 +125,7 @@ fn win_join(raw: &[StrOwner]) -> Result<Str> {
             append_segment(&mut tail, sep, t)?;
         }
     }
-    let mut path = replace_separator(drive, '/', '\\')?;
+    let mut path = replace_separator(drive, true)?;
     let sep = if !tail.is_empty()
         && root.is_empty()
         && !path.is_empty()
@@ -223,27 +228,31 @@ impl PurePath {
         Self::new(self.windows, raw)
     }
 
-    fn with_tail(&self, tail: Vec<Str>) -> Result<Self> {
+    fn with_parts(&self, drive: &str, root: &str, tail: Vec<Str>) -> Result<Self> {
         let mut p = Self::parsed(
             self.windows,
             vec![],
-            Str::try_new(&self.drive).map_err(|_| Error::allocation())?,
-            self.root.clone(),
+            Str::try_new(drive).map_err(|_| Error::allocation())?,
+            root.into(),
             tail,
         )?;
         p.raw
             .try_reserve_exact(1)
             .map_err(|_| Error::allocation())?;
-        p.raw.push(StrOwner::clone(&p.text));
+        // A derived empty path displays as ".", but contributes "" to the next join.
+        let segment = if drive.is_empty() && root.is_empty() && p.tail.is_empty() {
+            super::try_owned_string("")?
+        } else {
+            StrOwner::clone(&p.text)
+        };
+        p.raw.push(segment);
         Ok(p)
     }
 
     pub(super) fn parent(&self) -> Result<Self> {
-        self.with_tail(copy_components(
-            self.tail[..self.tail.len().saturating_sub(1)]
-                .iter()
-                .map(Str::as_str),
-        )?)
+        let tail = &self.tail[..self.tail.len().saturating_sub(1)];
+        let tail = copy_components(tail.iter().map(Str::as_str))?;
+        self.with_parts(&self.drive, &self.root, tail)
     }
 
     /// Return the same normalized spelling used for Windows path equality.
@@ -251,7 +260,7 @@ impl PurePath {
         if let Some(key) = self.folded.get() {
             return Ok(key);
         }
-        let key = lowercase(&self.text).map_err(|_| Error::allocation())?;
+        let key = case_map(&self.text, Case::Lower)?;
         Ok(self.folded.get_or_init(|| key))
     }
 
@@ -317,7 +326,7 @@ impl PurePath {
 
     /// Return the comparison key of the path left when every tail component is removed.
     fn windows_anchor_key(&self) -> Result<Str> {
-        let mut key = lowercase(&self.drive).map_err(|_| Error::allocation())?;
+        let mut key = case_map(&self.drive, Case::Lower)?;
         append_segment(&mut key, "", &self.root)?;
         if key.is_empty() {
             key.push('.');
@@ -414,12 +423,7 @@ impl PurePath {
             std::iter::repeat_n("..", other.tail.len() - common)
                 .chain(self.tail.iter().skip(common).map(Str::as_str)),
         )?;
-        let mut path = Self::parsed(self.windows, vec![], Str::default(), Str::default(), tail)?;
-        path.raw
-            .try_reserve_exact(1)
-            .map_err(|_| Error::allocation())?;
-        path.raw.push(StrOwner::clone(&path.text));
-        Ok(path)
+        self.with_parts("", "", tail)
     }
 
     pub(super) fn name(&self) -> Result<&StrOwner> {
@@ -486,12 +490,13 @@ impl PurePath {
             ));
         };
         *last = Str::try_new(name).map_err(|_| Error::allocation())?;
-        self.with_tail(tail)?.into_object()
+        self.with_parts(&self.drive, &self.root, tail)?
+            .into_object()
     }
 
     pub(super) fn as_posix(&self) -> Result<StrOwner> {
         if self.windows && self.text.contains('\\') {
-            Ok(StrOwner::new(replace_separator(&self.text, '\\', '/')?))
+            Ok(StrOwner::new(replace_separator(&self.text, false)?))
         } else {
             Ok(StrOwner::clone(&self.text))
         }

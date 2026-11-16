@@ -20,6 +20,25 @@ class Missing:
         self.procfile = "{missing}".format(pid=observe(pid))
 
 
+def default_label() -> str:
+    print("default label")
+    return "unnamed"
+
+
+class Choice:
+    def __init__(self, label: str | None):
+        self.name = label or "tool"
+        self.label = label or default_label()
+        self.display = self.name.upper()
+        initial = self.label
+        self.initial = initial
+
+
+given = Choice("given")
+empty = Choice("")
+absent = Choice(None)
+print(given.name, given.label, empty.name, empty.label, absent.name, absent.label)
+print(given.display, empty.display, absent.initial)
 first = Watch(7)
 second = Watch(21)
 first.started = True

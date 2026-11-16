@@ -18,13 +18,14 @@ impl Checker<'_> {
     pub(super) fn ordinal(&self, value: Expr, at: &impl Ranged) -> Result<Expr, String> {
         let value = Self::string_value(value);
         let ty = self.types.payload(value.ty).unwrap_or(value.ty);
-        if matches!(ty, Type::Str | Type::StrLiteral(_) | Type::Bytes)
-            || self.types.members(ty).is_some_and(|members| {
-                members
-                    .iter()
-                    .all(|member| matches!(member, Type::Str | Type::Bytes))
-            })
-        {
+        if matches!(
+            ty,
+            Type::Str | Type::StrLiteral(_) | Type::Bytes | Type::ByteArray
+        ) || self.types.members(ty).is_some_and(|members| {
+            members
+                .iter()
+                .all(|member| matches!(member, Type::Str | Type::Bytes))
+        }) {
             return Ok(Expr {
                 ty: Type::Int,
                 kind: ExprKind::Builtin(Builtin::Ord, vec![value]),

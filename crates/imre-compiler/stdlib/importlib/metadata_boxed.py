@@ -16,10 +16,6 @@ class PackageNotFoundError(ModuleNotFoundError):
         return name
 
 
-def _normalize_separators(name):
-    return '_'.join(re.split(r'[-_.]+', name))
-
-
 def _basename(root):
     return basename(root.rstrip('/'))
 
@@ -77,7 +73,7 @@ class Distribution(DeprecatedNonAbstract):
     @property
     def metadata(self):
         from importlib.metadata._adapters import Message
-        text = self.read_text('METADATA') or self.read_text('PKG-INFO') or self.read_text('')
+        text = _metadata_text(lambda filename: self.read_text(filename))
         return Message(text or '')
 
     @property
@@ -144,7 +140,7 @@ class PathDistribution(Distribution):
 
     def read_text(self, filename):
         try:
-            return self._path.joinpath(filename).read_text(encoding='utf-8')
+            return _path_text(self._path, filename)
         except (FileNotFoundError, IsADirectoryError, NotADirectoryError, PermissionError, KeyError):
             return None
 
@@ -183,10 +179,7 @@ class _ZipDistribution(PathDistribution):
 
     def read_text(self, filename):
         key = _join(self._path, fspath(filename)) if filename else self._path
-        data = _zip_read(self._archive, key)
-        if data is not None:
-            return data.decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
-        return None
+        return _zip_text(self._archive, key)
 
 
 class DistributionFinder(MetaPathFinder):
@@ -215,21 +208,11 @@ def _discover(context, resolvers):
             yield from resolver(context)
 
 
-def _path_distributions(context):
-    name = context.name
-    normalized = _normalize(name) if name else ''
-    legacy = name.lower().replace('-', '_') if name else ''
-    for root in context.path:
-        directory = fspath(root) or '.'
-        archive = None
-        try:
-            if _is_file(directory):
-                archive = _zip_open(directory)
-                entries = _archive_children(_zip_names(archive))
-            else:
-                entries = _filenames(directory)
-        except Exception:
-            # A sys.path entry can be unreadable, malformed or an unsupported ZIP.
+def _path_distributions(paths, normalized, legacy):
+    for path in paths:
+        directory = path or '.'
+        archive, entries = _read_root(directory)
+        if entries is None:
             continue
         for entry in _matching_entries(directory, entries, normalized, legacy):
             if archive is not None:
@@ -241,7 +224,12 @@ def _path_distributions(context):
 class MetadataPathFinder(DistributionFinder):
     @classmethod
     def find_distributions(cls, context=DistributionFinder.Context()):
-        return _path_distributions(context)
+        name = context.name
+        paths = context.path
+        normalized = _normalize(name) if name else ''
+        legacy = name.lower().replace('-', '_') if name else ''
+        # Capture the path iterator at lookup, leaving filesystem access lazy.
+        return _path_distributions(map(fspath, paths), normalized, legacy)
 
     @staticmethod
     def invalidate_caches():

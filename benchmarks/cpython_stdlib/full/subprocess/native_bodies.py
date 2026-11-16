@@ -1,7 +1,6 @@
 """Run unchanged native subprocess methods and assertions under CPython fixtures."""
 
 import argparse
-from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -21,7 +20,7 @@ NONBYTE_VIEW_CASE = PROCESS_CASE + "test_communicate_memoryview_input_nonbyte"
 FD_LEAK_CASE = PROCESS_CASE + "test_communicate_pipe_fd_leak"
 PIPE_BUF_CASE = PROCESS_CASE + "test_communicate_pipe_buf"
 ZERO_CMD_CASES = EPIPE_CASES | {FD_LEAK_CASE}
-BOXED_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, NONBYTE_VIEW_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
+PIPE_FIXTURE_CASES = ZERO_CMD_CASES | {PIPE_BUF_CASE, NONBYTE_VIEW_CASE, PROCESS_CASE + "test_communicate_memoryview_input"}
 METHODS = {
     "ContextManagerTests": {
         "test_returncode": "int",
@@ -84,26 +83,28 @@ class NativeCase:
 
 
 def subprocess_method(tools, directory, source, cls, case_id, fixture):
-    if case_id not in BOXED_CASES:
+    if case_id not in PIPE_FIXTURE_CASES:
         return native_method(tools, directory, source, cls, case_id, fixture)
-    preamble = "import subprocess\nimport sys\n"
+    preamble = "from importlib import import_module\nimport sys\n"
+    setup = 'subprocess = import_module("subprocess")\n\n'
     args = None
     if case_id in ZERO_CMD_CASES:
         from test import test_subprocess
         # setUpModule can replace the fallback Python command with a checked executable.
         args = lambda: test_subprocess.ZERO_RETURN_CMD
-        preamble += "\nZERO_RETURN_CMD = tuple(sys.argv[1:])\n"
+        setup += "ZERO_RETURN_CMD = tuple(sys.argv[1:])\n\n"
     elif case_id == NONBYTE_VIEW_CASE:
         preamble += "import select\n"
     elif case_id == PIPE_BUF_CASE:
         from test import support
-        preamble += f"import os\n\nclass support:\n    PIPE_MAX_SIZE = {support.PIPE_MAX_SIZE!r}\n"
+        preamble += "import os\n"
+        setup += f"class support:\n    PIPE_MAX_SIZE = {support.PIPE_MAX_SIZE!r}\n"
 
     flags = ["--opt-level", str(tools.level), "--runtime", str(tools.runtime.resolve()),
              "--clang", str(tools.clang.resolve())]
     child_env = {"IMRE_PYTHON": str(tools.imre.resolve()), "IMRE_ENCODED_FLAGS": "\x1f".join(flags)}
-    return native_method(replace(tools, runtime_imports=True), directory, source, cls, case_id,
-                         preamble + testcase_fixture(), cleanups=case_id != FD_LEAK_CASE, extra_env=child_env,
+    return native_method(tools, directory, source, cls, case_id,
+                         preamble + testcase_fixture(setup=setup), cleanups=case_id != FD_LEAK_CASE, extra_env=child_env,
                          assertions="none" if case_id in EPIPE_CASES else "imre", fixture_args=args)
 
 

@@ -25,6 +25,41 @@ def check_text_encoding_flag():
         raise AssertionError("deleted the inherited flag")
 
 
+def check_big5():
+    import io
+    entry = codecs.lookup("csbig5")
+    assert entry.name == "big5"
+    wire = bytes.fromhex("a2cc a2ce a1fe a240")
+    text = "十卅／＼"
+    assert entry.decode(wire) == (text, 8)
+    assert entry.encode(text) == (bytes.fromhex("a451 a4ca a241 a242"), 4)
+    reader = entry.streamreader(io.BytesIO(bytes.fromhex("a578 a55f 0a")))
+    assert list(reader) == ["台北\n"]
+    decoder = entry.incrementaldecoder()
+    assert decoder.decode(b"\x80") == ""
+    try:
+        decoder.decode(b"", True)
+    except UnicodeDecodeError as error:
+        assert (error.start, error.end, error.reason) == (0, 1, "incomplete multibyte sequence")
+    else:
+        raise AssertionError("accepted a truncated Big5 lead")
+    assert decoder.getstate() == (b"\x80", 0)
+    decoder.errors = "replace"
+    assert decoder.decode(b" ", True) == "� "
+
+    def bad_position(error):
+        return "?", 2**100
+
+    codecs.register_error("big5.badposition", bad_position)
+    for function, value in ((entry.encode, "😀"), (entry.decode, b"\xff")):
+        try:
+            function(value, "big5.badposition")
+        except IndexError as error:
+            assert str(error) == "position -1 from error handler out of bounds"
+        else:
+            raise AssertionError("accepted an overflowing multibyte callback position")
+
+
 def check_shift_jis():
     entry = codecs.lookup("sjis")
     assert entry.name == "shift_jis"
@@ -84,6 +119,49 @@ def check_shift_jis():
 
     codecs.register_error("test.sjis_switch", switch_handler)
     assert "☃😀☃".encode("shift_jis", "test.sjis_switch") == b"AB?"
+
+
+def check_multibyte_factories():
+    import io
+    from importlib import import_module
+
+    for name, alias, char in (("shift_jis", "s_jis", "日"), ("big5", "big5_tw", "台")):
+        provider = import_module("encodings." + name)
+        factory = provider.getregentry
+        calls = []
+
+        def record_entry():
+            entry = factory()
+            calls.append(entry)
+            return entry
+
+        provider.getregentry = record_entry
+        try:
+            entry = codecs.lookup(alias)
+            assert codecs.lookup(alias) is entry
+            assert len(calls) == 1 and calls[0] is entry
+        finally:
+            provider.getregentry = factory
+
+        assert entry.name == name and entry is not factory()
+        assert entry.encode.__self__ is entry.decode.__self__ is provider.codec
+        assert provider.Codec.decode(b"A") == ("A", 1)
+        assert entry.incrementalencoder is provider.IncrementalEncoder
+        assert entry.incrementaldecoder is provider.IncrementalDecoder
+        assert entry.streamreader is provider.StreamReader
+        assert entry.streamwriter is provider.StreamWriter
+        encoded = char.encode(name)
+        assert entry.streamreader(io.BytesIO(encoded)).read(1) == char
+        decoder = entry.incrementaldecoder()
+        assert decoder.decode(encoded[:1]) == ""
+        try:
+            decoder.decode(b"", final=True)
+        except UnicodeDecodeError as exc:
+            assert exc.encoding == name and exc.reason == "incomplete multibyte sequence"
+        else:
+            raise AssertionError("accepted a truncated multibyte lead")
+        assert decoder.getstate() == (encoded[:1], 0)
+        assert decoder.decode(encoded[1:], final=True) == char
 
 
 def check_raw_unicode_escape():
@@ -177,6 +255,7 @@ def check_escape_decode():
 
 def check_boms():
     from codecs import BOM_UTF8, BOM_UTF16_BE, BOM_UTF16_LE, BOM_UTF32_BE, BOM_UTF32_LE
+    from sys import byteorder
 
     for name, mark, expected in (
         ("BOM_UTF8", BOM_UTF8, b"\xef\xbb\xbf"),
@@ -187,6 +266,13 @@ def check_boms():
     ):
         assert type(mark) is bytes and mark == expected
         assert getattr(codecs, name) is mark
+
+    assert codecs.BOM_LE is codecs.BOM32_LE is BOM_UTF16_LE
+    assert codecs.BOM_BE is codecs.BOM32_BE is BOM_UTF16_BE
+    assert codecs.BOM64_LE is BOM_UTF32_LE
+    assert codecs.BOM64_BE is BOM_UTF32_BE
+    assert codecs.BOM is codecs.BOM_UTF16 is (BOM_UTF16_LE if byteorder == "little" else BOM_UTF16_BE)
+    assert codecs.BOM_UTF32 is (BOM_UTF32_LE if byteorder == "little" else BOM_UTF32_BE)
 
 
 def check_utf8_incremental_encoder():
@@ -204,6 +290,202 @@ def check_utf8_incremental_encoder():
     encoder.errors = "replace"
     assert encoder.encode("\ud800", final=True) == b"?"
     assert factory("ignore").encode("\ud800Z") == b"Z"
+
+
+def check_single_byte_stream_readers():
+    import encodings
+    import sys
+    from encodings import ascii, latin_1
+    from io import BytesIO
+
+    for name, provider in (("ascii", ascii), ("L1", latin_1)):
+        registry = codecs.lookup(name)
+        entry = provider.getregentry()
+        assert codecs.getreader(name) is entry.streamreader is provider.StreamReader
+        assert provider.StreamReader.__bases__ == (provider.Codec, codecs.StreamReader)
+        assert registry.encode is entry.encode is provider.Codec.encode
+        assert registry.decode is entry.decode is provider.StreamReader.decode
+        # A default search cache hit must not import the provider or its parent again.
+        for key in (provider.__name__, "encodings"):
+            saved = sys.modules[key]
+            sys.modules[key] = None
+            try:
+                assert encodings.search_function(name.lower()) is registry
+            finally:
+                sys.modules[key] = saved
+    assert ascii.StreamReader is not latin_1.StreamReader
+    latin = latin_1.StreamReader(BytesIO(b"A\xffB"))
+    assert latin.read(2) == "Aÿ"
+    latin.seek(1)
+    assert latin.read() == "ÿB" and latin.read() == ""
+
+    assert codecs.getreader("ascii") is ascii.StreamReader
+    factory = codecs.getreader("ascii")
+    assert factory is codecs.lookup("us-ascii").streamreader
+    raw = BytesIO(b"A\xffB")
+    reader = factory(raw, "replace")
+    assert reader.read(1) == "A" and raw.tell() == 1
+    assert reader.read(1) == "\ufffd" and raw.tell() == 2
+    assert reader.read() == "B"
+    assert reader.read() == reader.read() == ""
+
+
+def check_utf8_provider_entries():
+    from encodings import utf_8, utf_8_sig
+
+    for provider, name in ((utf_8, "utf-8"), (utf_8_sig, "utf-8-sig")):
+        entry = provider.getregentry()
+        registered = codecs.lookup(name)
+        assert registered.encode is entry.encode is provider.encode
+        assert registered.decode is entry.decode is provider.decode
+        assert registered.streamreader is entry.streamreader is provider.StreamReader
+        assert registered.streamwriter is entry.streamwriter is provider.StreamWriter
+        assert registered.incrementalencoder is entry.incrementalencoder is provider.IncrementalEncoder
+        assert registered.incrementaldecoder is entry.incrementaldecoder is provider.IncrementalDecoder
+
+
+def check_utf8_stream_readers():
+    from io import BytesIO
+
+    data = codecs.BOM_UTF8 + "AΩ".encode() + codecs.BOM_UTF8
+    for name, expected in (("utf8", "\ufeffAΩ\ufeff"), ("utf_8_sig", "AΩ\ufeff")):
+        factory = codecs.getreader(name)
+        assert factory is codecs.lookup(name).streamreader
+        reader = factory(BytesIO(data))
+        assert reader.read(1) + reader.read() == expected
+        reader.seek(0)
+        assert reader.read() == expected
+
+
+def check_charmap_undefined_bytes():
+    for name, value in (("cp1251", 0x98), ("cp1252", 0x81), ("cp424", 0x80)):
+        raw = bytes([value])
+        assert ord(raw.decode(name, "surrogateescape")) == 0xdc00 + value
+    raw = b"\x80\x70"
+    try:
+        raw.decode("cp424", "surrogateescape")
+    except UnicodeDecodeError as exc:
+        assert (exc.encoding, exc.object, exc.start, exc.end) == ("charmap", raw, 1, 2)
+    else:
+        raise AssertionError("surrogate-escaped an unmapped ASCII byte")
+
+    def replace_byte(exc):
+        assert exc.encoding == "charmap" and exc.object == raw
+        return str(exc.start), exc.end
+
+    for errors in ("strict", "replace", "ignore", "surrogateescape"):
+        previous = codecs.lookup_error(errors)
+        codecs.register_error(errors, replace_byte)
+        try:
+            assert raw.decode("cp424", errors) == "01"
+        finally:
+            codecs.register_error(errors, previous)
+
+
+def check_charmap_factories():
+    from encodings import cp424
+    factory = cp424.getregentry
+    calls = []
+
+    def record_entry():
+        entry = factory()
+        calls.append(entry)
+        return entry
+
+    cp424.getregentry = record_entry
+    try:
+        first = codecs.lookup("csibm424")
+        assert codecs.lookup("csibm424") is first
+        second = codecs.lookup("ebcdic-cp-he")
+        assert first is not second and len(calls) == 2
+        assert first is calls[0] and second is calls[1]
+    finally:
+        cp424.getregentry = factory
+
+    from encodings import cp1252
+    from io import BytesIO
+
+    entry = codecs.lookup("windows-1252")
+    assert entry.incrementalencoder is codecs.getincrementalencoder("cp1252") is cp1252.IncrementalEncoder
+    assert entry.streamreader is codecs.getreader("cp1252") is cp1252.StreamReader
+    encoder = entry.incrementalencoder("replace")
+    assert encoder.encode("€") + encoder.encode("☃", final=True) == b"\x80?"
+    reader = entry.streamreader(BytesIO(b"\x80\x81"), "replace")
+    assert reader.read(1) == "€"
+    assert reader.read() == "\ufffd"
+    reader.seek(0)
+    assert reader.read() == "€\ufffd"
+
+
+def check_module_factory_results():
+    from encodings import latin_1
+
+    calls = []
+    def invalid():
+        calls.append("invalid")
+        return None
+
+    def legacy():
+        calls.append("legacy")
+        return codecs.ascii_encode, codecs.ascii_decode, None, None
+
+    original = latin_1.getregentry
+    try:
+        latin_1.getregentry = invalid
+        try:
+            codecs.lookup("csisolatin1")
+        except TypeError as error:
+            assert str(error) == "object of type 'NoneType' has no len()"
+        else:
+            raise AssertionError("accepted an invalid module factory result")
+        latin_1.getregentry = legacy
+        info = codecs.lookup("csisolatin1")
+        assert isinstance(info, codecs.CodecInfo) and info.name == "latin_1"
+        assert codecs.getencoder("csisolatin1") is info.encode is codecs.ascii_encode
+        assert info.encode("é", "replace") == (b"?", 1)
+        assert calls == ["invalid", "legacy"]
+    finally:
+        latin_1.getregentry = original
+
+
+def check_cached_package_callback():
+    import encodings
+    import sys
+    from encodings import ascii
+
+    search = encodings.search_function
+    saved = sys.modules["encodings"]
+    sys.modules["encodings"] = None
+    try:
+        entry = search("us_ascii!")
+        assert entry.decode is ascii.Codec.decode
+        assert search("us_ascii!") is entry
+    finally:
+        sys.modules["encodings"] = saved
+
+
+def check_reentrant_codec_factory():
+    import encodings
+    from encodings import latin_1
+
+    original = latin_1.getregentry
+    expected = original()
+    seen = []
+
+    class Factory:
+        def __call__(self):
+            latin_1.getregentry = original
+            return expected
+
+        def __del__(self):
+            seen.append(encodings.search_function("iso_ir_100"))
+
+    try:
+        latin_1.getregentry = Factory()
+        assert codecs.lookup("iso_ir_100") is expected
+        assert seen == [expected] and seen[0] is expected
+    finally:
+        latin_1.getregentry = original
 
 
 def check_incremental_decoder_factory():
@@ -303,12 +585,23 @@ def current():
     check_utf8_error_handler()
     check_utf8_buffer_slice()
     check_utf8_incremental_encoder()
+    check_utf8_provider_entries()
+    check_utf8_stream_readers()
+    check_charmap_factories()
+    check_charmap_undefined_bytes()
     check_incremental_decoder_factory()
+    check_module_factory_results()
+    check_reentrant_codec_factory()
+    check_cached_package_callback()
+    check_single_byte_stream_readers()
     check_text_encoding_flag()
     check_escape_decode()
     fixed_endian_encoders()
+    fixed_endian_streams()
     utf16_extended_decoder()
     check_shift_jis()
+    check_big5()
+    check_multibyte_factories()
     check_raw_unicode_escape()
     check_boms()
     decoder = codecs.IncrementalDecoder(errors="replace")
@@ -410,6 +703,36 @@ def current():
         text = wire.decode(name)
         assert text[128:131] == "Çüé" and text.encode(name) == wire
         assert codecs.lookup(name).name == "cp437"
+
+    koi8_r = codecs.lookup("cskoi8r")
+    assert koi8_r.name == "koi8-r"
+    assert koi8_r.incrementaldecoder().decode(b"\xa4", final=True) == "╓"
+    assert wire.decode("KOI8-R").encode("cskoi8r") == wire
+
+    from encodings import koi8_r as provider
+    fresh = provider.getregentry()
+    assert fresh is not provider.getregentry() and fresh is not koi8_r
+    assert fresh.name == koi8_r.name and fresh.encode("╓") == (b"\xa4", 1)
+    assert fresh.decode(b"\xa4") == ("╓", 1)
+    assert fresh.encode.__self__ is not fresh.decode.__self__
+    assert fresh.encode.__self__.__class__ is fresh.decode.__self__.__class__ is provider.Codec
+    assert fresh.incrementalencoder is provider.IncrementalEncoder
+    assert fresh.incrementaldecoder is provider.IncrementalDecoder
+    assert fresh.streamwriter is provider.StreamWriter and fresh.streamreader is provider.StreamReader
+
+    from encodings.iso8859_2 import Codec as Latin2
+    latin2 = codecs.lookup("iso.ir.101")
+    assert latin2.decode.__self__.__class__ is Latin2
+    assert latin2.decode.__func__ is Latin2.decode
+    assert Latin2.__bases__ == (codecs.Codec,)
+    assert latin2.decode(b"\xa1") == ("Ą", 1)
+    from encodings.iso8859_2 import IncrementalEncoder, StreamReader
+    from io import BytesIO
+
+    assert codecs.getincrementalencoder("l2") is latin2.incrementalencoder is IncrementalEncoder
+    assert codecs.getreader("latin2") is latin2.streamreader is StreamReader
+    text = StreamReader(BytesIO(wire)).read()
+    assert text[0xA1] == "Ą" and IncrementalEncoder().encode(text, final=True) == wire
 
     entry_koi8 = codecs.lookup("KOI8_U")
     assert entry_koi8.name == "koi8-u"
@@ -539,3 +862,28 @@ def utf16_extended_decoder():
     wire = b"\x00\xdc"
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1) == ("?BC", 4, -1)
     assert utf_16_ex_decode(wire, "test.utf16_change_input", -1, True) == ("?BC", 2, -1)
+
+
+def fixed_endian_streams():
+    from io import BytesIO
+
+    for name in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        entry = codecs.lookup(name)
+        module = __import__("encodings." + name.replace("-", "_"), fromlist=["*"])
+        assert entry.incrementaldecoder is module.IncrementalDecoder
+        text = "\ufeffA🙂"
+        wire = text.encode(name)
+        stream = BytesIO()
+        entry.streamwriter(stream).write(text)
+        assert stream.getvalue() == wire
+        stream.seek(0)
+        assert entry.streamreader(stream).read() == text
+        for split in range(len(wire) + 1):
+            decoder = entry.incrementaldecoder()
+            first = decoder.decode(wire[:split])
+            restored = entry.incrementaldecoder()
+            restored.setstate(decoder.getstate())
+            assert first + restored.decode(wire[split:], True) == text
+        primitive = getattr(codecs, name.replace("-", "_") + "_decode")
+        assert primitive(wire + b"x") == (text, len(wire))
+        assert module.decode(wire + b"x", "replace") == (text + "\ufffd", len(wire) + 1)

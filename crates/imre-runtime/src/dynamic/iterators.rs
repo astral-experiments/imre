@@ -1,5 +1,5 @@
 //! Execution state for lazily resumed generator expressions.
-use super::{Context, Error, FrameOwner, Id, NONE, Result, Value};
+use super::{Context, Error, FrameOwner, Id, Result, Value};
 
 impl Context {
     pub(super) fn template_iterator(&mut self, strings: Id, interpolations: Id) -> Result<Id> {
@@ -56,7 +56,7 @@ impl Context {
         Ok(Some(self.alloc(Value::Tuple(vec![index, item]))))
     }
 
-    pub(super) fn generator(&mut self, function: Id, iter: Id, targets: Id) -> Result<Id> {
+    pub(super) fn generator(&mut self, function: Id, iter: Id) -> Result<Id> {
         let Value::Function {
             code,
             scope,
@@ -69,86 +69,13 @@ impl Context {
                 "expected a compiled generator body",
             ));
         };
-        let scope = self.comprehension_scope(scope, targets)?;
+        let locals = self.parsed_parameters(code)?.locals.clone();
+        let scope = self.comprehension_scope_with_locals(scope, locals);
         let Value::Scope(frame) = self.heap.get_mut(scope) else {
             unreachable!()
         };
         frame.class_cell = class_cell;
-        frame.first_argument = Some(".0".to_owned());
-        let source = match *self.heap.get(iter) {
-            Value::LoopIterator { source, .. } => source,
-            _ => iter,
-        };
-        self.bind(scope, ".0", source);
-        self.bind(scope, ".iterator", iter);
-        Ok(self.new_generator(code, scope, FrameOwner::Function(function)))
-    }
-
-    /// Runs the compiled body until it yields one item, returns, or raises.
-    pub(super) fn next_generator_item(&mut self, generator: Id) -> Result<Option<Id>> {
-        let Value::Generator {
-            code,
-            scope,
-            running,
-            offset,
-            ..
-        } = self.heap.get_mut(generator)
-        else {
-            unreachable!()
-        };
-        if *running {
-            return Err(Error::new("ValueError", "generator already executing"));
-        }
-        if offset.is_none() {
-            return Ok(None);
-        }
-        *running = true;
-        let (code, scope) = (*code, *scope);
-        let result = self
-            .execute(code, scope, FrameOwner::Generator(generator))
-            .map(|id| match self.heap.get(id) {
-                Value::None => None,
-                Value::Yielded(item) => Some(*item),
-                _ => unreachable!("compiled generator step result"),
-            });
-        let Value::Generator {
-            running,
-            offset,
-            scope,
-            owner,
-            frame,
-            ..
-        } = self.heap.get_mut(generator)
-        else {
-            unreachable!()
-        };
-        *running = false;
-        if matches!(result, Ok(Some(_))) {
-            // Native comprehension code keeps its own loop cursor in the scope.
-            *offset = Some(1);
-        } else {
-            *offset = None;
-            *scope = NONE;
-            *frame = None;
-            *owner = FrameOwner::Module(NONE);
-        }
-        result.map_err(|error| self.frame_error(error, code))
-    }
-
-    /// Preserve an escaping StopIteration as the cause and context of the frame's RuntimeError.
-    pub(super) fn frame_error(&mut self, error: Error, code: Id) -> Error {
-        if !self.is_stop_iteration(&error) {
-            return error;
-        }
-        let cause = self.raised_instance(error);
-        let message = if self.code_object(code).coroutine {
-            "coroutine raised StopIteration"
-        } else {
-            "generator raised StopIteration"
-        };
-        let mut error = Error::new("RuntimeError", message);
-        error.tracing().cause = Some(cause);
-        error.context = cause;
-        error
+        self.bind(scope, ".0", iter);
+        self.new_suspended(code, scope, FrameOwner::Function(function))
     }
 }

@@ -37,6 +37,21 @@ for newline in ["", "\r", "\n", "\r\n"]:
     print(path.write_text("a\r\nb\rc\n", encoding="latin-1", newline=newline))
     print(path.read_bytes())
 path.write_bytes(b"original")
+missing = Path("missing-codec.txt")
+for encoding, errors, newline in [
+    ("utf-8\0", "strict", ""),
+    ("utf-8", "strict\0", ""),
+    ("utf-8", "strict", "\n\0"),
+]:
+    try:
+        path.write_text("replacement", encoding, errors, newline)
+    except ValueError as exc:
+        print(str(exc))
+    assert path.read_bytes() == b"original"
+    try:
+        missing.read_text(encoding, errors, newline)
+    except ValueError as exc:
+        print(str(exc))
 try:
     path.write_text(b"wrong", encoding="nonexistent", newline="bad")
 except TypeError as exc:

@@ -77,10 +77,9 @@ def generate(*, pure=False):
             if name == "S_ISWHT" and not pure:
                 result.append("    return S_IFMT(mode) == _WHITEOUT_MASK")
             else:
-                fn = "".join(lines[statements[0].lineno - 1 : node.end_lineno]).rstrip()
-                if name == "filemode":
-                    fn = fn.replace("    perm = []", "    perm: list[str] = []")
-                result.append(fn)
+                result.append(
+                    "".join(lines[statements[0].lineno - 1 : node.end_lineno]).rstrip()
+                )
     return "\n".join(result) + "\n"
 
 

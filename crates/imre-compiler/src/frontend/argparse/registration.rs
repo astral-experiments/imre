@@ -1,6 +1,7 @@
 //! Preserve catchable errors from a literal add_argument call at the call site.
 
 use super::*;
+use crate::frontend::phase::Result;
 use ruff_python_ast::visitor::walk_stmt;
 
 pub(super) fn is_intrinsic(
@@ -8,15 +9,13 @@ pub(super) fn is_intrinsic(
     intrinsic: Intrinsic,
     graph: &SourceGraph,
     id: ModuleId,
-    locals: &HashSet<String>,
 ) -> bool {
     let mut root = expr;
     while let ast::Expr::Attribute(attr) = root {
         root = &attr.value;
     }
-    root.as_name_expr()
-        .is_some_and(|name| !locals.contains(name.id.as_str()))
-        && graph.resolve(id, expr) == Some(Binding::Intrinsic(intrinsic))
+    graph.resolve(id, expr) == Some(Binding::Intrinsic(intrinsic))
+        && graph.session.reads_module_binding(id, root)
 }
 
 /// CPython formats the choices to validate an action's metavar during add_argument.
@@ -92,13 +91,50 @@ struct Calls<'a> {
     receiver: &'a str,
     graph: &'a SourceGraph,
     module: ModuleId,
-    locals: &'a HashSet<String>,
     prefixes: &'a str,
     failures: HashMap<TextSize, Expr>,
 }
 
 impl Calls<'_> {
     fn failure(&self, call: &ast::ExprCall) -> Option<Expr> {
+        let mut action = None;
+        for kw in &call.arguments.keywords {
+            let name = kw.arg.as_ref()?.as_str();
+            if name == "action" {
+                action = Some(&kw.value);
+            } else if name == "dest"
+                && !matches!(
+                    kw.value,
+                    ast::Expr::NoneLiteral(_)
+                        | ast::Expr::BooleanLiteral(_)
+                        | ast::Expr::StringLiteral(_)
+                        | ast::Expr::NumberLiteral(_)
+                )
+                && builtin_constant(&kw.value, self.graph, self.module).is_none()
+            {
+                // A dynamic destination can fail lookup before the action constructor runs.
+                return None;
+            }
+        }
+        let action = action?;
+        let boolean = is_intrinsic(
+            action,
+            Intrinsic::BooleanOptionalAction,
+            self.graph,
+            self.module,
+        );
+        let class = if boolean {
+            "BooleanOptionalAction"
+        } else {
+            match action.as_string_literal_expr()?.value.to_str() {
+                "store_true" => "_StoreTrueAction",
+                "store_false" => "_StoreFalseAction",
+                "count" => "_CountAction",
+                "store_const" => "_StoreConstAction",
+                "append_const" => "_AppendConstAction",
+                _ => return None,
+            }
+        };
         let flags = call
             .arguments
             .args
@@ -117,55 +153,17 @@ impl Calls<'_> {
         if flags.is_empty() {
             return None;
         }
-        let mut action = None;
-        let mut keywords = Vec::new();
-        for kw in &call.arguments.keywords {
-            let name = kw.arg.as_ref()?.as_str();
-            if name == "action" {
-                action = Some(&kw.value);
-            } else {
-                // A dynamic destination can fail the parser's default lookup before
-                // the constructor is called. Other keywords are evaluated at the call site.
-                if name == "dest"
-                    && !matches!(
-                        kw.value,
-                        ast::Expr::NoneLiteral(_)
-                            | ast::Expr::BooleanLiteral(_)
-                            | ast::Expr::StringLiteral(_)
-                            | ast::Expr::NumberLiteral(_)
-                    )
-                    && builtin_constant(&kw.value, &self.graph.modules[self.module], self.locals)
-                        .is_none()
-                {
-                    return None;
-                }
-                keywords.push(name);
-            }
-        }
-        let action = action?;
-        let boolean = is_intrinsic(
-            action,
-            Intrinsic::BooleanOptionalAction,
-            self.graph,
-            self.module,
-            self.locals,
-        );
-        let class = if boolean {
-            "BooleanOptionalAction"
-        } else {
-            match action.as_string_literal_expr()?.value.to_str() {
-                "store_true" => "_StoreTrueAction",
-                "store_false" => "_StoreFalseAction",
-                "count" => "_CountAction",
-                "store_const" => "_StoreConstAction",
-                "append_const" => "_AppendConstAction",
-                _ => return None,
-            }
-        };
-        for name in keywords {
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref()?.as_str();
             if !matches!(
                 name,
-                "dest" | "default" | "help" | "required" | "deprecated" | "option_strings"
+                "action"
+                    | "dest"
+                    | "default"
+                    | "help"
+                    | "required"
+                    | "deprecated"
+                    | "option_strings"
             ) && !(matches!(class, "_StoreConstAction" | "_AppendConstAction")
                 && matches!(name, "const" | "metavar"))
             {
@@ -243,14 +241,12 @@ pub(super) fn failures(
     receiver: &str,
     graph: &SourceGraph,
     module: ModuleId,
-    locals: &HashSet<String>,
     prefixes: &str,
 ) -> HashMap<TextSize, Expr> {
     let mut calls = Calls {
         receiver,
         graph,
         module,
-        locals,
         prefixes,
         failures: HashMap::new(),
     };

@@ -296,7 +296,10 @@ pub(in crate::dynamic) fn decompressor(
 
 impl Decompressor {
     /// Keeps bytes reachable from the decompressor alive across boxed collections.
-    pub(in crate::dynamic) fn children(&self, visit: &mut crate::dynamic::value::MarkQueue<'_>) {
+    pub(in crate::dynamic) fn children(
+        &self,
+        visit: &mut impl crate::dynamic::value::VisitReferences,
+    ) {
         for tail in [&self.unused_data, &self.unconsumed_tail] {
             if let Tail::Published(id) = tail {
                 visit.push(*id);
@@ -435,22 +438,6 @@ impl Decompressor {
         }
         crate::compact_bytes(&mut output);
         Ok(output)
-    }
-}
-
-/// The gzip facade writes the framing and owns its file object. These primitives
-/// advance one raw DEFLATE stream and return just its newly produced bytes.
-pub(super) fn gzip_writer(ctx: &mut Context, name: &str, args: &[Id]) -> Result<Id> {
-    if name == "writer" {
-        let wbits = ctx.int(-15);
-        compressor(ctx, "new", args, &[("wbits".to_owned(), wbits)])
-    } else {
-        let method = if name == "compress" {
-            "compress"
-        } else {
-            "flush"
-        };
-        compressor(ctx, method, args, &[])
     }
 }
 

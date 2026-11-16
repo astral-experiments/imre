@@ -17,6 +17,11 @@ class BrokenReverse:
         raise ValueError("reverse")
 
 
+class BrokenLength(set):
+    def __len__(self):
+        raise ValueError("length")
+
+
 class BrokenIterator:
     def __iter__(self):
         return self
@@ -96,6 +101,7 @@ def current():
         lambda: sorted([1, "s"]),
         lambda: sorted([], reverse=BrokenReverse()),
         lambda: sorted(BrokenIterator(), unknown=1),
+        lambda: sorted(BrokenLength(), unknown=1),
     ):
         try:
             call()

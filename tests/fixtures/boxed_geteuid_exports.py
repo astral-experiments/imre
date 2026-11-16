@@ -6,6 +6,7 @@ names = ("chown", "fchown", "lchown", "getuid", "geteuid", "getgid", "getgroups"
 getters = ("getegid",)
 if sys.platform == "linux":
     getters += ("getresgid", "getresuid")
+    names += ("setresgid", "setresuid")
 names += getters + ("setreuid", "setregid")
 for name in names:
     assert name in vars(posix)
@@ -65,6 +66,32 @@ for name, current, real, effective in (
         else:
             raise AssertionError(f"{name} accepted invalid arguments")
     assert converted == [-1, 2**32 - 1]
+
+
+if sys.platform == "linux":
+    for setter, getter in ((os.setresgid, posix.getresgid), (posix.setresuid, os.getresuid)):
+        assert setter.__self__ is posix
+        print(setter.__text_signature__, setter.__doc__)
+        converted = []
+        before = getter()
+        assert setter(*(Identifier(value) for value in before)) is None
+        assert converted == list(before) and getter() == before
+        converted = []
+        assert setter(Identifier(-1), Identifier(2**32 - 1), Identifier(-1)) is None
+        for args, kwargs in (
+            ((Identifier(-1), Identifier(-2), Identifier(-1)), {}),
+            ((-1, -1, 2**64), {}),
+            ((-1, -1, None), {}),
+            ((-1, -1), {}),
+            ((Identifier(-1), -1, -1), {"saved": -1}),
+        ):
+            try:
+                setter(*args, **kwargs)
+            except (OverflowError, TypeError) as exc:
+                print(type(exc).__name__, str(exc))
+            else:
+                raise AssertionError(f"{setter.__name__} accepted invalid arguments")
+        assert converted == [-1, 2**32 - 1, -1, -1, -2] and getter() == before
 
 
 setter = os.setgroups

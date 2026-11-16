@@ -13,7 +13,20 @@ for member in (signal.SIGINT, signal.SIGALRM, signal.SIGTERM):
     assert member is signal.Signals(member.value)
     assert member == getattr(_signal, member.name)
 
+raw = _signal.valid_signals()
+valid = signal.valid_signals()
+assert valid == raw
+assert all(type(number) is int for number in raw)
+assert any(number is signal.SIGINT for number in valid)
+if hasattr(signal, "SIGRTMIN"):
+    assert set(range(signal.SIGRTMIN, signal.SIGRTMAX + 1)) <= valid
+valid.clear()
+assert signal.SIGINT in signal.valid_signals()
+
 assert signal.alarm is _signal.alarm
+assert signal.pause is _signal.pause
+assert signal.pause.__doc__ == "Wait until a signal arrives."
+
 assert signal.alarm(Delay()) == 0
 try:
     for args, kwargs in (([], {}), ([0, 0], {}), ([], {"seconds": 0}), ([1 << 40], {}), ([0.5], {})):
@@ -145,3 +158,138 @@ def check_handlers():
 
 
 check_handlers()
+
+
+def check_pause():
+    seen = []
+
+    def handler(signum, frame):
+        seen.append(signum)
+
+    old = signal.signal(signal.SIGALRM, handler)
+    try:
+        signal.alarm(1)
+        assert signal.pause() is None
+        assert seen == [signal.SIGALRM]
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
+check_pause()
+
+
+def check_buffered_read_eintr(mode):
+    import errno
+    import io
+    import os
+
+    r, w = os.pipe()
+
+    def finish_read(signum, frame):
+        os.write(w, b"bar")
+        if mode == "rb":
+            raise InterruptedError(errno.EINTR, "retry readinto")
+
+    previous = signal.signal(signal.SIGALRM, finish_read)
+    try:
+        with io.open(r, mode, encoding="latin-1" if mode == "r" else None) as reader:
+            os.write(w, b"foo")
+            signal.alarm(1)
+            assert reader.read(6) == ("foobar" if mode == "r" else b"foobar")
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+        os.close(w)
+
+
+check_buffered_read_eintr("rb")
+check_buffered_read_eintr("r")
+
+
+def check_wakeup_fd():
+    import _signal
+    import errno
+    import os
+
+    seen = []
+    sig = signal.SIGUSR1
+    previous = signal.signal(sig, lambda number, frame: seen.append(number))
+    read, write = os.pipe()
+    other_read, other_write = os.pipe()
+    old_fd = signal.set_wakeup_fd(-1)
+    try:
+        assert signal.set_wakeup_fd is _signal.set_wakeup_fd
+        os.set_blocking(read, False)
+        os.set_blocking(other_read, False)
+        os.set_blocking(write, False)
+        assert signal.set_wakeup_fd(write) == -1
+        try:
+            signal.set_wakeup_fd(other_write)
+        except ValueError as exc:
+            assert str(exc) == f"the fd {other_write} must be in non-blocking mode"
+        else:
+            raise AssertionError("accepted a blocking pipe")
+        os.set_blocking(other_write, False)
+        assert signal.set_wakeup_fd(other_write, warn_on_full_buffer=False) == write
+        os.kill(os.getpid(), sig)
+        assert os.read(other_read, 1) == bytes([sig])
+        assert signal.set_wakeup_fd(write) == other_write
+        stale = os.dup(other_write)
+        os.close(stale)
+        try:
+            signal.set_wakeup_fd(stale)
+        except OSError as exc:
+            assert exc.errno == errno.EBADF
+        else:
+            raise AssertionError("accepted a closed descriptor")
+        os.kill(os.getpid(), sig)
+        assert os.read(read, 1) == bytes([sig])
+        assert seen == [sig, sig]
+        assert signal.set_wakeup_fd(-1) == write
+        assert os.write(write, b"x") == 1
+    finally:
+        signal.set_wakeup_fd(old_fd)
+        signal.signal(sig, previous)
+        for fd in (read, write, other_read, other_write):
+            os.close(fd)
+
+
+check_wakeup_fd()
+
+
+def check_recursive_wakeup_error():
+    import errno
+    import os
+    import sys
+
+    sig = signal.SIGUSR1
+    events = []
+
+    def hook(record):
+        assert record.exc_value.errno == errno.EBADF
+        assert record.exc_traceback is not None
+        events.append("enter")
+        if events == ["enter"]:
+            signal.signal(sig, lambda *args: events.append("replacement"))
+            os.kill(os.getpid(), sig)
+        events.append("leave")
+
+    read, write = os.pipe()
+    os.set_blocking(read, False)
+    old_handler = signal.signal(sig, lambda *args: events.append("signal"))
+    old_fd = signal.set_wakeup_fd(read)
+    old_hook = sys.unraisablehook
+    try:
+        sys.unraisablehook = hook
+        os.kill(os.getpid(), sig)
+        assert events == ["enter", "replacement", "leave", "enter", "leave", "signal"]
+    finally:
+        sys.unraisablehook = old_hook
+        signal.set_wakeup_fd(old_fd)
+        signal.signal(sig, old_handler)
+        os.close(read)
+        os.close(write)
+
+
+check_recursive_wakeup_error()

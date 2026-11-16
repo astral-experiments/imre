@@ -4,6 +4,7 @@ import math
 from fractions import Fraction
 from math import atan2, ceil, copysign, cos, exp, floor, isfinite, isinf, isnan, log, modf, sqrt, trunc
 from math import e, inf, nan, pi, tau
+from math import sin, tan, ulp
 
 
 class Hooks:
@@ -101,10 +102,26 @@ def current():
     for value in (float("inf"), -0.0, FloatOnly(), IndexOnly()):
         assert isnan(value) is False
 
+    assert ulp is math.ulp
+    assert ulp(FloatOnly(-1.0)) == 2.0 ** -52
+    assert ulp(2**64) == 4096.0
+    for value in (-0.0, 1.5e-323, -1.5e-323):
+        assert ulp(value) == 5e-324
+    assert ulp(float.fromhex("0x1.fffffffffffffp+1023")) == 2.0 ** 971
+    assert ulp(-inf) == inf and isnan(ulp(nan))
+
     assert cos is math.cos and log is math.log
     assert cos(Fraction(1, 2)) == cos(0.5)
     assert cos(FloatOverride(-0.0)) == 1.0 and isnan(cos(float("nan")))
     assert cos(IndexOnly()) == cos(5)
+    assert sin is math.sin and tan is math.tan
+    assert sin(pi / 2) == 1.0
+    assert abs(tan(pi / 4) - 1.0) < 1e-15
+    for trig in (sin, tan):
+        angle = FloatOnly(-0.0)
+        assert copysign(1.0, trig(angle)) == -1.0
+        assert angle.calls == 1
+        assert isnan(trig(nan))
     assert log(Fraction(1, 4), FloatOverride(2)) == -2.0
     assert log(IndexOnly()) == log(5) and log(True) == 0.0
     assert log(10**1000, 10**500) == 2.0
@@ -124,11 +141,14 @@ def current():
     assert isnan(exp(nan)) and isnan(sqrt(nan))
     for call, error_type, message in (
         (lambda: exp(710.0), OverflowError, "math range error"),
+        (lambda: ulp(2**1024), OverflowError, "int too large to convert to float"),
         (lambda: isfinite(2**1024), OverflowError, "int too large to convert to float"),
         (lambda: isfinite("1"), TypeError, "must be real number, not str"),
         (lambda: sqrt(-1.0), ValueError, "expected a nonnegative input, got -1.0"),
         (lambda: sqrt(-inf), ValueError, "expected a nonnegative input, got -inf"),
         (lambda: cos(float("inf")), ValueError, "expected a finite input, got inf"),
+        (lambda: sin(-inf), ValueError, "expected a finite input, got -inf"),
+        (lambda: tan(inf), ValueError, "expected a finite input, got inf"),
         (lambda: cos(10**1000), OverflowError, "int too large to convert to float"),
         (lambda: cos("1"), TypeError, "must be real number, not str"),
         (lambda: log(-10**1000, 0), ValueError, "expected a positive input"),
@@ -231,8 +251,15 @@ def current():
         assert op(before) is obj.marker
         assert type(op(after)) is int and op(after) == big
     integer = int.__new__(Integral, 5)
-    real = Real()
+    real = Real(-1.25)
     assert ceil(integer) is integer and floor(real) is real
+    assert float.__floor__(real) == -2
+    try:
+        float.__floor__(FloatOnly())
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("float.__floor__ accepted a non-float receiver")
 
 
 if __name__ == "__main__":

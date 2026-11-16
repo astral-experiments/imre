@@ -2,6 +2,7 @@
 # Lib/urllib/request.py. See ../docstrings/LICENSE.
 import base64
 import bisect
+import email
 import hashlib
 import http.client
 import io
@@ -25,7 +26,7 @@ __all__ = [
     "Request", "OpenerDirector", "BaseHandler", "DataHandler", "FileHandler", "FTPHandler", "UnknownHandler",
     "HTTPPasswordMgr", "HTTPPasswordMgrWithDefaultRealm", "HTTPPasswordMgrWithPriorAuth",
     "AbstractBasicAuthHandler", "HTTPBasicAuthHandler", "ProxyBasicAuthHandler",
-    "AbstractDigestAuthHandler", "HTTPDigestAuthHandler",
+    "AbstractDigestAuthHandler", "HTTPDigestAuthHandler", "ProxyDigestAuthHandler",
     "ProxyHandler", "HTTPCookieProcessor", "HTTPHandler", "HTTPDefaultErrorHandler", "HTTPRedirectHandler", "HTTPErrorProcessor",
     "urlopen", "install_opener", "build_opener", "urlretrieve", "urlcleanup",
     "pathname2url", "url2pathname", "getproxies",
@@ -1092,6 +1093,19 @@ class HTTPDigestAuthHandler(BaseHandler, AbstractDigestAuthHandler):
         return retry
 
 
+class ProxyDigestAuthHandler(BaseHandler, AbstractDigestAuthHandler):
+
+    auth_header = 'Proxy-Authorization'
+    handler_order = 490  # before Basic auth
+
+    def http_error_407(self, req, fp, code, msg, headers):
+        host = req.host
+        retry = self.http_error_auth_reqed('proxy-authenticate',
+                                           host, req, headers)
+        self.reset_retry_count()
+        return retry
+
+
 class AbstractHTTPHandler(BaseHandler):
 
     def __init__(self, debuglevel=None):
@@ -1295,9 +1309,7 @@ class FTPHandler(BaseHandler):
                 headers += "Content-type: %s\n" % mtype
             if retrlen is not None and retrlen >= 0:
                 headers += "Content-length: %d\n" % retrlen
-            # Use the same MIME field parser as HTTP responses.
-            message = Message()
-            http.client.HTTPMessage._parse(message, io.StringIO(headers, newline="").readlines())
+            message = email.message_from_string(headers)
             return addinfourl(fp, message, req.full_url)
         except Exception as exp:
             if fw is not None and not fw.keepalive:

@@ -1,5 +1,6 @@
 //! Hash objects share mutable state. Digest reads finalize an independent snapshot.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ptr;
 
@@ -386,14 +387,6 @@ impl State {
         }
         Ok(bytes)
     }
-
-    pub(crate) fn xof_hexdigest(&self, length: &Int) -> Result<Str> {
-        hex_text(&self.xof_digest(length)?)
-    }
-
-    pub(crate) fn hexdigest(&self) -> Result<Str> {
-        self.fixed_digest("hexdigest", hex_text)
-    }
 }
 
 fn handle(state: DigestState) -> Result<*const Object> {
@@ -457,20 +450,58 @@ pub(crate) fn hex_text(bytes: &[u8]) -> Result<Str> {
     let mut text = Str::try_with_capacity(length).map_err(|_| Error::allocation())?;
     // SAFETY: every write is an ASCII digit within the reserved capacity.
     let space = unsafe { text.spare_capacity_mut() };
-    let (pairs, _) = space[..length].as_chunks_mut::<2>();
-    for (&byte, pair) in bytes.iter().zip(pairs) {
-        pair[0].write(HEX[usize::from(byte >> 4)]);
-        pair[1].write(HEX[usize::from(byte & 15)]);
-    }
+    write_hex_digits(bytes, b'a' - 10, &mut space[..length]);
     // SAFETY: the loop initialized exactly two valid UTF-8 bytes per input byte.
     unsafe { text.set_len(length) };
     Ok(text)
 }
 
-pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32) -> Result<Str> {
+/// Encode contiguous input directly into the returned uppercase byte buffer.
+pub(crate) fn uppercase_hex_bytes(input: &[u8]) -> Result<Vec<u8>> {
+    hex_bytes(input, b'A' - 10)
+}
+
+fn hex_bytes(input: &[u8], letter_offset: u8) -> Result<Vec<u8>> {
+    let length = input.len().checked_mul(2).ok_or_else(Error::allocation)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(length)
+        .map_err(|_| Error::allocation())?;
+    write_hex_digits(
+        input,
+        letter_offset,
+        &mut output.spare_capacity_mut()[..length],
+    );
+    // SAFETY: each input byte initialized exactly two output bytes.
+    unsafe { output.set_len(length) };
+    Ok(output)
+}
+
+/// Write into the final buffer for either text or bytes, using one vectorizable loop.
+#[inline(never)]
+fn write_hex_digits(input: &[u8], letter_offset: u8, output: &mut [std::mem::MaybeUninit<u8>]) {
+    let (pairs, _) = output.as_chunks_mut::<2>();
+    let digit = |nibble| {
+        if nibble < 10 {
+            b'0' + nibble
+        } else {
+            letter_offset + nibble
+        }
+    };
+    for (&byte, pair) in input.iter().zip(pairs) {
+        pair[0].write(digit(byte >> 4));
+        pair[1].write(digit(byte & 15));
+    }
+}
+
+pub(crate) fn hex_with_separator(
+    bytes: &[u8],
+    separator: Option<u8>,
+    group: i32,
+) -> Result<Vec<u8>> {
     let step = group.unsigned_abs() as usize;
     let Some(separator) = separator.filter(|_| step > 0 && step < bytes.len()) else {
-        return hex_text(bytes);
+        return hex_bytes(bytes, b'a' - 10);
     };
     let separators = (bytes.len() - 1) / step;
     let capacity = bytes
@@ -478,20 +509,36 @@ pub(crate) fn hex_with_separator(bytes: &[u8], separator: Option<u8>, group: i32
         .checked_mul(2)
         .and_then(|n| n.checked_add(separators))
         .ok_or_else(Error::allocation)?;
-    let mut result = Str::try_with_capacity(capacity).map_err(|_| Error::allocation())?;
-    let mut next = if group > 0 {
+    let mut result = Vec::new();
+    result
+        .try_reserve_exact(capacity)
+        .map_err(|_| Error::allocation())?;
+    let first = if group > 0 {
         (bytes.len() - 1) % step + 1
     } else {
         step
     };
-    for (index, &byte) in bytes.iter().enumerate() {
-        if index == next {
-            result.push(char::from(separator));
-            next += step;
+    let output = &mut result.spare_capacity_mut()[..capacity];
+    let (first_output, rest) = output.split_at_mut(2 * first);
+    write_hex_digits(&bytes[..first], b'a' - 10, first_output);
+    let remaining = &bytes[first..];
+    if step == 1 {
+        // One separator and two digits have a fixed stride for every input byte.
+        let (triples, _) = rest.as_chunks_mut::<3>();
+        for (triple, &byte) in triples.iter_mut().zip(remaining) {
+            triple[0].write(separator);
+            triple[1].write(HEX[usize::from(byte >> 4)]);
+            triple[2].write(HEX[usize::from(byte & 15)]);
         }
-        result.push(char::from(HEX[(byte >> 4) as usize]));
-        result.push(char::from(HEX[(byte & 15) as usize]));
+    } else {
+        for (destination, source) in rest.chunks_mut(2 * step + 1).zip(remaining.chunks(step)) {
+            destination[0].write(separator);
+            write_hex_digits(source, b'a' - 10, &mut destination[1..]);
+        }
     }
+    // SAFETY: the first group writes two digits per byte. Each remaining group
+    // also writes its leading separator, including a shorter last group.
+    unsafe { result.set_len(capacity) };
     Ok(result)
 }
 
@@ -685,7 +732,7 @@ pub unsafe extern "C" fn imre_hash_type(hash: *const Object) -> *const Str {
 /// The address is stable while an alias retains the rooted native hash.
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_hash_identity(hash: *const Object) -> usize {
-    Int::from_usize(hash as usize).into_raw()
+    super::imre_pointer_identity(hash.cast())
 }
 
 /// # Safety
@@ -733,7 +780,10 @@ pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
     // SAFETY: finalize reads a snapshot of the rooted hash.
     let digest = unsafe {
         with_state(hash, |s| {
-            s.fixed_digest("digest", super::bytes::owned_input)
+            s.fixed_digest("digest", |bytes| match bytes {
+                Cow::Borrowed(bytes) => super::bytes::owned_input(bytes),
+                Cow::Owned(bytes) => BytesOwner::try_new(bytes).map_err(|_| Error::memory_error()),
+            })
         })
     };
     finish(digest.map(BytesOwner::into_raw), ptr::null())
@@ -744,7 +794,11 @@ pub unsafe extern "C" fn imre_hash_digest(hash: *const Object) -> *const Bytes {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_hash_hexdigest(hash: *const Object) -> *const Str {
     // SAFETY: finalize reads a snapshot of the rooted hash.
-    let result = unsafe { with_state(hash, |s| s.fixed_digest("hexdigest", hex_text)) };
+    let result = unsafe {
+        with_state(hash, |s| {
+            s.fixed_digest("hexdigest", |bytes| hex_text(&bytes))
+        })
+    };
     finish(result.and_then(crate::checked_owned_str), ptr::null())
 }
 

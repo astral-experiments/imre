@@ -82,6 +82,14 @@ writer.write("ё☃!")
 assert stream.getvalue() == expected + b"\xb8<snow>!"
 
 
+for encoding in ("ascii", "utf-8", "utf-16-be", "cp1252"):
+    entry = codecs.lookup(encoding)
+    assert codecs.getencoder(encoding) is entry.encode
+    assert codecs.getdecoder(encoding) is entry.decode
+    encoded, used = codecs.getencoder(encoding)("A")
+    assert used == 1 and codecs.getdecoder(encoding)(encoded) == ("A", len(encoded))
+
+
 calls = []
 views = []
 enabled = False

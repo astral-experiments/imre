@@ -48,7 +48,7 @@ impl Checker<'_> {
         if let Some(owner) = receiver.as_ref()
             && (!call.arguments.keywords.is_empty()
                 || !(1..=2).contains(&call.arguments.args.len()))
-            && !matches!(owner.kind, ExprKind::Dict { .. })
+            && !matches!(owner.kind, ExprKind::Dict(_))
             && self
                 .types
                 .mapping(owner.ty)
@@ -201,7 +201,7 @@ impl Checker<'_> {
             let insert = if list_key {
                 Statement::Expr(fromkeys_error("unhashable type: 'list'".into(), Type::None))
             } else {
-                Statement::SetItem(checker.local(target), key, checker.local(kept))
+                Statement::assign_item(checker.local(target), key, checker.local(kept))
             };
             Ok(vec![insert])
         })?;
@@ -269,11 +269,7 @@ impl Checker<'_> {
         let ty = self.types.dict(key, value);
         let empty = Expr {
             ty,
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         match receiver {
             Some(owner) => Expr {

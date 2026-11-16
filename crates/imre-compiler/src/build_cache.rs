@@ -5,7 +5,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 use imre_compiler::{CodegenUnit, SourceInputs};
 use serde::{Deserialize, Serialize};
@@ -51,10 +53,27 @@ struct Manifest {
     executable: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ManifestRecord {
+    #[serde(flatten)]
+    manifest: Manifest,
+    checksum: String,
+}
+
+impl Manifest {
+    // Bind the complete dependency list and executable to the request that produced them.
+    fn checksum(&self, link_recipe: &blake3::Hash) -> Option<String> {
+        let mut hasher = blake3::Hasher::new_keyed(link_recipe.as_bytes());
+        serde_json::to_writer(&mut hasher, self).ok()?;
+        Some(hasher.finalize().to_hex().to_string())
+    }
+}
+
 pub struct Cache {
     pub root: PathBuf,
     manifest: PathBuf,
     object_recipe: blake3::Hash,
+    link_recipe: blake3::Hash,
     toolchain: NativeToolchain,
     runtime: PathBuf,
     previous: Option<Manifest>,
@@ -67,27 +86,28 @@ pub struct NativeToolchain {
     bundle: Option<PathBuf>,
 }
 
+/// The installed provider archive can also be linked by the native system toolchain.
+pub fn provider_archive(optimization: &OsStr) -> Option<PathBuf> {
+    let path = super::installation_file("imre-toolchain")
+        .ok()?
+        .join("lib/imre-stdlib")
+        .join(format!("O{}", optimization.to_str()?))
+        .join("providers.a");
+    path.is_file().then_some(path)
+}
+
 impl NativeToolchain {
     pub fn bundled() -> Option<Self> {
         if !cfg!(target_os = "linux") {
             return None;
         }
-        let root = env::current_exe().ok()?.with_file_name("imre-toolchain");
+        let root = super::installation_file("imre-toolchain").ok()?;
         let clang = root.join("bin/clang");
         clang.is_file().then(|| Self {
             clang,
             lld: Some(root.join("bin/ld.lld")),
             bundle: Some(root),
         })
-    }
-
-    pub fn provider_archive(&self, optimization: &OsStr) -> Option<PathBuf> {
-        let root = self.bundle.as_ref()?;
-        let path = root
-            .join("lib/imre-stdlib")
-            .join(format!("O{}", optimization.to_str()?))
-            .join("providers.a");
-        path.is_file().then_some(path)
     }
 
     pub fn driver(&self) -> Command {
@@ -205,7 +225,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 pub(super) fn stdlib_archive_path() -> Result<PathBuf, String> {
     // SAFETY: geteuid takes no arguments and has no failure mode.
     let uid = unsafe { libc::geteuid() };
-    let digest = blake3::hash(super::STDLIB_ARCHIVE).to_hex();
+    let digest = blake3::hash(super::packaged_stdlib_zip()).to_hex();
     Ok(std::path::absolute(env::temp_dir())
         .map_err(|e| e.to_string())?
         .join(format!("imre-stdlib-{uid}-{digest}"))
@@ -237,12 +257,12 @@ pub(super) fn prepare_stdlib_archive(path: &Path) -> io::Result<()> {
     }
     if path
         .symlink_metadata()
-        .is_ok_and(|m| m.is_file() && m.len() == super::STDLIB_ARCHIVE.len() as u64)
-        && fs::read(path)? == super::STDLIB_ARCHIVE
+        .is_ok_and(|m| m.is_file() && m.len() == super::packaged_stdlib_zip().len() as u64)
+        && fs::read(path)? == super::packaged_stdlib_zip()
     {
         return Ok(());
     }
-    atomic_write(path, super::STDLIB_ARCHIVE)
+    atomic_write(path, super::packaged_stdlib_zip())
 }
 
 /// An action index points to a verified object. Publishing the bytes first
@@ -272,8 +292,9 @@ impl ObjectEntry {
 
 pub fn compile_objects(
     units: &[CodegenUnit],
-    toolchain: &NativeToolchain,
+    driver: impl Fn() -> Command + Sync,
     opt: &OsStr,
+    sanitize: bool,
     stage: &Path,
     cache: Option<&Cache>,
     mut progress: impl FnMut(&str, bool),
@@ -283,7 +304,7 @@ pub fn compile_objects(
         fs::create_dir_all(&dir).ok()?;
         Some((dir, c.object_recipe))
     });
-    let ir_path = stage.join("module.ll");
+    let mut pending = Vec::new();
     let mut objects = Vec::with_capacity(units.len());
     for (i, unit) in units.iter().enumerate() {
         let filename = format!("unit-{i}.o");
@@ -310,35 +331,73 @@ pub fn compile_objects(
             );
         }
         if !hit {
-            fs::write(&ir_path, &unit.llvm_ir).map_err(|e| e.to_string())?;
-            let status = toolchain
-                .driver()
-                .current_dir(stage)
-                .arg(format!("-O{}", opt.to_string_lossy()))
-                .args([
-                    "-Wno-override-module",
-                    "-c",
-                    "-x",
-                    "ir",
-                    "module.ll",
-                    "-o",
-                    &filename,
-                ])
-                .status()
-                .map_err(|e| format!("Could not compile {}: {e}", unit.name))?;
-            if !status.success() {
-                return Err(format!(
-                    "LLVM compilation of {} failed: {status}",
-                    unit.name
-                ));
-            }
-            if let Some(entry) = entry {
-                let _ = entry.publish(&staged);
-            }
+            pending.push((i, entry));
         }
         objects.push(staged);
     }
+
+    // Start the largest units first so they can overlap the smaller compilations.
+    pending.sort_unstable_by_key(|(i, _)| std::cmp::Reverse(units[*i].llvm_ir.len()));
+    let workers = thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(4)
+        .min(pending.len());
+    let next = AtomicUsize::new(0);
+    let compile = || {
+        while let Some((i, entry)) = pending.get(next.fetch_add(1, Ordering::Relaxed)) {
+            let object = &objects[*i];
+            if let Err(err) = compile_object(&units[*i], driver(), opt, sanitize, object) {
+                next.store(pending.len(), Ordering::Relaxed);
+                return Err(err);
+            }
+            if let Some(entry) = entry {
+                let _ = entry.publish(object);
+            }
+        }
+        Ok(())
+    };
+    thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers).map(|_| scope.spawn(compile)).collect();
+        for handle in handles {
+            handle.join().expect("codegen worker panicked")?;
+        }
+        Ok::<(), String>(())
+    })?;
     Ok(objects)
+}
+
+/// Compile one LLVM module through the selected driver, keeping its IR in memory.
+fn compile_object(
+    unit: &CodegenUnit,
+    mut driver: Command,
+    opt: &OsStr,
+    sanitize: bool,
+    output: &Path,
+) -> Result<(), String> {
+    let error = |e| format!("Could not compile {}: {e}", unit.name);
+    if sanitize {
+        driver.args(["-fsanitize=address", "-fno-omit-frame-pointer"]);
+    }
+    let mut child = driver
+        .arg(format!("-O{}", opt.to_string_lossy()))
+        .args(["-Wno-override-module", "-c", "-x", "ir", "-", "-o"])
+        .arg(output)
+        .stdin(Stdio::piped())
+        .spawn()
+        .map_err(error)?;
+    let input = child
+        .stdin
+        .take()
+        .expect("piped clang input")
+        .write_all(unit.llvm_ir.as_bytes());
+    let status = child.wait().map_err(error)?;
+    if !status.success() {
+        return Err(format!(
+            "LLVM compilation of {} failed: {status}",
+            unit.name
+        ));
+    }
+    input.map_err(error)
 }
 
 /// Preserve output symlinks, and keep writable user outputs independent of the cache.
@@ -407,10 +466,9 @@ pub fn native_toolchain(
     {
         return None;
     }
-    let compiler = env::current_exe().ok()?;
     // Also support a standalone linker beside Imre, as in earlier releases.
     let lld = [
-        compiler.with_file_name("imre-ld.lld"),
+        super::installation_file("imre-ld.lld").ok()?,
         PathBuf::from("/usr/bin/ld.lld-18"),
     ]
     .into_iter()
@@ -515,8 +573,16 @@ impl Cache {
             crate::cli::Relro::Partial => 1,
             crate::cli::Relro::Off => 2,
         };
+        // An unreadable or incomplete index can select local provider bodies without
+        // placing the archive in the linker's dependency file. Its identity still
+        // determines whether this executable can be reused.
+        let provider_archive = match &options.bundled_provider_archive {
+            Some(path) => Some(Stamp::read(path)?),
+            None => None,
+        };
         let link_inputs = serde_json::to_vec(&(
-            5,
+            6,
+            provider_archive,
             module_objects,
             (
                 file,
@@ -524,10 +590,13 @@ impl Cache {
                 &options.module_entry,
                 options.path_entry,
                 options.python_startup(),
-                options.runtime_imports,
-                &options.extension_paths,
-                &options.system_site,
-                &options.stdlib_fallback,
+                (&options.extension_paths, &options.pythonpath),
+                &options.include_modules,
+                &options.python_archive_indices,
+                (&options.stdlib_dir, &options.site_dirs),
+                (&options.user_site_pth, &options.venv_site_pth),
+                (options.sitecustomize, options.stdlib_sitecustomize),
+                (&options.stdlib_fallback, &options.installed_stdlib_archive),
             ),
             env::current_dir().ok()?.join(entry).into_os_string(),
             module_root,
@@ -540,12 +609,17 @@ impl Cache {
         let manifest = root.join(format!("{}.json", link_recipe.to_hex()));
         let previous = fs::read(&manifest)
             .ok()
-            .and_then(|bytes| serde_json::from_slice::<Manifest>(&bytes).ok())
+            .and_then(|bytes| serde_json::from_slice::<ManifestRecord>(&bytes).ok())
+            .and_then(|record| {
+                (record.manifest.checksum(&link_recipe)? == record.checksum)
+                    .then_some(record.manifest)
+            })
             .filter(|m| m.native.iter().all(|(p, stamp)| Stamp::read(p) == *stamp));
         Some(Self {
             root,
             manifest,
             object_recipe,
+            link_recipe,
             toolchain: toolchain.clone(),
             runtime: runtime.resolved,
             previous,
@@ -600,8 +674,16 @@ impl Cache {
         stage: &Path,
         file: &Path,
         materialized_output: &Path,
+        extension_archives: &[PathBuf],
         bundled_provider_archive: Option<&Path>,
     ) -> Option<()> {
+        // A wheel symlink's physical target need not have an archive suffix.
+        if extension_archives
+            .iter()
+            .any(|path| !ordinary_archive(path))
+        {
+            return None;
+        }
         // LLD's Make depfile normalizes POSIX backslashes into separators.
         // Its object trace preserves those names, including archive members.
         let lld = self.toolchain.lld.is_some();
@@ -647,9 +729,10 @@ impl Cache {
                             .is_some_and(|dir| path.starts_with(dir))
                 };
                 let cwd_symlink = p.parent() == Some(cwd.as_path()) && p.is_symlink();
-                // The packaged provider archive is an explicit compiler input, like the runtime.
-                let is_provider =
-                    bundled_provider_archive == Some(p.as_path()) && ordinary_archive(&resolved);
+                // Ordinary archives explicitly selected by the compiler have known identities.
+                let is_provider = (bundled_provider_archive == Some(p.as_path())
+                    || extension_archives.contains(&p))
+                    && ordinary_archive(&resolved);
                 if resolved != self.runtime
                     && !is_provider
                     && !(supported(&resolved) && (supported(&p) || cwd_symlink))
@@ -702,11 +785,15 @@ impl Cache {
         let executable = file_hash(file).ok()?;
         let object = self.root.join(&executable);
         fs::rename(file, &object).ok()?;
-        let record = Manifest {
+        let manifest = Manifest {
             sources,
             native,
             search_dirs,
             executable,
+        };
+        let record = ManifestRecord {
+            checksum: manifest.checksum(&self.link_recipe)?,
+            manifest,
         };
         let mut temp = NamedTempFile::new_in(&self.root).ok()?;
         serde_json::to_writer(&mut temp, &record).ok()?;

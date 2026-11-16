@@ -1,0 +1,24 @@
+ordinal	id	occurrence	upstream_line	stock	ordinary_O0	ordinary_O3	declared_O0	declared_O3	disposition	stock_pass_cohort	skip_reason	stock_stderr_line_offset	declared_O0_stderr_status_offset	declared_O3_stderr_status_offset
+1	test.test_netrc.NetrcTestCase.test_comment_after_machine_line	1	214	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		0	100	100
+2	test.test_netrc.NetrcTestCase.test_comment_after_machine_line_hash_only	1	238	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		103	223	223
+3	test.test_netrc.NetrcTestCase.test_comment_after_machine_line_no_space	1	226	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		226	344	344
+4	test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line	1	250	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		347	455	455
+5	test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line_no_space	1	256	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		458	584	584
+6	test.test_netrc.NetrcTestCase.test_comment_at_end_of_machine_line_pass_has_hash	1	262	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		587	723	723
+7	test.test_netrc.NetrcTestCase.test_comment_before_machine_line	1	193	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		726	828	828
+8	test.test_netrc.NetrcTestCase.test_comment_before_machine_line_hash_only	1	207	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		831	953	953
+9	test.test_netrc.NetrcTestCase.test_comment_before_machine_line_no_space	1	200	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		956	1076	1076
+10	test.test_netrc.NetrcTestCase.test_invalid_tokens	1	82	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1079	1155	1155
+11	test.test_netrc.NetrcTestCase.test_macros	1	38	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1158	1218	1218
+12	test.test_netrc.NetrcTestCase.test_optional_tokens	1	56	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1221	1299	1299
+13	test.test_netrc.NetrcTestCase.test_security	1	277	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1302	1366	1366
+14	test.test_netrc.NetrcTestCase.test_security_on_WASI	1	269	SKIP	omitted_before_start	omitted_before_start	SKIP	SKIP	same_id_same_reason_skip	no	WASI only test	1369	1449	1449
+15	test.test_netrc.NetrcTestCase.test_token_value_escape	1	113	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1474	1558	1558
+16	test.test_netrc.NetrcTestCase.test_token_value_internal_hash	1	177	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1561	1659	1659
+17	test.test_netrc.NetrcTestCase.test_token_value_leading_hash	1	155	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1662	1758	1758
+18	test.test_netrc.NetrcTestCase.test_token_value_non_ascii	1	144	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1761	1851	1851
+19	test.test_netrc.NetrcTestCase.test_token_value_quotes	1	102	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1854	1938	1938
+20	test.test_netrc.NetrcTestCase.test_token_value_trailing_hash	1	166	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		1941	2039	2039
+21	test.test_netrc.NetrcTestCase.test_token_value_whitespace	1	133	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		2042	2134	2134
+22	test.test_netrc.NetrcTestCase.test_toplevel_non_ordered_tokens	1	22	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		2137	2239	2239
+23	test.test_netrc.NetrcTestCase.test_toplevel_tokens	1	30	PASS	omitted_before_start	omitted_before_start	PASS	PASS	paired_pass	yes		2242	2320	2320

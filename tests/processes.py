@@ -49,7 +49,6 @@ REJECTED = {
     "wrong_check": "run(['command'], capture_output=True, encoding='utf-8', check=1)",
     "wrong_env": "run(['command'], capture_output=True, encoding='utf-8', env={'KEY': 1})",
     "wrong_env_key": "run(['command'], capture_output=True, encoding='utf-8', env={1: 'value'})",
-    "raw_environ": "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)",
     "environ_index_type": "print(os.environ[42])",
     "environ_assignment_type": "os.environ['KEY'] = 42",
     "environ_copy_args": "os.environ.copy(1)",
@@ -255,7 +254,7 @@ def main() -> None:
         with os.fdopen(fcntl.fcntl(original.fileno(), fcntl.F_DUPFD_CLOEXEC, 211), "rb") as inherited:
             descriptor = inherited.fileno()
             signal_child = temporary / "signal-child"
-            built = files.run([args.clang, str(FIXTURES / "signal.c"), "-o", str(signal_child)], temporary)
+            built = files.run([args.clang or "clang-18", str(FIXTURES / "signal.c"), "-o", str(signal_child)], temporary)
             files.check_result(built, None, "signal probe build")
             arguments = [python, str(FIXTURES / "child.py"), str(descriptor), str(signal_child)]
             sources = [source for source in sorted(FIXTURES.glob("*.py")) if source.name != "child.py"]
@@ -310,6 +309,13 @@ def main() -> None:
                         assert actual.stdout == reference.stdout, (name, level, actual.stdout, reference.stdout)
                     assert snapshot(native_dir) == expected_files, (name, level, "filesystem effects differ")
                     checks += 1
+        path = temporary / "raw_environ.py"
+        path.write_text(
+            IMPORTS + "run(['command'], capture_output=True, encoding='utf-8', env=os.environ)\n",
+            encoding="utf-8",
+        )
+        files.check_result(files.run([compiler, "check", str(path)], temporary), None, "check raw_environ")
+        checks += 1
         for name, source in REJECTED.items():
             path = temporary / f"reject-{name}.py"
             path.write_text(IMPORTS + source + "\n", encoding="utf-8")

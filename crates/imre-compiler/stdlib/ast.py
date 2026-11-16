@@ -12,6 +12,30 @@ def iter_fields(node):
             pass
 
 
+def iter_child_nodes(node):
+    """
+    Yield all direct child nodes of *node*, that is, all fields that are nodes
+    and all items of fields that are lists of nodes.
+    """
+    for name, field in iter_fields(node):
+        if isinstance(field, AST):
+            yield field
+        elif isinstance(field, list):
+            for item in field:
+                if isinstance(item, AST):
+                    yield item
+
+
+def unparse(ast_obj):
+    global _Unparser
+    try:
+        unparser = _Unparser()
+    except NameError:
+        from _ast_unparse import Unparser as _Unparser
+        unparser = _Unparser()
+    return unparser.visit(ast_obj)
+
+
 class NodeVisitor(object):
     """
     A node visitor base class that walks the abstract syntax tree and calls a
@@ -106,3 +130,18 @@ class NodeTransformer(NodeVisitor):
                 else:
                     setattr(node, field, new_node)
         return node
+
+
+# If the ast module is loaded more than once, only add deprecated methods once
+if not hasattr(Tuple, 'dims'):
+    # The following code is for backward compatibility.
+    # It will be removed in future.
+
+    def _dims_getter(self):
+        """Deprecated. Use elts instead."""
+        return self.elts
+
+    def _dims_setter(self, value):
+        self.elts = value
+
+    Tuple.dims = property(_dims_getter, _dims_setter)

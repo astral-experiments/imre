@@ -113,13 +113,13 @@ impl Writer {
 /// # Safety
 /// The generated caller roots the writer and the input string until write finishes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_codec_writer_write(writer: *const Object, text: *const Str) {
+pub unsafe extern "C" fn imre_codec_writer_write(writer: *const Object, source: *const Str) {
     // SAFETY: the generated native types are a writer and a Unicode string.
-    let (writer, text) = unsafe { (object(writer), &*text) };
+    let (writer, text) = unsafe { (object(writer), &*source) };
     let result = inspect(writer, |s| match s {
         Storage::CodecWriter(w) => w.write(text, || {
-            // SAFETY: the generated caller retains this exact input for the whole write.
-            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
+            // SAFETY: source is the original pointer to the rooted shared allocation.
+            Ok(unsafe { StrOwner::acquire_word(source as usize) })
         }),
         _ => unreachable!(),
     });
@@ -231,4 +231,33 @@ pub unsafe extern "C" fn imre_codec_writer_set_errors(text: *const Str, owner: *
         Storage::CodecWriter(w) => *w.errors.borrow_mut() = text,
         _ => unreachable!(),
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_write_keeps_the_original_string_alive_with_the_error() {
+        let stream = crate::objects::files::FileState::memory(crate::BytesOwner::new(Vec::new()));
+        let strict = StrOwner::new(Str::new("strict"));
+        let input = StrOwner::new(Str::new("x😀y"));
+        let observer = StrOwner::downgrade(&input);
+        // SAFETY: every borrowed ABI argument below has a live owner throughout its call.
+        let error = unsafe {
+            let info = ObjectOwner::from_raw(imre_codec_lookup(&Str::new("iso8859-15")));
+            let class = ObjectOwner::from_raw(imre_codec_writer_class(ObjectOwner::as_ptr(&info)));
+            let writer = ObjectOwner::from_raw(imre_codec_writer_new(
+                ObjectOwner::as_ptr(&class),
+                ObjectOwner::as_ptr(&stream),
+                StrOwner::as_ptr(&strict),
+            ));
+            imre_codec_writer_write(ObjectOwner::as_ptr(&writer), StrOwner::as_ptr(&input));
+            crate::objects::exceptions::take_pending().unwrap()
+        };
+        drop(input);
+        assert_eq!(observer.upgrade().unwrap().as_str(), "x😀y");
+        drop(error);
+        assert!(observer.upgrade().is_none());
+    }
 }

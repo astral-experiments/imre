@@ -2,7 +2,7 @@
 
 use super::*;
 
-impl ClassInfo {
+impl ClassInfo<'_> {
     /// Concrete layouts whose objects can inhabit a slot typed as the base class.
     pub(super) fn concrete_layouts(&self, base: usize) -> Vec<usize> {
         self.declarations
@@ -19,25 +19,63 @@ impl ClassInfo {
     /// A generated dataclass repr shadows an inherited override even though the
     /// generated method has no source signature in the method table.
     pub(super) fn has_repr_override(&self, id: usize) -> bool {
+        self.repr_override(id).is_some()
+    }
+
+    pub(super) fn repr_override(&self, id: usize) -> Option<(DefinitionId, &ast::StmtFunctionDef)> {
         for &owner in std::iter::once(&id).chain(&self.declarations.definitions[id].bases) {
             let class = &self.declarations.definitions[owner];
-            if class.node.body.iter().any(
-                |stmt| matches!(stmt, ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__"),
-            ) {
-                return true;
+            if let Some(method) = class.node.body.iter().find_map(|stmt| match stmt {
+                ast::Stmt::FunctionDef(f) if f.name.as_str() == "__repr__" => Some(f),
+                _ => None,
+            }) {
+                return Some((class.definition, method));
             }
             if class.dataclass.is_some_and(|options| options.repr) {
-                return false;
+                return None;
             }
         }
-        false
+        None
+    }
+
+    pub(super) fn missing_key_reprs(
+        &self,
+        keys: HashSet<Type>,
+        graph: &SourceGraph,
+        types: &Types,
+        owners: &mut HashSet<DefinitionId>,
+    ) {
+        let mut pending: Vec<_> = keys.into_iter().collect();
+        let mut seen = HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if !seen.insert(ty) {
+                continue;
+            }
+            if let Type::Class(id) = ty {
+                for layout in self.concrete_layouts(id) {
+                    let class = &self.declarations.definitions[layout];
+                    if let Some((owner, method)) = self.repr_override(layout) {
+                        if !method.is_async && !graph.includes_method(owner.module, method) {
+                            owners.insert(owner);
+                        }
+                    } else if class.dataclass.is_some_and(|d| d.repr) {
+                        pending.extend(
+                            class
+                                .fields
+                                .iter()
+                                .zip(&self.fields[layout])
+                                .filter_map(|(field, &ty)| field.repr.then_some(ty)),
+                        );
+                    }
+                }
+            } else {
+                pending.extend(types.children(ty));
+            }
+        }
     }
 
     pub(super) fn has_concrete_subclasses(&self, class: usize) -> bool {
-        self.declarations
-            .definitions
-            .iter()
-            .any(|c| c.abstract_methods.is_empty() && c.bases.contains(&class))
+        !self.types.concrete_subclasses(class).is_empty()
     }
 
     /// A concrete Mapping subclass supplies an iterator omitted by its abstract base.
@@ -79,6 +117,20 @@ impl Checker<'_> {
                     .iter()
                     .all(|(_, expr)| self.types.join(expr.ty, ty) == Some(ty))
         });
+        let union_result = union_result.or_else(|| {
+            // A checked Python call contributes its result contract without a fixed slot.
+            // Concrete overrides must still agree with each other on their result layout.
+            let homogeneous = |unrepresented| {
+                let mut types = alternatives.iter().filter_map(|(_, expr)| {
+                    (matches!(expr.kind, ExprKind::Builtin(Builtin::UnrepresentedCall, _))
+                        == unrepresented)
+                        .then_some(expr.ty)
+                });
+                let ty = types.next()?;
+                types.all(|other| other == ty).then_some(ty)
+            };
+            self.types.join(homogeneous(true)?, homogeneous(false)?)
+        });
         let Some((_, mut value)) = alternatives.pop() else {
             return Err(error(
                 self.source,
@@ -111,19 +163,29 @@ impl Checker<'_> {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::ExactRecord(class), vec![self.local(slot)]),
             };
-            value = Expr {
-                ty: value.ty,
-                kind: ExprKind::Conditional(Box::new(test), Box::new(next), Box::new(value)),
+            // A store has no result to merge. Its remaining layouts can all raise.
+            value = if value.ty == Type::None {
+                Expr::scope(
+                    vec![Statement::If(
+                        test,
+                        vec![Statement::Expr(next)],
+                        vec![Statement::Expr(value)],
+                    )],
+                    Expr::none(),
+                    Vec::new(),
+                )
+            } else {
+                Expr {
+                    ty: value.ty,
+                    kind: ExprKind::Conditional(Box::new(test), Box::new(next), Box::new(value)),
+                }
             };
         }
-        Ok(Expr {
-            ty: value.ty,
-            kind: ExprKind::Scope {
-                body: vec![Statement::Assign(slot, receiver)],
-                value: Box::new(value),
-                clear: vec![slot],
-            },
-        })
+        Ok(Expr::scope(
+            vec![Statement::Assign(slot, receiver)],
+            value,
+            vec![slot],
+        ))
     }
 
     /// Invoke the concrete slot, including overrides on a fixed-layout subclass.
@@ -156,13 +218,25 @@ impl Checker<'_> {
         arguments: &[Expr],
         at: &impl Ranged,
     ) -> Result<Expr, String> {
+        self.record_slot_at(class, receiver, name, arguments, at, ir::CallSite::None)
+    }
+
+    pub(super) fn record_slot_at(
+        &mut self,
+        class: usize,
+        receiver: Expr,
+        name: &str,
+        arguments: &[Expr],
+        at: &impl Ranged,
+        site: ir::CallSite,
+    ) -> Result<Expr, String> {
         let method = self.classes.methods[class]
             .get(name)
             .ok_or_else(|| error(self.source, at, "missing record primitive"))?
             .clone();
         if method.params.len() != arguments.len() + 1
             || (matches!(name, "get" | "__setitem__")
-                && method.method.unwrap().kind(&self.classes.declarations)
+                && method.method.unwrap().kind(self.classes.declarations)
                     != crate::classes::MethodKind::Instance)
         {
             return Err(error(
@@ -182,7 +256,11 @@ impl Checker<'_> {
             inputs.push(self.coerce(argument.clone(), ty, at)?);
         }
         self.calls.insert(method.id);
-        Ok(self.call_value(&method, method.returns, ir::CallArgs::positional(inputs)))
+        Ok(self.call_value(
+            &method,
+            method.returns,
+            ir::CallArgs::positional_at(inputs, site),
+        ))
     }
 
     /// `type(record)()` uses the default constructor of the actual fixed layout.

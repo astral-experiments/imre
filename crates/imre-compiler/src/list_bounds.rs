@@ -5,6 +5,7 @@
 //! site supplies a known interval without intervening argument effects.
 
 use crate::ir::{self, Builtin, Expr, ExprKind, Module, Statement, Type};
+use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Bounds {
@@ -129,8 +130,21 @@ impl Analysis<'_> {
                         state[slot] = None;
                     }
                 }
-                Statement::Expr(value) | Statement::Return(value) | Statement::Assert(value) => {
+                Statement::Expr(value) | Statement::Return(value) => {
                     self.expression(value, state);
+                }
+                Statement::Match(..) => {
+                    // A failed equality or guard may have mutated any live list.
+                    ir::statement_children_mut(statement, |child| {
+                        state.fill(None);
+                        match child {
+                            ir::ChildMut::Expression(expr) => {
+                                self.expression(expr, state);
+                            }
+                            ir::ChildMut::Suite(body) => self.block(body, state),
+                        }
+                    });
+                    state.fill(None);
                 }
                 Statement::If(test, yes, no) => {
                     self.expression(test, state);
@@ -149,6 +163,20 @@ impl Analysis<'_> {
                         self.expression(arg, state);
                     }
                     self.loop_body(None, body, orelse, state);
+                }
+                Statement::With {
+                    manager,
+                    binding,
+                    body,
+                    ..
+                } => {
+                    self.expression(manager, state);
+                    state.fill(None);
+                    if let Some(binding) = binding {
+                        self.block(&mut binding.body, state);
+                    }
+                    self.block(body, state);
+                    state.fill(None);
                 }
                 Statement::Try {
                     body,
@@ -170,10 +198,8 @@ impl Analysis<'_> {
                     self.block(finalbody, state);
                     state.fill(None);
                 }
-                Statement::SetItem(receiver, index, value) => {
-                    self.expression(value, state);
-                    self.expression(receiver, state);
-                    self.expression(index, state);
+                Statement::SetItem(order, receiver, index, value) => {
+                    order.evaluate(receiver, index, value, |expr| self.expression(expr, state));
                     state.fill(None);
                 }
                 Statement::AugmentItem(receiver, index, _, value) => {
@@ -194,7 +220,10 @@ impl Analysis<'_> {
                 }
                 Statement::Raise(value) => {
                     if let Some(value) = value {
-                        self.expression(value, state);
+                        self.expression(&mut value.exception, state);
+                        if let Some(cause) = &mut value.cause {
+                            self.expression(cause, state);
+                        }
                     }
                 }
                 Statement::IterNext {
@@ -204,7 +233,10 @@ impl Analysis<'_> {
                         state[slot] = None;
                     }
                 }
-                Statement::Break | Statement::Continue | Statement::Exhaust => {}
+                Statement::Position(..)
+                | Statement::Break(_)
+                | Statement::Continue(_)
+                | Statement::Exhaust => {}
             }
         }
     }
@@ -239,7 +271,13 @@ impl Analysis<'_> {
     }
 
     fn expression(&mut self, expression: &mut Expr, state: &mut State) -> Fact {
+        let python_unary = expression.uses_python_unary_protocol();
         match &mut expression.kind {
+            ExprKind::Unary(_, operand) if python_unary => {
+                self.expression(operand, state);
+                state.fill(None);
+                None
+            }
             ExprKind::Local(slot) => state[*slot],
             ExprKind::Builtin(operation, args) => {
                 let arguments_readonly = args.iter().all(readonly);
@@ -252,17 +290,20 @@ impl Analysis<'_> {
                     return None;
                 }
                 match operation {
-                    Builtin::StringIntList => Some(Bounds { min: 0, max: 9 }),
+                    Builtin::StringIntList(_) => Some(Bounds { min: 0, max: 9 }),
                     Builtin::Slice if expression.ty == Type::ListInt && arguments_readonly => {
                         facts.first().copied().flatten()
                     }
-                    Builtin::ListGet if arguments_readonly && args[0].ty == Type::ListInt => {
+                    Builtin::ListGet(origin)
+                        if arguments_readonly && args[0].ty == Type::ListInt =>
+                    {
                         if matches!(self, Self::Rewrite)
                             && let Some(bounds) = facts.first().copied().flatten()
                         {
                             *operation = Builtin::ListGetBounded {
                                 min: bounds.min,
                                 max: bounds.max,
+                                origin: origin.take(),
                             };
                         }
                         None
@@ -344,10 +385,26 @@ impl Analysis<'_> {
                 }
                 None
             }
-            ExprKind::Dict { entries, .. } => {
-                for (key, value) in entries {
-                    self.expression(key, state);
+            ExprKind::Dict(entries) => {
+                for crate::ir::DictEntry { key, value } in entries {
+                    if let Some(key) = key {
+                        self.expression(key, state);
+                    }
                     self.expression(value, state);
+                }
+                if expression.ty == Type::PythonObject {
+                    state.fill(None);
+                }
+                None
+            }
+            ExprKind::Compare(values, ops)
+                if crate::ir::Compare::uses_python_protocol(expression.ty, ops) =>
+            {
+                for (index, value) in values.iter_mut().enumerate() {
+                    self.expression(value, state);
+                    if index != 0 {
+                        state.fill(None);
+                    }
                 }
                 None
             }
@@ -369,8 +426,13 @@ impl Analysis<'_> {
                 join_states(state, &other);
                 join(yes, no)
             }
-            ExprKind::BooleanValue(_, left, right) => {
+            ExprKind::BooleanValue(_, left, right, predicate) => {
                 let left = self.expression(left, state);
+                if let Some(predicate) = predicate {
+                    state[predicate.receiver] = left;
+                    self.expression(&mut predicate.condition, state);
+                    state[predicate.receiver] = None;
+                }
                 let skipped = state.clone();
                 let right = self.expression(right, state);
                 join_states(state, &skipped);
@@ -389,8 +451,7 @@ impl Analysis<'_> {
             ExprKind::Present(value)
             | ExprKind::Absent(value)
             | ExprKind::Unwrap(value)
-            | ExprKind::Not(value)
-            | ExprKind::Negate(value)
+            | ExprKind::Unary(_, value)
             | ExprKind::Field(value, _) => {
                 self.expression(value, state);
                 None
@@ -414,7 +475,7 @@ impl Analysis<'_> {
 fn literal(value: &Expr) -> Option<i64> {
     let value = match &value.kind {
         ExprKind::Int(value) => value.parse().ok()?,
-        ExprKind::Negate(value) => literal(value)?.checked_neg()?,
+        ExprKind::Unary(UnaryOp::USub, value) => literal(value)?.checked_neg()?,
         _ => return None,
     };
     (-(1_i64 << 62)..(1_i64 << 62))
@@ -426,6 +487,7 @@ fn literal(value: &Expr) -> Option<i64> {
 /// heap writes and callbacks can change aliases and are never treated as pure.
 fn readonly(expression: &Expr) -> bool {
     match &expression.kind {
+        ExprKind::Unary(..) if expression.uses_python_unary_protocol() => false,
         ExprKind::Call(..) | ExprKind::Construct { .. } | ExprKind::Invoke { .. } => false,
         ExprKind::Callable { receiver, .. } => receiver.as_deref().is_none_or(readonly),
         ExprKind::Builtin(operation, args) => {
@@ -435,21 +497,29 @@ fn readonly(expression: &Expr) -> bool {
         ExprKind::List(values)
         | ExprKind::Tuple(values)
         | ExprKind::Set { values, .. }
-        | ExprKind::Compare(values, _)
         | ExprKind::Boolean(_, values) => values.iter().all(readonly),
-        ExprKind::Dict { entries, .. } => entries
-            .iter()
-            .all(|(key, value)| readonly(key) && readonly(value)),
+        ExprKind::Compare(values, ops) => {
+            !crate::ir::Compare::uses_python_protocol(expression.ty, ops)
+                && values.iter().all(readonly)
+        }
+        ExprKind::Dict(entries) => {
+            expression.ty != Type::PythonObject
+                && entries
+                    .iter()
+                    .all(|entry| entry.key.as_ref().is_some_and(readonly) && readonly(&entry.value))
+        }
         ExprKind::Bind(_, value)
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => readonly(value),
-        ExprKind::Binary(_, left, right) | ExprKind::BooleanValue(_, left, right) => {
-            readonly(left) && readonly(right)
+        ExprKind::BooleanValue(_, left, right, predicate) => {
+            readonly(left)
+                && predicate.as_ref().is_none_or(|p| readonly(&p.condition))
+                && readonly(right)
         }
+        ExprKind::Binary(_, left, right) => readonly(left) && readonly(right),
         ExprKind::Conditional(test, yes, no) => readonly(test) && readonly(yes) && readonly(no),
         ExprKind::Exception { message, .. } => message.as_deref().is_none_or(readonly),
         _ => true,
@@ -461,10 +531,9 @@ fn readonly(expression: &Expr) -> bool {
 /// local identities must separately reject writes to those locals.
 pub(crate) fn block_readonly(body: &[Statement]) -> bool {
     body.iter().all(|statement| match statement {
-        Statement::Assign(_, value)
-        | Statement::Expr(value)
-        | Statement::Return(value)
-        | Statement::Assert(value) => readonly(value),
+        Statement::Assign(_, value) | Statement::Expr(value) | Statement::Return(value) => {
+            readonly(value)
+        }
         Statement::Scope { body, .. } => block_readonly(body),
         Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
             readonly(test) && block_readonly(yes) && block_readonly(no)
@@ -472,11 +541,14 @@ pub(crate) fn block_readonly(body: &[Statement]) -> bool {
         Statement::For {
             args, body, orelse, ..
         } => args.iter().all(readonly) && block_readonly(body) && block_readonly(orelse),
-        Statement::Raise(value) => value.as_ref().is_none_or(readonly),
+        Statement::Raise(value) => value.as_ref().is_none_or(|value| {
+            readonly(&value.exception) && value.cause.as_deref().is_none_or(readonly)
+        }),
         Statement::Move(..)
         | Statement::Clear(_)
-        | Statement::Break
-        | Statement::Continue
+        | Statement::Position(..)
+        | Statement::Break(_)
+        | Statement::Continue(_)
         | Statement::Exhaust => true,
         _ => false,
     })
@@ -498,12 +570,25 @@ mod tests {
         let mut reads = Vec::new();
         for function in module.functions.iter().chain([&module.entry]) {
             walk_expressions(&function.body, &mut |value| {
-                if let ExprKind::Builtin(Builtin::ListGetBounded { min, max }, _) = value.kind {
+                if let ExprKind::Builtin(Builtin::ListGetBounded { min, max, .. }, _) = value.kind {
                     reads.push((min, max));
                 }
             });
         }
         reads
+    }
+
+    #[test]
+    fn a_unary_protocol_call_invalidates_aliased_list_bounds() {
+        let mut state = vec![Some(Bounds { min: 0, max: 9 }), None];
+        let mut value = Expr::unary(
+            UnaryOp::Invert,
+            Expr::local(1, Type::PythonObject),
+            Type::PythonObject,
+        );
+        assert!(!readonly(&value));
+        Analysis::Rewrite.expression(&mut value, &mut state);
+        assert_eq!(state, vec![None, None]);
     }
 
     #[test]

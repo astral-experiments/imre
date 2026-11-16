@@ -1,7 +1,7 @@
 """POSIX signal numbers, handlers, and pending signals."""
 
 import _signal
-from _signal import NSIG, alarm, default_int_handler
+from _signal import NSIG, alarm, default_int_handler, pause, set_wakeup_fd, siginterrupt
 from _imre_signal import make_signals as _make_signals
 from enum import IntEnum as _IntEnum
 
@@ -27,6 +27,13 @@ def sigpending():
 
 
 sigpending.__doc__ = _signal.sigpending.__doc__
+
+
+def valid_signals():
+    return {_int_to_enum(x, Signals) for x in _signal.valid_signals()}
+
+
+valid_signals.__doc__ = _signal.valid_signals.__doc__
 
 
 class Handlers(_IntEnum):

@@ -213,7 +213,7 @@ impl Checker<'_> {
         at: &ast::Expr,
         mut check: impl FnMut(&mut Self, Expr) -> Result<Expr, String>,
     ) -> Result<Option<Expr>, String> {
-        let Some((slot, test, first, second)) = self.protocol_alternatives(value.ty) else {
+        let Some((slot, test, first, second)) = self.split_protocol_union(value.ty) else {
             return Ok(None);
         };
         let mut left = check(self, first)?;

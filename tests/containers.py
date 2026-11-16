@@ -87,6 +87,7 @@ for row in rows.values():
     rows["second"] = [3]
     print(row[0])
 """,
+    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n    print(type(value).__name__)\n',
     "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
     "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
     "iteration_mutable_unpacking_leaf": "values = [0]\nvalues[0], other = (1, 2)\nprint(values[0])\nprint(other)\n",
@@ -371,7 +372,6 @@ print(point(), value("wrong"))
 """,
     "namedtuple_duplicate_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x x")\n',
     "namedtuple_private_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "_x")\n',
-    "namedtuple_unchecked_options": 'from collections import namedtuple\nPair = namedtuple("Pair", "x", rename=True)\n',
     "namedtuple_missing_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x y")\nprint(Pair(1))\n',
     "namedtuple_repeated_argument": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\nprint(Pair(1, x=2))\n',
     "namedtuple_readonly_field": 'from collections import namedtuple\nPair = namedtuple("Pair", "x")\np = Pair(1)\np.x = 2\n',
@@ -416,9 +416,24 @@ print(point(), value("wrong"))
     "set_add_arity": "values = {1}\nvalues.add(2, 3)\n",
     "set_discard_arity": "values = {1}\nvalues.discard()\n",
     "set_add_keyword": "values = {1}\nvalues.add(element=2)\n",
-    "set_copy_method": "values = {1}\ncopy = values.copy()\n",
-    "set_pop_method": "values = {1}\nvalues.pop()\n",
-    "set_remove_method": "values = {1}\nvalues.remove(1)\n",
+    "set_copy_wrong_return": """\
+def copy_names(values: set[int]) -> set[str]:
+    return values.copy()
+
+copy_names({1})
+""",
+    "set_pop_wrong_return": """\
+def take(values: set[int]) -> str:
+    return values.pop()
+
+take({1})
+""",
+    "set_remove_wrong_return": """\
+def take(values: set[int]) -> int:
+    return values.remove(1)
+
+take({1})
+""",
     "set_union_mismatched_keys": 'values = {1} | {"two"}\n',
     "dict_keys_union_mismatched": 'values = {"one": 1}.keys() | {2: "two"}.keys()\n',
     "defaultdict_requires_factory": "from collections import defaultdict\na: defaultdict[str, list[int]] = defaultdict()\n",
@@ -531,7 +546,6 @@ print(point(), value("wrong"))
     "iteration_target_type_mismatch": 'value = "text"\nfor value in [1]:\n    pass\n',
     "iteration_tuple_target_arity": "for first, second in [(1, 2, 3)]:\n    pass\n",
     "iteration_range_tuple_target": "for (value,) in range(2):\n    pass\n",
-    "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n',
     "iteration_optional_iterable": """
         def show(values: list[int] | None) -> None:
             for value in values:
@@ -1039,6 +1053,10 @@ def run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def exception_name(stderr: str) -> str:
+    return stderr.rstrip().rsplit("\n", 1)[-1].partition(":")[0]
+
+
 def check_join_under_memory_limit(command: list[str]) -> None:
     import resource
 
@@ -1102,7 +1120,7 @@ def main() -> None:
             reference = run([args.python, "-I", str(path)])
             if expected_error:
                 assert (
-                    reference.returncode > 0 and expected_error in reference.stderr
+                    reference.returncode > 0 and exception_name(reference.stderr) == expected_error
                 ), (name, reference)
             else:
                 assert reference.returncode == 0 and not reference.stderr, (
@@ -1138,8 +1156,8 @@ def main() -> None:
                     actual.stderr,
                 )
                 if expected_error:
-                    assert actual.returncode > 0 and actual.stderr.startswith(
-                        expected_error + ":"
+                    assert (
+                        actual.returncode > 0 and exception_name(actual.stderr) == expected_error
                     ), (name, level, actual)
                 else:
                     assert actual.returncode == 0 and not actual.stderr, (

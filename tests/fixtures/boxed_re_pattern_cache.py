@@ -71,6 +71,32 @@ def current():
     assert plain == grouped and hash(plain) == hash(grouped)
     assert compile_fresh('(?=a).') != compile_fresh('(?=b).')
     assert compile_fresh('(?P<x>a)') == compile_fresh('(?P<y>a)')
+    for left, right, equal in (
+        (r"\bx|\by", r"\b[xy]", True),
+        (r"(?x:a)x|(?x:a)y", r"(?x:a)[xy]", False),
+    ):
+        a, b = compile_fresh(left), compile_fresh(right)
+        routes = {a: "invoice"}
+        assert (a == b) is equal
+        assert routes.get(b) == ("invoice" if equal else None)
+        routes[b] = "export"
+        assert len(routes) == (1 if equal else 2)
+    events = []
+    class Declines(str):
+        def __hash__(self):
+            return 37
+
+        def __eq__(self, other):
+            events.append("equal")
+            return NotImplemented
+
+    re.purge()
+    left = re.compile(Declines("same"))
+    re.purge()
+    right = re.compile(Declines("same"))
+    events.clear()
+    assert left != right and right not in {left: 1}
+    assert events == ["equal"] * 4
     binary = Binary(b'abc')
     assert re.compile(binary).pattern is binary and re.fullmatch(binary, b'abc')
     high = compile_fresh(chr(0xd800))

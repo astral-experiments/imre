@@ -53,7 +53,7 @@ def main():
     for arg in ("imre", "runtime", "clang", "vectors"):
         parser.add_argument("--" + arg, type=Path, required=True)
     parser.add_argument("--opt-level", choices=("0", "3"), required=True)
-    parser.add_argument("--runtime-imports", action="store_true")
+    parser.add_argument("--import-style", choices=("direct", "importlib"), default="direct")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -70,7 +70,7 @@ def main():
             (cache / filename).write_bytes(data)
 
         entry = lib / "imre_shake_vectors.py"
-        if args.runtime_imports:
+        if args.import_style == "importlib":
             imports = (
                 'from importlib import import_module\n'
                 'target = import_module("test.test_hashlib")\n'
@@ -84,8 +84,6 @@ def main():
         cmd = [args.imre.resolve(), "build", entry, "--module-root", lib, "--runtime",
                args.runtime.resolve(), "--clang", args.clang.resolve(), "--no-cache",
                "--opt-level", args.opt_level, "-o", exe]
-        if args.runtime_imports:
-            cmd.append("--runtime-imports")
         subprocess.run(cmd, cwd=lib, check=True, timeout=600)
 
         run(exe, lib)

@@ -2,7 +2,7 @@
 use super::{Context, Error, Id, NONE, Result, Value};
 use crate::dynamic::operators::surrogate_repr;
 use crate::objects::csv::{Dialect, Field, Row};
-use crate::objects::exceptions::{Kind, string_repr};
+use crate::objects::exceptions::Kind;
 
 fn character(ctx: &Context, id: Id) -> Result<u32> {
     if id == NONE {
@@ -64,27 +64,19 @@ pub(super) fn read_row(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
         let value = match field {
             Field::Text(text) if !quoted && text.is_empty() && matches!(mode, 4 | 5) => Value::None,
             Field::Text(text) if numeric && !text.is_empty() => {
-                let value = crate::floats::parse(&text).ok_or_else(|| {
-                    crate::Error::new(
-                        Kind::ValueError,
-                        format!(
-                            "could not convert string to float: {}",
-                            string_repr(&text).as_str()
-                        ),
-                    )
-                })?;
-                Value::Float(value)
+                Value::Float(crate::floats::parse_str(&text)?)
             }
             Field::Surrogates(points) if numeric => {
                 return Err(crate::Error::new(
                     Kind::ValueError,
                     format!(
-                        "could not convert string to float: {}",
+                        "{}{}",
+                        crate::floats::INVALID_STRING_PREFIX,
                         surrogate_repr(&points)
                     ),
                 ));
             }
-            Field::Text(text) => Value::Str(text),
+            Field::Text(text) => Value::Str(text.into()),
             Field::Surrogates(points) => Value::SurrogateStr(points),
         };
         fields

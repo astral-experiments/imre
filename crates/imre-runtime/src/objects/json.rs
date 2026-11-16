@@ -49,6 +49,7 @@ const MAX_DEPTH: usize = 128;
 pub struct Schema {
     pub kind: u32,
     pub word_kind: u32,
+    /// Child schema for containers, or lexicographically sorted field indices for records.
     pub element: *const Schema,
     pub record: *const RecordDescriptor,
     pub field_count: usize,
@@ -74,6 +75,22 @@ impl Schema {
     fn child(&self) -> &Self {
         // SAFETY: list/optional compiler metadata contains a live child schema.
         unsafe { &*self.element }
+    }
+
+    /// Prefer the next declared field, then search the immutable name index of a wide record.
+    fn field_index(&self, fields: &[Field], key: &str, next: usize) -> Option<usize> {
+        if fields.get(next).is_some_and(|field| field.name() == key) {
+            return Some(next);
+        }
+        if self.element.is_null() {
+            return fields.iter().position(|field| field.name() == key);
+        }
+        // SAFETY: a record with a non-null index has one compiler-emitted u32 per field.
+        let order = unsafe { std::slice::from_raw_parts(self.element.cast::<u32>(), fields.len()) };
+        let position = order
+            .binary_search_by(|&i| fields[i as usize].name().cmp(key))
+            .ok()?;
+        Some(order[position] as usize)
     }
 
     fn fields(&self) -> &[Field] {
@@ -410,9 +427,12 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
         };
         // SAFETY: zeroed fields are cleanup-safe while the record is incomplete.
         let owner = unsafe { OwnedWord::from_owned(pointer as usize, self.0.storage()) };
-        let mut seen = Seen::new(fields.len());
+        // The prefix already occupies its final slots. Only out-of-order fields
+        // need a bitset; a search in the prefix can only find a duplicate.
+        let mut prefix = 0;
+        let mut unordered = None;
         while let Some(key) = map.next_key_seed(Key)? {
-            let Some(index) = fields.iter().position(|field| field.name() == key) else {
+            let Some(index) = self.0.field_index(fields, &key, prefix) else {
                 if self.1.checked {
                     map.next_value::<IgnoredAny>()?;
                 } else {
@@ -420,7 +440,18 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
                 }
                 continue;
             };
-            if !seen.insert(index) {
+            let fresh = if index == prefix {
+                prefix += 1;
+                unordered
+                    .as_mut()
+                    .is_none_or(|seen: &mut Seen| seen.insert(index))
+            } else {
+                index > prefix
+                    && unordered
+                        .get_or_insert_with(|| Seen::new(fields.len()))
+                        .insert(index)
+            };
+            if !fresh {
                 return Err(A::Error::custom(format!(
                     "duplicate field {:?}",
                     fields[index].name()
@@ -434,8 +465,8 @@ impl<'de> Visitor<'de> for Seed<'_, '_, 'de> {
             // SAFETY: each declared slot is initialized once with its exact owned type.
             unsafe { store(pointer.add(index), value) };
         }
-        for (index, field) in fields.iter().enumerate() {
-            if seen.insert(index) {
+        for (index, field) in fields.iter().enumerate().skip(prefix) {
+            if unordered.as_mut().is_none_or(|seen| seen.insert(index)) {
                 let value = field.missing(self.1.allocation)?;
                 // SAFETY: the missing slot is still zero and the default has its exact type.
                 unsafe { store(pointer.add(index), value) };

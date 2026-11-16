@@ -42,9 +42,14 @@ impl Context {
     pub(super) fn zip_or_map(
         &mut self,
         name: &str,
+        class: Id,
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        let base = self.builtin(name);
+        if !self.direct_subclass(class, base) {
+            return Err(self.invalid_new_subtype(name, class));
+        }
         let strict = match kwargs {
             [] => false,
             [(key, value)] if key == "strict" => self.truth(*value)?,
@@ -90,7 +95,52 @@ impl Context {
             },
             None => Value::Zip { inputs, strict },
         };
-        Ok(self.alloc(cursor))
+        let storage = self.alloc(cursor);
+        Ok(self.with_subclass_storage(class, base, storage))
+    }
+
+    /// Materialize the remaining digits of a forward text cursor mapped by the original int.
+    /// A rejected character consumes its own UTF-8 bytes and leaves the remaining cursor live.
+    pub(super) fn list_from_int_character_map(&mut self, map: Id) -> Option<Result<Id>> {
+        let Value::Map {
+            function, inputs, ..
+        } = self.heap.get(map)
+        else {
+            return None;
+        };
+        if self.builtins.get("int") != Some(function) {
+            return None;
+        }
+        let &[input] = inputs.as_ref() else {
+            return None;
+        };
+        let super::IteratorSlice::Text(text) = self.iterator_remaining(input).ok()? else {
+            return None;
+        };
+        let digits = crate::objects::string_integer_values(text);
+        let consumed = match &digits {
+            Ok(_) => text.len(),
+            Err((0, _)) => return None, // A failed bulk reservation consumed no input.
+            Err((consumed, _)) => *consumed,
+        };
+        let Value::Iterator {
+            offset, sequence, ..
+        } = self.heap.get_mut(input)
+        else {
+            unreachable!()
+        };
+        *offset += consumed;
+        match digits {
+            Ok(digits) => {
+                *sequence = None;
+                let items = digits
+                    .into_iter()
+                    .map(|digit| self.alloc(Value::Int(digit)))
+                    .collect();
+                Some(Ok(self.alloc(Value::List(items))))
+            }
+            Err((_, error)) => Some(Err(error.into())),
+        }
     }
 
     /// Pull one row, preserving source errors and the strict mismatch probe order.
@@ -149,7 +199,15 @@ impl Context {
                 result = if row.exhausted {
                     Ok(None)
                 } else if let Some(function) = row.function {
-                    self.call(function, row.values, Vec::new()).map(Some)
+                    if let [value] = row.values.as_slice()
+                        && let Value::Str(character) = self.heap.get(*value)
+                        && matches!(self.heap.get(function), Value::Native(name) if name == "int")
+                        && let Some(digit) = crate::integer_text::single_decimal_digit(character)
+                    {
+                        Ok(Some(self.int(i64::from(digit))))
+                    } else {
+                        self.call(function, row.values, Vec::new()).map(Some)
+                    }
                 } else {
                     Ok(Some(self.alloc(Value::Tuple(row.values))))
                 };
@@ -162,10 +220,15 @@ impl Context {
     }
 
     /// Keep each candidate alive across its predicate and return the original item.
-    pub(super) fn next_filtered(&mut self, predicate: Id, input: Id) -> Result<Option<Id>> {
+    pub(super) fn next_filtered(
+        &mut self,
+        filter: Id,
+        predicate: Id,
+        input: Id,
+    ) -> Result<Option<Id>> {
         let roots = self.heap.temporary_mark();
-        self.heap.keep(predicate);
-        self.heap.keep(input);
+        // The filter owns its predicate and input throughout a reentrant pull.
+        self.heap.keep(filter);
         let step = self.heap.temporary_mark();
         let mut limit = self.heap.streaming_collection_limit();
         let result = (|| loop {
@@ -197,13 +260,23 @@ impl Context {
         args: &[Id],
         kwargs: &[(String, Id)],
     ) -> Result<Id> {
+        if name == "__length_hint__" {
+            let receiver =
+                super::builtins::noargs_method_receiver(self, owner, name, args, kwargs)?;
+            return self.length_hint(receiver, None);
+        }
         let Some((&cursor, rest)) = args.split_first() else {
             return Err(Error::new(
                 "TypeError",
                 format!("descriptor '{name}' of '{owner}' object needs an argument"),
             ));
         };
-        if self.heap.get(cursor).intrinsic_type_name() != Some(owner) {
+        let storage = if matches!(owner, "filter" | "map" | "zip") {
+            self.scalar_value(cursor)
+        } else {
+            cursor
+        };
+        if self.heap.get(storage).intrinsic_type_name() != Some(owner) {
             return Err(Error::new(
                 "TypeError",
                 format!(
@@ -227,22 +300,25 @@ impl Context {
         match name {
             "__iter__" => Ok(cursor),
             "__next__" => self
-                .next_result(cursor)?
+                .next_result(storage)?
                 .ok_or_else(|| Error::new("StopIteration", "")),
             "__reduce__" => {
                 let Value::DictIterator(state) = self.heap.get(cursor) else {
                     unreachable!("ordered dictionary iterator reduction");
                 };
-                // Walking a copy preserves the live cursor, including when iteration raises.
-                let snapshot = self.alloc(Value::DictIterator(*state));
-                let remaining = self.items(snapshot)?;
-                let items = self.alloc(Value::List(remaining));
-                let args = self.alloc(Value::Tuple(vec![items]));
-                let iter = self.builtin("iter");
-                Ok(self.alloc(Value::Tuple(vec![iter, args])))
+                self.reduce_iterator_copy(Value::DictIterator(*state))
             }
             _ => unreachable!("iterator slot"),
         }
+    }
+
+    /// Walking a copy preserves the live cursor, including when iteration raises.
+    pub(super) fn reduce_iterator_copy(&mut self, copy: Value) -> Result<Id> {
+        let snapshot = self.alloc(copy);
+        let items = super::builtins::call(self, "list", &[snapshot], &[])?;
+        let args = self.alloc(Value::Tuple(vec![items]));
+        let iter = self.builtin("iter");
+        Ok(self.alloc(Value::Tuple(vec![iter, args])))
     }
 }
 

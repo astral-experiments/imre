@@ -1,3 +1,4 @@
+pub(in crate::dynamic) mod attributes;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod device;
 #[cfg(target_os = "linux")]
@@ -22,6 +23,7 @@ pub(in crate::dynamic) mod stat;
 pub(super) mod statvfs;
 
 use std::ffi::CString;
+use std::os::fd::IntoRawFd;
 
 use super::{Context, Error, Id, NONE, Result, Value, builtins, posixpath};
 use crate::dynamic::builtins::bind_two_positional;
@@ -32,7 +34,7 @@ use crate::objects::os as native;
 #[cfg(unix)]
 pub(in crate::dynamic) fn install_capabilities(
     ctx: &mut Context,
-    module: Id,
+    posix: Id,
     scope: Id,
 ) -> Result<()> {
     for (capability, functions) in [
@@ -97,16 +99,20 @@ pub(in crate::dynamic) fn install_capabilities(
             if function == "mkfifo" && mkfifo::at_function().is_none() {
                 continue;
             }
-            let value = ctx.lookup_attr(module, function)?;
+            let value = match ctx.lookup_attr(posix, function) {
+                Ok(value) => value,
+                Err(error) if ctx.is_attribute_error(&error) => continue,
+                Err(error) => return Err(error),
+            };
             builtins::set_add(ctx, set, value)?;
         }
-        // os copies the current posix dictionary, including reassigned optional functions.
         #[cfg(target_os = "linux")]
-        if capability == "supports_fd"
-            && let Some(execve) = ctx.module_value("posix", "execve")
-        {
-            ctx.bind(scope, "execve", execve);
-            builtins::set_add(ctx, set, execve)?;
+        if capability == "supports_fd" {
+            match ctx.lookup_attr(posix, "execve") {
+                Ok(execve) => builtins::set_add(ctx, set, execve)?,
+                Err(error) if ctx.is_attribute_error(&error) => (),
+                Err(error) => return Err(error),
+            }
         }
         ctx.bind(scope, capability, set);
     }
@@ -214,14 +220,14 @@ pub(super) fn memfd_create(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id
     Ok(ctx.int(i64::from(fd.into_raw_fd())))
 }
 
-pub(super) fn is_process_function(name: &str) -> bool {
-    cfg!(unix) && matches!(name, "execv" | "times" | "WIFSTOPPED")
-}
-
 /// Audit after signature validation and before any Python fork handlers run.
 #[cfg(target_os = "linux")]
 fn audit_fork(ctx: &mut Context) -> Result<()> {
-    if ctx.finalizing.load(std::sync::atomic::Ordering::Acquire) {
+    if ctx
+        .interpreter
+        .finalizing
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
         return Err(Error::new(
             "PythonFinalizationError",
             "can't fork at interpreter shutdown",
@@ -534,9 +540,6 @@ pub(super) fn change_environment(
             },
         ));
     }
-    // posix.putenv can run before os is imported. Preserve the initial dictionary first.
-    let posix = ctx.module("posix")?;
-    ctx.lookup_attr(posix, "environ")?;
     let key = fs_argument(ctx, args[0])?;
     let value = if set {
         Some(fs_argument(ctx, args[1])?)
@@ -560,6 +563,8 @@ pub(in crate::dynamic) mod sysconf;
 mod truncate;
 mod unlink;
 mod utime;
+#[cfg(target_os = "linux")]
+pub(in crate::dynamic) mod waitid;
 #[cfg(target_os = "linux")]
 pub(in crate::dynamic) mod xattr;
 
@@ -590,92 +595,6 @@ fn setgroups(ctx: &mut Context, groups: Id) -> Result<Id> {
     Ok(NONE)
 }
 
-/// POSIX functions exported as the same builtins by both os and posix.
-pub(super) fn is_descriptor_function(name: &str) -> bool {
-    if matches!(
-        name,
-        "getpgid" | "setpgid" | "setgroups" | "setregid" | "setreuid"
-    ) {
-        return cfg!(unix);
-    }
-    if name == "_exit" {
-        return cfg!(unix);
-    }
-    if matches!(
-        name,
-        "device_encoding" | "fchdir" | "fsync" | "pread" | "pwrite" | "readinto"
-    ) {
-        return cfg!(unix);
-    }
-    matches!(
-        name,
-        "access"
-            | "open"
-            | "getsid"
-            | "waitpid"
-            | "rename"
-            | "replace"
-            | "readlink"
-            | "scandir"
-            | "remove"
-            | "unlink"
-            | "rmdir"
-            | "mkdir"
-            | "mkfifo"
-            | "chmod"
-            | "fchmod"
-            | "chown"
-            | "fchown"
-            | "lchown"
-            | "chdir"
-            | "umask"
-            | "utime"
-            | "dup"
-            | "dup2"
-            | "isatty"
-            | "lseek"
-            | "truncate"
-            | "ftruncate"
-            | "pipe"
-            | "openpty"
-            | "read"
-            | "write"
-            | "close"
-            | "closerange"
-            | "get_blocking"
-            | "set_blocking"
-            | "get_inheritable"
-            | "set_inheritable"
-            | "link"
-            | "symlink"
-    ) || (cfg!(unix) && matches!(name, "kill" | "getppid" | "waitstatus_to_exitcode"))
-        || (cfg!(target_os = "linux")
-            && matches!(
-                name,
-                "copy_file_range"
-                    | "get_terminal_size"
-                    | "tcgetpgrp"
-                    | "tcsetpgrp"
-                    | "timerfd_create"
-                    | "timerfd_gettime"
-                    | "timerfd_gettime_ns"
-                    | "timerfd_settime"
-                    | "timerfd_settime_ns"
-                    | "ttyname"
-                    | "preadv"
-                    | "pwritev"
-                    | "readv"
-                    | "writev"
-                    | "splice"
-                    | "lockf"
-                    | "fdatasync"
-                    | "mknod"
-                    | "posix_fadvise"
-                    | "posix_fallocate"
-                    | "sendfile"
-            ))
-}
-
 /// Retry a POSIX call that returns its error number directly instead of setting errno.
 #[cfg(target_os = "linux")]
 fn posix_file_call(ctx: &mut Context, mut call: impl FnMut() -> i32) -> Result<Id> {
@@ -703,6 +622,26 @@ fn unsigned(ctx: &mut Context, id: Id, max: u64, kind: &str) -> Result<u64> {
             format!("Python int too large for C unsigned {kind}"),
         )
     })
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn sendfile_to<F: std::os::fd::AsRawFd>(
+    ctx: &mut Context,
+    out_fd: impl FnMut() -> crate::objects::exceptions::Result<F>,
+    in_fd: Id,
+    offset: Id,
+    count: Id,
+) -> Result<Id> {
+    let in_fd = c_int(ctx, in_fd)?;
+    // Argument Clinic converts count before sendfile converts an explicit offset.
+    let count = ssize_t(ctx, count)?;
+    let offset = if offset == NONE {
+        None
+    } else {
+        Some(file_offset(ctx, offset)?)
+    };
+    let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
+    Ok(ctx.int(sent as i64))
 }
 
 pub(super) fn c_int(ctx: &mut Context, value: Id) -> Result<i32> {
@@ -760,19 +699,13 @@ fn file_offset(ctx: &mut Context, value: Id) -> Result<i64> {
 
 /// Hold the buffer export over offset conversion and interrupted write retries.
 fn write_fd(ctx: &mut Context, fd: i32, data: Id, offset: Option<Id>) -> Result<Id> {
-    ctx.with_buffer_export(data, |ctx| {
-        let offset = if let Some(offset) = offset {
-            // PyBUF_SIMPLE acquisition precedes the offset's __index__ call.
-            ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
-            Some(file_offset(ctx, offset)?)
-        } else {
-            None
-        };
+    ctx.with_read_buffer(data, |ctx, export| {
+        let offset = offset.map(|id| file_offset(ctx, id)).transpose()?;
         loop {
-            // Conversion or signal handlers can change bytes without resizing.
-            let bytes = ctx.native_buffer_bytes(data)?;
-            if let Some(count) = native::try_write(fd, bytes, offset)? {
+            let buffer = export.storage(ctx)?;
+            let ptr = buffer.read_ptr()?;
+            // SAFETY: the export holds this range live until the synchronous syscall returns.
+            if let Some(count) = unsafe { native::try_write(fd, ptr, buffer.len(), offset) }? {
                 return Ok(ctx.int(count as i64));
             }
             ctx.dispatch_signals()?;
@@ -991,6 +924,11 @@ fn create_node(ctx: &mut Context, name: &str, args: &[Id], kwargs: &[(String, Id
     if name == "mkfifo" {
         return mkfifo::create(&pathname, mode as libc::mode_t, dir_fd);
     }
+    if !ctx.audit_hooks.is_empty() {
+        let audit_mode = ctx.int(i64::from(mode));
+        let audit_directory = audit_fd(ctx, dir_fd);
+        super::audit::event(ctx, "os.mkdir", &[path, audit_mode, audit_directory])?;
+    }
     // SAFETY: pathname is NUL-terminated and stays live through the synchronous call.
     if unsafe { libc::mkdirat(dir_fd, pathname.as_ptr(), mode as libc::mode_t) } != 0 {
         let error = crate::objects::errno_error(std::io::Error::last_os_error());
@@ -1038,8 +976,21 @@ fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
         let audit_flags = ctx.int(i64::from(flags | libc::O_CLOEXEC));
         super::audit::event(ctx, "open", &[path, NONE, audit_flags])?;
     }
-    match native::open_at(&pathname, flags, mode, dir_fd) {
-        Ok(fd) => Ok(ctx.int(i64::from(fd))),
+    let fd = open_path(ctx, path, &pathname, flags, mode, dir_fd)?;
+    Ok(ctx.int(i64::from(fd.into_raw_fd())))
+}
+
+/// Decorate only the failed system call. Signal and audit exceptions keep their identity.
+pub(super) fn open_path(
+    ctx: &mut Context,
+    path: Id,
+    pathname: &std::ffi::CStr,
+    flags: i32,
+    mode: i32,
+    dir_fd: i32,
+) -> Result<std::os::fd::OwnedFd> {
+    match native::open_at(pathname, flags, mode, dir_fd, || ctx.dispatch_signals())? {
+        Ok(fd) => Ok(fd),
         Err(error) => {
             Err(ctx.with_errno_filename(crate::objects::errno_error(error).into(), path)?)
         }
@@ -1056,6 +1007,17 @@ pub(super) fn descriptor(
     #[cfg(target_os = "linux")]
     if name.starts_with("timerfd_") {
         return timerfd::call(ctx, name, args, kwargs);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "pidfd_open" {
+        let [pid, flags] =
+            builtins::bind_builtin_arguments(name, args, kwargs, ["pid", "flags"], 1)?;
+        let pid = c_int(ctx, pid.unwrap())?;
+        let flags = flags
+            .map(|value| unsigned(ctx, value, u64::from(u32::MAX), "int"))
+            .transpose()?
+            .unwrap_or(0) as u32;
+        return Ok(ctx.int(i64::from(native::pidfd_open(pid, flags)?)));
     }
     if name == "device_encoding" {
         let [Some(fd)] = builtins::bind_builtin_arguments(name, args, kwargs, ["fd"], 1)? else {
@@ -1269,16 +1231,7 @@ pub(super) fn descriptor(
             unreachable!("sendfile requires both descriptors, offset and count")
         };
         let out_fd = c_int(ctx, out_fd)?;
-        let in_fd = c_int(ctx, in_fd)?;
-        // Argument Clinic converts count before sendfile converts an explicit offset.
-        let count = ssize_t(ctx, count)?;
-        let offset = if offset == NONE {
-            None
-        } else {
-            Some(file_offset(ctx, offset)?)
-        };
-        let sent = native::sendfile(out_fd, in_fd, offset, count, || ctx.dispatch_signals())?;
-        return Ok(ctx.int(sent as i64));
+        return sendfile_to(ctx, || Ok(out_fd), in_fd, offset, count);
     }
     if name == "dup2" {
         let [Some(fd), Some(fd2), inheritable] = builtins::bind_builtin_arguments(
@@ -1375,6 +1328,33 @@ pub(super) fn descriptor(
             "TypeError",
             format!("posix.{name}() takes no keyword arguments"),
         ));
+    }
+    #[cfg(target_os = "linux")]
+    if matches!(name, "setresgid" | "setresuid") {
+        let [real, effective, saved] = args else {
+            return Err(Error::new(
+                "TypeError",
+                format!("{name} expected 3 arguments, got {}", args.len()),
+            ));
+        };
+        let group = name == "setresgid";
+        let real = chown::owner_id(ctx, *real, group)?;
+        let effective = chown::owner_id(ctx, *effective, group)?;
+        let saved = chown::owner_id(ctx, *saved, group)?;
+        if group {
+            native::setresgid(
+                real as libc::gid_t,
+                effective as libc::gid_t,
+                saved as libc::gid_t,
+            )?;
+        } else {
+            native::setresuid(
+                real as libc::uid_t,
+                effective as libc::uid_t,
+                saved as libc::uid_t,
+            )?;
+        }
+        return Ok(NONE);
     }
     #[cfg(target_os = "linux")]
     if name == "tcsetpgrp" {
@@ -1527,6 +1507,10 @@ pub(super) fn descriptor(
     #[cfg(unix)]
     if name == "execv" {
         return execv(ctx, args);
+    }
+    #[cfg(target_os = "linux")]
+    if name == "waitid" {
+        return waitid::call(ctx, args);
     }
     if name == "waitpid" {
         let [pid, options] = args else {

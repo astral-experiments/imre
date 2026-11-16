@@ -14,6 +14,17 @@ def current():
     assert next(cursor) == 2 and calls == ["opened"]
     assert next(cursor, None) is None and next(cursor, None) is None
 
+    class Labeled(chain):
+        def __init__(self, *sources, label):
+            self.label = label
+
+    cursor = Labeled([1], [2], label="queued")
+    assert cursor.label == "queued" and list(cursor) == [1, 2]
+    cursor = chain([1, 2])
+    assert next(cursor) == 1
+    cursor.__init__([3])
+    assert list(cursor) == [2]
+
     cursor = chain([1], None, [2])
     assert next(cursor) == 1
     try:

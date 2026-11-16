@@ -149,8 +149,7 @@ impl ViewLayout {
         let [start, stop, step] = slice::normalize(bounds, self.first_len()? as i64);
         // PySlice_Unpack limits the absolute step to PY_SSIZE_T_MAX.
         let step = step.max(-i64::MAX);
-        let distance = if step > 0 { stop - start } else { start - stop };
-        let rows = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
+        let rows = crate::dynamic::slice_count(start, stop, step);
         let row = self.row_len();
         self.start = if rows == 0 {
             0

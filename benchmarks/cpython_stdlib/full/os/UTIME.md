@@ -10,7 +10,7 @@ This benchmark runs CPython 3.14.5's 13 original `test.test_os.UtimeTests` regis
 
 The class run uses the original `setUp`, file creation, cleanup, decorators and module teardown. It covers path and directory timestamps, file descriptors, directory-relative paths, the no-follow argument on a regular file, seconds and nanoseconds, the current time, missing files and invalid arguments. The full-module import on public Imre `aa1c3a37ed86` stops at `import fractions` before discovery. The table records the class-scoped run.
 
-## Replay
+## Replay the historical explicit build
 
 From the repository root, set `CPYTHON` to a test-enabled Linux CPython 3.14.5 interpreter, `IMRE` to the compiler, `RUNTIME` to its matching release `libimre_runtime.a` and `CLANG` to Clang 18. Use absolute paths. The staging command verifies vendored Git blobs against the pinned CPython manifests and retains the original source lines for the class and its dependencies.
 

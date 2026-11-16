@@ -58,7 +58,13 @@ jobs:
           mkdir -p "$ARCHIVE_NAME"
           cp "target/$TARGET/dist/imre" "target/$TARGET/dist/libimre_runtime.a" LICENSE-APACHE LICENSE-MIT "$ARCHIVE_NAME/"
           "$ARCHIVE_NAME/imre" --emit-bundled-stdlib > "$ARCHIVE_NAME/imre-stdlib.zip"
+          # ensurepip needs a real wheel filename when it passes the resource to pip.
+          ensurepip_dir="$ARCHIVE_NAME/lib/imre3.14/ensurepip"
+          mkdir -p "$ensurepip_dir/_bundled"
+          install -m 644 stdlib/ensurepip/*.py licenses/CPython.txt "$ensurepip_dir/"
+          install -m 644 stdlib/ensurepip/_bundled/*.whl "$ensurepip_dir/_bundled/"
           cp examples/conformance_report/upstream/LICENSE "$ARCHIVE_NAME/LICENSE-Ruff"
+          cp licenses/Optik.txt "$ARCHIVE_NAME/LICENSE-Optik"
           cargo metadata --locked --format-version 1 --filter-platform "$TARGET" > "$RUNNER_TEMP/imre-packages.json"
           typeshed_manifest=$(jq -er '.packages[] | select(.name == "ty_vendored") | .manifest_path' "$RUNNER_TEMP/imre-packages.json")
           cp "$(dirname "$typeshed_manifest")/vendor/typeshed/LICENSE" "$ARCHIVE_NAME/LICENSE-typeshed"
@@ -76,6 +82,8 @@ jobs:
         run: |
           tar -xzf "imre-$TARGET.tar.gz" -C "$RUNNER_TEMP"
           cd "$RUNNER_TEMP"
+          cmp "$GITHUB_WORKSPACE"/stdlib/ensurepip/_bundled/*.whl "./imre-$TARGET"/lib/imre3.14/ensurepip/_bundled/*.whl
+          "./imre-$TARGET/imre" -m ensurepip --version
           "./imre-$TARGET/imre" build-target --output-dir sdk > reported-target.json
           cmp reported-target.json sdk/target.json
           test -s sdk/include/Python.h && test -s sdk/setuptools/pyproject.toml && test -s sdk/scikit/Imre.cmake
@@ -108,7 +116,7 @@ jobs:
               grep -Fx "imre cache hit" cache.log
               test "$("$bindir/imre" run hello.py --allocator jemalloc)" = 42
               echo "from json.decoder import JSONDecoder; from json.encoder import JSONEncoder; print(JSONDecoder().decode(JSONEncoder().encode([42]))[0])" > boxed.py
-              "$bindir/imre" build boxed.py --runtime-imports --opt-level 3 --no-cache --verbose-link -o boxed 2>boxed-link.log
+              "$bindir/imre" build boxed.py --opt-level 3 --no-cache --verbose-link -o boxed 2>boxed-link.log
               grep -F -- "\"$bindir/imre-toolchain/lib/imre-stdlib/O3/providers.a\"" boxed-link.log
               test "$(./boxed)" = 42
             ' < "imre-$TARGET.tar.gz"
@@ -176,6 +184,8 @@ jobs:
           sh target/distrib/imre-installer.sh
           sh target/distrib/imre-installer.sh
           test -s "$IMRE_UNMANAGED_INSTALL/imre-stdlib.zip"
+          cmp stdlib/ensurepip/_bundled/*.whl "$IMRE_UNMANAGED_INSTALL"/lib/imre3.14/ensurepip/_bundled/*.whl
+          "$IMRE_UNMANAGED_INSTALL/imre" -m ensurepip --version
           echo 'print(40 + 2)' > "$RUNNER_TEMP/hello.py"
           test "$(env -i HOME="$RUNNER_TEMP" PATH=/usr/bin:/bin \
             "$IMRE_UNMANAGED_INSTALL/imre" run "$RUNNER_TEMP/hello.py" --verbose-link 2>"$RUNNER_TEMP/install-link.log")" = 42

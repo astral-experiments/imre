@@ -17,6 +17,13 @@ assert spread(3, 1, 2) == 2
 assert spread(-large, 1, large) == 2 * large
 assert spread(large, large, large) == 0
 
+
+def bounds(values: dict[str, int]) -> int:
+    return max(values.values()) - min(values.values())
+
+
+assert bounds({"first": 2, "second": 39, "third": 4}) == 37
+
 visits: list[int] = []
 print(min(observe(n, visits) for n in [large, -large, -large]))
 print(len(visits))
@@ -52,3 +59,17 @@ try:
     max(observe(1, visits), 1 // observe(0, visits), observe(7, visits))
 except ZeroDivisionError:
     print(repr(visits))
+
+
+def replace_words(words: list[str]) -> str:
+    words.clear()
+    words.append("β")
+    return "default"
+
+
+words: list[str] = []
+print(min(words, default="empty"), max(words, default="empty"))
+words.extend(["λ", "a", "λ"])
+print(min(words, default="!"), max(words, default="最高"))
+print(min(words, default=replace_words(words)))
+print(max([4, 4, -2], default=19))

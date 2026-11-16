@@ -82,6 +82,7 @@ pub(super) fn runtime_expression(expr: &ast::Expr) -> bool {
             | ast::Expr::Attribute(_)
             | ast::Expr::Call(_)
             | ast::Expr::List(_)
+            | ast::Expr::Tuple(_)
             | ast::Expr::Set(_)
             | ast::Expr::Dict(_)
             | ast::Expr::DictComp(_)

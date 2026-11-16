@@ -2,16 +2,15 @@
 
 use std::ops::ControlFlow;
 
-use num_traits::ToPrimitive;
 use smallvec::SmallVec;
 
 use super::Entries;
-use crate::dynamic::value::NONE;
+use crate::dynamic::value::{Heap, NONE};
 use crate::dynamic::{Context, Error, Id, Result, Value, weakref};
 
 const EMPTY: usize = usize::MAX;
 const DUMMY: usize = usize::MAX - 1;
-use crate::python_hash::{IMAG, INF, MODULUS};
+use crate::python_hash::{IMAG, INF, MODULUS, integer_hash};
 
 /// A pending operation in the left-to-right hash of a boxed key.
 enum HashFrame {
@@ -119,28 +118,38 @@ impl KeyLookup {
                 return ControlFlow::Break(dense);
             }
         }
-        for bucket in &mut self.slots {
-            let position = index.slots[bucket];
-            if position == EMPTY {
-                return ControlFlow::Break(None);
-            }
-            if position == DUMMY {
-                continue;
-            }
-            let dense = entries.dense(position).expect("live dictionary slot");
-            let resident = entries[dense].0;
-            if resident == self.key {
-                return ControlFlow::Break(Some(dense));
-            }
-            if index.hashes[dense] == self.hash {
-                return ControlFlow::Continue((position, resident));
-            }
+        match index.next_candidate(entries, &mut self.slots, self.hash, Some(self.key)) {
+            Some((_, dense)) if entries[dense].0 == self.key => ControlFlow::Break(Some(dense)),
+            Some((position, dense)) => ControlFlow::Continue((position, entries[dense].0)),
+            None => ControlFlow::Break(None),
         }
-        unreachable!("the dictionary probe always yields a bucket")
     }
 }
 
 impl Index {
+    /// Resume a probe at the next identical key or matching stored hash.
+    fn next_candidate(
+        &self,
+        entries: &Entries,
+        slots: &mut Probe,
+        hash: i64,
+        key: Option<Id>,
+    ) -> Option<(usize, usize)> {
+        for bucket in slots {
+            let position = self.slots[bucket];
+            if position == EMPTY {
+                return None;
+            }
+            if position != DUMMY {
+                let dense = entries.dense(position).expect("live dictionary slot");
+                if self.hashes[dense] == hash || key == Some(entries[dense].0) {
+                    return Some((position, dense));
+                }
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
+    }
+
     fn new(hashes: Vec<i64>, positions: Option<&[usize]>, size: usize) -> Result<Self> {
         let mut index = Self {
             slots: Vec::new(),
@@ -200,6 +209,91 @@ impl Index {
 }
 
 impl Entries {
+    /// Read an exact string key without invoking Python equality or creating an index.
+    pub(in super::super) fn named_item(&self, heap: &Heap, name: &str) -> Option<Id> {
+        let value = |&(key, item): &(Id, Id)| {
+            matches!(heap.get(key), Value::Str(text) if text == name).then_some(item)
+        };
+        let Some(index) = &self.index else {
+            return self.iter().find_map(value);
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        for bucket in Probe::new(hash, index.slots.len()) {
+            let position = index.slots[bucket];
+            if position == EMPTY {
+                return None;
+            }
+            if position != DUMMY {
+                let dense = self.dense(position).expect("live dictionary slot");
+                if index.hashes[dense] == hash
+                    && let Some(item) = value(&self[dense])
+                {
+                    return Some(item);
+                }
+            }
+        }
+        unreachable!("the dictionary probe always yields a bucket")
+    }
+
+    /// A proof may read an exact string key only before Python equality would run.
+    pub(in super::super) fn lookup_text(
+        &self,
+        heap: &Heap,
+        name: &str,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            if self
+                .iter()
+                .any(|&(key, _)| !matches!(heap.get(key), Value::Str(_)))
+            {
+                return ControlFlow::Break(());
+            }
+            return ControlFlow::Continue(self.named_item(heap, name));
+        };
+        let hash = normalized(crate::python_hash::text(name));
+        let mut probe = Probe::new(hash, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, hash, None) {
+            let (key, value) = self[dense];
+            let Value::Str(stored) = heap.get(key) else {
+                return ControlFlow::Break(());
+            };
+            if stored == name {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
+    }
+
+    /// Probe an unboxed ordinal. Defer before a resident key could run Python equality.
+    pub(in super::super) fn lookup_ordinal(
+        &self,
+        ctx: &Context,
+        ch: char,
+    ) -> ControlFlow<(), Option<Id>> {
+        let Some(index) = &self.index else {
+            return if self.is_empty() {
+                ControlFlow::Continue(None)
+            } else {
+                ControlFlow::Break(())
+            };
+        };
+        // Every Unicode ordinal is its own Python integer hash.
+        let ordinal = i64::from(u32::from(ch));
+        let mut probe = Probe::new(ordinal, index.slots.len());
+        while let Some((_, dense)) = index.next_candidate(self, &mut probe, ordinal, None) {
+            let (key, value) = self[dense];
+            let equal = match ctx.heap.get(key) {
+                Value::Int(integer) => integer.to_i64() == Some(ordinal),
+                Value::Bool(bit) => i64::from(*bit) == ordinal,
+                _ => return ControlFlow::Break(()),
+            };
+            if equal {
+                return ControlFlow::Continue(Some(value));
+            }
+        }
+        ControlFlow::Continue(None)
+    }
+
     /// Ordered iterators track node mutations separately from the size of the base dict.
     pub(in super::super) fn order_state(&self) -> usize {
         self.order.as_ref().map_or(0, |order| order.revision)
@@ -270,17 +364,6 @@ fn normalized(hash: i64) -> i64 {
     if hash == -1 { -2 } else { hash }
 }
 
-fn integer_hash(value: &crate::Int) -> i64 {
-    value.to_i64().map_or_else(
-        || {
-            (value.big().as_ref() % MODULUS)
-                .to_i64()
-                .expect("bounded remainder")
-        },
-        |n| n % MODULUS,
-    )
-}
-
 fn float_hash(value: f64, identity: Id) -> i64 {
     if !value.is_finite() {
         return if value.is_nan() {
@@ -339,16 +422,36 @@ impl Context {
     ) -> Result<()> {
         let entries = self.stored_entries(dict);
         let nodes = entries.ordered_nodes();
-        if (if last { nodes.last() } else { nodes.first() }).is_some_and(|&(node, _)| node == key) {
+        let Some(&(endpoint, _)) = (if last { nodes.last() } else { nodes.first() }) else {
+            return Err(self.missing_move_key(key));
+        };
+        if endpoint == key {
             return Ok(());
         }
-        let (_, dense) = self.find_dictionary_key(dict, key, None)?;
+        let hash = self.dictionary_hash(key)?;
+        let (_, dense) = self.find_dictionary_key(dict, key, Some(hash))?;
         let entries = self.stored_entries(dict);
         let rank = dense
             .and_then(|i| entries.ordered_rank(i))
-            .ok_or_else(|| self.lookup_error("KeyError", key))?;
+            .ok_or_else(|| self.missing_move_key(key))?;
         self.stored_entries_mut(dict).move_to_end(rank, last);
         Ok(())
+    }
+
+    /// move_to_end sets KeyError from the supplied object, including a tuple of arguments.
+    fn missing_move_key(&mut self, key: Id) -> Error {
+        match self.tuple_backing(key) {
+            Value::None => self.exception("KeyError", &[]),
+            Value::Tuple(items) | Value::NamedTuple { values: items, .. } => {
+                let args = items.clone();
+                self.exception("KeyError", &args)
+            }
+            Value::Raised(error) if self.is_builtin_error(error, "KeyError") => {
+                self.chain_raised_instance(key);
+                self.error_from_instance(key)
+            }
+            _ => self.exception("KeyError", &[key]),
+        }
     }
 
     /// Detach the node before the backing lookup can run an equality callback.
@@ -415,17 +518,15 @@ impl Context {
             return error;
         }
         let name = if let Value::Instance { class, .. } = *self.heap.get(key)
-            && let Value::Class { scope, .. } = *self.heap.get(class)
+            && matches!(self.heap.get(class), Value::Class { .. })
         {
-            let module = &self.scope_data(scope).module;
-            let name = self
-                .own_class_attr(class, "__qualname__")
+            let name = self.class_qualname(class);
+            match self
+                .own_class_attr(class, "__module__")
                 .and_then(|id| self.str_value(id).ok())
-                .unwrap_or_else(|| self.type_name(key));
-            if matches!(module.as_str(), "builtins" | "__main__") {
-                name.to_owned()
-            } else {
-                format!("{module}.{name}")
+            {
+                None | Some("builtins" | "__main__") => name.to_owned(),
+                Some(module) => format!("{module}.{name}"),
             }
         } else {
             self.type_name(key).to_owned()
@@ -586,8 +687,12 @@ impl Context {
             if matches!(self.heap.get(slot), Value::Native(name) if name == "object.__hash__") {
                 return Ok(ControlFlow::Break(Self::identity_hash(key)));
             }
-            let method = self.bind_attribute(slot, key, class)?;
-            let returned = self.call(method, vec![], vec![])?;
+            let returned = if matches!(self.heap.get(slot), Value::Function { .. }) {
+                self.call(slot, vec![key], vec![])?
+            } else {
+                let method = self.bind_attribute(slot, key, class)?;
+                self.call(method, vec![], vec![])?
+            };
             let hash = match self.heap.get(self.scalar_value(returned)) {
                 Value::Int(n) => n.to_i64().unwrap_or_else(|| integer_hash(n)),
                 Value::Bool(b) => i64::from(*b),
@@ -677,6 +782,7 @@ impl Context {
             match self.heap.get(key) {
                 Value::Int(n) => integer_hash(n),
                 Value::Bool(b) => i64::from(*b),
+                Value::ContextVar { name_hash, .. } => Self::identity_hash(key) ^ name_hash,
                 Value::Float(f) => float_hash(*f, key),
                 Value::Complex(z) => normalized(float_hash(z.real, key))
                     .wrapping_add(IMAG.wrapping_mul(normalized(float_hash(z.imag, key)))),
@@ -800,6 +906,11 @@ impl Context {
     pub(in super::super) fn dictionary_equal(&mut self, left: Id, right: Id) -> Result<bool> {
         if left == right {
             return Ok(true);
+        }
+        if let (Value::Int(a), Value::Int(b)) = (self.heap.get(left), self.heap.get(right))
+            && let (Some(a), Some(b)) = (a.as_small(), b.as_small())
+        {
+            return Ok(a == b);
         }
         let roots = self.heap.temporary_mark();
         self.heap.keep(left);
@@ -1015,6 +1126,20 @@ impl Context {
         Ok(())
     }
 
+    /// Read a stored value, deferring to Python equality with the original key on a collision.
+    pub(in super::super) fn dictionary_value(&mut self, dict: Id, key: Id) -> Result<Option<Id>> {
+        // Let the first general lookup build the index, including for locals() snapshots.
+        if let Value::Str(name) = self.heap.get(key)
+            && let Value::Dict(entries) = self.heap.get(dict)
+            && entries.index.is_some()
+            && let ControlFlow::Continue(found) = entries.lookup_text(&self.heap, name)
+        {
+            return Ok(found);
+        }
+        let (_, index) = self.find_dictionary_key(dict, key, None)?;
+        Ok(index.map(|i| self.stored_entries(dict)[i].1))
+    }
+
     pub(in super::super) fn find_dictionary_key(
         &mut self,
         dict: Id,
@@ -1075,6 +1200,36 @@ impl Context {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, known_hash)?;
         self.store_dictionary_value(dict, key, value, hash, index, overwrite)
+    }
+
+    /// A source binding drops the displaced dictionary value after the new value
+    /// is visible. A comparison during lookup can change which value it displaces.
+    pub(in super::super) fn store_binding_item(
+        &mut self,
+        dict: Id,
+        key: Id,
+        value: Id,
+    ) -> Result<bool> {
+        if !matches!(
+            self.heap.get(dict),
+            Value::Dict(_) | Value::DefaultDict { .. }
+        ) {
+            self.put_item(dict, key, value)?;
+            return Ok(false);
+        }
+        self.heap.keep(value);
+        let (hash, index) = self.find_dictionary_key(dict, key, None)?;
+        let previous = index.map(|i| self.stored_entries(dict)[i].1);
+        self.store_dictionary_value(dict, key, value, hash, index, true)?;
+        if let Some(previous) = previous
+            && previous != value
+        {
+            let released =
+                self.heap.tracks_finalizers() && self.heap.could_own_finalizer(previous, false);
+            self.release_list_owner(previous);
+            return Ok(released);
+        }
+        Ok(false)
     }
 
     pub(in super::super) fn set_ordered_dictionary_key(

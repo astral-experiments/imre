@@ -142,6 +142,17 @@ impl Checker<'_> {
             }
         }
         let source = &args.values[args.order[0]];
+        // A Python error handler can return lone surrogates, which need the boxed str layout.
+        if !quote {
+            let policy = &args.values[args.order[2]];
+            let scalar_result = match &policy.kind {
+                ExprKind::Str(name) => matches!(name.as_str(), "strict" | "replace" | "ignore"),
+                _ => policy.ty == Type::None,
+            };
+            if !scalar_result {
+                return Err(self.scoped_builtin_error("urllib.parse.unquote", call));
+            }
+        }
         if !quote && call.arguments.len() == 1 && source.ty != Type::Bytes {
             return Ok(Expr {
                 ty: Type::Str,

@@ -23,6 +23,21 @@ def read(mode: str):
             parser.add_argument("--bad", action="count", help=value("first"), choices=value("second"))
         elif mode == "interrupt":
             parser.add_argument("--bad", action="store_false", const=value("interrupt"), help=value("late"))
+        elif mode == "repeated_flag":
+            parser.add_argument("-v", "--verbose")
+            parser.add_argument("-v")
+        elif mode == "invalid_arity":
+            parser.add_argument("input", nargs="bad")
+        elif mode == "zero_arity":
+            parser.add_argument("input", nargs=0)
+        elif mode == "mixed_positionals":
+            parser.add_argument("input", "--other")
+        elif mode == "metavar_arity":
+            parser.add_argument("--key", nargs="?", metavar=("A", "B"))
+        elif mode == "bad_template":
+            parser.add_argument("--key", help="%(value)s")
+    except argparse.ArgumentError as error:
+        print("argument: " + str(error))
     except TypeError as error:
         print("type: " + str(error))
     except ValueError as error:

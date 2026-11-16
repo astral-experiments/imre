@@ -104,8 +104,18 @@ def run():
                 assert file.name == -1 and repr(file) == "<_io.BufferedReader name=-1>"
                 client.sendall(b"X\xff")
                 data = bytearray(4)
-                assert peer.recv_into(data, 2) == 2
-                assert bytes(data) == b"X\xff\x00\x00"
+
+                class Count:
+                    def __index__(self):
+                        try:
+                            data.append(0)
+                        except BufferError:
+                            return 2
+                        raise AssertionError("recv_into must hold the destination during conversion")
+
+                assert peer.recv_into(buffer=data, nbytes=Count(), flags=0) == 2
+                data.append(0)
+                assert bytes(data) == b"X\xff\x00\x00\x00"
     sock, peer = socket.socketpair()
     with sock, peer, sock.makefile("rwb", 0) as raw:
         assert isinstance(raw, socket.SocketIO) and isinstance(raw, io.RawIOBase)

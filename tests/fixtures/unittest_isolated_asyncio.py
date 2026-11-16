@@ -37,7 +37,54 @@ class Case(IsolatedAsyncioTestCase):
         import asyncio
         self.assertEqual(state.get(), "async setup")
         self.loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        coro = task.get_coro()
+        self.assertEqual(coro.__name__, "test_body")
+        self.assertEqual(coro.__qualname__, "Case.test_body")
+        for field in ("__name__", "__qualname__"):
+            previous = getattr(coro, field)
+            name = "read" + chr(0xd800)
+            setattr(coro, field, name)
+            self.assertIs(getattr(coro, field), name)
+            setattr(coro, field, previous)
+        coro.__qualname__ = "connection.read"
+        self.assertIn("coro=<connection.read()", repr(task))
+        self.assertEqual(self.test_body.__qualname__, "Case.test_body")
         await asyncio.sleep(0)
+
+        from unittest.mock import AsyncMock, call
+
+        order = []
+
+        async def double(value):
+            order.append(value)
+            return 2 * value
+
+        mock = AsyncMock(side_effect=double)
+        first = mock(1)
+        second = mock(2)
+        self.assertEqual(mock.call_args_list, [call(1), call(2)])
+        mock.assert_not_awaited()
+        self.assertEqual(order, [])
+        second_result = await second
+        first_result = await first
+        self.assertEqual((second_result, first_result), (4, 2))
+        self.assertEqual(order, [2, 1])
+        self.assertEqual(mock.await_args_list, [call(2), call(1)])
+
+        wrapped = AsyncMock(wraps=double)
+        self.assertEqual(await wrapped(3), 6)
+        wrapped.assert_awaited_once_with(3)
+
+        class Transport(AsyncMock):
+            pass
+
+        transport = Transport()
+        reply = await transport()
+        for child in (reply, transport.send):
+            self.assertIsInstance(child, AsyncMock)
+            self.assertNotIsInstance(child, Transport)
+
         state.set("test")
 
     async def asyncTearDown(self):

@@ -2,11 +2,32 @@
 
 use super::*;
 
+/// The fixed calling convention either names its function or reads an adapter and
+/// context from a callable captured before its arguments.
+pub(super) enum NativeCallTarget {
+    Function(usize),
+    Callable(Operand),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Entry {
+    Function,
+    Adapter { bound: bool, cold: bool },
+}
+
+impl Entry {
+    fn reference(self, output: &mut Output<'_>, module: &Module, id: usize) -> String {
+        match self {
+            Self::Function => output.function_ref(module, id),
+            Self::Adapter { bound, .. } => output.adapter_ref(id, bound),
+        }
+    }
+}
+
 /// Definitions referenced while lowering callable construction, invocation and inspection.
 #[derive(Default)]
 pub(super) struct Uses {
-    /// Function index, bound receiver, and cold coroutine calling convention.
-    targets: BTreeSet<(usize, bool, bool)>,
+    targets: BTreeSet<(usize, Entry)>,
     layouts: BTreeSet<&'static str>,
     context: bool,
     pub(super) inspected: bool,
@@ -35,27 +56,23 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
     if uses.targets.is_empty() && uses.layouts.is_empty() && !uses.context {
         return;
     }
-    output.common().push_str("%callable = type { ptr, ptr }\n");
-    if uses.layouts.contains("python_function") {
-        // Keep the ordinary adapter/context ABI. The optional third field owns
-        // __wrapped__; kind 3 identifies this link when reclaiming a cycle.
-        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n@kinds_python_function = private constant [3 x i32] [i32 0, i32 6, i32 6]\n");
-        output
-            .global(
-                output.entry,
-                "layout_python_function",
-                "constant",
-                "{ i64, ptr, ptr }",
-            )
-            .push_str("{ i64 3, ptr @kinds_python_function, ptr @semantics_python_function }\n");
+    // Bound adapters consume the receiver word. An unbound adapter ignores it.
+    output
+        .common()
+        .push_str("%callable = type { ptr, ptr, [0 x ptr] }\n");
+    if uses.layouts.contains("python_function") || uses.layouts.contains("cache_callable") {
+        // A function link owns its referent and can participate in a cycle.
+        output.entry_buffer().push_str("@semantics_python_function = private constant { i32, i32, ptr, i64, ptr, i64, ptr } { i32 3, i32 0, ptr null, i64 0, ptr null, i64 0, ptr null }\n");
     }
     for (name, kinds, length) in [
+        ("python_function", "i32 0, i32 6", 2),
         ("callable", "i32 0, i32 6", 2),
+        ("class_factory", "i32 0, i32 11", 2),
         ("callable_enum", "i32 0, i32 10", 2),
         ("callable_object", "i32 0, i32 5", 2),
         ("callable_list", "i32 0, i32 4", 2),
         ("empty_partial", "i32 0, i32 0, i32 6", 3),
-        ("cache_callable", "i32 0, i32 6, i32 0, i32 0", 4),
+        ("cache_callable", "i32 0, i32 6, i32 6, i32 0, i32 0", 5),
     ] {
         if !uses.layouts.contains(name) {
             continue;
@@ -65,6 +82,11 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
             "@kinds_{name} = private unnamed_addr constant [{length} x i32] [{kinds}]"
         )
         .unwrap();
+        let semantics = if matches!(name, "python_function" | "cache_callable") {
+            "@semantics_python_function"
+        } else {
+            "null"
+        };
         writeln!(
             output.global(
                 output.entry,
@@ -72,11 +94,14 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
                 "constant",
                 "{ i64, ptr, ptr }"
             ),
-            "{{ i64 {length}, ptr @kinds_{name}, ptr null }}"
+            "{{ i64 {length}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
     }
-    for &(id, bound, cold) in &uses.targets {
+    for &(id, entry) in &uses.targets {
+        let Entry::Adapter { bound, cold } = entry else {
+            continue;
+        };
         let function = &module.functions[id];
         let params = &function.params[usize::from(bound)..];
         let arguments = params
@@ -109,46 +134,48 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
         };
         let target = output.function_name(id);
         let name = output.adapter_name(id, bound);
-        let body = output.function(
+        output.define_function(
             output.function_owner(id),
             &name,
             returns,
             &signature.join(", "),
             attributes,
+            |body| {
+                if cold && bound {
+                    body.push_str("  %slot = getelementptr %callable, ptr %callable, i32 0, i32 1\n  %context = load ptr, ptr %slot\n");
+                }
+                let owns_receiver = bound
+                    && emitter
+                        .resource_types
+                        .contains(&function.locals[function.params[0]]);
+                if scalar {
+                    body.push_str("  %tag = ptrtoint ptr %context to i64\n");
+                } else if owns_receiver {
+                    let family = if matches!(function.locals[function.params[0]], Type::Deque(_)) {
+                        "object"
+                    } else {
+                        "record"
+                    };
+                    writeln!(body, "  call void @imre_{family}_retain(ptr %context)").unwrap();
+                }
+                if cold && owns_receiver {
+                    // The callee now owns self. A temporary bound method must not keep
+                    // the previous self alive after its parameter is rebound.
+                    body.push_str("  call void @imre_record_release(ptr %callable)\n");
+                }
+                writeln!(
+                    body,
+                    "  %result = call {returns} @{target}({})",
+                    inputs.join(", ")
+                )
+                .unwrap();
+                if cold && !owns_receiver {
+                    // A non-resource receiver can stay borrowed until the call returns.
+                    body.push_str("  call void @imre_record_release(ptr %callable)\n");
+                }
+                writeln!(body, "  ret {returns} %result").unwrap();
+            },
         );
-        if cold && bound {
-            body.push_str("  %slot = getelementptr %callable, ptr %callable, i32 0, i32 1\n  %context = load ptr, ptr %slot\n");
-        }
-        let owns_receiver = bound
-            && emitter
-                .resource_types
-                .contains(&function.locals[function.params[0]]);
-        if scalar {
-            body.push_str("  %tag = ptrtoint ptr %context to i64\n");
-        } else if owns_receiver {
-            let family = if matches!(function.locals[function.params[0]], Type::Deque(_)) {
-                "object"
-            } else {
-                "record"
-            };
-            writeln!(body, "  call void @imre_{family}_retain(ptr %context)").unwrap();
-        }
-        if cold && owns_receiver {
-            // The callee now owns self. A temporary bound method must not keep
-            // the previous self alive after its parameter is rebound.
-            body.push_str("  call void @imre_record_release(ptr %callable)\n");
-        }
-        writeln!(
-            body,
-            "  %result = call {returns} @{target}({})",
-            inputs.join(", ")
-        )
-        .unwrap();
-        if cold && !owns_receiver {
-            // A non-resource receiver can stay borrowed until the call returns.
-            body.push_str("  call void @imre_record_release(ptr %callable)\n");
-        }
-        writeln!(body, "  ret {returns} %result\n}}").unwrap();
         output.common().push('\n');
     }
 }
@@ -157,7 +184,7 @@ pub(super) fn adapters(emitter: &mut Emitter<'_, '_>) {
 /// callback emit this table of async definitions, partial frames and markers.
 fn coroutine_table(
     module: &Module,
-    targets: &BTreeSet<(usize, bool, bool)>,
+    targets: &BTreeSet<(usize, Entry)>,
     marked: &BTreeSet<usize>,
     output: &mut Output,
 ) {
@@ -166,14 +193,14 @@ fn coroutine_table(
     output.current = output.entry;
     let entry = "{ ptr, i64, ptr }";
     let mut rows = Vec::new();
-    for &(id, bound, _) in targets {
+    for &(id, callable) in targets {
         let slot = match module.types.coroutine_target(id) {
             Some(CoroutineTarget::Coroutine) => "-1".to_owned(),
             Some(CoroutineTarget::Partial(slot)) => slot.to_string(),
             None if marked.contains(&id) => "-2".to_owned(),
             None => continue,
         };
-        let adapter = output.adapter_ref(id, bound);
+        let adapter = callable.reference(output, module, id);
         let mark = if marked.contains(&id) {
             format!("@coroutine_mark_{id}")
         } else {
@@ -200,12 +227,26 @@ impl Emitter<'_, '_> {
         self.output.global_ref(format!("layout_{name}"))
     }
 
-    fn callable_adapter(&mut self, function: usize, bound: bool, ty: Type) -> String {
+    fn callable_entry(&mut self, function: usize, bound: bool, ty: Type) -> String {
         let (_, returns) = self.module.types.signature(ty).unwrap();
-        self.callable_uses
-            .targets
-            .insert((function, bound, matches!(returns, Type::Coroutine(_))));
-        self.output.adapter_ref(function, bound)
+        let cold = matches!(returns, Type::Coroutine(_));
+        let body = &self.module.functions[function];
+        // The callable roots its receiver. A borrowed pointer is already the
+        // source method's first native parameter and needs no forwarding body.
+        let borrowed_receiver = bound
+            && !cold
+            && body.params.first().is_some_and(|&slot| {
+                let receiver = body.locals[slot];
+                matches!(receiver.llvm_type(), LlvmType::Ptr)
+                    && !self.resource_types.contains(&receiver)
+            });
+        let entry = if borrowed_receiver {
+            Entry::Function
+        } else {
+            Entry::Adapter { bound, cold }
+        };
+        self.callable_uses.targets.insert((function, entry));
+        entry.reference(self.output, self.module, function)
     }
 
     /// Locate the receiver in the two-word prefix shared by native callable records.
@@ -237,12 +278,17 @@ impl Emitter<'_, '_> {
         function: usize,
         receiver: Option<&Expr>,
     ) -> Value {
-        if let Some(slot) = self.module.types.constructor_slot(function, ty) {
+        if let Some((slot, class)) = self.module.types.constructor_slot(function, ty) {
             let slot = self.output.global_ref(format!("module_value_{slot}"));
-            let layout = self.callable_layout("callable");
-            let target = self.callable_adapter(function, false, ty);
+            let name = self.literal_root(
+                self.module.class_metadata[class].qualified_name.as_bytes(),
+                Type::Str,
+            );
+            let layout = self.callable_layout("class_factory");
+            let target = self.callable_entry(function, false, ty);
             let operand = self.checked_pointer(format!(
-                "call ptr @imre_record_class_factory(ptr @{slot}, ptr @{layout}, ptr @{target})"
+                "call ptr @imre_record_class_value(ptr @{slot}, ptr @{layout}, ptr @{target}, ptr {})",
+                name.operand
             ));
             return self.owned(Value {
                 ty,
@@ -251,7 +297,7 @@ impl Emitter<'_, '_> {
             });
         }
         let bound = receiver.is_some();
-        let receiver = receiver.map(|receiver| self.expr(receiver));
+        let mut receiver = receiver.map(|receiver| self.expr(receiver));
         // The hidden context is one pointer-sized ABI word. A StrEnum stores its
         // nonowning tag in that word; only its adapter converts the bits back.
         let scalar = receiver
@@ -260,8 +306,13 @@ impl Emitter<'_, '_> {
         let policy = self.module.types.cache_adapter(function);
         let layout = if policy.is_some() {
             "cache_callable"
-        } else if receiver.is_none() && self.function_link_types.contains(&ty) {
+        } else if receiver.is_none() && self.linked_functions.contains(&function) {
             "python_function"
+        } else if receiver
+            .as_ref()
+            .is_some_and(|r| r.ty == Type::BuiltinClass)
+        {
+            "class_factory"
         } else if scalar {
             "callable_enum"
         } else if receiver
@@ -276,18 +327,28 @@ impl Emitter<'_, '_> {
         };
         let layout = self.callable_layout(layout);
         let result = self.record_with_layout(ty, layout);
-        let target = self.callable_adapter(function, bound, ty);
+        let target = self.callable_entry(function, bound, ty);
         self.line(format!("store ptr @{target}, ptr {}", result.operand));
         let context = self.callable_context_slot(&result);
         if let Some(policy) = policy {
-            // Applied caches capture the actual wrappee in the first field of
-            // their frame. A statically decorated declaration has no frame.
-            let source = receiver.as_ref().map_or_else(
-                || "null".to_owned(),
-                |frame| self.instruction(format!("load ptr, ptr {}", frame.operand)),
-            );
+            let source = if let Some(frame) = &receiver {
+                self.instruction(format!("load ptr, ptr {}", frame.operand))
+            } else {
+                // The adapter invokes the declared body directly. Its context still owns
+                // the original Python callable if the public link is later replaced.
+                let raw = self
+                    .module
+                    .types
+                    .original_cache_body(function)
+                    .expect("declared cache body");
+                let signature = self.module.types.wrapped_link_type(ty);
+                let original = self.callable_value(signature, raw, None);
+                let operand = original.operand.clone();
+                receiver = Some(original);
+                operand
+            };
             self.line(format!(
-                "call void @imre_callable_copy_cache_policy(ptr {}, ptr {source}, i64 {}, i32 {})",
+                "call void @imre_callable_init_cache(ptr {}, ptr {source}, i64 {}, i32 {})",
                 result.operand,
                 policy.capacity,
                 u32::from(policy.typed)
@@ -323,53 +384,80 @@ impl Emitter<'_, '_> {
         result
     }
 
-    /// The callee is captured before arguments. Stable local owners permit a
-    /// borrow; temporaries and expression-rebound slots keep independent owners.
-    /// A singleton closed target exposes its body to LLVM without dynamic dispatch.
-    pub(super) fn invoke_callable(
+    /// Transfer resources only after every operand has been captured in source order.
+    pub(super) fn native_call(
         &mut self,
-        callable: &Expr,
+        target: NativeCallTarget,
         args: &CallArgs,
         returns: Type,
     ) -> Value {
-        let targets = self.callable_targets.get(callable.ty).to_vec();
-        let callable = self.operand(callable);
+        // A field reader can borrow a headerless value-struct snapshot directly.
+        if let NativeCallTarget::Function(id) = target
+            && let [arg] = args.values.as_slice()
+            && self.module.types.is_value_struct(arg.ty)
+            && structs::field_reader(&self.module.functions[id])
+            && let Some(snapshot) = self.struct_snapshot(arg)
+        {
+            return self.user_call(
+                id,
+                returns,
+                &[&snapshot],
+                args.exhaustive_enum_match,
+                args.site.fixed(),
+            );
+        }
         let mut values = self.call_operands(args);
         self.transfer_call_operands(&mut values);
-        let target = if let [target] = targets.as_slice() {
-            format!(
-                "@{}",
-                self.callable_adapter(target.function, target.bound, callable.value.ty)
-            )
-        } else {
-            self.instruction(format!("load ptr, ptr {}", callable.value.operand))
+        let inputs: Vec<_> = args
+            .order
+            .iter()
+            .map(|&index| &values[index].value)
+            .collect();
+        let result = match (&target, &args.site) {
+            (NativeCallTarget::Function(id), _)
+            | (NativeCallTarget::Callable(_), ir::CallSite::SavedFunction(_, id)) => self
+                .user_call(
+                    *id,
+                    returns,
+                    &inputs,
+                    args.exhaustive_enum_match,
+                    args.site.fixed(),
+                ),
+            (NativeCallTarget::Callable(callable), _) => {
+                let targets = self.callable_targets.get(callable.value.ty).to_vec();
+                let entry = if let [target] = targets.as_slice() {
+                    format!(
+                        "@{}",
+                        self.callable_entry(target.function, target.bound, callable.value.ty)
+                    )
+                } else {
+                    self.instruction(format!("load ptr, ptr {}", callable.value.operand))
+                };
+                let context = self.callable_context_slot(&callable.value);
+                let context = self.instruction(format!("load ptr, ptr {context}"));
+                let may_raise = targets.is_empty()
+                    || targets
+                        .iter()
+                        .any(|target| self.effects.may_raise(target.function));
+                self.call_with_effect(
+                    &entry,
+                    Some(&context),
+                    returns,
+                    &inputs,
+                    may_raise,
+                    super::CallSite {
+                        origin: args.site.fixed(),
+                        inline: false,
+                    },
+                )
+            }
         };
-        let context = self.callable_context_slot(&callable.value);
-        let context = self.instruction(format!("load ptr, ptr {context}"));
-        let mut inputs = vec![format!("ptr {context}")];
-        inputs.extend(args.order.iter().map(|&index| {
-            let value = &values[index].value;
-            format!("{} {}", value.ty.llvm(), value.operand)
-        }));
-        let instruction = format!("call {} {target}({})", returns.llvm(), inputs.join(", "));
-        let may_raise = targets.is_empty()
-            || targets
-                .iter()
-                .any(|target| self.effects.may_raise(target.function));
-        let operand = if may_raise {
-            self.checked_instruction(instruction)
-        } else {
-            self.instruction(instruction)
-        };
-        let result = self.owned(Value {
-            ty: returns,
-            operand,
-            small_integer: false,
-        });
         for value in &values {
             self.release_operand(value);
         }
-        self.release_operand(&callable);
+        if let NativeCallTarget::Callable(callable) = target {
+            self.release_operand(&callable);
+        }
         result
     }
 }
@@ -431,7 +519,7 @@ print(apply(increment, 4))
             "from typing import Callable\ndef apply(callback: Callable[[int], int], value: int) -> int:\n    return callback(value)\n",
             &CompileOptions::default(),
         ).unwrap();
-        assert!(output.contains("%callable = type { ptr, ptr }"));
+        assert!(output.contains("%callable = type { ptr, ptr, [0 x ptr] }"));
         assert!(!output.contains("@layout_callable ="));
     }
 }

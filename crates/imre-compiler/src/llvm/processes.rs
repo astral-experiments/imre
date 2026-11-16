@@ -362,12 +362,9 @@ impl Emitter<'_, '_> {
             | ProcessOperation::Call { streams, .. }
             | ProcessOperation::CheckOutput { streams, .. }
             | ProcessOperation::Run { streams, .. } => {
-                let cwd =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[2].value.operand));
-                let env =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[3].value.operand));
-                let executable =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[10].value.operand));
+                let cwd = self.optional_object_pointer(&args[2].value);
+                let env = self.optional_object_pointer(&args[3].value);
+                let executable = self.optional_object_pointer(&args[10].value);
                 // Bit 20 is set in the ABI word only when the caller disables
                 // restoration. The optional boolean is the final bound operand.
                 let signal_arg = streams & (1 << 20) != 0;
@@ -848,10 +845,15 @@ impl Emitter<'_, '_> {
                 }
             }
             ProcessOperation::Copy(op) => {
-                let [src, dst, follow] = args else {
-                    unreachable!()
+                let (src, dst, follow) = match args {
+                    [src, dst] => (src, dst, "1".to_owned()),
+                    [src, dst, follow] => (
+                        src,
+                        dst,
+                        self.instruction(format!("zext i1 {} to i32", follow.value.operand)),
+                    ),
+                    _ => unreachable!(),
                 };
-                let follow = self.instruction(format!("zext i1 {} to i32", follow.value.operand));
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_shutil_copy(i32 {}, ptr {}, i32 {}, ptr {}, i32 {}, i32 {follow})",
                     op as u32,

@@ -7,13 +7,13 @@ use std::mem::MaybeUninit;
 
 use smallvec::SmallVec;
 
-use super::super::codecs::Codec;
+use super::super::codecs::{Codec, StrEncoder};
 use super::gzip::GzipDecoder;
 use super::{Bytes, Error, Kind, Result, Str, decode_text, errno_error};
 use crate::{BinaryOutput, StrOwner};
 
 struct TextEncoder {
-    codec: Codec,
+    codec: StrEncoder,
     errors: Option<StrOwner>,
     newline: Option<&'static str>,
 }
@@ -48,22 +48,26 @@ impl Output {
     /// Keep a signature pending only when this stream starts at offset zero.
     pub(super) fn set_encoding(
         &mut self,
-        mut codec: Codec,
+        mut codec: StrEncoder,
         errors: Option<StrOwner>,
         newline: Option<&str>,
     ) {
-        if matches!(codec, Codec::Utf8 { signature: true })
-            && self
+        let wide = matches!(codec, StrEncoder::Wide { .. });
+        if let Some(signature) = codec.signature_mut()
+            && *signature
+        {
+            // UTF-16/32 fast encoders omit the BOM on pipes. UTF-8-SIG emits it.
+            *signature = self
                 .raw
                 .inner
                 .stream_position()
-                .is_ok_and(|position| position != 0)
-        {
-            codec = Codec::Utf8 { signature: false };
+                .map_or(!wide, |position| position == 0);
         }
         // A native str already contains the bytes needed by an untranslated UTF-8 writer.
-        if matches!(codec, Codec::Utf8 { signature: false })
-            && !matches!(newline, Some("\r" | "\r\n"))
+        if matches!(
+            codec,
+            StrEncoder::Registered(Codec::Utf8 { signature: false })
+        ) && !matches!(newline, Some("\r" | "\r\n"))
         {
             self.encoder = None;
             return;
@@ -80,31 +84,53 @@ impl Output {
     }
 
     /// Encode the entire input before changing the file or its text buffer.
-    pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+    /// An untranslated, buffered UTF-8 file can accept the fragments as one pending write.
+    pub(super) fn try_write_parts<'a>(&mut self, parts: impl Iterator<Item = &'a [u8]>) -> bool {
+        self.encoder.is_none()
+            && !self.line_buffering
+            && self
+                .text
+                .as_mut()
+                .is_some_and(|pending| pending.try_append_parts(parts))
+    }
+
+    pub(super) fn write_text(
+        &mut self,
+        text: &str,
+        input: impl FnOnce() -> Result<StrOwner>,
+    ) -> Result<()> {
         let Some(encoder) = self.encoder.as_mut() else {
             return self.write(text.as_bytes()).map_err(errno_error);
         };
-        let translated;
-        let text = if let Some(newline) = encoder.newline {
-            translated = super::path_text::output_newlines(text, newline)?;
-            &translated
-        } else {
-            text
-        };
-        let encoded =
-            encoder
-                .codec
-                .encode(text, encoder.errors.as_deref().map(Str::as_str), || {
-                    super::super::text::try_owned_string(text)
-                })?;
-        if matches!(encoder.codec, Codec::Utf8 { signature: true }) {
-            encoder.codec = Codec::Utf8 { signature: false };
+        let translated = encoder
+            .newline
+            .filter(|_| text.contains('\n'))
+            .map(|newline| super::path_text::output_newlines(text, newline))
+            .transpose()?;
+        // Even a failed encoding attempt consumes the stream's pending signature.
+        let codec = encoder.codec;
+        if let Some(signature) = encoder.codec.signature_mut() {
+            *signature = false;
         }
-        self.write(&encoded).map_err(errno_error)
+        let encoded = codec.encode(
+            translated.as_deref().unwrap_or(text),
+            encoder.errors.as_deref().map_or("strict", Str::as_str),
+            || match &translated {
+                Some(value) => super::super::text::try_owned_string(value),
+                None => input(),
+            },
+        )?;
+        let flush_line = self.line_buffering && text.contains(['\r', '\n']);
+        self.write_buffered(&encoded, flush_line)
+            .map_err(errno_error)
     }
 
     pub(super) fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         let flush_line = self.line_buffering && memchr::memchr2(b'\r', b'\n', bytes).is_some();
+        self.write_buffered(bytes, flush_line)
+    }
+
+    fn write_buffered(&mut self, bytes: &[u8], flush_line: bool) -> io::Result<()> {
         let Some(pending) = &mut self.text else {
             self.raw.write_all(bytes)?;
             return if flush_line { self.raw.flush() } else { Ok(()) };
@@ -354,11 +380,14 @@ impl Input {
         } else {
             TEXT_CHUNK_SIZE
         };
+        // Start at the end of the untouched zeroed window. The Python reader
+        // can take the allocation, and a native refill can reuse its capacity.
+        let bytes = crate::zeroed_io_buffer(capacity).map_err(|_| Error::memory_error())?;
         Ok(Self {
             raw: ReadBuffer::Pipe {
                 source: Source::Plain(file).take(u64::MAX),
-                bytes: reserve(capacity)?,
-                start: 0,
+                start: bytes.len(),
+                bytes,
                 window,
             },
             text: TextBuffer::default(),
@@ -409,6 +438,25 @@ impl Input {
         let pos = file.seek(at).map_err(super::errno_error)?;
         self.raw.consume(buffered);
         Ok(pos)
+    }
+
+    /// Hand the newly opened pipe's reserved read-ahead storage to its Python reader.
+    pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
+        let ReadBuffer::Pipe {
+            source,
+            bytes,
+            start,
+            window,
+        } = &mut self.raw
+        else {
+            unreachable!("Popen input has pipe storage")
+        };
+        if source.limit() == u64::MAX && *start == *window && bytes.len() == *window {
+            *start = 0;
+            return Ok(std::mem::take(bytes));
+        }
+        // A second wrapper must not take unread bytes belonging to the first.
+        crate::zeroed_io_buffer(*window)
     }
 
     /// Detach bytes already prefetched by the public buffered pipe before reading its raw fd.
@@ -602,12 +650,15 @@ impl Input {
             word.wrapping_sub(0x0101_0101_0101_0101) & !word & 0x8080_8080_8080_8080
         }
         let (chunks, _) = window.as_chunks::<8>();
-        let end = chunks.iter().enumerate().find_map(|(i, chunk)| {
+        for (i, chunk) in chunks.iter().enumerate() {
             let matches = newline(chunk);
-            (matches != 0).then(|| 8 * i + (matches.trailing_zeros() / 8) as usize + 1)
-        })?;
-        self.text.pos += end;
-        Some((end, window))
+            if matches != 0 {
+                let end = i * 8 + matches.trailing_zeros() as usize / 8 + 1;
+                self.text.pos += end;
+                return Some((end, window));
+            }
+        }
+        None
     }
 
     pub(super) fn text_line(&mut self) -> Result<Str> {
@@ -698,17 +749,21 @@ pub(in crate::objects) fn decode_text_lines(bytes: &[u8], codec: Codec) -> Resul
             text.push_str(&decoder.decoded);
         }
         Ok(text)
-    } else if matches!(codec, Codec::ShiftJis) {
+    } else if matches!(codec, Codec::DoubleByte(_) | Codec::Wide(_)) {
         let mut start = 0;
         let mut end = 0;
         for chunk in chunks.chain([&[][..]]) {
             end += chunk.len();
-            start += super::super::codecs::shift_jis::decode_chunk(
-                &mut text,
-                &bytes[start..end],
-                None,
-                chunk.is_empty(),
-            )?;
+            let input = &bytes[start..end];
+            start += match codec {
+                Codec::Wide(format) => {
+                    format.decode_text(&mut text, input, None, chunk.is_empty())?
+                }
+                Codec::DoubleByte(format) => {
+                    format.decode_chunk(&mut text, input, None, chunk.is_empty())?
+                }
+                _ => unreachable!(),
+            };
         }
         Ok(super::super::codecs::universal_newlines(text))
     } else {

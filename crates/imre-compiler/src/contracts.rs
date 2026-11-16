@@ -55,7 +55,15 @@ impl Builtin {
         use HeapEffect::{PreservesLists, PreservesOwners, Unknown};
 
         match self {
-            Self::Bool => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_))), PreservesLists),
+            Self::Bool => Contract::new(
+                args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::ObjectValue | Type::List(_) | Type::Union(_) | Type::Optional(_)
+                    )
+                }),
+                PreservesLists,
+            ),
             Self::Len => Contract::new(
                 args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
                 PreservesLists,
@@ -65,22 +73,39 @@ impl Builtin {
                 match op {
                     New | Index | Snapshot(_) | Field(_) => Contract::new(true, PreservesLists),
                     AddRow | Push => Contract::new(true, Unknown),
-                    Len | RowLen | ViewLen(_) | ViewField(..) => Contract::new(false, PreservesLists),
+                    Len | RowLen | ViewLen(_) | ViewField(..) => {
+                        Contract::new(false, PreservesLists)
+                    }
                 }
             }
-            Self::SplitIntSource(_) | Self::StringSliceEqual => Contract::new(false, PreservesLists),
-            Self::SplitIntField(_) | Self::SplitIntCached(_) | Self::StringListNonempty | Self::StringListContains | Self::StringListFilter(_) | Self::FilterCharacterSet(_) => {
-                Contract::new(true, PreservesLists)
-            }
+            Self::SplitIntSource(_)
+            | Self::SplitTextSource(_)
+            | Self::SplitTextLen
+            | Self::StringSliceEqual => Contract::new(false, PreservesLists),
+            Self::SplitTextField(..) => Contract::new(true, PreservesLists),
+            Self::StringTupleContains => Contract::new(false, PreservesLists),
+            Self::SplitIntField(..)
+            | Self::SplitIntCached(..)
+            | Self::StringListNonempty
+            | Self::StringListContains
+            | Self::StringListFilter(_)
+            | Self::FilterCharacterSet(_) => Contract::new(true, PreservesLists),
             Self::Random(crate::ir::RandomOperation::Shuffle) => Contract::new(true, Unknown),
-            Self::ListReverse => Contract::new(args.first().is_some_and(|e| matches!(e.ty, Type::List(_))), Unknown),
-            Self::ListExtendBuffer | Self::ListExtendSnapshot | Self::ListExtendUnhinted | Self::SortDetach => Contract::new(true, Unknown),
+            Self::ListReverse => Contract::new(
+                args.first().is_some_and(|e| matches!(e.ty, Type::List(_))),
+                Unknown,
+            ),
+            Self::CollectIntCursor => Contract::new(true, Unknown),
+            Self::ListExtendBuffer
+            | Self::ListExtendSnapshot
+            | Self::ListExtendUnhinted
+            | Self::SortDetach => Contract::new(true, Unknown),
             Self::FunctionWrappedSet => Contract::new(false, Unknown),
             Self::MarkCoroutine(_) => Contract::new(false, Unknown),
             Self::IsCoroutineFunction => Contract::new(false, PreservesOwners),
-            Self::FunctionWrappedGet => Contract::new(true, PreservesLists),
-            Self::Repr => Contract::new(true, Unknown),
-            Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
+            Self::FunctionWrappedGet(_) => Contract::new(true, PreservesLists),
+            Self::Repr | Self::ReprWithMethods(_) => Contract::new(true, Unknown),
+            Self::BaseObjectRepr | Self::DefaultRecordRepr => Contract::new(true, PreservesLists),
             Self::Str
                 if args
                     .first()
@@ -89,9 +114,12 @@ impl Builtin {
                 Contract::new(true, PreservesLists)
             }
             Self::Str
-                if args
-                    .first()
-                    .is_some_and(|e| matches!(e.ty, Type::Exception | Type::NamedException(_) | Type::ObjectValue)) =>
+                if args.first().is_some_and(|e| {
+                    matches!(
+                        e.ty,
+                        Type::Exception | Type::NamedException(_) | Type::ObjectValue
+                    )
+                }) =>
             {
                 Contract::new(true, Unknown)
             }
@@ -103,8 +131,12 @@ impl Builtin {
             Self::Calendar(op) => Contract::new(
                 matches!(
                     op,
-                    crate::ir::CalendarOp::Date
+                    crate::ir::CalendarOp::MonthGrid
+                        | crate::ir::CalendarOp::InstanceMonthGrid
+                        | crate::ir::CalendarOp::SetFirstWeekday
+                        | crate::ir::CalendarOp::Date
                         | crate::ir::CalendarOp::DateTime
+                        | crate::ir::CalendarOp::FromIsoFormat
                         | crate::ir::CalendarOp::Combine
                         | crate::ir::CalendarOp::Replace { .. }
                         | crate::ir::CalendarOp::Astimezone
@@ -126,19 +158,20 @@ impl Builtin {
             Self::ImportErrorNew { .. }
             | Self::ImportErrorField(_)
             | Self::ExceptionArgs
+            | Self::ExceptionName
             | Self::ExceptionFieldLen
             | Self::ExceptionFieldIndex
             | Self::ExceptionFormatterResult(_) => Contract::new(true, PreservesLists),
-            Self::MappingObjectGet | Self::ObjectTextProject => Contract::new(true, PreservesOwners),
+            Self::MappingObjectGet | Self::ObjectTextProject | Self::RecordFromFields => {
+                Contract::new(true, PreservesOwners)
+            }
             Self::BoxValue
-            | Self::ExceptionTupleView
             | Self::ObjectRecordProject(_)
-            | Self::ObjectIsExactTuple
+            | Self::IsExactTuple
             | Self::ObjectStreamProject
             | Self::ObjectRecordIdentity { .. }
             | Self::ExceptionTupleIdentity
-            | Self::ExceptionKeywordSuggestion
-            | Self::ExceptionRecordFields => Contract::new(false, PreservesOwners),
+            | Self::ExceptionKeywordSuggestion => Contract::new(false, PreservesOwners),
             // Formatting a projected task-group member may call its own __repr__.
             Self::ExceptionFieldRepr
             | Self::ExceptionRepr
@@ -148,9 +181,7 @@ impl Builtin {
                 | crate::ir::LogOperation::DictConfig
                 | crate::ir::LogOperation::DictConfigTyped
                 | crate::ir::LogOperation::FileConfig,
-            ) => {
-                Contract::new(true, Unknown)
-            }
+            ) => Contract::new(true, Unknown),
             Self::SystemExitFromTuple
             | Self::ExceptionArgument(_)
             | Self::NamedException { .. } => Contract::new(false, PreservesLists),
@@ -162,6 +193,7 @@ impl Builtin {
                     TextOperation::SplitLineEnds
                     | TextOperation::ExpandTabs
                     | TextOperation::ZFill { .. }
+                    | TextOperation::UnicodeProperty(_)
                     | TextOperation::Normalize
                     | TextOperation::Lower
                     | TextOperation::Upper
@@ -186,8 +218,7 @@ impl Builtin {
                     | TextOperation::Strip(_)
                     | TextOperation::StartsWith
                     | TextOperation::EndsWith
-                    | TextOperation::Find
-                    | TextOperation::Dedent => false,
+                    | TextOperation::Find => false,
                 },
                 PreservesLists,
             ),
@@ -196,7 +227,9 @@ impl Builtin {
             | Self::ChainMapContains
             | Self::DictGetDefault
             | Self::DictTryGet(_)
-            | Self::SetContains => Contract::new(true, PreservesLists),
+            | Self::SetContains
+            | Self::SetCaseLengthPossible
+            | Self::SetCasePrefixPossible(_) => Contract::new(true, PreservesLists),
             Self::Socket(op) => Contract::new(
                 !matches!(
                     op,
@@ -211,8 +244,6 @@ impl Builtin {
                 match operation {
                     PathOperation::ContextExit
                     | PathOperation::PureNew(_)
-                    | PathOperation::Join
-                    | PathOperation::JoinObject
                     | PathOperation::Parent
                     | PathOperation::IsRelativeTo
                     | PathOperation::AsPosix
@@ -284,9 +315,17 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::WarningScopeEnter | Self::WarningScopeExit => Contract::new(false, PreservesLists),
+            Self::WarningScopeEnter | Self::WarningScopeExit => {
+                Contract::new(false, PreservesLists)
+            }
             Self::TimeExtras | Self::TimeExtra(_) => Contract::new(false, PreservesLists),
-            Self::Mktime | Self::MktimeOffset | Self::TimeComponent | Self::TimeSequenceLength | Self::ClockParts(_) | Self::TimeSleep
+            Self::Mktime
+            | Self::MktimeOffset
+            | Self::TimeComponent
+            | Self::TimeSequenceLength
+            | Self::ClockParts(_)
+            | Self::TimeSleep
+            | Self::SignalPause
             | Self::PercentFormat
             | Self::WarningFilter { .. }
             | Self::WarningFormat { .. }
@@ -301,8 +340,7 @@ impl Builtin {
             Self::Logging(operation) => Contract::new(
                 matches!(
                     operation,
-                    crate::ir::LogOperation::CheckLevel
-                        | crate::ir::LogOperation::WriteStream
+                    crate::ir::LogOperation::WriteStream
                         | crate::ir::LogOperation::FlushStream
                         | crate::ir::LogOperation::LockAcquire
                         | crate::ir::LogOperation::LockAcquireInt
@@ -316,7 +354,7 @@ impl Builtin {
                 ),
                 PreservesLists,
             ),
-            Self::Process(operation) => match operation {
+            Self::Process(operation, _) => match operation {
                 ProcessOperation::DescriptorConstant(_)
                 | ProcessOperation::SelectorClass(_)
                 | ProcessOperation::SetSelector
@@ -415,12 +453,12 @@ impl Builtin {
                 args.first().is_none_or(|arg| arg.ty != Type::Bytes),
                 PreservesLists,
             ),
-            Self::Int => Contract::new(
+            Self::Int(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
                 PreservesLists,
             ),
-            Self::Float => Contract::new(
+            Self::Float(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
                 PreservesLists,
@@ -428,6 +466,7 @@ impl Builtin {
             Self::BytesGet
             | Self::WrapperAttributes(_)
             | Self::Chr
+            | Self::UnicodePropertyOfOrdinal(_)
             | Self::Ord
             | Self::Random(_)
             | Self::IntegerPower
@@ -435,7 +474,9 @@ impl Builtin {
             | Self::NegativeIntegerPower
             | Self::Decode
             | Self::DecodeAscii
-            | Self::FloatDivmod | Self::BytesHex
+            | Self::DecodeLatin1
+            | Self::FloatDivmod
+            | Self::BytesHex
             | Self::UrlsafeB64encode
             | Self::Base64Translate
             | Self::BinasciiAsciiInput
@@ -470,6 +511,7 @@ impl Builtin {
             | Self::SetDiscard
             | Self::CounterUpdate
             | Self::DictUpdate
+            | Self::BindSourceKeywords
             | Self::KeySet
             | Self::KeyUnion
             | Self::KeyIntersection
@@ -498,6 +540,7 @@ impl Builtin {
             | Self::JsonEncoderEncode(_)
             | Self::JsonErrorField(_)
             | Self::HashRecord
+            | Self::FractionHash(_, _)
             | Self::JsonGet { .. }
             | Self::JsonGetReceiver
             | Self::JsonAdd
@@ -510,18 +553,21 @@ impl Builtin {
             | Self::JsonLen
             | Self::JsonSelect(_)
             | Self::TupleGet
-            | Self::ListGet
+            | Self::ListGet(_)
             | Self::ListGetBounded { .. }
             | Self::CacheProbe(_)
             | Self::CacheInsert(_)
             | Self::EmptyPartial
-            | Self::ListGetI32
-            | Self::ListGetStable
+            | Self::ListGetI32(_)
+            | Self::ListGetStable(_)
             | Self::ListSliceSum
             | Self::Slice
             | Self::StringFormat
+            | Self::RegexCollect { .. }
             | Self::RegexSub(_)
             | Self::UnittestCompilePattern
+            | Self::RegexSearch
+            | Self::RegexMatchStart
             | Self::RegexSearchText { .. }
             | Self::StringIterationList
             | Self::StringJoin
@@ -529,10 +575,21 @@ impl Builtin {
             | Self::JoinBufferNew
             | Self::StringReplace
             | Self::StringGet
-            | Self::StringIntList
+            | Self::StringIntList(_)
+            | Self::ListAccumulate
+            | Self::Sumprod
+            | Self::MathComb
+            | Self::MathPerm
+            | Self::MathFactorial
             | Self::EnumLookup(_)
-            | Self::TomlDecode(_) => Contract::new(true, PreservesLists),
-            Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
+            | Self::TomlDecode(_)
+            | Self::FloatAcos
+            | Self::FloatFmod
+            | Self::FloatAsin
+            | Self::FloatLog10
+            | Self::FloatLog1p
+            | Self::IntLog10
+            | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
             | Self::DefaultFactoryEnabled
             | Self::DictIsOrdered
@@ -548,35 +605,45 @@ impl Builtin {
             | Self::JsonEncoderNew
             | Self::JsonDecoderMemo
             | Self::HashDigestSize
-            | Self::HashIdentity
+            | Self::PointerIdentity
             | Self::HashBlockSize
             | Self::ActiveException
             | Self::SysIntern
             | Self::SysIsInterned
             | Self::ExceptionRecord
             | Self::ExceptionCause
-            // A fresh exception retains its cause without replacing any existing owner.
-            | Self::ExceptionWithCause
             | Self::ExceptionOrigin(_)
             | Self::ExceptionSuppressContext
             | Self::HexFormat { .. }
             | Self::GlobalGet(_)
+            | Self::BoundedCursorValue { .. }
             | Self::IntBounded { .. }
             | Self::CanElideMapperFrames(_)
             | Self::SysGetRecursionLimit
+            | Self::SysMaxSize
             | Self::SysContextAwareWarnings
             | Self::FaultFrame { .. }
             | Self::FaultLine(_)
+            | Self::RegisteredLocation(..)
             | Self::GeneratorFrameLeave
             | Self::IntExtremum { .. }
+            | Self::IntBitCount
             | Self::IntBitLength
+            | Self::IntHash
+            | Self::IntFromBytes
+            | Self::FloatIsInteger
+            | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
+            | Self::FloatErfc
+            | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
             | Self::IsBuiltinSubclass
             | Self::TryDigitSums(_)
             | Self::IsNone
-            | Self::MockCallList { .. }
+            | Self::MarkMockCallList
             | Self::JsonIsInt
             | Self::WallTime
             | Self::CacheNew
@@ -596,9 +663,8 @@ impl Builtin {
             | Self::LiteralStringView
             | Self::RStrip
             | Self::RegexCompile { .. }
+            | Self::RegexFlags
             | Self::RegexSpelling
-            | Self::RegexSearch
-            | Self::RegexMatchStart
             | Self::Split
             | Self::SourceModule
             | Self::SourceModuleAttribute { .. }
@@ -612,6 +678,7 @@ impl Builtin {
             | Self::AnnotationIs
             | Self::StaticFunction(_)
             | Self::NewForwardRef
+            | Self::ConstructorClass
             | Self::ClassNameView
             | Self::ClassNamePart { .. }
             | Self::IntEnumValue
@@ -626,17 +693,63 @@ impl Builtin {
             | Self::StringContains
             | Self::BytesContains
             | Self::UnionInject
+            | Self::TargetLittleEndian
             | Self::UnionProject => Contract::new(false, PreservesLists),
-            Self::Append | Self::JoinBufferAppend | Self::SortByKeys => {
-                Contract::new(true, PreservesOwners)
+            Self::Append
+            | Self::AppendInWindow(_)
+            | Self::BeginListAppends(_)
+            | Self::FinishListAppends(_)
+            | Self::GetInAppendWindow(..)
+            | Self::GetBoundedInAppendWindow { .. }
+            | Self::JoinBufferAppend
+            | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            Self::ObjectCall(..)
+            | Self::RegisteredImport(_)
+            | Self::RegisteredSuspend(..)
+            | Self::RegisteredAssertionFailure { .. }
+            | Self::RegisteredNamespaceAnnotation(_)
+            | Self::RegisteredAnnotationFormat
+            | Self::RegisteredAnnotations { .. }
+            | Self::BindAnnotationExpression { .. }
+            | Self::RegisteredDeleteName(..)
+            | Self::RegisteredDefinition(_)
+            | Self::RegisteredClassNamespace(..)
+            | Self::RegisteredLambda(..)
+            | Self::RegisteredGenerator(..)
+            | Self::RegisteredTypeAlias(_)
+            | Self::RegisteredSuite(_)
+            | Self::RegisteredInput(_)
+            | Self::RegisteredDiscard
+            | Self::RegisteredDisplayHook
+            | Self::RegisteredName(_)
+            | Self::RegisteredInPlace(_)
+            | Self::RegisteredAttribute { .. }
+            | Self::RegisteredSpread
+            | Self::Unrepresented
+            | Self::UnrepresentedCall
+            | Self::RegisteredSubscript(..)
+            | Self::RegisteredIndexConstant(_)
+            | Self::RegisteredSlice
+            | Self::RegisteredEllipsis
+            | Self::RegisteredComplex(..)
+            | Self::FormatConversion(_)
+            | Self::FormatField(_)
+            | Self::RegisteredString(_)
+            | Self::RegisteredTemplate
+            | Self::RegisteredInterpolation { .. }
+            | Self::RegisteredNamespace(_)
+            | Self::RegisteredUnpack { .. }
+            | Self::RegisteredIter(_)
+            | Self::SortByComparator => Contract::new(true, Unknown),
+            Self::ListReserveRange | Self::StructCyclePrefix => {
+                Contract::new(false, PreservesOwners)
             }
-            Self::SortByComparator => Contract::new(true, Unknown),
-            Self::ListReserveRange | Self::StructCyclePrefix => Contract::new(false, PreservesOwners),
             Self::AnnotationRef
             | Self::BinaryOpen(_)
             | Self::BinaryRead
             | Self::BinaryReadSize
             | Self::Ndiff
+            | Self::FormatJoin
             | Self::StringListCopy
             | Self::JoinedSplitLines
             | Self::StringListSortSuffix(_)
@@ -649,7 +762,7 @@ impl Builtin {
             | Self::DequeCopy
             | Self::DequeExtendSource
             | Self::NamespaceDelete
-            | Self::DictDelete
+            | Self::DeleteItem
             | Self::ChainMapGetItem
             | Self::ChainMapSetItem
             | Self::ChainMapGet(_)
@@ -671,7 +784,6 @@ impl Builtin {
             | Self::BinaryTell
             | Self::ZipOpenFile
             | Self::ZipGetInfo
-            | Self::ZipImportData
             | Self::ZipInfoList
             | Self::ZipMember
             | Self::ZipRead
@@ -684,7 +796,9 @@ impl Builtin {
             | Self::ZipNamelist
             | Self::ZipClose
             | Self::Input
-            | Self::LengthResult
+            | Self::InputSelectStdout
+            | Self::InputFinish
+            | Self::LengthResult(_)
             | Self::ParseArgs { .. }
             | Self::ArgparseText { .. }
             | Self::ArgparseChoiceDigits(_)
@@ -703,7 +817,7 @@ impl Builtin {
             | Self::SysOriginalOutput { .. }
             | Self::SysStdoutSet
             | Self::SysStdoutDelete
-            | Self::TextOptionalReceiver
+            | Self::RequireObjectReceiver
             | Self::TextMetadata { .. }
             | Self::SysHasStdout
             | Self::BuiltinsLast
@@ -726,6 +840,7 @@ impl Builtin {
             | Self::ExceptionFieldIdentity { .. }
             | Self::SysThreadInfo
             | Self::SysThreadText { .. }
+            | Self::SysBuiltinModuleNames
             | Self::SysStdlibModuleNames
             | Self::SysVersionInfo { .. }
             | Self::SysPlatform
@@ -735,7 +850,6 @@ impl Builtin {
             | Self::OsLinesep
             | Self::OsPathsep
             | Self::OsSeparator { .. }
-            | Self::OptionalStrConcat
             | Self::SysOrigArgv
             | Self::DocCaptureStart
             | Self::DocCaptureTake
@@ -760,7 +874,8 @@ impl Builtin {
             | Self::TupleIndex
             | Self::Combinatorial(_)
             | Self::Islice
-            | Self::Cycle => Contract::new(true, PreservesLists),
+            | Self::Cycle
+            | Self::AccumulateCursor => Contract::new(true, PreservesLists),
             Self::DefaultListDict
             | Self::DefaultFactorySet { .. }
             | Self::DequeMaxlen
@@ -782,11 +897,14 @@ impl Builtin {
             | Self::RecordView
             | Self::ListAllI32
             | Self::ListDistinct
+            | Self::IntFitsI32
+            | Self::CursorScanBudget(_)
             | Self::ListPresent
             | Self::DequeClear
             | Self::DequeReverse
             | Self::SetIter
             | Self::MatchingSplitIter(_)
+            | Self::SortedSplitByteIter(_)
             | Self::SplitByteIter(_)
             | Self::SplitLinesIter
             | Self::StringIter
@@ -811,10 +929,11 @@ impl Builtin {
         &self,
         args: &[Expr],
         result: Type,
-        types: &crate::types::Types,
+        module: &crate::ir::Module,
     ) -> Result<(), &'static str> {
         use crate::ir::ExprKind;
 
+        let types = &module.types;
         let signature = |params: &[Type], returns| {
             result == returns && args.iter().map(|arg| arg.ty).eq(params.iter().copied())
         };
@@ -846,23 +965,28 @@ impl Builtin {
                     && matches!(args, [buffer] if types.element(buffer.ty) == Some(Type::Str))
             }
             Self::TryDigitSums(_) => signature(&[Type::Str], Type::Int),
-            Self::ListGetI32 | Self::ListGetStable => {
+            Self::ListGetI32(_) | Self::ListGetStable(_) => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
             }
-            Self::ListGetBounded { min, max } | Self::ListGetBoundedInBounds { min, max } => {
+            Self::ListGetBounded { min, max, .. } | Self::ListGetBoundedInBounds { min, max } => {
                 signature(&[Type::ListInt, Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && (!matches!(self, Self::ListGetBoundedInBounds { .. })
-                        || (matches!(args[0].kind, ExprKind::Local(_)) && index(&args[1])))
+                        || (matches!(args[0].kind, ExprKind::Local(_))
+                            && (index(&args[1])
+                                || args[1]
+                                    .local_integer_offset()
+                                    .is_some_and(|(_, offset)| offset >= 0))))
             }
             Self::SequenceGetInBounds | Self::SequenceTakeInBounds => {
                 matches!(args, [source, cursor]
-                if matches!(source.ty, Type::List(_))
-                    && types.element(source.ty) == Some(result)
+                if ((matches!(source.ty, Type::List(_)) && types.element(source.ty) == Some(result))
+                    || (matches!(self, Self::SequenceGetInBounds)
+                        && types.homogeneous_tuple_element(source.ty) == Some(result)))
                     && matches!(source.kind, ExprKind::Local(_))
                     && cursor.ty == Type::Int && index(cursor))
             }
-            Self::IntBounded { min, max } => {
+            Self::BoundedCursorValue { min, max } | Self::IntBounded { min, max } => {
                 signature(&[Type::Int], Type::Int)
                     && bounds(*min, *max)
                     && matches!(args[0].kind, ExprKind::Local(_))
@@ -881,15 +1005,71 @@ impl Builtin {
                 ) && matches!(args[4].kind, ExprKind::Int(_))
                     && index(&args[4])
             }
+            Self::IntFitsI32 => signature(&[Type::Int], Type::Bool),
+            Self::CursorScanBudget(_) => signature(&[], Type::Int),
             Self::ListPresent => signature(&[Type::ListInt], Type::Bool),
+            Self::BeginListAppends(_) | Self::FinishListAppends(_) => signature(&[], Type::None),
+            Self::AppendInWindow(_) => signature(&[Type::ListInt, Type::Int], Type::None),
+            Self::GetInAppendWindow(..) => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::GetBoundedInAppendWindow { min, max, .. } => {
+                signature(&[Type::ListInt, Type::Int], Type::Int) && bounds(*min, *max)
+            }
             Self::ListDistinct => matches!(args, [left, right]
                 if types.element(left.ty).is_some() && types.element(right.ty).is_some() && result == Type::Bool),
-            Self::ListSum => signature(&[Type::ListInt, Type::Int], Type::Int),
+            Self::AccumulateCursor => {
+                let Some(element @ (Type::Int | Type::Float)) = types.cursor_element(result) else {
+                    return Err("accumulate cursor requires a numeric element");
+                };
+                matches!(args, [source] | [source, _]
+                    if types.element(source.ty)
+                        .or_else(|| types.homogeneous_tuple_element(source.ty))
+                        .or_else(|| types.var_tuple_element(source.ty)) == Some(element)
+                        && args.get(1).is_none_or(|seed| seed.ty == element))
+            }
+            Self::CollectIntCursor => matches!(args, [source]
+                if types.cursor_element(source.ty) == Some(Type::Int) && result == Type::ListInt),
+            Self::ListAccumulate => {
+                signature(&[Type::ListInt], Type::ListInt)
+                    || signature(&[Type::ListInt, Type::Int], Type::ListInt)
+            }
+            Self::ListSum => {
+                signature(&[Type::ListInt], Type::Int)
+                    || signature(&[Type::ListInt, Type::Int], Type::Int)
+            }
+            Self::Sumprod => {
+                matches!(args, [left, right] if left.ty == right.ty && match types.element(left.ty) {
+                    Some(Type::Int) => result == Type::Int,
+                    Some(Type::Float) => result == Type::ObjectValue
+                        || result == Type::Float && args.iter().any(Expr::is_nonempty_list_literal),
+                    _ => false,
+                })
+            }
             Self::IntExtremum { .. } => {
                 result == Type::Int && args.len() >= 2 && args.iter().all(|arg| arg.ty == Type::Int)
             }
-            Self::IntBitLength => signature(&[Type::Int], Type::Int),
-            Self::IntSignAsFloat => signature(&[Type::Int], Type::Float),
+            Self::IntFromBytes => signature(&[Type::Bytes], Type::Int),
+            Self::MathComb | Self::MathPerm => signature(&[Type::Int, Type::Int], Type::Int),
+            Self::MathFactorial | Self::IntBitCount | Self::IntBitLength | Self::IntHash => {
+                signature(&[Type::Int], Type::Int)
+            }
+            Self::FloatIsInteger => signature(&[Type::Float], Type::Bool),
+            Self::FloatFmod => {
+                result == Type::Float
+                    && args.len() == 2
+                    && args
+                        .iter()
+                        .all(|arg| matches!(arg.ty, Type::Int | Type::Float))
+            }
+            Self::FloatAcos
+            | Self::FloatAsin
+            | Self::FloatAtan
+            | Self::FloatDegrees
+            | Self::FloatRadians
+            | Self::FloatErfc
+            | Self::FloatLog2
+            | Self::FloatLog10
+            | Self::FloatLog1p => signature(&[Type::Float], Type::Float),
+            Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
                 let table = if matches!(op, New) {
@@ -920,7 +1100,30 @@ impl Builtin {
             Self::SplitIntSource(mask) => {
                 mask.count_ones() >= 2 && signature(&[Type::Str], Type::Str)
             }
-            Self::SplitIntCached(index) => {
+            Self::SplitTextSource(count) => {
+                (1..=8).contains(count) && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitTextLen => {
+                matches!(
+                    args,
+                    [Expr {
+                        kind: ExprKind::Local(_),
+                        ..
+                    }]
+                ) && signature(&[Type::Str], Type::Int)
+            }
+            Self::SplitTextField(i, _) => {
+                *i < 8
+                    && matches!(
+                        args,
+                        [Expr {
+                            kind: ExprKind::Local(_),
+                            ..
+                        }]
+                    )
+                    && signature(&[Type::Str], Type::Str)
+            }
+            Self::SplitIntCached(index, _) => {
                 *index < 8
                     && matches!(
                         args,
@@ -931,14 +1134,22 @@ impl Builtin {
                     )
                     && signature(&[Type::Str], Type::Int)
             }
-            Self::SplitIntField(_) => signature(&[Type::Str], Type::Int),
+            Self::SplitIntField(..) => signature(&[Type::Str], Type::Int),
             Self::MatchingSplitIter(_) => {
                 signature(&[Type::Str, Type::Str, Type::Int], Type::Iterator)
             }
             Self::SplitLinesIter => signature(&[Type::Str], Type::Iterator),
-            Self::SplitByteIter(byte) => byte.is_ascii() && signature(&[Type::Str], Type::Iterator),
+            Self::SplitByteIter(byte) | Self::SortedSplitByteIter(byte) => {
+                byte.is_ascii() && signature(&[Type::Str], Type::Iterator)
+            }
             Self::FunctionWrappedSet => {
-                matches!(result, Type::Callable(_)) && signature(&[result, result], result)
+                matches!(args, [owner, target] if matches!(result, Type::Callable(_))
+                    && owner.ty == result
+                    && types.wrapped_link_type(result) == types.wrapped_link_type(target.ty))
+            }
+            Self::ConstructorClass => {
+                matches!(args, [factory] if types.constructor_base(factory.ty).is_some())
+                    && result == Type::BuiltinClass
             }
             Self::IsCoroutineFunction => {
                 matches!(args, [arg] if matches!(arg.ty, Type::Callable(_))) && result == Type::Bool
@@ -946,8 +1157,9 @@ impl Builtin {
             Self::MarkCoroutine(_) => {
                 matches!(result, Type::Callable(_)) && signature(&[result], result)
             }
-            Self::FunctionWrappedGet => {
-                matches!(result, Type::Callable(_)) && signature(&[result], result)
+            Self::FunctionWrappedGet(_) => {
+                matches!(args, [owner] if matches!(result, Type::Callable(_))
+                    && types.wrapped_link_type(owner.ty) == result)
             }
             Self::WrapperAttributes(fields) => {
                 args.is_empty() && result == types.tuple(vec![Type::Str; fields.names().len()])
@@ -955,7 +1167,16 @@ impl Builtin {
             Self::CallableContext => {
                 matches!(args, [callable] if types.cached_function(callable.ty).map(|c| c.frame)
                     .or_else(|| types.partial_function(callable.ty).map(|p| p.frame))
-                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame)) == Some(result))
+                    .or_else(|| types.dispatcher(callable.ty).map(|d| d.frame))
+                    .or_else(|| {
+                        let (class, _, receiver) = types.source_method_site(callable.ty)?;
+                        let owner = module.class_metadata.get(class)?;
+                        match receiver? {
+                            Type::BuiltinClass => Some(Type::BuiltinClass),
+                            Type::Class(id) if id == class && owner.enum_members.is_empty() => Some(Type::Class(id)),
+                            _ => None,
+                        }
+                    }) == Some(result))
             }
             Self::EmptyPartial => {
                 matches!(args, [target] if matches!(result, Type::Callable(_)) && target.ty == result)
@@ -1003,26 +1224,38 @@ impl Binary {
     /// Conservative operation effect before operand-specific conversion checks.
     pub(crate) fn may_raise(self) -> bool {
         match self {
-            Self::Divide
+            Self::Power
+            | Self::MatrixMultiply
+            | Self::Divide
             | Self::FloorDivide
             | Self::Modulo
-            | Self::Repeat
             | Self::LeftShift
             | Self::RightShift => true,
             Self::Add
             | Self::Subtract
             | Self::Multiply
-            | Self::Concat
             | Self::BitAnd
             | Self::BitOr
             | Self::BitXor => false,
         }
     }
 
-    /// Includes checked byte concatenation and conversion of mixed integer/float operands.
+    /// Includes sequence allocation, optional string errors and mixed numeric conversion.
     pub(crate) fn may_raise_with_operands(self, left: Type, right: Type) -> bool {
         self.may_raise()
-            || (matches!(self, Self::Concat) && matches!(left, Type::Str | Type::Bytes))
+            || left == Type::PythonObject
+            || right == Type::PythonObject
+            || (self == Self::Add
+                && matches!(
+                    left,
+                    Type::Str
+                        | Type::Bytes
+                        | Type::ListInt
+                        | Type::List(_)
+                        | Type::Optional(_)
+                        | Type::None
+                ))
+            || (self == Self::Multiply && Type::repeated_sequence(left, right).is_some())
             || matches!(
                 (left, right),
                 (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -1145,7 +1378,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_mktime_offset"
                 | "imre_time_sequence_length"
                 | "imre_time_component"
-                | "int_floordiv"
                 | "imre_seq_len_fast"
                 | "imre_seq_len"
                 | "imre_str_list_nonempty"
@@ -1156,6 +1388,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_list_extend_snapshot"
                 | "imre_list_extend_unhinted"
                 | "imre_chr"
+                | "imre_unicode_category_of_ordinal"
+                | "imre_unicode_bidirectional_of_ordinal"
                 | "imre_annotation_ref"
                 | "imre_typing_call_stub"
                 | "imre_random_bits"
@@ -1163,6 +1397,9 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_secrets_choice_index"
                 | "imre_random_progression"
                 | "imre_function_get_wrapped"
+                | "imre_math_comb"
+                | "imre_math_perm"
+                | "imre_math_factorial"
                 | "imre_int_pow"
                 | "imre_int_modpow"
                 | "imre_int_negative_pow"
@@ -1171,6 +1408,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_decoder_decode"
                 | "imre_exception_args"
                 | "imre_exception_message"
+                | "imre_exception_name"
                 | "imre_import_error_reject_reset"
                 | "imre_exception_repr"
                 | "imre_json_iter"
@@ -1181,7 +1419,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_json_empty_object"
                 | "int_mod"
                 | "int_lshift"
-                | "int_rshift"
                 | "imre_flush_stdout"
                 | "imre_environ_clear"
                 | "imre_environ_update"
@@ -1203,6 +1440,10 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_file_new"
                 | "imre_log_clock_new"
                 | "imre_calendar_datetime"
+                | "imre_datetime_fromisoformat"
+                | "imre_calendar_instance_grid"
+                | "imre_calendar_month_grid"
+                | "imre_calendar_setfirstweekday"
                 | "imre_calendar_date"
                 | "imre_calendar_combine"
                 | "imre_calendar_replace"
@@ -1236,7 +1477,6 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_log_dict_config"
                 | "imre_log_typed_dict_config"
                 | "imre_log_file_config"
-                | "imre_log_check_level"
                 | "imre_log_lock_acquire"
                 | "imre_log_lock_acquire_int"
                 | "imre_log_lock_enter"
@@ -1277,6 +1517,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_bytes_repeat"
                 | "imre_counter_update"
                 | "imre_dict_update"
+                | "imre_bind_source_keywords"
                 | "imre_key_union"
                 | "imre_key_intersection"
                 | "imre_key_difference"
@@ -1296,6 +1537,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_exception_field_len"
                 | "imre_bytes_decode"
                 | "imre_bytes_decode_ascii"
+                | "imre_bytes_decode_latin1"
                 | "imre_bytes_hex"
                 | "imre_fnmatch_translate"
                 | "imre_fnmatch_translate_bytes"
@@ -1345,6 +1587,8 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_print_bool"
                 | "imre_print_none"
                 | "imre_input"
+                | "imre_input_select_stdout"
+                | "imre_input_finish"
                 | "imre_sys_stdout"
                 | "imre_sys_stdout_del"
                 | "imre_text_optional_receiver"
@@ -1394,6 +1638,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_text_read"
                 | "imre_text_readline"
                 | "imre_text_write"
+                | "imre_text_output_write"
                 | "imre_text_flush"
                 | "imre_text_close"
                 | "imre_bytes_io"
@@ -1424,11 +1669,19 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_int_parse"
                 | "imre_int_parse_hex"
                 | "imre_int_float"
+                | "imre_sumprod_int_lists"
+                | "imre_sumprod_float_lists"
+                | "imre_sumprod_number_lists"
+                | "imre_float_acos"
+                | "imre_float_fmod"
+                | "imre_float_asin"
+                | "imre_float_log10"
+                | "imre_float_log1p"
+                | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"
                 | "imre_bytes_float"
                 | "imre_int_true_divide"
-                | "imre_assert_fail"
                 | "imre_range_step_zero"
                 | "imre_list_repeat"
                 | "imre_list_slice"

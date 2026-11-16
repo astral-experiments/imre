@@ -1,4 +1,18 @@
+"""Dataclasses for native runtime-loaded Python classes.
+
+Field construction, parameter metadata and the field queries follow CPython 3.14.5
+Lib/dataclasses.py (PSF-2.0). Class methods are compiled closures on the original class.
+"""
+
+
+class _MISSING_TYPE:
+    pass
+
+
+MISSING = _MISSING_TYPE()
+
 from _imre_dataclasses import (
+    bind_initializer as _bind_initializer,
     is_defaultdict as _is_defaultdict,
     loaded_module as _loaded_module,
     members as _members,
@@ -9,6 +23,15 @@ from _imre_dataclasses import (
 import abc
 import types
 from types import GenericAlias, MemberDescriptorType
+
+def __getattr__(name):
+    # Keep the module attribute available without loading inspect on every dataclasses import.
+    if name == "inspect":
+        global inspect
+        import inspect
+        return inspect
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = ["dataclass", "field", "Field", "fields", "is_dataclass", "make_dataclass", "asdict", "astuple", "replace",
            "MISSING", "KW_ONLY", "InitVar", "FrozenInstanceError"]
@@ -256,11 +279,13 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
     constants = [_HAS_DEFAULT_FACTORY, object.__setattr__]
     def capture(value):
         constants.append(value)
-        return f'{constants_name}[{len(constants) - 1}]'
+        return len(constants) - 1
 
     parameters = {}
-    body = []
+    defaults = {}
+    stores = []
     initvars = []
+    needs_cell = False
     for name, f in zip(spellings, data.values()):
         if not name.isidentifier() or iskeyword(name):
             raise SyntaxError(f'invalid field name {name!r}')
@@ -271,45 +296,48 @@ def _initializer(owner_class, data, positional, qualname, frozen, slots):
             if symbol in bound:
                 raise SyntaxError(f'duplicate argument {symbol!r} in function definition')
             bound.add(symbol)
-        parameter = name
-        value = name
+        argument = symbol
+        index = None
+        factory = False
         if f.default_factory is not MISSING:
-            factory = capture(f.default_factory)
-            value = f'{factory}()'
+            index = capture(f.default_factory)
+            factory = True
             if f.init:
-                marker = f'{constants_name}[0]'
-                parameter += '=' + marker
-                value = f'{value} if {name} is {marker} else {name}'
+                defaults[symbol] = _HAS_DEFAULT_FACTORY
+            else:
+                argument = None
         elif f.default is not MISSING:
             if f.init:
-                parameter += '=' + capture(f.default)
+                default = f.default
+                capture(default)
+                defaults[symbol] = default
             elif slots:
-                value = capture(f.default)
+                argument = None
+                index = capture(f.default)
         if f.init:
-            parameters[name] = parameter
+            parameters[name] = symbol
         if f._field_type is _FIELD_INITVAR:
-            initvars.append(name)
+            initvars.append(symbol)
         elif f.init or f.default_factory is not MISSING or (slots and f.default is not MISSING):
             if frozen:
-                body.append(f'{constants_name}[1]({receiver}, {name!r}, {value})')
+                target, sealed = name, True
             else:
                 if symbol == '__debug__':
                     raise SyntaxError('cannot assign to __debug__')
-                body.append(f'{receiver}.{name} = {value}')
+                target, sealed = symbol, False
+            stores.append((target, argument, index, factory, sealed))
+            needs_cell = needs_cell or sealed or index is not None
 
     args = [receiver] + [parameters[f.name] for f in positional]
     kw_only = [parameters[f.name] for f in data.values() if f.init and f.kw_only]
-    if kw_only:
-        args += ['*'] + kw_only
-    if hasattr(cls, '__post_init__'):
-        body.append(f'{receiver}.__post_init__({", ".join(initvars)})')
-    lines = [f'def build({constants_name}):', f' def __init__({", ".join(args)}):']
-    lines.extend('  ' + line for line in (body or ['pass']))
-    lines.append(' return __init__')
+    post_init = tuple(initvars) if hasattr(cls, '__post_init__') else None
     owner = _loaded_module(cls.__module__)
-    namespace = {}
-    exec('\n'.join(lines), owner.__dict__ if owner is not None else {}, namespace)
-    init = namespace['build'](tuple(constants))
+    # The lazy annotation function keeps this frame after the slots class replaces cls.
+    del cls
+    init = _bind_initializer(
+        owner.__dict__ if owner is not None else {}, args, kw_only, defaults,
+        (receiver, tuple(stores), post_init), constants_name if needs_cell else None, tuple(constants),
+    )
 
     names = tuple(f.name for f in data.values() if f.init)
     def annotate(format, /):
@@ -502,6 +530,13 @@ def _decorate(cls, params):
             super(frozen_owner, self).__delattr__(name)
         install('__setattr__', __setattr__)
         install('__delattr__', __delattr__)
+    if not cls.__doc__:
+        from dataclasses import inspect
+        try:
+            text_sig = str(inspect.signature(cls, annotation_format=Format.FORWARDREF)).replace(' -> None', '')
+        except (TypeError, ValueError):
+            text_sig = ''
+        cls.__doc__ = cls.__name__ + text_sig
     if params.slots:
         # Generated methods may retain this frame. The original descriptor snapshot owns the old class.
         own.clear()
@@ -510,6 +545,14 @@ def _decorate(cls, params):
         # can have a separate cell from the one shared by generated methods.
         if not repaired_user_cell:
             frozen_owner = cls
+        # Forward references in Field.type must resolve against the replacement class.
+        annotations = get_annotations(cls, format=Format.FORWARDREF)
+        for f in getattr(cls, _FIELDS).values():
+            try:
+                annotation = annotations[f.name]
+            except KeyError:
+                continue
+            f.type = annotation
     abc.update_abstractmethods(cls)
     return cls
 
@@ -524,9 +567,10 @@ def _dataclass_setstate(self, state):
 
 
 def _add_slots(cls, real_fields, params, slot_bases):
-    namespace = _members(cls)
-    if '__slots__' in namespace:
+    if '__slots__' in cls.__dict__:
         raise TypeError(f'{cls.__name__} already specifies __slots__')
+    # Detach the original type's layout descriptors before copying its namespace.
+    namespace = _members(cls, True)
     inherited = set()
     for base, implicit in slot_bases:
         declared = base.__dict__.get('__slots__')
@@ -544,10 +588,10 @@ def _add_slots(cls, real_fields, params, slot_bases):
     namespace['__slots__'] = slots if any(doc is not None for doc in slots.values()) else tuple(slots)
     for f in real_fields:
         namespace.pop(f.name, None)
-    namespace.pop('__dict__', None)
-    namespace.pop('__weakref__', None)
-    namespace['__qualname__'] = cls.__qualname__
+    # The replacement's descriptors and subclass hooks see the simple type name.
+    qualname = cls.__qualname__
     newcls = _slotted_type(cls, namespace)
+    newcls.__qualname__ = qualname
 
     if params.frozen:
         if '__getstate__' not in namespace:
@@ -662,7 +706,16 @@ def make_dataclass(cls_name, fields, *, bases=(), namespace=None, init=True,
 def _convert(obj, factory, named):
     if hasattr(type(obj), '__dataclass_fields__'):
         if named:
-            return factory([(f.name, _convert(getattr(obj, f.name), factory, named)) for f in fields(obj)])
+            plain_dict = factory is dict
+            result = {} if plain_dict else []
+            for f in fields(obj):
+                name = f.name
+                value = _convert(getattr(obj, f.name), factory, named)
+                if plain_dict:
+                    result[name] = value
+                else:
+                    result.append((name, value))
+            return result if plain_dict else factory(result)
         return factory([_convert(getattr(obj, f.name), factory, named) for f in fields(obj)])
     if isinstance(obj, tuple) and hasattr(obj, '_fields'):
         return type(obj)(*[_convert(x, factory, named) for x in obj])

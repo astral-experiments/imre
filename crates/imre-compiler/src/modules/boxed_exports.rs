@@ -10,8 +10,58 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             }
         };
     }
+    macro_rules! socket_exports {
+        ($module:literal $(, $member:literal)* $(,)?) => {
+            exports!(
+                $module,
+                "AF_INET6",
+                "AF_UNIX",
+                "AI_NUMERICHOST",
+                "AI_NUMERICSERV",
+                "AI_PASSIVE",
+                "EAI_NODATA",
+                "EAI_NONAME",
+                "EAI_SERVICE",
+                "IPPROTO_IPV6",
+                "IPPROTO_UDP",
+                "IPV6_V6ONLY",
+                "NI_DGRAM",
+                "NI_NAMEREQD",
+                "NI_NOFQDN",
+                "NI_NUMERICHOST",
+                "NI_NUMERICSERV",
+                "SOCK_DGRAM",
+                "SOCK_RAW",
+                "SOCK_RDM",
+                "SOCK_SEQPACKET",
+                "SOL_TCP",
+                "SO_REUSEPORT",
+                "SocketType",
+                "close",
+                "getaddrinfo",
+                "gethostbyaddr",
+                "gethostbyname",
+                "gethostname",
+                "getnameinfo",
+                "getservbyname",
+                "getservbyport",
+                "has_ipv6",
+                "if_indextoname",
+                "if_nameindex",
+                "if_nametoindex",
+                "inet_aton",
+                "inet_ntoa",
+                "inet_ntop",
+                "inet_pton",
+                "socketpair",
+                $($member,)*
+            )
+        };
+    }
     let qualified = match module {
-        M::Binascii => exports!("binascii", "crc32"),
+        M::Binascii => exports!(
+            "binascii", "a2b_uu", "b2a_uu", "a2b_qp", "b2a_qp", "crc32", "crc_hqx"
+        ),
         M::Blake2 => exports!(
             "_blake2",
             "BLAKE2B_MAX_DIGEST_SIZE",
@@ -28,6 +78,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::CodecsNative => exports!(
             "_codecs",
+            "_imre_bind_module_search",
             "_imre_codec_functions",
             "_imre_idna_label",
             "_imre_native_search",
@@ -101,12 +152,33 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "shake_256"
         ),
         M::SignalNative => exports!("_signal", "SIGALRM", "SIGINT", "SIGTERM"),
+        M::SocketNative => socket_exports!(
+            "_socket",
+            "AF_INET",
+            "AF_UNSPEC",
+            "IPPROTO_TCP",
+            "SHUT_RD",
+            "SHUT_RDWR",
+            "SHUT_WR",
+            "SOCK_STREAM",
+            "SOL_SOCKET",
+            "SOMAXCONN",
+            "SO_REUSEADDR",
+            "SO_SNDBUF",
+            "SO_TYPE",
+            "TCP_NODELAY",
+            "error",
+            "gaierror",
+            "socket"
+        ),
         M::Thread => exports!(
             "_thread",
             "_count",
             "allocate",
             "allocate_lock",
             "error",
+            "exit",
+            "exit_thread",
             "start_new_thread"
         ),
         M::TracemallocNative => exports!(
@@ -241,11 +313,17 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::Gc => exports!(
             "gc",
+            "DEBUG_LEAK",
+            "DEBUG_SAVEALL",
+            "callbacks",
             "collect",
             "disable",
             "enable",
+            "garbage",
+            "get_debug",
             "get_threshold",
             "isenabled",
+            "set_debug",
             "set_threshold"
         ),
         M::Grp => exports!("grp", "getgrall", "getgrgid", "getgrnam", "struct_group"),
@@ -350,6 +428,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "getasyncgenlocals",
             "getasyncgenstate",
             "getcallargs",
+            "getcomments",
             "getcoroutinelocals",
             "getcoroutinestate",
             "getfullargspec",
@@ -390,16 +469,32 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
         ),
         M::Locale => exports!("locale", "getlocale", "getpreferredencoding", "setlocale"),
         M::Math => exports!("math", "copysign", "cos", "isinf", "isnan", "isqrt", "log"),
-        M::Numbers => exports!("numbers", "Complex", "Integral", "Rational", "Real"),
+        M::Numbers => exports!("numbers", "Complex", "Integral", "Real"),
         M::Pickle => exports!("pickle", "UnpicklingError", "_loads", "dumps", "loads"),
         M::PosixPath => exports!("posixpath", "expanduser", "ismount", "split"),
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        M::Termios => match name {
+            "tcgetattr" => "termios.tcgetattr",
+            "tcsetattr" => "termios.tcsetattr",
+            "error" => "termios.error",
+            #[cfg(target_os = "macos")]
+            "TCSASOFT" => "termios.TCSASOFT",
+            _ => {
+                imre_ast::providers::termios::CONSTANTS
+                    .iter()
+                    .find(|(member, _, _)| *member == name)?
+                    .1
+            }
+        },
         M::Pwd => exports!("pwd", "getpwall", "getpwnam", "getpwuid", "struct_passwd"),
         M::Re => exports!(
             "re", "Scanner", "escape", "findall", "finditer", "split", "subn"
         ),
         M::Resource => exports!(
             "resource",
+            "RLIMIT_AS",
             "RLIMIT_CORE",
+            "RLIMIT_FSIZE",
             "RLIMIT_NOFILE",
             "RLIMIT_NPROC",
             "RLIMIT_STACK",
@@ -412,10 +507,22 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "Struct",
             "calcsize",
             "error",
+            "iter_unpack",
             "pack",
             "pack_into",
             "unpack",
             "unpack_from"
+        ),
+        M::Socket => socket_exports!(
+            "socket",
+            "AddressFamily",
+            "AddressInfo",
+            "SocketKind",
+            "create_connection",
+            "create_server",
+            "has_dualstack_ipv6",
+            "recv_fds",
+            "send_fds"
         ),
         M::Sys => exports!(
             "sys",
@@ -423,6 +530,9 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "get_asyncgen_hooks",
             "get_coroutine_origin_tracking_depth",
             "getsizeof",
+            "getprofile",
+            "gettrace",
+            "setprofile",
             "hash_info",
             "is_finalizing",
             "monitoring",
@@ -465,12 +575,19 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "monotonic_ns",
             "perf_counter",
             "perf_counter_ns",
+            "process_time",
             "time_ns",
             "timezone",
             "tzname",
             "tzset"
         ),
-        M::Traceback => exports!("traceback", "extract_tb", "print_stack", "walk_tb"),
+        M::Traceback => exports!(
+            "traceback",
+            "extract_tb",
+            "format_exception_only",
+            "print_stack",
+            "walk_tb"
+        ),
         M::Types => exports!(
             "types",
             "BuiltinMethodType",
@@ -506,6 +623,7 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "ForwardRef",
             "FrozenSet",
             "Generator",
+            "Generic",
             "Hashable",
             "ItemsView",
             "KT",
@@ -629,6 +747,15 @@ pub(super) fn symbol(module: M, name: &str) -> Option<Binding> {
             "ref"
         ),
         M::Gzip => exports!("gzip", "GzipFile"),
+        M::LzmaNative => exports!(
+            "_lzma",
+            "LZMACompressor",
+            "LZMADecompressor",
+            "LZMAError",
+            "_decode_filter_properties",
+            "_encode_filter_properties",
+            "is_check_supported"
+        ),
         M::Zlib => exports!("zlib", "compress", "crc32", "decompress"),
         _ => return None,
     };

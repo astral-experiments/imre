@@ -1,6 +1,6 @@
 //! Whole-file text conversion uses the same descriptor, buffering, and close path as binary I/O.
 
-use super::super::codecs::{Codec, option_error};
+use super::super::codecs::{Codec, StrEncoder, option_error};
 use super::super::{Storage, StorageCell};
 use super::{Error, Int, Kind, Object, Result, Str, finish, object, with_path_file};
 use crate::{ObjectOwner, StrOwner};
@@ -30,7 +30,24 @@ pub(super) fn output_newlines(text: &str, replacement: &str) -> Result<String> {
     Ok(result)
 }
 
-fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
+// open() rejects embedded NULs when converting its string arguments, before
+// opening the file. Other invalid newlines and codec names are checked later.
+fn check_open_strings(
+    encoding: Option<&str>,
+    errors: Option<&str>,
+    newline: Option<&str>,
+) -> Result<()> {
+    if [encoding, errors, newline]
+        .into_iter()
+        .flatten()
+        .any(|option| option.contains('\0'))
+    {
+        return Err(Error::new(Kind::ValueError, "embedded null character"));
+    }
+    Ok(())
+}
+
+fn check_newline(newline: Option<&str>) -> Result<()> {
     if let Some(value) = newline
         && !matches!(value, "" | "\n" | "\r" | "\r\n")
     {
@@ -41,6 +58,11 @@ fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
             "",
         ));
     }
+    Ok(())
+}
+
+fn options(encoding: Option<&str>, newline: Option<&str>) -> Result<Codec> {
+    check_newline(newline)?;
     Codec::lookup(&crate::sys::file_encoding(encoding))
 }
 
@@ -59,13 +81,7 @@ fn open_text_output(
     errors: Option<StrOwner>,
     newline: Option<&str>,
 ) -> Result<*const Object> {
-    if [encoding, errors.as_deref().map(Str::as_str), newline]
-        .into_iter()
-        .flatten()
-        .any(|option| option.contains('\0'))
-    {
-        return Err(Error::new(Kind::ValueError, "embedded null character"));
-    }
+    check_open_strings(encoding, errors.as_deref().map(Str::as_str), newline)?;
     let mode = match mode {
         "w" | "wt" | "tw" => 1,
         "a" | "at" | "ta" => 2,
@@ -76,7 +92,8 @@ fn open_text_output(
     let policy = errors.as_deref().map_or("strict", Str::as_str);
     let mut state =
         super::open_state_with_encoding(path, mode, false, false, Some((&spelling, policy)))?;
-    let codec = options(Some(&spelling), newline)?;
+    check_newline(newline)?;
+    let codec = StrEncoder::for_stream(&spelling)?;
     let Some(super::Stream::Write(writer)) = state.stream.as_mut() else {
         unreachable!()
     };
@@ -121,6 +138,7 @@ pub(super) fn read(
     errors: Option<&str>,
     newline: Option<&str>,
 ) -> Result<Str> {
+    check_open_strings(encoding, errors, newline)?;
     with_path_file(path, 0, true, |file| {
         let codec = options(encoding, newline)?;
         let data = file.input()?.read_bytes(None)?;
@@ -184,6 +202,7 @@ pub unsafe extern "C" fn imre_path_write_text_options(
     // SAFETY: no language callback can mutate the rooted path during file I/O.
     let result = unsafe {
         path.0.with(|storage| {
+            check_open_strings(encoding, errors, newline)?;
             with_path_file(storage.path(), 1, true, |file| {
                 let codec = options(encoding, newline)?;
                 let converted;

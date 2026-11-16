@@ -52,16 +52,6 @@ impl Storage {
         }
     }
 }
-fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Expr {
-    Expr {
-        ty: value.ty,
-        kind: ExprKind::Scope {
-            body,
-            value: Box::new(value),
-            clear,
-        },
-    }
-}
 fn field(owner: &Expr, at: usize, ty: Type) -> Expr {
     Expr {
         ty,
@@ -138,7 +128,7 @@ impl Checker<'_> {
     pub(super) fn inherit_class_data(
         &self,
         class: usize,
-        body: &mut Vec<Statement>,
+        mut body: Option<&mut Vec<Statement>>,
     ) -> Result<(), String> {
         let def = &self.classes.declarations.definitions[class];
         let mut names: Vec<_> = def
@@ -165,7 +155,7 @@ impl Checker<'_> {
                     .ok_or_else(|| {
                         error(
                             self.source,
-                            &def.node,
+                            def.node.as_ref(),
                             "inherited class data is not initialized",
                         )
                     })?;
@@ -175,16 +165,15 @@ impl Checker<'_> {
                     ty,
                     inherited: true,
                 };
-                body.push(Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        Builtin::GlobalSet(c.slot),
-                        vec![Expr {
+                if let Some(body) = body.as_deref_mut() {
+                    body.push(Statement::store_global(
+                        c.slot,
+                        Expr {
                             ty: st,
                             kind: ExprKind::List(vec![]),
-                        }],
-                    ),
-                }));
+                        },
+                    ));
+                }
                 data.cells.insert(key.clone(), c);
                 c
             };
@@ -228,7 +217,7 @@ impl Checker<'_> {
         Expr {
             ty: c.ty,
             kind: ExprKind::Builtin(
-                Builtin::ListGet,
+                Builtin::ListGet(None),
                 vec![self.globals.slot_value(c.slot), Expr::integer(0)],
             ),
         }
@@ -299,7 +288,7 @@ impl Checker<'_> {
         let slot = self.hidden(receiver.ty);
         let local = self.local(slot);
         let payload = s.payload(&local);
-        Ok(scope(
+        Ok(Expr::scope(
             vec![Statement::Assign(slot, receiver)],
             choose(field(&local, s.ready, Type::Bool), payload, value),
             vec![slot],
@@ -320,7 +309,7 @@ impl Checker<'_> {
         let value = self.coerce(value, c.ty, attr)?;
         let slot = self.hidden(value.ty);
         let cell = self.globals.slot_value(c.slot);
-        let set = Statement::SetItem(cell.clone(), Expr::integer(0), self.local(slot));
+        let set = Statement::assign_item(cell.clone(), Expr::integer(0), self.local(slot));
         let store = if c.inherited {
             let append = Statement::Expr(Expr {
                 ty: Type::None,
@@ -330,7 +319,7 @@ impl Checker<'_> {
         } else {
             set
         };
-        Ok(Statement::Expr(scope(
+        Ok(Statement::Expr(Expr::scope(
             vec![Statement::Assign(slot, value), store],
             Expr::none(),
             vec![slot],
@@ -364,19 +353,26 @@ impl Checker<'_> {
     ) -> Result<Statement, String> {
         let slot = self.hidden(value.ty);
         let branch = self.dispatch_record(class, receiver, attr, |me, concrete, view| {
+            if me.has_property(concrete, attr.attr.as_str())
+                || me.shadow(concrete, attr.attr.as_str()).is_none()
+            {
+                let setter = me.classes.setters[concrete].get(attr.attr.as_str());
+                let put = me.direct_setter(concrete, setter, attr, view, me.local(slot))?;
+                return Ok(Expr::scope(vec![put], Expr::none(), Vec::new()));
+            }
             let s = me.writable_shadow(concrete, attr)?;
             let v = me.coerce(me.local(slot), s.ty, attr)?;
             let v = me.coerce(v, s.stored, attr)?;
-            Ok(scope(
+            Ok(Expr::scope(
                 vec![
-                    Statement::SetField(view.clone(), s.value, v),
-                    Statement::SetField(view, s.ready, Expr::boolean(true)),
+                    Statement::set_field(view.clone(), s.value, v),
+                    Statement::set_field(view, s.ready, Expr::boolean(true)),
                 ],
                 Expr::none(),
                 Vec::new(),
             ))
         })?;
-        Ok(Statement::Expr(scope(
+        Ok(Statement::Expr(Expr::scope(
             vec![Statement::Assign(slot, value)],
             branch,
             vec![slot],
@@ -402,14 +398,14 @@ impl Checker<'_> {
                     )))),
                 },
             };
-            Ok(scope(
+            Ok(Expr::scope(
                 vec![Statement::If(
                     field(&view, s.ready, Type::Bool),
                     vec![
-                        Statement::SetField(view.clone(), s.value, release),
-                        Statement::SetField(view, s.ready, Expr::boolean(false)),
+                        Statement::set_field(view.clone(), s.value, release),
+                        Statement::set_field(view, s.ready, Expr::boolean(false)),
                     ],
-                    vec![Statement::Raise(Some(exc))],
+                    vec![Statement::raise(exc)],
                 )],
                 Expr::none(),
                 Vec::new(),

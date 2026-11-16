@@ -2,11 +2,10 @@
 //! final ownership cleanup only closes resources and never changes error state.
 
 use crate::StrOwner;
-use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
+use std::ffi::CString;
+use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
-use std::os::unix::ffi::OsStrExt;
+use std::os::fd::{AsRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::MetadataExt;
 
 use super::exceptions::{Error, Kind, Result, finish};
@@ -27,6 +26,31 @@ pub(super) use seekable::disk_offset;
 pub(super) use buffered::decode_text_lines;
 pub(crate) use buffered::peek_bytes;
 use buffered::{Input, Output};
+
+/// Append a raw read result before its caller advances the input cursor.
+pub(crate) fn append_read_bytes(out: &mut Bytes, bytes: &[u8]) -> Result<()> {
+    out.try_reserve(bytes.len())
+        .map_err(|_| Error::allocation())?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+
+/// Copy the available prefix up to the requested limit, including the first LF for a line.
+pub(crate) fn append_read_ahead(
+    out: &mut Bytes,
+    available: &[u8],
+    limit: usize,
+    line: bool,
+) -> Result<usize> {
+    let bytes = &available[..limit.min(available.len())];
+    let count = if line {
+        memchr::memchr(b'\n', bytes).map_or(bytes.len(), |i| i + 1)
+    } else {
+        bytes.len()
+    };
+    append_read_bytes(out, &bytes[..count])?;
+    Ok(count)
+}
 
 pub(super) type BoxedFile = allocator_api2::boxed::Box<FileState>;
 
@@ -102,33 +126,6 @@ impl Drop for FileState {
 }
 
 impl FileState {
-    /// Opens a buffered binary writer with the same ownership and errors as typed files.
-    pub(crate) fn binary_writer(path: &str, mode: u32, capacity: Option<usize>) -> Result<Self> {
-        open_state_with_capacity(
-            &super::text::try_owned_string(path)?,
-            mode,
-            true,
-            false,
-            None,
-            capacity,
-        )
-    }
-
-    /// Open an owned binary gzip reader and defer parsing until its first read.
-    pub(crate) fn gzip_reader(path: &[u8]) -> Result<Self> {
-        let (file, metadata) = open_raw_file(path, 0, false)?;
-        let capacity = crate::text_output::binary_capacity(metadata.blksize().into());
-        Ok(Self {
-            fd: Some(file.as_raw_fd()),
-            raw: false,
-            stream: Some(Stream::UnreadGzip { file, capacity }),
-            name: None,
-            encoding: None,
-            errors: None,
-            kind: FileKind::GzipBinaryRead,
-        })
-    }
-
     /// Opens an anonymous binary update stream, buffered against its own POSIX descriptor.
     pub(crate) fn temporary(directory: Option<&str>) -> Result<Self> {
         let file = super::tempdirs::anonymous_file(directory)?;
@@ -157,11 +154,17 @@ impl FileState {
     }
 
     /// Closing the raw view of a buffered pipe discards the outer pending bytes.
-    pub(super) fn close_raw_pipe(&mut self) -> io::Result<()> {
-        match self.stream.take() {
-            Some(Stream::Write(writer)) => close_file(writer.into_file()),
-            stream => stream.map_or(Ok(()), Stream::close),
-        }
+    pub(super) fn take_raw_pipe_fd(&mut self) -> Option<RawFd> {
+        let file = match self.stream.take()? {
+            Stream::Read(input) => input.into_file(),
+            Stream::Write(writer) => writer.into_file(),
+            _ => unreachable!("a subprocess pipe has a reader or writer"),
+        };
+        Some(file.into_raw_fd())
+    }
+
+    pub(super) fn take_pipe_buffer(&mut self) -> Result<Bytes> {
+        self.input()?.take_pipe_buffer()
     }
 
     pub(super) fn take_pipe_read_ahead(&mut self) -> Result<Bytes> {
@@ -169,9 +172,6 @@ impl FileState {
     }
 
     pub(crate) fn read_once(&mut self, size: Option<usize>) -> Result<Bytes> {
-        if size == Some(0) && matches!(self.stream, Some(Stream::UnreadGzip { .. })) {
-            return Ok(Bytes::new());
-        }
         self.input()?.read_once(size)
     }
 
@@ -201,12 +201,6 @@ impl FileState {
 
     pub(crate) fn close(&mut self) -> io::Result<()> {
         self.stream.take().map_or(Ok(()), Stream::close)
-    }
-
-    pub(super) fn close_standard_buffer(&mut self) -> Result<()> {
-        let stderr = self.standard_writer()?;
-        self.stream.take();
-        crate::sys::close_standard_output(stderr, false).map_err(errno_error)
     }
 
     pub(super) fn communicate_stdin(&mut self, input: &[u8], close: bool) -> Result<()> {
@@ -461,7 +455,7 @@ impl FileState {
             return self.text_memory()?.write(text);
         }
         if let Some(Stream::Write(writer)) = self.stream.as_mut() {
-            return writer.write_text(text);
+            return writer.write_text(text, input);
         }
         self.write_bytes(text.as_bytes())
     }
@@ -476,14 +470,6 @@ impl FileState {
         }
         self.write_with(text, input)?;
         self.write("\n")
-    }
-
-    /// Boxed native text files are standard writers or read-only files.
-    pub(super) fn standard_writer(&mut self) -> Result<bool> {
-        match self.stream()? {
-            Stream::Standard(stderr) => Ok(*stderr),
-            _ => Err(Error::new(Kind::UnsupportedOperation, "not writable")),
-        }
     }
 
     pub(super) fn has_encoding(&self) -> bool {
@@ -533,22 +519,12 @@ fn decode_text(bytes: Vec<u8>, preserve_newlines: bool) -> Result<Str> {
             Err(_) => Error::memory_error(),
         }
     })?;
-    if preserve_newlines || memchr::memchr(b'\r', text.as_bytes()).is_none() {
-        return Ok(Str::from(text));
-    }
-    let mut normalized = Str::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(value) = chars.next() {
-        if value == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            normalized.push('\n');
-        } else {
-            normalized.push(value);
-        }
-    }
-    Ok(normalized)
+    let text = if preserve_newlines {
+        text
+    } else {
+        super::codecs::universal_newlines(text)
+    };
+    Ok(Str::from(text))
 }
 
 impl Storage {
@@ -610,7 +586,7 @@ pub(crate) fn errno_error(error: io::Error) -> Error {
     errno_with_filename(error, None)
 }
 
-pub(super) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
+pub(crate) fn errno_with_filename(error: io::Error, path: Option<&str>) -> Error {
     errno_with_filenames(
         error,
         path.map(|s| super::exceptions::Filename::Str(StrOwner::new(Str::from(s)))),
@@ -791,24 +767,25 @@ fn open_state_with_encoding(
     gzip: bool,
     encoding: Option<(&str, &str)>,
 ) -> Result<FileState> {
-    open_state_with_capacity(path, mode, binary, gzip, encoding, None)
-}
-
-fn open_state_with_capacity(
-    path: &StrOwner,
-    mode: u32,
-    binary: bool,
-    gzip: bool,
-    encoding: Option<(&str, &str)>,
-    writer_capacity: Option<usize>,
-) -> Result<FileState> {
-    let (file, metadata) = open_file_with(path.as_bytes(), mode, false, |error| {
+    let opened = open_file_with(path.as_bytes(), mode, |error| {
         errno_with_filenames(
             error,
             Some(super::exceptions::Filename::Str(path.clone())),
             None,
         )
     })?;
+    state_from_file(path, mode, binary, gzip, encoding, None, opened)
+}
+
+fn state_from_file(
+    path: &StrOwner,
+    mode: u32,
+    binary: bool,
+    gzip: bool,
+    encoding: Option<(&str, &str)>,
+    writer_capacity: Option<usize>,
+    (file, metadata): (File, std::fs::Metadata),
+) -> Result<FileState> {
     // CPython 3.14 bounds the device's preferred block size for buffered I/O.
     let capacity = writer_capacity
         .unwrap_or_else(|| crate::text_output::binary_capacity(metadata.blksize().into()));
@@ -849,40 +826,57 @@ fn open_state_with_capacity(
 
 /// Open a raw descriptor with the same pathname and directory errors as Python open().
 pub(crate) fn open_file(path: &str, mode: u32) -> Result<(std::fs::File, std::fs::Metadata)> {
-    open_file_with(path.as_bytes(), mode, false, |error| {
+    open_file_with(path.as_bytes(), mode, |error| {
         errno_with_filename(error, Some(path))
     })
 }
 
-pub(crate) fn open_raw_file(
-    path: &[u8],
-    mode: u32,
-    update: bool,
-) -> Result<(std::fs::File, std::fs::Metadata)> {
-    open_file_with(path, mode, update, errno_error)
+/// Translate the parsed FileIO mode into the flags passed to an opener.
+pub(crate) fn file_flags(mode: u32, update: bool) -> i32 {
+    let access = if update {
+        libc::O_RDWR
+    } else if matches!(mode, 0 | 4) {
+        libc::O_RDONLY
+    } else {
+        libc::O_WRONLY
+    };
+    let create = match mode {
+        0 | 4 => 0,
+        1 => libc::O_CREAT | libc::O_TRUNC,
+        2 => libc::O_CREAT | libc::O_APPEND,
+        3 => libc::O_CREAT | libc::O_EXCL,
+        _ => fail("SystemError", "invalid file mode"),
+    };
+    access | create | libc::O_CLOEXEC
 }
 
-/// Use the caller's filename when opening the path or rejecting a directory.
+/// Open on the typed caller's thread and preserve its original filename on errors.
 fn open_file_with(
     path: &[u8],
     mode: u32,
-    update: bool,
     path_error: impl Fn(io::Error) -> Error,
-) -> Result<(std::fs::File, std::fs::Metadata)> {
+) -> Result<(File, std::fs::Metadata)> {
     super::super::initialize_io();
-    if path.contains(&0) {
-        return Err(Error::new(Kind::ValueError, "embedded null byte"));
-    }
-    let mut options = OpenOptions::new();
-    options.read(update);
-    match mode {
-        0 | 4 => options.read(true).write(update),
-        1 => options.write(true).create(true).truncate(true),
-        2 => options.append(true).create(true),
-        3 => options.write(true).create_new(true),
-        _ => fail("SystemError", "invalid file mode"),
-    };
-    let mut file = options.open(OsStr::from_bytes(path)).map_err(&path_error)?;
+    let path =
+        CString::new(path).map_err(|_| Error::new(Kind::ValueError, "embedded null byte"))?;
+    let flags = file_flags(mode, false);
+    let fd = super::os::open_at(
+        &path,
+        flags,
+        0o666,
+        libc::AT_FDCWD,
+        super::stdlib::check_interrupt,
+    )?
+    .map_err(&path_error)?;
+    prepare_file(fd, mode, path_error)
+}
+
+pub(crate) fn prepare_file(
+    fd: OwnedFd,
+    mode: u32,
+    path_error: impl Fn(io::Error) -> Error,
+) -> Result<(File, std::fs::Metadata)> {
+    let mut file = File::from(fd);
     let metadata = file.metadata().map_err(errno_error)?;
     if metadata.is_dir() {
         return Err(path_error(io::Error::from_raw_os_error(libc::EISDIR)));
@@ -1156,15 +1150,15 @@ pub unsafe extern "C" fn imre_text_readline_inline(
 /// Both handles must be rooted with matching types and pending state clear.
 /// Raw zero signals failure; a successful empty write returns tagged zero (1).
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_text_write(value: *const Object, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_text_write(value: *const Object, source: *const Str) -> usize {
     // SAFETY: the caller roots this immutable string throughout the write and count.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     // SAFETY: text is immutable, both handles are rooted, and no storage escapes.
     let result = unsafe {
         object(value).0.with_mut(|storage| {
-            storage.file_mut().write_with(text, || {
-                Ok(StrOwner::acquire_word(text as *const Str as usize))
-            })
+            storage
+                .file_mut()
+                .write_with(text, || Ok(StrOwner::acquire_word(source as usize)))
         })
     };
     finish(
@@ -1206,6 +1200,22 @@ pub unsafe extern "C" fn imre_text_write_parts(
     parts: *const StringPart,
     count: usize,
 ) -> u32 {
+    if count != 0 {
+        // SAFETY: the rooted arguments supply immutable UTF-8 fragments disjoint
+        // from the private file buffer. The fast path cannot allocate, flush, or reenter.
+        let buffered = unsafe {
+            let parts = std::slice::from_raw_parts(parts, count);
+            object(value).0.with_mut(|storage| {
+                let Some(Stream::Write(writer)) = &mut storage.file_mut().stream else {
+                    return false;
+                };
+                writer.try_write_parts(parts.iter().map(|part| part.as_str().as_bytes()))
+            })
+        };
+        if buffered {
+            return 1;
+        }
+    }
     // SAFETY: all fragments remain rooted and immutable through assembly.
     let text = match unsafe { concat_parts(parts, count) } {
         Ok(text) => text,
@@ -1315,6 +1325,59 @@ mod tests {
         unsafe { imre_object_release(error) };
         os_error(io::Error::from_raw_os_error(libc::ENOMEM)).raise();
         take_error(Kind::OSError);
+    }
+
+    #[test]
+    fn checked_print_keeps_the_input_in_encoding_errors() {
+        use super::super::stdio::{imre_print_scalars, imre_sys_stdout_clear, imre_sys_stdout_set};
+
+        let directory = Directory::new();
+        let path = directory.0.join("print.txt");
+        let name = path_name(&path);
+        let encoding = Str::new("ascii");
+        let input = StrOwner::new(Str::new("α"));
+        let observer = StrOwner::downgrade(&input);
+        let kinds = [1_u8, 3, 0];
+        let words = [1, StrOwner::as_ptr(&input) as usize, 0];
+        // SAFETY: the path and encoding stay live through open; the arguments stay rooted through print.
+        unsafe {
+            let path = super::super::paths::imre_path_new(StrOwner::as_ptr(&name));
+            assert!(!path.is_null());
+            let path = crate::ObjectOwner::from_raw(path);
+            let file = super::path_text::imre_path_open_text_output(
+                crate::ObjectOwner::as_ptr(&path),
+                &Str::new("w"),
+                &encoding as *const Str as usize,
+                0,
+                0,
+            );
+            assert!(!file.is_null());
+            let file = crate::ObjectOwner::from_raw(file);
+            imre_sys_stdout_set(crate::ObjectOwner::as_ptr(&file) as usize);
+            imre_print_scalars(kinds.as_ptr(), words.as_ptr(), words.len());
+            imre_sys_stdout_clear();
+        }
+        let error = super::super::exceptions::take_pending().unwrap();
+        assert_eq!(std::fs::read(path).unwrap(), b"True ");
+        drop(input);
+        assert!(observer.upgrade().is_some());
+        drop(error);
+        assert!(observer.upgrade().is_none());
+    }
+
+    #[test]
+    fn failed_sized_read_keeps_the_temporary_file_position() {
+        let directory = Directory::new();
+        let mut file = FileState::temporary(directory.0.to_str()).ok().unwrap();
+        file.write_bytes(b"abc").ok().unwrap();
+        file.seek(SeekFrom::Start(0)).ok().unwrap();
+        assert_eq!(file.read_bytes(Some(1)).ok().unwrap(), b"a");
+        file.read_bytes(Some(crate::MAX_BYTES_LEN))
+            .unwrap_err()
+            .raise();
+        take_error(Kind::MemoryError);
+        assert_eq!(file.tell().ok().unwrap(), 1);
+        assert_eq!(file.read_bytes(None).ok().unwrap(), b"bc");
     }
 
     struct Directory(PathBuf);
@@ -1848,6 +1911,7 @@ mod tests {
     #[test]
     fn append_open_positions_existing_files_and_accepts_pipes() {
         use std::ffi::CString;
+        use std::fs::OpenOptions;
         use std::io::Read;
         use std::os::unix::ffi::OsStrExt;
         use std::os::unix::fs::OpenOptionsExt;

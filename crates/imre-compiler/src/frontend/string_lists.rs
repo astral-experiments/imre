@@ -1,5 +1,7 @@
 //! Bulk operations whose exact string elements cannot invoke user callbacks.
 
+use imre_ast::comprehension::{Output, Plan};
+
 use super::*;
 
 fn same_name(expr: &ast::Expr, name: &str) -> bool {
@@ -45,49 +47,52 @@ fn prefix_argument<'a>(expr: &'a ast::Expr, name: &str) -> Option<&'a ast::Expr>
     .then_some(arg)
 }
 
+/// Both bulk filters implement exactly one synchronous pull guarded by one
+/// predicate. Inspect the executable plan before replacing that loop.
+fn filtered_item<'a>(plan: &Plan<'a>) -> Option<(&'a str, &'a ast::Expr)> {
+    let [clause] = plan.clauses else { return None };
+    match (&clause.target, clause.ifs.as_slice(), clause.is_async) {
+        (ast::Expr::Name(target), [test], false) => Some((target.id.as_str(), test)),
+        _ => None,
+    }
+}
+
 impl Checker<'_> {
     /// Recognize `{c for c in text if c in keys}`, optionally including `ord(c) < n`.
     pub(super) fn character_set_filter(
         &mut self,
-        set: &ast::ExprSetComp,
+        plan: &Plan<'_>,
         expected: Option<Type>,
+        text: &mut Expr,
     ) -> Result<Option<Expr>, String> {
-        let [clause] = set.generators.as_slice() else {
+        let Some((name, condition)) = filtered_item(plan) else {
             return Ok(None);
         };
-        let [condition] = clause.ifs.as_slice() else {
-            return Ok(None);
-        };
-        let ast::Expr::Name(target) = &clause.target else {
-            return Ok(None);
-        };
-        let name = target.id.as_str();
         let ty = self.types.set(Type::Str);
-        if clause.is_async
-            || !same_name(&set.elt, name)
+        if !same_name(plan.output.value(), name)
             || expected.is_some_and(|t| t != ty)
-            || !matches!(clause.iter, ast::Expr::Name(_))
+            || text.ty != Type::Str
         {
             return Ok(None);
         }
         let Some((keys, below)) = self.character_filter_operands(condition, name) else {
             return Ok(None);
         };
-        let text = self.expr(&clause.iter)?;
-        if text.ty != Type::Str {
-            return Ok(None);
-        }
         let keys = self.expr(keys)?;
         if !matches!(keys.ty, Type::Set(_) | Type::FrozenStrings)
             || self.types.readable_set_element(keys.ty) != Some(Type::Str)
         {
             return Ok(None);
         }
+        let text = std::mem::replace(text, Expr::none());
         let source = self.hidden(Type::Str);
         let selected = Expr {
             ty,
             kind: ExprKind::Builtin(
-                Builtin::FilterCharacterSet(below),
+                Builtin::FilterCharacterSet(crate::ir::CharacterFilter {
+                    below,
+                    ascii_keys: None,
+                }),
                 vec![self.local(source), keys],
             ),
         };
@@ -193,26 +198,17 @@ impl Checker<'_> {
     /// Lowers one eager, side-effect-free prefix filter on an exact string list.
     pub(super) fn string_list_filter(
         &mut self,
-        clauses: &[ast::Comprehension],
-        elt: &ast::Expr,
+        plan: &Plan<'_>,
         element: Option<Type>,
-        generator: bool,
+        checked: Option<&mut Expr>,
     ) -> Result<Option<Expr>, String> {
-        let [clause] = clauses else { return Ok(None) };
-        let [condition] = clause.ifs.as_slice() else {
+        let Some((name, condition)) = filtered_item(plan) else {
             return Ok(None);
         };
-        let ast::Expr::Name(target) = &clause.target else {
+        let Some(strip) = suffix(plan.output.value(), name) else {
             return Ok(None);
         };
-        let name = target.id.as_str();
-        let Some(strip) = suffix(elt, name) else {
-            return Ok(None);
-        };
-        if clause.is_async
-            || element.is_some_and(|ty| ty != Type::Str)
-            || !matches!(clause.iter, ast::Expr::Name(_) | ast::Expr::Attribute(_))
-        {
+        if element.is_some_and(|ty| ty != Type::Str) {
             return Ok(None);
         }
         let (include, exclude) = match condition {
@@ -249,10 +245,20 @@ impl Checker<'_> {
             _ if self.invariant_prefix(arg, name) => (arg, None),
             _ => return Ok(None),
         };
-        let list = self.expr(&clause.iter)?;
+        // Eager displays already own this operand in their outer iteration.
+        let mut outer;
+        let list = match checked {
+            Some(iterable) => iterable,
+            None if matches!(plan.outer, ast::Expr::Name(_) | ast::Expr::Attribute(_)) => {
+                outer = self.expr(plan.outer)?;
+                &mut outer
+            }
+            None => return Ok(None),
+        };
         if self.types.element(list.ty) != Some(Type::Str) {
             return Ok(None);
         }
+        let list = std::mem::replace(list, Expr::none());
         let ty = list.ty;
         let source = self.hidden(ty);
         let mut optional = |expr: Option<&ast::Expr>| {
@@ -294,9 +300,9 @@ impl Checker<'_> {
         };
         let mut body = vec![Statement::Assign(source, list)];
         let mut clear = vec![source];
-        let value = if generator {
+        let value = if matches!(plan.output, Output::Generator(_)) {
             let result = self.hidden(ty);
-            body.push(self.generator_frame(Statement::Assign(result, value)));
+            body.push(self.generator_frame(vec![Statement::Assign(result, value)]));
             clear.push(result);
             self.local(result)
         } else {

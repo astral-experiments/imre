@@ -17,7 +17,7 @@
     name = property(get_name, set_name)
 
     def setLevel(self, level: _Level) -> None:
-        self.level = _handler_level(level)
+        self.level = _checkLevel(level)
 
     def setFormatter(self, fmt: Formatter | None) -> None:
         self.formatter = fmt
@@ -57,12 +57,6 @@ class NullHandler(Handler):
 
 class StreamHandler(Handler):
     stream: _TextOutput | None
-    terminator: str
-
-    def __init__(self, stream: _TextOutput | None = None) -> None:
-        super().__init__()
-        self.stream = sys.stderr if stream is None else stream
-        self.terminator = "\n"
 
     def flush(self) -> None:
         with self.lock:

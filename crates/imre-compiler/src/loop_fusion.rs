@@ -4,11 +4,10 @@ mod nullable;
 mod periodic;
 mod records;
 
+use ruff_python_ast::CmpOp;
 use std::collections::{HashMap, HashSet};
 
-use crate::ir::{
-    self, Binary, Builtin, Compare, Expr, ExprKind, Function, Module, Statement, Type,
-};
+use crate::ir::{self, Binary, Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 
 pub(crate) fn specialize(module: &mut Module) {
     let constructors = records::constructors(module);
@@ -138,7 +137,7 @@ struct Column {
 
 /// Finds a read of exactly the element produced for this ordinal.
 fn row_read(expr: &Expr, index: usize) -> Option<usize> {
-    let ExprKind::Builtin(Builtin::ListGet, args) = &expr.kind else {
+    let ExprKind::Builtin(Builtin::ListGet(_), args) = &expr.kind else {
         return None;
     };
     let [collection, offset] = args.as_slice() else {
@@ -162,10 +161,7 @@ fn remap_index(expr: &mut Expr, from: usize, to: usize) {
 fn greater(left: &Expr, right: i128) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(
-            vec![left.clone(), Expr::integer(right)],
-            vec![Compare::Greater],
-        ),
+        kind: ExprKind::Compare(vec![left.clone(), Expr::integer(right)], vec![CmpOp::Gt]),
     }
 }
 
@@ -312,6 +308,15 @@ fn loop_prefix(
 
 /// A callback could observe intermediate ownership while a producer is rescheduled.
 fn observable_consumer(expr: &Expr) -> bool {
+    if expr.uses_python_unary_protocol() {
+        return true;
+    }
+    if matches!(expr.kind, ExprKind::Binary(Binary::Add, ..)) {
+        // A list copy can allocate and optional string addition can raise before
+        // the following iteration. Keep those effects in the original loop.
+        return matches!(expr.ty, Type::ListInt | Type::List(_))
+            || (expr.ty == Type::Str && expr.string_addends().is_none());
+    }
     !matches!(
         &expr.kind,
         ExprKind::Int(_)
@@ -323,11 +328,10 @@ fn observable_consumer(expr: &Expr) -> bool {
             | ExprKind::Tuple(_)
             | ExprKind::Binary(..)
             | ExprKind::Compare(..)
-            | ExprKind::Not(_)
-            | ExprKind::Negate(_)
+            | ExprKind::Unary(_, _)
             | ExprKind::Boolean(..)
             | ExprKind::Conditional(..)
-            | ExprKind::Builtin(Builtin::ListGet | Builtin::TupleGet | Builtin::Len, _)
+            | ExprKind::Builtin(Builtin::ListGet(_) | Builtin::TupleGet | Builtin::Len, _)
     ) && !matches!(&expr.kind, ExprKind::Field(base,_) if matches!(base.ty,Type::Tuple(_)))
 }
 

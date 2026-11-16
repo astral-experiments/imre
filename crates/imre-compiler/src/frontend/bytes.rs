@@ -16,7 +16,7 @@ impl Checker<'_> {
             Type::Bool => {
                 needle = Expr {
                     ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Int, vec![needle]),
+                    kind: ExprKind::Builtin(Builtin::Int(None), vec![needle]),
                 };
                 Builtin::BytesContainsInt
             }
@@ -74,10 +74,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(builtin, vec![needle, haystack]),
         };
         Ok(if op == ast::CmpOp::NotIn {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(found)),
-            }
+            Expr::not(found)
         } else {
             found
         })

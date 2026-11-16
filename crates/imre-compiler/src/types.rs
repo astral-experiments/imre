@@ -46,7 +46,7 @@ enum Shape {
     DeferredCmpFrame((usize, u32), Vec<Type>),
     Callable(Vec<Type>, Type),
     IndexCallable(Type),
-    BoundSourceMethod(Type, usize, usize),
+    SourceMethod(Type, usize, usize, Option<Type>),
     RecordConstructor(usize, Vec<Type>),
     PartialCallable(PartialFunction),
     DeclaredCache(Type, usize),
@@ -147,8 +147,10 @@ struct Storage {
     shapes: Vec<Shape>,
     has_module_spec: bool,
     named_tuples: HashMap<DefinitionId, Rc<NamedTuple>>,
-    cache_adapters: HashMap<usize, CachePolicy>,
+    cache_adapters: HashMap<usize, (CachePolicy, Option<usize>)>,
     source_sites: HashMap<(usize, u32), Rc<FunctionSite>>,
+    module_list_appends: HashMap<DefinitionId, ModuleListAppends>,
+    document_list_sites: HashSet<(usize, u32, Option<usize>)>,
     function_sites: HashMap<usize, Rc<FunctionSite>>,
     coroutine_targets: HashMap<usize, CoroutineTarget>,
     plain_callbacks: HashSet<Type>,
@@ -165,6 +167,15 @@ struct Storage {
     concrete_subclasses: HashMap<usize, Vec<Type>>,
 }
 
+/// Only an unannotated allocation with exclusively string appends needs a
+/// different layout from the ordinary empty-list initializer.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModuleListAppends {
+    Unseen,
+    Strings,
+    Other,
+}
+
 /// An annotation and a matching inferred literal always receive the same identity.
 /// Interior mutability lets independent function checkers share this compilation's
 /// type universe without retaining references into its growable storage.
@@ -175,6 +186,60 @@ pub(crate) struct Types(RefCell<Storage>);
 pub(crate) struct ShapePrefix(Vec<Shape>);
 
 impl Types {
+    pub(crate) fn infer_module_list(&self, owner: DefinitionId) {
+        self.0
+            .borrow_mut()
+            .module_list_appends
+            .insert(owner, ModuleListAppends::Unseen);
+    }
+
+    pub(crate) fn module_list_uses_strings(&self, owner: DefinitionId) -> Option<bool> {
+        self.0
+            .borrow()
+            .module_list_appends
+            .get(&owner)
+            .map(|state| *state == ModuleListAppends::Strings)
+    }
+
+    pub(crate) fn observe_module_list_use(&self, owner: DefinitionId, string_append: bool) -> bool {
+        let mut storage = self.0.borrow_mut();
+        let state = storage
+            .module_list_appends
+            .get_mut(&owner)
+            .expect("tracked module list");
+        let previous = *state;
+        if !string_append {
+            *state = ModuleListAppends::Other;
+        } else if previous == ModuleListAppends::Unseen {
+            *state = ModuleListAppends::Strings;
+        }
+        (*state == ModuleListAppends::Strings) != (previous == ModuleListAppends::Strings)
+    }
+
+    pub(crate) fn collects_document_lists(
+        &self,
+        module: usize,
+        site: u32,
+        class: Option<usize>,
+    ) -> bool {
+        self.0
+            .borrow()
+            .document_list_sites
+            .contains(&(module, site, class))
+    }
+
+    pub(crate) fn record_document_lists(
+        &self,
+        module: usize,
+        site: u32,
+        class: Option<usize>,
+    ) -> bool {
+        self.0
+            .borrow_mut()
+            .document_list_sites
+            .insert((module, site, class))
+    }
+
     pub(crate) fn shape_count(&self) -> usize {
         self.0.borrow().shapes.len()
     }
@@ -197,6 +262,8 @@ impl Types {
     pub(crate) fn verify_type(&self, ty: Type, classes: usize) -> Result<(), String> {
         let storage = self.0.borrow();
         let valid = match ty {
+            // Registered object handles cannot enter a fixed-layout module.
+            Type::PythonObject => false,
             Type::StrLiteral(id) => {
                 matches!(storage.shapes.get(id), Some(Shape::StringLiterals(_)))
             }
@@ -254,7 +321,7 @@ impl Types {
                     Shape::Callable(..)
                         | Shape::RecordConstructor(..)
                         | Shape::IndexCallable(_)
-                        | Shape::BoundSourceMethod(..)
+                        | Shape::SourceMethod(..)
                         | Shape::DeclaredCache(..)
                         | Shape::CachedCallable(_)
                         | Shape::DispatchCallable(_)
@@ -309,6 +376,7 @@ impl Types {
             | Type::BinaryIO
             | Type::Path
             | Type::PurePath(_)
+            | Type::Range
             | Type::SysImplementation
             | Type::CompletedProcess(_, None)
             | Type::ActivePopen
@@ -348,6 +416,8 @@ impl Types {
             | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
+            | Type::RegexBytesPattern
+            | Type::RegexBytesMatch
             | Type::RegexMatch
             | Type::JsonRoot
             | Type::JsonValue
@@ -394,7 +464,7 @@ impl Types {
                 | Shape::DeferredCmpFrame(_, fields)
                 | Shape::Union(fields) => fields.clone(),
                 Shape::IndexCallable(callable)
-                | Shape::BoundSourceMethod(callable, ..)
+                | Shape::SourceMethod(callable, ..)
                 | Shape::DeclaredCache(callable, _) => {
                     vec![*callable]
                 }
@@ -650,6 +720,15 @@ impl Types {
         }
     }
 
+    /// A selected Python result can hold either operand when one already uses an object handle.
+    pub(crate) fn join_results(&self, left: Type, right: Type) -> Option<Type> {
+        if left == Type::PythonObject || right == Type::PythonObject {
+            Some(Type::PythonObject)
+        } else {
+            self.join(left, right)
+        }
+    }
+
     /// Joins values only when one existing concrete or nullable layout can hold both.
     pub(crate) fn join(&self, left: Type, right: Type) -> Option<Type> {
         if let (Some(left), Some(right)) = (self.directory_value(left), self.directory_value(right))
@@ -816,12 +895,35 @@ impl Types {
         ]))))
     }
 
+    /// A checked read-only slot can hold either physical container without copying its items.
+    pub(crate) fn sequence_union(&self, list: Type) -> Type {
+        let item = self.element(list).expect("declared sequence list");
+        Type::Union(self.intern(Shape::Union(vec![list, self.var_tuple(item)])))
+    }
+
+    pub(crate) fn sequence_union_element(&self, ty: Type) -> Option<Type> {
+        let Type::Union(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Union(members) = &shapes.shapes[id] else {
+            return None;
+        };
+        let &[list, tuple] = members.as_slice() else {
+            return None;
+        };
+        let item = self.var_tuple_element(tuple)?;
+        (self.element(list) == Some(item)).then_some(item)
+    }
+
     pub(crate) fn members(&self, ty: Type) -> Option<Vec<Type>> {
         let Type::Union(id) = ty else { return None };
         match &self.0.borrow().shapes[id] {
             Shape::Union(members) => Some(members.clone()),
             _ => unreachable!("union type identity has a union shape"),
         }
+    }
+
+    pub(crate) fn is_text_bytes_union(&self, ty: Type) -> bool {
+        self.members(ty).as_deref() == Some(&[Type::Str, Type::Bytes])
     }
 
     /// A string list can defer its rows; testing a boxed value or a union may read that list.
@@ -903,6 +1005,8 @@ impl Types {
             | Type::ZipInfo
             | Type::CsvReader
             | Type::RegexPattern
+            | Type::RegexBytesPattern
+            | Type::RegexBytesMatch
             | Type::RegexMatch
             | Type::ContextVar(_)
             | Type::ContextToken(_)
@@ -1217,6 +1321,10 @@ impl Types {
         )
     }
 
+    pub(crate) fn is_plain_tuple(&self, ty: Type) -> bool {
+        matches!(ty, Type::Tuple(id) if matches!(self.0.borrow().shapes[id], Shape::Tuple(_)))
+    }
+
     /// Tuple layouts whose directories are provided by the native tuple namespace.
     pub(crate) fn is_plain_or_declared_tuple(&self, ty: Type) -> bool {
         match ty {
@@ -1370,6 +1478,25 @@ impl Types {
         Type::Callable(self.intern(Shape::Callable(params, returns)))
     }
 
+    pub(crate) fn has_cold_callback_abi(&self, ty: Type) -> bool {
+        matches!(ty, Type::Callable(id) if matches!(self.0.borrow().shapes[id],
+            Shape::Callable(_, Type::Coroutine(_))))
+    }
+
+    /// Inspect the synchronous positional signature that a Python frame can call directly.
+    pub(crate) fn with_callback_signature<T>(
+        &self,
+        ty: Type,
+        read: impl FnOnce(&[Type], Type) -> T,
+    ) -> Option<T> {
+        let Type::Callable(id) = ty else { return None };
+        let shapes = self.0.borrow();
+        let Shape::Callable(params, returns) = &shapes.shapes[id] else {
+            return None;
+        };
+        (!matches!(returns, Type::Coroutine(_))).then(|| read(params, *returns))
+    }
+
     /// A subscription method accepts booleans in its first positional integer slot.
     pub(crate) fn index_callable(&self, callable: Type) -> Type {
         Type::Callable(self.intern(Shape::IndexCallable(callable)))
@@ -1383,15 +1510,23 @@ impl Types {
         }
     }
 
-    /// A bound source method retains its declaration for keyword and default binding.
-    pub(crate) fn bound_source_method(&self, callable: Type, class: usize, method: usize) -> Type {
-        Type::Callable(self.intern(Shape::BoundSourceMethod(callable, class, method)))
+    /// Keep the declaration for argument binding and the type of any retained receiver.
+    pub(crate) fn source_method(
+        &self,
+        callable: Type,
+        class: usize,
+        method: usize,
+        receiver: Option<Type>,
+    ) -> Type {
+        Type::Callable(self.intern(Shape::SourceMethod(callable, class, method, receiver)))
     }
 
-    pub(crate) fn bound_method_site(&self, ty: Type) -> Option<(usize, usize)> {
+    pub(crate) fn source_method_site(&self, ty: Type) -> Option<(usize, usize, Option<Type>)> {
         let Type::Callable(id) = ty else { return None };
         match self.0.borrow().shapes.get(id) {
-            Some(Shape::BoundSourceMethod(_, class, method)) => Some((*class, *method)),
+            Some(Shape::SourceMethod(_, class, method, receiver)) => {
+                Some((*class, *method, *receiver))
+            }
             _ => None,
         }
     }
@@ -1400,11 +1535,16 @@ impl Types {
     pub(crate) fn method_signature(&self, ty: Type) -> Option<Type> {
         let Type::Callable(id) = ty else { return None };
         match self.0.borrow().shapes.get(id) {
-            Some(Shape::IndexCallable(signature) | Shape::BoundSourceMethod(signature, ..)) => {
+            Some(Shape::IndexCallable(signature) | Shape::SourceMethod(signature, ..)) => {
                 Some(*signature)
             }
             _ => None,
         }
+    }
+
+    /// A source method can flow into its positional `Callable` type without changing its receiver.
+    pub(crate) fn source_callable_types(&self, ty: Type) -> impl Iterator<Item = Type> {
+        std::iter::once(ty).chain(self.method_signature(ty))
     }
 
     /// Different bound declarations may still share a positional call ABI.
@@ -1441,46 +1581,55 @@ impl Types {
     pub(crate) fn reserve_constructor_globals(
         &self,
         globals: &mut Vec<Type>,
-        functions: &[crate::ir::Function],
-        entry: &crate::ir::Function,
+        classes: &BTreeMap<usize, Type>,
     ) {
-        let mut classes = BTreeMap::new();
-        for function in functions.iter().chain([entry]) {
-            crate::ir::walk_expressions(&function.body, &mut |expr| {
-                if let crate::ir::ExprKind::Callable {
-                    function,
-                    receiver: None,
-                } = &expr.kind
-                    && self.constructor_base(expr.ty).is_some()
-                {
-                    classes
-                        .entry(self.0.borrow().constructor_targets[function])
-                        .or_insert(expr.ty);
-                }
-            });
-        }
         let mut storage = self.0.borrow_mut();
-        for (class, ty) in classes {
+        for (&class, &ty) in classes {
             storage.constructor_slots.insert(class, globals.len());
             globals.push(ty);
         }
     }
 
-    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<usize> {
+    pub(crate) fn constructor_class(&self, function: usize, ty: Type) -> Option<usize> {
         self.constructor_base(ty)?;
+        Some(self.0.borrow().constructor_targets[&function])
+    }
+
+    pub(crate) fn constructor_slot(&self, function: usize, ty: Type) -> Option<(usize, usize)> {
+        let class = self.constructor_class(function, ty)?;
         let storage = self.0.borrow();
-        Some(storage.constructor_slots[&storage.constructor_targets[&function]])
+        Some((storage.constructor_slots[&class], class))
     }
 
     /// A module cache keeps its declaration's identity when bound to another name.
     pub(crate) fn declared_cache(&self, callable: Type, id: usize, policy: CachePolicy) -> Type {
-        self.0.borrow_mut().cache_adapters.insert(id, policy);
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .entry(id)
+            .or_insert((policy, None));
         Type::Callable(self.intern(Shape::DeclaredCache(callable, id)))
     }
 
     /// Adapter identity survives storage in a parameter or return typed as Callable.
     pub(crate) fn cache_adapter(&self, function: usize) -> Option<CachePolicy> {
-        self.0.borrow().cache_adapters.get(&function).copied()
+        self.0
+            .borrow()
+            .cache_adapters
+            .get(&function)
+            .map(|&(policy, _)| policy)
+    }
+
+    /// A decorated module function is still the first value of its cache's public link.
+    pub(crate) fn register_cache_body(&self, wrapper: usize, raw: usize, policy: CachePolicy) {
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .insert(wrapper, (policy, Some(raw)));
+    }
+
+    pub(crate) fn original_cache_body(&self, function: usize) -> Option<usize> {
+        self.0.borrow().cache_adapters.get(&function)?.1
     }
 
     pub(crate) fn cache_declaration(&self, ty: Type) -> Option<(Type, usize)> {
@@ -1491,6 +1640,19 @@ impl Types {
         }
     }
 
+    /// A mutable link keeps the replacement's call ABI independently of its declaration.
+    pub(crate) fn wrapped_link_type(&self, owner: Type) -> Type {
+        if self.cached_function(owner).is_some()
+            || self.cache_declaration(owner).is_some()
+            || self.source_method_site(owner).is_some()
+        {
+            self.wrapped_signature(owner)
+                .expect("a method or cache has a callable signature")
+        } else {
+            owner
+        }
+    }
+
     /// The public positional ABI of a wrapper, including nested applied caches.
     pub(crate) fn wrapped_signature(&self, ty: Type) -> Option<Type> {
         let shapes = self.0.borrow();
@@ -1498,7 +1660,7 @@ impl Types {
         while let Type::Callable(id) = current {
             current = match shapes.shapes.get(id)? {
                 Shape::IndexCallable(underlying)
-                | Shape::BoundSourceMethod(underlying, ..)
+                | Shape::SourceMethod(underlying, ..)
                 | Shape::DeclaredCache(underlying, _) => *underlying,
                 Shape::CachedCallable(cache) => cache.callable,
                 Shape::DispatchCallable(dispatcher) => dispatcher.callable,
@@ -1516,7 +1678,10 @@ impl Types {
         id: usize,
         policy: CachePolicy,
     ) -> Type {
-        self.0.borrow_mut().cache_adapters.insert(id, policy);
+        self.0
+            .borrow_mut()
+            .cache_adapters
+            .insert(id, (policy, None));
         Type::Callable(self.intern(Shape::CachedCallable(layout)))
     }
 
@@ -1571,7 +1736,7 @@ impl Types {
             Shape::Callable(params, returns) => Some((params.clone(), *returns)),
             Shape::RecordConstructor(base, params) => Some((params.clone(), Type::Class(*base))),
             Shape::IndexCallable(callable)
-            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::SourceMethod(callable, ..)
             | Shape::DeclaredCache(callable, _) => self.signature(*callable),
             Shape::CachedCallable(c) => self.signature(c.callable),
             Shape::DispatchCallable(d) => self.signature(d.callable),
@@ -1636,7 +1801,39 @@ impl Types {
         Some(element)
     }
 
-    /// Mutable sequences with integer positions; their storage layouts remain distinct.
+    /// Preserve the common element type when an iterator traverses a fixed tuple.
+    pub(crate) fn tuple_iteration_element(&self, fields: &[Type]) -> Option<Type> {
+        let first = *fields.first()?;
+        if fields.iter().all(|ty| *ty == first) {
+            return Some(first);
+        }
+        let non_none = *fields.iter().find(|&&ty| ty != Type::None)?;
+        let payload = self.payload(non_none).unwrap_or(non_none);
+        fields
+            .iter()
+            .all(|&ty| ty == Type::None || self.payload(ty).unwrap_or(ty) == payload)
+            .then(|| self.optional(payload))
+    }
+
+    /// The element contract for an ordinary container or mapping view.
+    pub(crate) fn iteration_element(&self, ty: Type, items: bool) -> Option<Type> {
+        self.indexed_element(ty)
+            .or_else(|| self.var_tuple_element(ty))
+            .or_else(|| self.readable_set_element(ty))
+            .or((ty == Type::Str).then_some(Type::Str))
+            .or((ty == Type::Bytes).then_some(Type::Int))
+            .or_else(|| {
+                self.mapping(ty).map(|(key, value)| {
+                    if items {
+                        self.tuple(vec![key, value])
+                    } else {
+                        key
+                    }
+                })
+            })
+    }
+
+    /// Mutable sequences with integer positions and distinct storage layouts.
     pub(crate) fn indexed_element(&self, ty: Type) -> Option<Type> {
         self.element(ty).or_else(|| self.deque_element(ty))
     }
@@ -1654,6 +1851,14 @@ impl Types {
             Shape::Set(element) => Some(element),
             _ => unreachable!("set type identity has a set shape"),
         }
+    }
+
+    /// Two set handles need Python's element protocol when either key layout is opaque.
+    pub(crate) fn sets_with_object_keys(&self, left: Type, right: Type) -> bool {
+        matches!(
+            (self.set_element(left), self.set_element(right)),
+            (Some(Type::PythonObject), Some(_)) | (Some(_), Some(Type::PythonObject))
+        )
     }
 
     /// Element type for membership and iteration, including immutable set views.
@@ -1824,6 +2029,21 @@ impl Types {
         false
     }
 
+    /// Whether any stored part of this operand requires a live Python handle.
+    pub(crate) fn stores_python_object(&self, ty: Type) -> bool {
+        let mut pending = vec![ty];
+        let mut visited = std::collections::HashSet::new();
+        while let Some(ty) = pending.pop() {
+            if ty == Type::PythonObject {
+                return true;
+            }
+            if visited.insert(ty) {
+                pending.extend(self.children(ty));
+            }
+        }
+        false
+    }
+
     /// Enumerates stored types for the class-field acyclicity check.
     pub(crate) fn children(&self, ty: Type) -> Vec<Type> {
         if let Type::ForwardRef(id) | Type::AnnotationValue(id) | Type::CmpKey(id, _) = ty {
@@ -1953,7 +2173,7 @@ impl TypeDescription<'_> {
             Shape::CallbackPositional => return self.write_str("callback positional arguments"),
             Shape::ModuleSpec(_) => return self.write_str("importlib.machinery.ModuleSpec"),
             Shape::IndexCallable(callable)
-            | Shape::BoundSourceMethod(callable, ..)
+            | Shape::SourceMethod(callable, ..)
             | Shape::DeclaredCache(callable, _) => {
                 return self.write_type(*callable);
             }

@@ -270,6 +270,117 @@ impl Parser<'_> {
         ))
     }
 
+    /// Convert a case clause, which has no independent source position in Python's AST.
+    fn match_case(&mut self, case: ast::MatchCase) -> Result<Id> {
+        let pattern = self.pattern(case.pattern)?;
+        let guard = self.optional(case.guard)?;
+        let body = self.suite(case.body)?;
+        Ok(parsed_instance(
+            self.ctx,
+            "match_case",
+            &[pattern, guard, body],
+            None,
+        ))
+    }
+
+    fn patterns(&mut self, patterns: impl IntoIterator<Item = ast::Pattern>) -> Result<Id> {
+        let elements = patterns
+            .into_iter()
+            .map(|p| self.pattern(p))
+            .collect::<Result<_>>()?;
+        Ok(self.list(elements))
+    }
+
+    /// Preserve the shape and byte positions of nested structural patterns.
+    fn pattern(&mut self, pattern: ast::Pattern) -> Result<Id> {
+        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.pattern_inner(pattern))
+    }
+
+    fn pattern_inner(&mut self, pattern: ast::Pattern) -> Result<Id> {
+        use ast::Pattern;
+        let range = pattern.range();
+        let (kind, fields) = match pattern {
+            Pattern::MatchValue(p) => ("MatchValue", vec![self.expr(*p.value)?]),
+            Pattern::MatchSingleton(p) => {
+                let value = match p.value {
+                    ast::Singleton::None => NONE,
+                    ast::Singleton::True => TRUE,
+                    ast::Singleton::False => FALSE,
+                };
+                ("MatchSingleton", vec![value])
+            }
+            Pattern::MatchSequence(p) => ("MatchSequence", vec![self.patterns(p.patterns)?]),
+            Pattern::MatchMapping(p) => (
+                "MatchMapping",
+                vec![
+                    self.exprs(p.keys)?,
+                    self.patterns(p.patterns)?,
+                    p.rest.map_or(NONE, |name| self.ctx.text(name.as_str())),
+                ],
+            ),
+            Pattern::MatchClass(p) => {
+                let cls = self.expr(*p.cls)?;
+                let positional = self.patterns(p.arguments.patterns)?;
+                let mut attrs = Vec::with_capacity(p.arguments.keywords.len());
+                let mut patterns = Vec::with_capacity(p.arguments.keywords.len());
+                for kw in p.arguments.keywords {
+                    attrs.push(self.ctx.text(kw.attr.as_str()));
+                    patterns.push(self.pattern(kw.pattern)?);
+                }
+                (
+                    "MatchClass",
+                    vec![cls, positional, self.list(attrs), self.list(patterns)],
+                )
+            }
+            Pattern::MatchStar(p) => (
+                "MatchStar",
+                vec![p.name.map_or(NONE, |name| self.ctx.text(name.as_str()))],
+            ),
+            Pattern::MatchAs(p) => {
+                let inner = p.pattern.map_or(Ok(NONE), |p| self.pattern(*p))?;
+                let name = p.name.map_or(NONE, |name| self.ctx.text(name.as_str()));
+                ("MatchAs", vec![inner, name])
+            }
+            Pattern::MatchOr(p) => ("MatchOr", vec![self.patterns(p.patterns)?]),
+        };
+        Ok(self.node(kind, &fields, range))
+    }
+
+    /// Convert the identifier list carried by a global or nonlocal declaration.
+    fn identifiers(&mut self, names: Vec<ast::Identifier>) -> Id {
+        let names = names
+            .into_iter()
+            .map(|name| self.ctx.text(name.as_str()))
+            .collect();
+        self.list(names)
+    }
+
+    /// Preserve the bounds, defaults, and source spans of a declaration's type parameters.
+    fn type_parameters(&mut self, params: Option<Box<ast::TypeParams>>) -> Result<Id> {
+        let Some(params) = params else {
+            return Ok(self.list(Vec::new()));
+        };
+        let mut nodes = Vec::with_capacity(params.len());
+        for param in params.type_params {
+            let range = param.range();
+            let name = self.ctx.text(param.name().as_str());
+            let (kind, fields) = match param {
+                ast::TypeParam::TypeVar(v) => (
+                    "TypeVar",
+                    vec![name, self.optional(v.bound)?, self.optional(v.default)?],
+                ),
+                ast::TypeParam::TypeVarTuple(v) => {
+                    ("TypeVarTuple", vec![name, self.optional(v.default)?])
+                }
+                ast::TypeParam::ParamSpec(v) => {
+                    ("ParamSpec", vec![name, self.optional(v.default)?])
+                }
+            };
+            nodes.push(self.node(kind, &fields, range));
+        }
+        Ok(self.list(nodes))
+    }
+
     fn statement(&mut self, s: ast::Stmt) -> Result<Id> {
         use ast::Stmt;
         let range = self.statement_range(&s);
@@ -277,9 +388,14 @@ impl Parser<'_> {
             Stmt::Expr(v) => ("Expr", vec![self.expr(*v.value)?]),
             Stmt::Pass(_) => ("Pass", vec![]),
             Stmt::Import(v) if !v.is_lazy => ("Import", vec![self.aliases(&v.names)]),
-            // Absolute future directives need feature validation before conversion.
+            // Other absolute future imports can require feature validation or change the grammar.
             Stmt::ImportFrom(v)
-                if !v.is_lazy && (v.level != 0 || v.module.as_deref() != Some("__future__")) =>
+                if !v.is_lazy
+                    && (v.level != 0
+                        || v.module.as_deref() != Some("__future__")
+                        || v.names
+                            .iter()
+                            .all(|name| name.name.as_str() == "annotations")) =>
             {
                 let module = v
                     .module
@@ -289,6 +405,25 @@ impl Parser<'_> {
                 let level = self.ctx.int(i64::from(v.level));
                 ("ImportFrom", vec![module, names, level])
             }
+            Stmt::AnnAssign(v) => (
+                "AnnAssign",
+                vec![
+                    self.expr(*v.target)?,
+                    self.expr(*v.annotation)?,
+                    self.optional(v.value)?,
+                    self.ctx.int(i64::from(v.simple)),
+                ],
+            ),
+            Stmt::Global(v) => ("Global", vec![self.identifiers(v.names)]),
+            Stmt::Nonlocal(v) => ("Nonlocal", vec![self.identifiers(v.names)]),
+            Stmt::TypeAlias(v) => (
+                "TypeAlias",
+                vec![
+                    self.expr(*v.name)?,
+                    self.type_parameters(v.type_params)?,
+                    self.expr(*v.value)?,
+                ],
+            ),
             Stmt::Assign(v) => (
                 "Assign",
                 vec![self.exprs(v.targets)?, self.expr(*v.value)?, NONE],
@@ -339,6 +474,15 @@ impl Parser<'_> {
                     vec![self.list(items), self.suite(v.body)?, NONE],
                 )
             }
+            Stmt::Match(v) => {
+                let subject = self.expr(*v.subject)?;
+                let cases = v
+                    .cases
+                    .into_iter()
+                    .map(|case| self.match_case(case))
+                    .collect::<Result<_>>()?;
+                ("Match", vec![subject, self.list(cases)])
+            }
             Stmt::Try(v) => {
                 let body = self.suite(v.body)?;
                 let handlers = v
@@ -356,7 +500,7 @@ impl Parser<'_> {
                     ],
                 )
             }
-            Stmt::ClassDef(v) if v.type_params.is_none() => {
+            Stmt::ClassDef(v) => {
                 let (bases, keywords) = if let Some(args) = v.arguments {
                     let bases = self.exprs(args.args)?;
                     let keywords = args
@@ -376,7 +520,7 @@ impl Parser<'_> {
                         keywords,
                         self.suite(v.body)?,
                         self.exprs(v.decorator_list.into_iter().map(|d| d.expression))?,
-                        self.list(vec![]),
+                        self.type_parameters(v.type_params)?,
                     ],
                 )
             }
@@ -402,7 +546,7 @@ impl Parser<'_> {
                     vec![self.expr(*v.test)?, self.suite(v.body)?, otherwise],
                 )
             }
-            Stmt::FunctionDef(mut v) if v.type_params.is_none() => {
+            Stmt::FunctionDef(mut v) => {
                 let decorators = v
                     .decorator_list
                     .into_iter()
@@ -421,7 +565,7 @@ impl Parser<'_> {
                         self.list(decorators),
                         self.optional(v.returns)?,
                         NONE,
-                        self.list(vec![]),
+                        self.type_parameters(v.type_params)?,
                     ],
                 )
             }
@@ -748,6 +892,21 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// Decode a string with the original code points preserved for surrogate escapes.
+    fn string_value(&mut self, v: &ast::ExprStringLiteral) -> Result<Id> {
+        let text = v.value.to_str();
+        let points = crate::dynamic::source_code::original_points(
+            text,
+            self.replacements
+                .range(v.start()..v.end())
+                .flat_map(|(_, points)| points.iter().copied()),
+        )?;
+        Ok(match points {
+            Some(points) => self.ctx.text_codepoints(points),
+            None => self.ctx.text(text),
+        })
+    }
+
     fn expr(&mut self, e: ast::Expr) -> Result<Id> {
         stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || self.expr_inner(e))
     }
@@ -784,6 +943,10 @@ impl Parser<'_> {
         }
         let range = e.range();
         let (kind, fields) = match e {
+            Expr::Named(v) if !self.literal => (
+                "NamedExpr",
+                vec![self.expr(*v.target)?, self.expr(*v.value)?],
+            ),
             Expr::Name(v) => (
                 "Name",
                 vec![self.ctx.text(v.id.as_str()), self.context(v.ctx)?],
@@ -794,20 +957,7 @@ impl Parser<'_> {
             Expr::TString(mut v) if !self.literal => {
                 ("TemplateStr", vec![self.template_values(&mut v)?])
             }
-            Expr::StringLiteral(v) => {
-                let text = v.value.to_str();
-                let points = crate::dynamic::source_code::original_points(
-                    text,
-                    self.replacements
-                        .range(v.start()..v.end())
-                        .flat_map(|(_, points)| points.iter().copied()),
-                )?;
-                let value = match points {
-                    Some(points) => self.ctx.text_codepoints(points),
-                    None => self.ctx.text(text),
-                };
-                ("Constant", vec![value, NONE])
-            }
+            Expr::StringLiteral(v) => ("Constant", vec![self.string_value(&v)?, NONE]),
             Expr::BytesLiteral(v) => (
                 "Constant",
                 vec![
@@ -892,6 +1042,8 @@ impl Parser<'_> {
             Expr::Starred(v) if !self.literal => {
                 ("Starred", vec![self.expr(*v.value)?, self.context(v.ctx)?])
             }
+            Expr::Await(v) if !self.literal => ("Await", vec![self.expr(*v.value)?]),
+            Expr::Yield(v) if !self.literal => ("Yield", vec![self.optional(v.value)?]),
             Expr::YieldFrom(v) if !self.literal => ("YieldFrom", vec![self.expr(*v.value)?]),
             Expr::Tuple(v) => ("Tuple", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
             Expr::List(v) => ("List", vec![self.exprs(v.elts)?, self.context(v.ctx)?]),
@@ -1011,28 +1163,29 @@ pub(super) fn parse(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
             "compile() mode must be 'exec', 'eval', 'single' or 'func_type'",
         ));
     }
+    ctx.check_compile_ast(source, &mode)?;
     let text;
     let decoded;
     let source = if ctx.string_storage(source).is_some() {
         text = copy(ctx.str_value(source)?)?;
+        if text.contains('\0') {
+            let file = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
+            return Err(ctx.source_decode_error(crate::objects::SourceDecodeError::Null, file));
+        }
         text.as_str()
     } else {
-        let bytes = ctx.native_buffer_bytes(source).map_err(|_| {
-            Error::new(
-                "TypeError",
-                "compile() arg 1 must be a string, bytes or AST object",
-            )
-        })?;
-        decoded = crate::objects::decode_compile_source(bytes).map_err(|error| {
-            let filename_id = filename_id.unwrap_or_else(|| ctx.text("<unknown>"));
-            ctx.source_decode_error(error, filename_id)
-        })?;
+        decoded = ctx.decode_compile_buffer(source, filename_id)?;
         decoded.as_str()
     };
     parse_source(ctx, source, &filename, &mode, false)
 }
 
-pub(super) fn parse_source(
+/// Evaluate literal source after applying the same syntax checks as parsing an expression.
+pub(super) fn literal_source(ctx: &mut Context, source: &str) -> Result<Id> {
+    parse_source(ctx, source, "<unknown>", "eval", true)
+}
+
+fn parse_source(
     ctx: &mut Context,
     source: &str,
     filename: &str,
@@ -1047,9 +1200,7 @@ pub(super) fn parse_source(
     } else {
         source
     };
-    let lines = crate::dynamic::source_code::line_starts(
-        source.match_indices('\n').map(|(offset, _)| offset + 1),
-    )?;
+    let lines = crate::dynamic::source_code::line_starts(source)?;
     let load = ctx.builtins["ast._Load"];
     let store = ctx.builtins["ast._Store"];
     let mut parser = Parser {
@@ -1071,13 +1222,21 @@ pub(super) fn parse_source(
     let syntax = |err| Error::new("SyntaxError", format!("{filename}: {err}"));
     match mode {
         "exec" => {
+            let input = imre_ast::indentation::prepare(source);
             let body =
-                ruff_python_parser::parse_unchecked_source(source, ast::PySourceType::Python);
+                ruff_python_parser::parse_unchecked_source(&input.text, ast::PySourceType::Python);
             if let Some(limit) =
-                crate::dynamic::source_code::IndentationLimit::find(&body, source, true, None)
+                crate::dynamic::source_code::IndentationDiagnostic::find(&body, source, true, None)
             {
                 let file = parser.ctx.text(filename);
                 return limit.raise(parser.ctx, file);
+            }
+            if let Some(error) = input.first_issue(body.errors().first()) {
+                let issue = crate::dynamic::source_code::IndentationDiagnostic::from_issue(
+                    source, error, true,
+                );
+                let file = parser.ctx.text(filename);
+                return issue.raise(parser.ctx, file);
             }
             if let Some(error) = body.errors().first() {
                 return Err(syntax(error.clone()));
@@ -1102,8 +1261,20 @@ pub(super) fn parse_source(
                 }
             })?;
             parser.prepare_strings(source, expr.tokens(), expr.syntax())?;
-            let body = parser.expr(*expr.into_syntax().body)?;
-            Ok(parsed_instance(parser.ctx, "Expression", &[body], None))
+            let expr = *expr.into_syntax().body;
+            if literal
+                && let ast::Expr::StringLiteral(text) = &expr
+                && super::literal::plain_string_fields(parser.ctx)
+            {
+                return parser.string_value(text);
+            }
+            let body = parser.expr(expr)?;
+            let expression = parsed_instance(parser.ctx, "Expression", &[body], None);
+            if literal {
+                super::literal::from_node(parser.ctx, expression)
+            } else {
+                Ok(expression)
+            }
         }
         _ => Err(Error::new(
             "ValueError",

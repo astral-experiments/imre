@@ -1,3 +1,6 @@
+from typing import Iterator as _Iterator
+
+
 class FileFinder:
     path: str
 
@@ -27,7 +30,18 @@ def _module_info(finder: FileFinder, filename: str, prefix: str, seen: set[str])
     if not name and '.' not in filename and _is_package(_join(finder.path, filename)):
         name = filename
         ispkg = True
-    if not name or name == '__init__' or '.' in name or name in seen:
+    if not name or name == '__init__' or '.' in name:
+        return None
+    name = prefix + name
+    if name in seen:
         return None
     seen.add(name)
-    return ModuleInfo(finder, prefix + name, ispkg)
+    return ModuleInfo(finder, name, ispkg)
+
+
+def _iter_file_modules(finder, prefix, seen) -> _Iterator[ModuleInfo]:
+    for filename in _filenames(finder.path):
+        info = _module_info(finder, filename, prefix, seen)
+        if info is None:
+            continue
+        yield info

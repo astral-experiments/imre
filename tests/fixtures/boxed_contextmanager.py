@@ -45,6 +45,31 @@ def check():
         return 23
 
     assert decorated() == decorated() == 23
+
+    @contextmanager
+    def nested(label):
+        with track(label):
+            try:
+                yield
+            finally:
+                events.append(label)
+
+    def exit_method(label):
+        manager = nested(label)
+        manager.__enter__()
+        return manager.__exit__
+
+    def discard(value):
+        pass
+
+    def check_transients():
+        assert exit_method('truth') and events[-2:] == ['truth', 'exit']
+        assert (discard(exit_method('call')), events[-2:]) == (None, ['call', 'exit'])
+
+    with nested('outer'):
+        check_transients()
+    assert events[-2:] == ['outer', 'exit']
+
     for exc in (ValueError('body'), RuntimeError('body'), StopIteration('body')):
         try:
             with track(1):

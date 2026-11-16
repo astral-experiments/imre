@@ -9,6 +9,13 @@ import tempfile
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures/socketserver"
 REJECT = {
+    "registered_factory_unknown_keyword": (
+        "from socketserver import TCPServer\n"
+        "calls = bytearray()\n"
+        "def handler(request, address, server): calls.append(1)\n"
+        'TCPServer(("127.0.0.1", 0), handler, bind_and_activate=False, extra=True)\n',
+        "unknown-argument",
+    ),
     "runtime_server_keeps_argument_checks": (
         "from socketserver import ThreadingTCPServer\n"
         "def identity(value: int) -> int: return value\n"
@@ -147,15 +154,17 @@ def main():
         )
         imported_output = observe([args.python, "-E", imported])
 
-        def build(source, level, *options):
+        def build(source, level):
             binary = root / source.stem
             subprocess.run([compiler, "build", source, "--no-cache", "--runtime", args.runtime.resolve(),
-                            "--clang", args.clang, "--opt-level", level, *options, "-o", binary], check=True, timeout=180)
+                            "--clang", args.clang, "--opt-level", level, "-o", binary], check=True, timeout=180)
             return binary
 
+        threaded_entry = root / "threaded_server.py"
+        threaded_entry.write_text("import boxed_threading_tcp_server\n")
         for level in args.opt_levels:
             assert observe([build(imported, level)]) == imported_output
-            assert observe([build(threaded, level, "--runtime-imports")]) == threaded_output
+            assert observe([build(threaded_entry, level)]) == threaded_output
             check_handler_error([build(failure, level)], failure)
             timed_binary = build(timed, level)
             assert observe([timed_binary]) == b"socketserver listener timeout only supports None\n"

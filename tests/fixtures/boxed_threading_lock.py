@@ -1,5 +1,7 @@
 import _thread
+import os
 import types
+import threading
 from _thread import LockType, error as lock_error
 from threading import Lock, TIMEOUT_MAX, ThreadError
 from weakref import ref
@@ -10,6 +12,14 @@ class MapLock:
 
 
 def factories():
+    assert "Lock" in dir(threading)
+    assert threading.Lock is LockType
+    try:
+        del threading.Lock
+        assert "Lock" not in dir(threading)
+        assert not hasattr(threading, "Lock")
+    finally:
+        threading.Lock = Lock
     assert ThreadError is lock_error is _thread.error is RuntimeError
     try:
         Lock().release()
@@ -94,5 +104,25 @@ def current():
     assert observed() is None
 
 
+def reinit_during_acquire():
+    inherited = Lock()
+    inherited.acquire()
+    acquire = inherited.acquire
+
+    class ResetTimeout:
+        def __index__(self):
+            inherited._at_fork_reinit()
+            return 0
+
+    pid = os.fork()
+    if pid == 0:
+        os._exit(0 if acquire(timeout=ResetTimeout()) and inherited.locked() else 1)
+    _, status = os.waitpid(pid, 0)
+    assert status == 0 and inherited.locked()
+    inherited.release()
+
+
 if __name__ == "__main__":
     current()
+    if hasattr(os, "fork"):
+        reinit_during_acquire()

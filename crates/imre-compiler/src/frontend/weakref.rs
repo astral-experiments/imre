@@ -91,13 +91,7 @@ impl Checker<'_> {
     }
 
     pub(super) fn record_class_object(&self, class: usize) -> Expr {
-        let definition = &self.classes.declarations.definitions[class];
-        let module = if definition.definition.module == self.graph.entry {
-            "__main__"
-        } else {
-            &self.graph.modules[definition.definition.module].name
-        };
-        annotations::class_value(&format!("{module}.{}", definition.name))
+        records::class_object(self.graph, &self.classes.declarations.definitions[class])
     }
 
     pub(super) fn weak_proxy_type_name(callable: bool) -> &'static str {
@@ -184,7 +178,7 @@ impl Checker<'_> {
             let values = args
                 .by_ref()
                 .map(|arg| self.expr(arg))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             return Ok(scope.finish(calls::type_error(
                 Type::None,
                 values,
@@ -293,7 +287,7 @@ impl Checker<'_> {
         };
         Ok(scope.finish(Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(inputs, vec![op]),
+            kind: ExprKind::Compare(inputs, vec![op.operator()]),
         }))
     }
 

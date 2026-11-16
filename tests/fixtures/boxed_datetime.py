@@ -27,6 +27,13 @@ def test_date_fromisoformat():
         raise AssertionError("accepted a nonexistent ISO week")
 
 
+def test_isoformat_field_widths():
+    stamp = dt(1, 2, 3, 4, 5, 6, 7, UTC)
+    sep = chr(0xD800)
+    assert stamp.isoformat(sep) == "0001-02-03" + sep + "04:05:06.000007+00:00"
+    assert stamp.timetz().isoformat(timespec="milliseconds") == "04:05:06.000+00:00"
+
+
 def test_date_isoformat():
     class Zone(tzinfo):
         def utcoffset(self, value):
@@ -930,6 +937,7 @@ def test_calendar_reduction():
     assert (obj.year, obj.month, obj.day, obj.hour, obj.microsecond) == (12601, 3, 53, 45, 2961973)
     assert type(obj) is Moment and obj.__reduce_ex__(4) == (Moment, (invalid,))
     assert obj.isoformat() == "12601-03-53T45:48:51.2961973"
+    assert obj.isoformat(chr(0xD800)) == "12601-03-53" + chr(0xD800) + "45:48:51.2961973"
     assert repr(obj) == "Moment(12601, 3, 53, 45, 48, 51, 2961973)"
     folded = Moment(invalid[:2] + b"\x83" + invalid[3:], UTC)
     assert folded.fold == 1 and folded.__reduce__() == (Moment, (invalid, UTC))
@@ -1159,6 +1167,7 @@ def test_calendar_strftime():
 def current():
     test_date_fromisoformat()
     test_date_isoformat()
+    test_isoformat_field_widths()
     test_calendar_strftime()
     test_calendar_reduction()
     test_fixed_timezone_methods()

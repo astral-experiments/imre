@@ -1,9 +1,11 @@
-//! A Sequence parameter borrows an exact typed list through a read-only interface.
+//! Read-only observations of typed sequence parameters.
 
 use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr, walk_stmt};
 
 use super::*;
+use std::result::Result;
 
+/// Returns whether these reads can use an exact tuple through the same item contract.
 pub(super) fn check_reads(
     function: &ast::StmtFunctionDef,
     parameter: &str,
@@ -11,11 +13,12 @@ pub(super) fn check_reads(
     graph: &SourceGraph,
     module: ModuleId,
     source: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let mut reads = Reads {
         parameter,
         empty_tuple_default,
         pack: false,
+        tuple_reads: !empty_tuple_default,
         graph,
         module,
         allowed: HashSet::new(),
@@ -23,7 +26,7 @@ pub(super) fn check_reads(
     };
     reads.visit_body(&function.body);
     if let Some(expr) = reads.invalid {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expr,
             if empty_tuple_default {
@@ -33,7 +36,7 @@ pub(super) fn check_reads(
             },
         ))
     } else {
-        Ok(())
+        Ok(reads.tuple_reads)
     }
 }
 
@@ -51,6 +54,7 @@ pub(super) fn check_pack_reads(
         parameter,
         empty_tuple_default: false,
         pack: true,
+        tuple_reads: false,
         graph,
         module,
         allowed: HashSet::new(),
@@ -58,7 +62,7 @@ pub(super) fn check_pack_reads(
     };
     reads.visit_body(&function.body);
     if let Some(expr) = reads.invalid {
-        Err(error(
+        Err(diagnostic_message(
             source,
             expr,
             "a variadic positional parameter supports iteration, expansion, and len",
@@ -72,6 +76,7 @@ struct Reads<'a, 'ast> {
     parameter: &'a str,
     empty_tuple_default: bool,
     pack: bool,
+    tuple_reads: bool,
     graph: &'a SourceGraph,
     module: ModuleId,
     allowed: HashSet<TextRange>,
@@ -79,9 +84,12 @@ struct Reads<'a, 'ast> {
 }
 
 impl Reads<'_, '_> {
-    fn allow(&mut self, expr: &ast::Expr) {
+    fn allow(&mut self, expr: &ast::Expr) -> bool {
         if matches!(expr, ast::Expr::Name(name) if name.id == self.parameter) {
             self.allowed.insert(expr.range());
+            true
+        } else {
+            false
         }
     }
 }
@@ -108,28 +116,15 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
     }
 
     fn visit_expr(&mut self, expr: &'ast ast::Expr) {
-        let clauses = match expr {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        if let Some(clauses) = clauses {
-            let mut targets = HashSet::new();
-            for clause in clauses {
-                comprehensions::target_names(&clause.target, &mut targets);
-            }
-            if targets.contains(self.parameter) {
-                // Only the first iterable is evaluated outside the
-                // comprehension's private scope.
-                self.allow(&clauses[0].iter);
-                self.visit_expr(&clauses[0].iter);
-                return;
-            }
+        if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr)
+            && plan.binds_name(self.parameter)
+        {
+            self.allow(plan.outer);
+            self.visit_expr(plan.outer);
+            return;
         }
         if let ast::Expr::Lambda(lambda) = expr
-            && !comprehensions::free_reads(expr, HashSet::new()).contains(self.parameter)
+            && !function_scope::expression_reads(expr).contains(self.parameter)
         {
             if let Some(parameters) = &lambda.parameters {
                 self.visit_parameters(parameters);
@@ -138,10 +133,10 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
         }
         match expr {
             ast::Expr::BinOp(binary) if self.pack && binary.op == ast::Operator::Mod => {
-                self.allow(&binary.right)
+                self.allow(&binary.right);
             }
             ast::Expr::Starred(star) if self.pack && star.ctx == ast::ExprContext::Load => {
-                self.allow(&star.value)
+                self.allow(&star.value);
             }
             ast::Expr::Name(name)
                 if name.id == self.parameter && !self.allowed.remove(&expr.range()) =>
@@ -153,28 +148,53 @@ impl<'ast> Visitor<'ast> for Reads<'_, 'ast> {
                     && !self.empty_tuple_default
                     && !self.pack =>
             {
-                self.allow(&subscript.value);
+                if self.allow(&subscript.value) && self.tuple_reads {
+                    // An integer read returns the declared item. A slice exposes the container.
+                    self.tuple_reads = self
+                        .graph
+                        .session
+                        .operand_types(self.module)
+                        .scalar_type(&subscript.slice)
+                        == Some(Type::Int);
+                }
             }
             ast::Expr::Call(call)
                 if self.graph.resolve(self.module, &call.func)
                     == Some(Binding::Intrinsic(Intrinsic::Ndiff)) =>
             {
                 for arg in &call.arguments.args {
-                    self.allow(arg);
+                    if self.allow(arg) {
+                        self.tuple_reads = false;
+                    }
                 }
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "len")
+                    && self.graph.resolve(self.module, &call.func).is_none()
                     && let [arg] = call.arguments.args.as_ref() =>
             {
-                self.allow(arg);
+                if self.allow(arg) && self.tuple_reads {
+                    self.tuple_reads = !self.graph.mutable_builtin_len
+                        && self
+                            .graph
+                            .session
+                            .operand_types(self.module)
+                            .is_original_operand(&call.func)
+                        && self.graph.session.is_stdlib_function(
+                            self.module,
+                            &call.func,
+                            "builtins",
+                            "len",
+                        );
+                }
             }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "map")
                     && let [ast::Expr::Name(convert), arg] = call.arguments.args.as_ref()
-                    && convert.id == "str" =>
+                    && convert.id == "str"
+                    && self.allow(arg) =>
             {
-                self.allow(arg);
+                self.tuple_reads = false;
             }
             _ => {}
         }

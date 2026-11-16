@@ -14,6 +14,13 @@ import tempfile
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "imports"
 HELPER = "def f(value: int) -> int:\n    return value + 1\n"
 IMPORT = "from helper import f\nprint(f(2))\n"
+ORDERED_DEFINITIONS = (
+    "from helper import f\n"
+    "def scale(value: int) -> int: return value * 7 + 3\n"
+    "print(scale(f(2)))\n"
+    "def bound(value: int) -> int: return scale(value)\n"
+    "print(bound(f(3)))\n"
+)
 
 # The wrong call is never executed. Checked builds must diagnose it in either source order.
 LOCALE_CALL = "def typed(n: int) -> int: return n\ndef unused() -> int: return typed({argument})\n"
@@ -24,7 +31,106 @@ LOCALE_FORMAT = (
     + "print(format_string('%d', CHAR_MAX))\n"
 )
 
+RETURNED_ARGUMENT = (
+    "def take(value: int) -> int:\n    return value\n\n"
+    "def text():\n    return 'wrong'\n"
+    "print(take(text()))\n"
+    "import opcode\n"
+)
+
+WRAPPED_MEASURE = (
+    "from functools import wraps\nimport scores\n"
+    "def wrapper(func):\n"
+    "    @wraps(func)\n"
+    "    def invoke(): return func()\n"
+    "    return invoke\n"
+    "result = wrapper(scores.measure)\n"
+    "print(result(), result.__name__, result.__doc__, result.__wrapped__ is scores.measure)\n"
+)
+
 REJECTED = {
+    "wraps_preserves_imported_return": ({
+        "main.py": WRAPPED_MEASURE,
+        "scores.py": "def measure() -> int:\n    return 'bad'\n",
+    }, "scores.py:2:12: Imre: expected int, got str"),
+    "initializer_receives_returned_argument": ({
+        "main.py": RETURNED_ARGUMENT,
+    }, "main.py:6:12: Imre: expected int, got str"),
+    "initializer_imports_completed_value": ({
+        "owner.py": "data = 42\n",
+        "main.py": "from owner import data\n" + RETURNED_ARGUMENT,
+    }, "main.py:7:12: Imre: expected int, got str"),
+    "futures_does_not_activate_unused_calendar": ({
+        "features.py": "import calendar\nimport concurrent.futures\n",
+        "main.py": "import features\ndef scale(x: float) -> float: return 1.5 * x\nprint(scale(2.5))\n",
+    }, "requires runtime import initialization"),
+    "futures_requires_initializer": ({
+        "main.py": "from concurrent.futures import Future\nprint(7)\n",
+    }, "concurrent.futures requires runtime import initialization"),
+    **{
+        f"futures_preserves_first_party_call_{order}": ({
+            "features.py": "import concurrent.futures\n",
+            "scores.py": (
+                "def take(n: int) -> int: return n\n"
+                "def score(debug: bool) -> int:\n"
+                "    if debug: return take('x')\n"
+                "    return take(7)\n"
+            ),
+            "main.py": f"{imports}\nprint(scores.score(False))\n",
+        }, "scores.py:3:27: Imre: expected int, got str")
+        for order, imports in enumerate(("import features, scores", "import scores, features"))
+    },
+    "local_source_loader_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from scores import take\n"
+            "def loader_type():\n"
+            "    from importlib.abc import SourceLoader\n"
+            "    return SourceLoader\n"
+            "print(take('x'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "unused_source_loader_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib.abc import SourceLoader as Loader\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(take(7))\n"
+        ),
+    }, "invalid-argument-type"),
+    "source_loader_subclass_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "rules.py": (
+            "from importlib.abc import SourceLoader\n"
+            "class MemoryLoader(SourceLoader):\n"
+            "    def get_filename(self, fullname): return 'rules.py'\n"
+            "    def get_data(self, path): return b'value = 42'\n"
+        ),
+        "main.py": (
+            "from rules import MemoryLoader\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(MemoryLoader().get_filename('rules'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "unused_reload_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib import reload\n"
+            "from scores import take\n"
+            "def unused() -> int: return take('x')\n"
+            "print(take(7))\n"
+        ),
+    }, "expected int, got str"),
+    "reload_needs_a_module_object": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "import importlib, scores\n"
+            "def unused() -> None: importlib.reload(scores)\n"
+            "print(scores.take(7))\n"
+        ),
+    }, "importlib.reload requires native Python object operations"),
     "decimal_float_preserves_typed_call": ({
         "main.py": (
             "from decimal import Decimal\n"
@@ -34,6 +140,44 @@ REJECTED = {
             "print(convert(Decimal('1.25')))\n"
         ),
     }, "invalid-argument-type"),
+    "clock_lookup_preserves_typed_call": ({
+        "main.py": "import time\n" + HELPER + "f('wrong')\nprint(getattr(time, 'monotonic_ns')())\n",
+    }, "expected int, got str"),
+    "unused_strptime_preserves_typed_call": ({
+        "main.py": "from time import strptime\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
+    "frozen_importer_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib.machinery import FrozenImporter\n"
+            "from scores import take\n"
+            "if False: FrozenImporter.find_spec('stat')\n"
+            "print(take('x'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "builtin_importer_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from importlib.machinery import BuiltinImporter\n"
+            "from scores import take\n"
+            "if False: BuiltinImporter.find_spec('errno')\n"
+            "print(take('x'))\n"
+        ),
+    }, "invalid-argument-type"),
+    "methodcaller_preserves_typed_call": ({
+        "main.py": (
+            "from operator import methodcaller\n"
+            "def typed(n: int) -> int: return n\n"
+            "print(methodcaller('upper')('ok'))\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "unused_is_tracked_preserves_typed_call": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f('wrong')\n",
+    }, "expected int, got str"),
+    "later_is_tracked_preserves_missing_argument": ({
+        "main.py": "from gc import is_tracked\n" + HELPER + "f()\nprint(is_tracked([]))\n",
+    }, "missing required argument"),
     "unused_isclose_preserves_typed_call": ({
         "main.py": (
             "from math import isclose\n"
@@ -192,6 +336,13 @@ REJECTED = {
             "import sys\n"
         ),
     }, "invalid-argument-type"),
+    "optional_probe_checks_missing_argument": ({
+        "main.py": "from probe import result\nprint(result)\n",
+        "probe.py": (
+            "def take(value: int) -> int: return value\n"
+            "try:\n    import sys\n    result = take()\nexcept ImportError:\n    result = 0\n"
+        ),
+    }, "missing-argument"),
     "optional_from_keeps_typed_call_check": ({
         "main.py": (
             "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
@@ -238,6 +389,14 @@ REJECTED = {
         "main.py": (
             "from random import randbytes\n"
             "def typed(n: int) -> int: return n\n"
+            "typed('wrong')\n"
+        ),
+    }, "expected int, got str"),
+    "email_message_from_bytes_preserves_typed_call": ({
+        "main.py": (
+            "from email import message_from_bytes\n"
+            "def typed(n: int) -> int: return n\n"
+            "message_from_bytes(b'body')\n"
             "typed('wrong')\n"
         ),
     }, "expected int, got str"),
@@ -295,6 +454,10 @@ REJECTED = {
     "wildcard_keeps_missing_import": ({
         "main.py": "from helper import *\nimport absent\n", "helper.py": HELPER,
     }, "cannot resolve first-party"),
+    "glob_preserves_typed_call": ({
+        "main.py": "import glob\nfrom scores import score\nprint(glob.translate('*.py'), score)\n",
+        "scores.py": "def take(n: int) -> int: return 7\nscore = take('x')\n",
+    }, "expected int, got str"),
     "type_checking_only_export": ({
         "main.py": "from helper import token\n",
         "helper.py": "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    token = 3\n",
@@ -338,7 +501,7 @@ REJECTED = {
             "import logging, weakref\nhandler = logging.NullHandler()\n"
             "logging.shutdown(handlerList=[weakref.ref(handler)])\n"
         ),
-    }, "logging.shutdown arguments require --runtime-imports"),
+    }, "native lowering of logging.shutdown supports only the no-argument form"),
     "saved_deque_repr_keeps_checked_calls": ({
         "main.py": (
             "from collections import deque\ndef identity(n: int) -> int:\n    return n\n"
@@ -359,6 +522,13 @@ REJECTED = {
             "    value: int = 'wrong'\n    print(value)\nrun()\n"
         ),
     }, "expected int, got str"),
+    "pkgutil_resolve_name_preserves_checked_calls": ({
+        "main.py": (
+            "from pkgutil import resolve_name\n"
+            "def take(n: int) -> int:\n    return n\n"
+            "print(resolve_name('builtins:int'), take('wrong'))\n"
+        ),
+    }, "invalid-argument-type"),
     "platform_iot_preserves_checked_calls": ({
         "main.py": (
             "import helper\ndef typed(value: int) -> int:\n    return value + 1\n"
@@ -423,6 +593,13 @@ REJECTED = {
     "chdir_keeps_subsequent_checks": ({
         "main.py": "import os\ndef path(n: int) -> int:\n    return n\nos.chdir('.')\npath('wrong')\n",
     }, "expected int, got str"),
+    "struct_clearcache_preserves_typed_call": ({
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from struct import _clearcache as clear\nfrom scores import take\n"
+            "def unused() -> int: return take('x')\nclear()\n"
+        ),
+    }, "expected int, got str"),
     "unused_struct_keeps_return_checks": ({
         "main.py": "from struct import Struct as Format\ndef wrong() -> int:\n    return 'bad'\nwrong()\n",
     }, "expected int, got str"),
@@ -450,6 +627,13 @@ REJECTED = {
         "pkg/http.py": "import pkg.child as child\n",
         "pkg/child.py": "from . import http as partial\nprint(\"child finished\")\n",
     }, "cyclic import through \"pkg.http\""),
+    "unpublished_class_in_same_fromlist": ({
+        "main.py": "import pkg\n",
+        "pkg/__init__.py": "from .api import Item as Published, child\n",
+        "pkg/api/__init__.py": "from .origin import Item\n",
+        "pkg/api/origin.py": "class Item:\n    pass\n",
+        "pkg/api/child.py": "from pkg import Published\n",
+    }, 'cyclic import through "pkg"'),
     "decorated_partial_function": ({
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
@@ -542,6 +726,14 @@ REJECTED = {
         "main.py": "from helper import bad\nprint(bad())\n",
         "helper.py": "from traceback import format_exc\ndef bad() -> int:\n    return 'wrong'\n",
     }, "expected int, got str"),
+    "traceback_print_list_preserves_typed_call": ({
+        "main.py": (
+            "from traceback import print_list\n"
+            "def typed(n: int) -> int: return n\n"
+            "print_list([])\n"
+            "typed('wrong')\n"
+        ),
+    }, "invalid-argument-type"),
     "contextmanager_wrong_generator_return": ({
         "main.py": "import helper\nimport sys\nsys.exit(0)\n",
         "helper.py": (
@@ -594,6 +786,12 @@ REJECTED = {
     "local_module_shadow": ({"main.py": "import helper\ndef g() -> None:\n    helper = 1\n", "helper.py": HELPER}, "rebinding"),
     "local_function_shadow": ({"main.py": "from helper import f\ndef g() -> None:\n    f = 1\n", "helper.py": HELPER}, "rebinding"),
     "module_rebinding": ({"main.py": "from helper import f\ndef f(value: int) -> int:\n    return value\n", "helper.py": HELPER}, "cannot be rebound"),
+    "child_reexport_keeps_call_diagnostic": ({
+        "pkg/__init__.py": "from .label import label\n",
+        "pkg/label.py": "label = 'version'\n",
+        "scores.py": "def take(x: int) -> int: return x\ndef unused() -> int: return take('x')\n",
+        "main.py": "from pkg import label\nimport scores\nfrom importlib import import_module\nprint(import_module(label))\n",
+    }, "expected int, got str"),
     "cached_target_early_alias": ({
         "main.py": "import pkg.parent\n", "pkg/__init__.py": "", "pkg/child.py": HELPER,
         "pkg/parent.py": "from . import child\nvalue = late(1)\nfrom .child import f as late\n",
@@ -628,13 +826,28 @@ REJECTED = {
         "feature.py": "def require(enabled: bool):\n    if not enabled: raise RuntimeError('unavailable')\n",
         "main.py": "import feature\nfeature.require(True)\ndef typed(value: int) -> int: return value\ntyped('bad')\n",
     }, "expected int, got str"),
-    "definition_after_execution": ({"main.py": "print(1)\n" + HELPER}, "definitions must precede"),
+    "later_definition_keeps_external_signature": ({
+        "main.py": ORDERED_DEFINITIONS,
+        "helper.py": HELPER + "def dormant(value: complex) -> complex: return value + 1j\n",
+    }, "unsupported exact type annotation"),
+    "later_definition_keeps_scalar_argument": ({
+        "main.py": ORDERED_DEFINITIONS + "scale('bad')\n",
+        "helper.py": HELPER,
+    }, "expected int, got str"),
+    "missing_installed_root": ({
+        "main.py": "from invoice_rates.lookup import rate\nprint(rate(7))\n",
+    }, "--extension-path DIRECTORY"),
     "missing_namespace_child": ({"main.py": "import package.missing\n", "package/child.py": HELPER}, "cannot resolve first-party module"),
     "namespace_preserves_annotation": ({
         "main.py": "import helper\n",
         "space/child.py": "value = 3\n",
         "helper.py": "from space.child import value\ndef result() -> int:\n    return 'wrong'\nresult()\n",
     }, "expected int, got str"),
+    "previously_bound_child": ({
+        "main.py": "import package\n",
+        "package/__init__.py": "from . import token\nfrom .token import token\n",
+        "package/token.py": "token = 42\n",
+    }, "cannot be rebound"),
     "child_overwrites_definition": ({"main.py": "import package.child\n", "package/__init__.py": "def child() -> int:\n    return 1\n", "package/child.py": HELPER}, "overwrite"),
     "entry_self_import": ({"main.py": "import main\n"}, "entry module"),
     "reserved_alias": ({"main.py": "from helper import f as int\n", "helper.py": HELPER}, "reserved"),
@@ -666,16 +879,131 @@ REJECTED = {
                    "def identity(n: int) -> int: return n\nidentity('wrong')\n",
     }, "expected int, got str"),
     "opcode_shadow": ({"main.py": "import _opcode\n", "_opcode.py": HELPER}, "shadowing"),
+    "inspect_shadow_invalid_return": ({
+        "main.py": "from inspect import f\nprint(f(2))\n",
+        "inspect.py": HELPER + "\ndef uncalled() -> int:\n    return 'wrong'\n",
+    }, "expected int, got str"),
     "opcode_unknown_operation": ({"main.py": "from _opcode import not_an_opcode_operation\n"}, "not_an_opcode_operation"),
     "opcode_typed_argument": ({"main.py": "import _opcode as op\ndef text(x: str) -> None:\n    print(x)\ntext(op.ENABLE_SPECIALIZATION)\n"}, "expected str, got int"),
     "unstubbed_builtin_shadow": ({"main.py": "import _types\n", "_types.py": HELPER}, "standard-library"),
-    "frozen_shadow": ({"main.py": "import __hello__\n", "__hello__.py": HELPER}, "standard-library"),
     "imported_surrogate": ({"main.py": IMPORT, "helper.py": '"\\ud800"\n' + HELPER}, "surrogate"),
     "imported_encoding": ({"main.py": IMPORT, "helper.py": "# coding: latin1\n" + HELPER}, "encoding"),
-    "imported_tabs": ({"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"}, "indentation"),
 }
 
 ACCEPTED = {
+    "wraps_uses_source_defaults": {
+        "main.py": WRAPPED_MEASURE,
+        "scores.py": 'def measure() -> int:\n    """score doc"""\n    return 7\n',
+    },
+    "unreached_initializer_local": {
+        "main.py": "import child\nprint('after child')\n",
+        "child.py": (
+            "for item in range(0):\n    pass\n"
+            "print('started')\nraise SystemExit(0)\nprint(item)\n"
+        ),
+    },
+    "bisect_obeys_the_target_finder": {
+        "_bisect.py": "def bisect_right(a, x): return 1234\n",
+        "main.py": (
+            "import bisect\nimport sys\n"
+            "result = bisect.bisect_right([1, 2, 2], 2)\n"
+            "print(result == (3 if '_bisect' in sys.builtin_module_names else 1234))\n"
+        ),
+    },
+    "ssl_import_in_an_imported_initializer": {
+        "helper.py": "import ssl\n",
+        "main.py": "import helper\ndef twice(n: int) -> int: return n * 2\nprint(twice(21))\n",
+    },
+    "bisect_from_its_module_initializer": {
+        "main.py": (
+            "import bisect\nfrom bisect import bisect_left\n"
+            "right = bisect.bisect_right\n"
+            "values = [1, 2, 2, 4]\n"
+            "print(bisect_left(values, 2), right(values, 2), bisect.bisect is right)\n"
+            "print(right(values, 2, hi=-1), right.__module__)\n"
+        ),
+    },
+    "definition_after_execution": {"main.py": ORDERED_DEFINITIONS, "helper.py": HELPER},
+    "class_after_execution": {
+        "main.py": (
+            "value = 1\nprint(value)\n"
+            "class Box:\n    field = value\n"
+            "value = 2\nprint(Box.field, value)\n"
+        ),
+    },
+    "sdk_dependency_keeps_unused_frozen_shadow_dormant": {
+        "main.py": (
+            "import sys\n"
+            "def archive_type():\n"
+            "    import tarfile\n"
+            "    return tarfile.TarFile\n"
+            "print('tarfile' in sys.modules)\n"
+        ),
+        **dict.fromkeys(
+            ("stat.py", "zipimport.py"),
+            "def amount(value: int) -> int: return value\ndef dormant(): return amount('x')\n",
+        ),
+    },
+    "sdk_import_after_provider_hint": {
+        "main.py": (
+            "import sys\n"
+            "import shutil\n"
+            "import reader\n"
+            "print(reader.archive is sys.modules['tarfile'])\n"
+        ),
+        "reader.py": "import tarfile as archive\n",
+    },
+    "function_type_for_selected_callback": {
+        "handlers.py": (
+            "import sys\n\n"
+            "def increment(n: int) -> int:\n"
+            "    return n + 1\n\n"
+            "def double(n: int) -> int:\n"
+            "    return n * 2\n\n"
+            "if len(sys.argv) > 1:\n"
+            "    selected = double\n"
+            "else:\n"
+            "    selected = increment\n"
+        ),
+        "main.py": (
+            "from handlers import selected\n"
+            "from types import FunctionType\n\n"
+            "copied = FunctionType(selected.__code__, globals(), \"copied\")\n"
+            "print(type(copied) is FunctionType, copied is not selected, copied(40))\n"
+        ),
+    },
+    "imported_tabs": {"main.py": IMPORT, "helper.py": "def f(value: int) -> int:\n\treturn value\n"},
+    "inspect_shadow": {
+        "main.py": "from inspect import f\nprint(f(2))\n",
+        "inspect.py": HELPER,
+    },
+    "methodcaller_module_alias": {
+        "main.py": "import operator as op\nprint(op.methodcaller('upper')('ok'))\n",
+    },
+    "methodcaller_from_alias": {
+        "main.py": "from operator import methodcaller as call\nprint(call('replace', 'a', 'b')('abc'))\n",
+    },
+    "unreached_local_source_loader": {
+        "scores.py": "def take(value: int) -> int: return value\n",
+        "main.py": (
+            "from scores import take\n"
+            "def loader_type():\n"
+            "    from importlib.abc import SourceLoader\n"
+            "    return SourceLoader\n"
+            "print(take(3))\n"
+        ),
+    },
+    "doctest_qualified_exception": {
+        "events_module.py": (
+            '"""\n>>> raise Problem("sample event")\nTraceback (most recent call last):\n'
+            '...\nevents_module.Problem: sample event\n"""\n'
+            "class Problem(Exception): pass\n"
+        ),
+        "main.py": (
+            "import doctest\nimport events_module\n"
+            "for case in doctest.DocTestSuite(events_module):\n    case.debug()\n    print(case.id())\n"
+        ),
+    },
     "locale_typed_char_max": {"main.py": LOCALE_CHAR_MAX.format(argument="1")},
     "locale_formats_typed_char_max": {"main.py": LOCALE_FORMAT.format(argument="1")},
     "generator_local_argument_binding": {
@@ -849,6 +1177,60 @@ ACCEPTED = {
             "after = value()\ndef read() -> int:\n    return after\nprint(read())\n"
         ),
     },
+    "rebound_import_surrogate_file_origin": {
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "",
+        "pkg/middle/leaf.py": "answer = 41\n",
+        "main.py": (
+            "import pyexpat\nimport pkg.middle.leaf as physical\nimport pkg\n"
+            "class Spec:\n    has_location = True\n"
+            "    @property\n    def _initializing(self): raise RuntimeError('unexpected read')\n"
+            "class Receiver: pass\n"
+            "spec = Spec()\nspec.origin = __file__.rsplit('/', 1)[0] + '/local-' + chr(0xdcff) + '.py'\n"
+            "view = Receiver()\nview.__name__ = 'json'\nview.__spec__ = spec\npkg.middle = view\n"
+            "try:\n    import pkg.middle.leaf as selected\n"
+            "except ImportError as error:\n    print(error.path is spec.origin, physical.answer)\n"
+        ),
+    },
+    "nonmodule_import_error_recovery": {
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "",
+        "pkg/middle/last.py": "answer = 41\n",
+        "main.py": (
+            "from importlib import import_module\n"
+            "pkg = import_module('pkg')\n"
+            "physical = import_module('pkg.middle.last')\n"
+            "class NamespaceView: pass\n"
+            "pkg.middle = NamespaceView()\n"
+            "try:\n"
+            "    import pkg.middle.last as selected\n"
+            "except ImportError as exc:\n"
+            "    print(str(exc), exc.name, exc.path, exc.name_from)\n"
+            "    selected = import_module('pkg.middle.last')\n"
+            "print(selected is physical, selected.answer)\n"
+        ),
+    },
+    "boxed_reexported_child": {
+        "pkg/__init__.py": "from .label import label\n",
+        "pkg/label.py": "label = 73\nphysical = 41\n",
+        "main.py": "from importlib import import_module\nimport pkg.label as alias\nprint(alias)\nprint(import_module('pkg.label').physical)\n",
+    },
+    "initializing_child_after_reexport": {
+        "banner/__init__.py": "from .version import version\n",
+        "banner/version.py": "version = 1\n",
+        "pkg/__init__.py": "",
+        "pkg/middle/__init__.py": "import pkg.middle.leaf as first\nanswer = first.value\n",
+        "pkg/middle/leaf.py": "value = 37\n",
+        "main.py": "import banner\nimport pkg.middle\nprint(pkg.middle.answer)\n",
+    },
+    "reexported_child_module": {
+        "pkg/__init__.py": "from .middle import middle\n",
+        "pkg/middle/__init__.py": "from .. import alternate as middle\n",
+        "pkg/middle/last.py": "answer = 41\n",
+        "pkg/alternate/__init__.py": "from . import last\n",
+        "pkg/alternate/last.py": "answer = 73\n",
+        "main.py": "import pkg.middle.last as alias\nfrom pkg.middle.last import answer\nprint(alias.answer)\nprint(answer)\n",
+    },
     "optional_stdlib_entry_import": {
         "main.py": (
             "try:\n    import sys as available\nexcept ImportError:\n    available = None\n"
@@ -865,6 +1247,8 @@ ACCEPTED = {
             "import fractions\n"
             "from numbers import Rational\n"
             "def total():\n"
+            "    assert fractions.Fraction(-3, 2).limit_denominator(1) == -2\n"
+            "    assert fractions.Fraction(-355, 113).limit_denominator(10) == fractions.Fraction(-22, 7)\n"
             "    value = fractions.Fraction(6, -8) + fractions.Fraction(1, 4)\n"
             "    return isinstance(value, Rational), value.numerator, value.denominator\n"
         ),
@@ -895,6 +1279,18 @@ ACCEPTED = {
             "print(parent.provider is not None)\n"
         ),
         "main.py": "from helper import value\nprint(value())\n",
+    },
+    "optional_probe_with_dormant_call": {
+        "main.py": (
+            "from provider import ready\nfrom io import BytesIO\n"
+            "print(BytesIO(b'x').getbuffer().nbytes)\nprint(ready())\n"
+        ),
+        "provider.py": (
+            "def take(x: int) -> int: return x\ndef dormant(): return take()\n"
+            "try:\n    import sys as optional\n    detail = optional.maxsize\n"
+            "except ImportError:\n    detail = 0\n"
+            "def ready() -> int: return 42\n"
+        ),
     },
     "optional_stdlib_probe_in_dependency": {
         "main.py": "from pkg.probe import witness\nprint(witness.checked)\n",
@@ -964,7 +1360,14 @@ ACCEPTED = {
         "after.py": "print('after')\n",
     },
     "wildcard_native_namespaces": {
-        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\n",
+        "main.py": "import paths\nimport prepare\nimport codes\nimport computed\nimport collection_abcs\n",
+        "collection_abcs.py": (
+            "from collections.abc import *\nimport collections.abc as _abc\n"
+            "_names = [n for n in globals() if not n.startswith('_')]\n"
+            "assert _names == _abc.__all__\n"
+            "for _name in _names:\n    assert globals()[_name] is getattr(_abc, _name)\n"
+            "print(_names)\n"
+        ),
         "paths.py": (
             "import genericpath as _path\nfrom genericpath import *\n"
             "assert [n for n in globals() if not n.startswith('_')] == _path.__all__\n"
@@ -990,6 +1393,16 @@ ACCEPTED = {
             "_errno.__getattr__ = _prepare.resolve\n_errno.__all__ = ['_computed']\n"
         ),
         "computed.py": "from errno import *\nassert _computed == 19\n",
+    },
+    "wildcard_binding_release": {
+        "main.py": "from provider import *\nprint(_first, second)\n",
+        "provider.py": (
+            "import sys\napp = sys.modules['__main__']\n"
+            "class Key(str): pass\n"
+            "class Pending:\n    def __del__(self): print('second' in app.__dict__)\n"
+            "app.__dict__[Key('_first')] = Pending()\n"
+            "__all__ = ['_first', 'second']\n_first = 17\nsecond = 37\n"
+        ),
     },
     "wildcard_dict_subclass_all": {
         "main.py": (
@@ -1018,16 +1431,20 @@ ACCEPTED = {
         "broken.py": "earlier = 1\n__all__ = ['earlier', 'absent']\n",
         "invalid.py": "__all__ = [3]\n",
     },
+    "unused_glob_module": {
+        "main.py": "import glob\ndef weight(n: int) -> int: return n * 3 + 2\nprint(weight(13))\n",
+    },
     "type_checking_runtime_export": {
         "main.py": (
-            "import helper\nfrom helper import token as selected\n"
+            "import helper\nfrom helper import Layer, token as selected\n"
             "print(selected is helper.token, selected[0])\n"
+            "print(Layer is helper.Layer, Layer.__name__)\n"
         ),
         "helper.py": (
             "import typing as t\n"
             "def initialize():\n    print('initialized')\n    return [41]\n"
             "if t.TYPE_CHECKING:\n    from unavailable_at_runtime import token\n"
-            "else:\n    token = initialize()\n"
+            "else:\n    token = initialize()\n    class Layer(dict): pass\n"
         ),
     },
     "record_warnings": {
@@ -1069,6 +1486,21 @@ ACCEPTED = {
             "print(ref(stream)() is stream, cache.get(stream))\n"
         ),
     },
+    "struct_clearcache_evaluates_rejected_arguments": {
+        "main.py": (
+            "from struct import _clearcache\n"
+            "def touch(n: int) -> int:\n    print(n)\n    return n\n"
+            "try:\n    _clearcache(touch(1), key=touch(2))\n"
+            "except TypeError as exc:\n    print(str(exc))\n"
+        ),
+    },
+    "struct_clearcache_with_typed_call": {
+        "scores.py": "def take(value: int) -> int: return value + 1\n",
+        "main.py": (
+            "import struct\nfrom struct import _clearcache as clear\nfrom scores import take\n"
+            "assert struct._clearcache() is None and clear() is None\nprint(take(6))\n"
+        ),
+    },
     "imported_struct_timestamp": {
         "main.py": (
             "from wire import encode, decode\nimport struct\n"
@@ -1090,6 +1522,16 @@ ACCEPTED = {
             "magic = b'j2' + pickle.dumps(5, 2) + dumps(version, 2)\n"
             "decode = loads(b'i\\x03\\x00\\x00\\x00')\n"
             "encode = pickle.dumps is dumps\n"
+        ),
+    },
+    "marshal_shared_roundtrip": {
+        "main.py": (
+            "from marshal import dumps, loads\n"
+            "print(loads(dumps(42)))\n"
+            "shared = [loads(b'i*\\x00\\x00\\x00')]\n"
+            "value = (shared, shared)\n"
+            "restored = loads(dumps(value))\n"
+            "print(restored, restored[0] is restored[1])\n"
         ),
     },
     "namespace_package": {
@@ -1136,6 +1578,48 @@ ACCEPTED = {
         "orchard/leaf.py": "print('leaf init')\nmarker = 47\n",
         "unrelated.py": "invalid syntax for an unrelated source file!\n",
     },
+    "module_docstring_store_frame": {
+        "main.py": (
+            "import sys\n"
+            "import leaf\n"
+            "\n"
+            "class Key(str):\n"
+            "    __hash__ = str.__hash__\n"
+            "\n"
+            "    def __eq__(self, other):\n"
+            "        frame = sys._getframe(1)\n"
+            "        print(\"binding\", frame.f_globals[\"__name__\"], frame.f_lineno)\n"
+            "        return str.__eq__(self, other)\n"
+            "\n"
+            "del leaf.__doc__\n"
+            "leaf.__dict__[Key(\"__doc__\")] = 41\n"
+            "leaf.__spec__.loader.exec_module(leaf)\n"
+            "print(\"complete\")\n"
+        ),
+        "leaf.py": "# first line\n\n\"\"\"module\ndocumentation\"\"\"\nfrom __future__ import annotations\nprint(\"leaf\")\n",
+    },
+    "reload_source_plugin": {
+        "main.py": (
+            "from importlib import *\n"
+            "import importlib\n"
+            "assert importlib.__all__ == ['__import__', 'import_module', 'invalidate_caches', 'reload']\n"
+            "assert '__import__' in globals() and 'sys' not in globals()\n"
+            "from sys import modules\n"
+            "name = '.'.join(('plugins', 'report'))\n"
+            "plugin = import_module(name)\n"
+            "render = plugin.render\n"
+            "assert render('first') == ('first', 1)\n"
+            "assert import_module('.report', 'plugins') is plugin\n"
+            "assert reload(plugin) is plugin is modules[name]\n"
+            "assert plugin.render is not render\n"
+            "print(plugin.render('new'), render('saved'))\n"
+        ),
+        "plugins/__init__.py": "",
+        "plugins/report.py": (
+            "generation = globals().get('generation', 0) + 1\n"
+            "def render(label):\n    return label, generation\n"
+        ),
+    },
     "boxed_unittest_lazy_import": {
         "main.py": (
             "import sys\nimport unittest\n\n"
@@ -1156,6 +1640,15 @@ ACCEPTED = {
             "TestCase().assertTrue(True)\n"
         ),
     },
+    "project_typing_module": {
+        "main.py": "import typing\nprint(typing.value())\n",
+        "typing.py": "def value() -> int:\n    return 1\n",
+    },
+    "frozen_zipimport_shadows_project": {
+        "main.py": "import zipimport\nprint('imported')\n",
+        "zipimport.py": "raise RuntimeError('local zipimport executed')\n",
+    },
+    "frozen_shadow": {"main.py": "import __hello__\n", "__hello__.py": HELPER},
     "frozen_import_override": {
         "main.py": (
             "import _imp\nfrom _imp import _override_frozen_modules_for_tests as override\n"
@@ -1184,18 +1677,29 @@ ACCEPTED = {
     },
     "email_address_parsers": {
         "main.py": (
+            "import email\n"
+            "from email import message_from_bytes\n"
             "from email._header_value_parser import get_addr_spec, get_angle_addr as angle\n"
+            "from email import message_from_binary_file\n"
+            "from io import BytesIO\n"
             "import email._header_value_parser as parser\n"
             "assert angle is parser.get_angle_addr\n"
+            "assert email.message_from_bytes is message_from_bytes\n"
+            "print(email.message_from_bytes(b'Subject: hello\\r\\n\\r\\nbody')['Subject'])\n"
+            "print(message_from_bytes(b'\\r\\nraw\\xff').get_payload(decode=True))\n"
             "for parse, value in ((get_addr_spec, 'user@example.org SIZE=32'), (angle, '<>')):\n"
             "    address, rest = parse(value)\n"
             "    print(address.addr_spec, rest)\n"
+            "with BytesIO(b'Subject: hi\\r\\n folded\\r\\n\\r\\nraw\\xff') as fp:\n"
+            "    msg = message_from_binary_file(fp)\n"
+            "    print(msg['Subject'], msg.get_payload(decode=True), fp.read())\n"
         ),
     },
     "zip_source_spec": {
         "main.py": (
             "import sys\nimport zipimport\nfrom importlib import import_module, invalidate_caches\n"
             "from importlib.util import find_spec\nfrom importlib.resources import files\nfrom witness import seen\n"
+            "from pkgutil import get_importer, iter_modules\n"
             "sys.path.insert(0, __file__.rsplit('/', 1)[0] + '/zip-provider')\n"
             "def refresh():\n    assert sys.exception() is None\n    refresh_finder()\n"
             "for name in ('stored', 'deflated'):\n"
@@ -1205,10 +1709,15 @@ ACCEPTED = {
             "    assert package is import_module(name) and package.__spec__ is spec\n"
             "    assert spec.loader is package.__loader__ and type(spec.loader) is zipimport.zipimporter\n"
             "    assert spec.submodule_search_locations is package.__path__\n"
+            "    roots = [sys.path[0], sys.path[0]]\n"
+            "    assert list(iter_modules(roots)) == [(get_importer(roots[0]), name, True)]\n"
+            "    assert list(iter_modules(package.__path__, name + '.')) == [\n"
+            "        (get_importer(package.__path__[0]), name + '.leaf', False)]\n"
             "    from importlib.readers import ZipReader\n"
             "    reader = spec.loader.get_resource_reader(name)\n"
             "    assert isinstance(reader, ZipReader) and reader.prefix == name + '/'\n"
             "    leaf = import_module(name + '.leaf')\n"
+            "    assert leaf.word == 'café'\n"
             "    adjacent = leaf.__loader__.get_resource_reader(leaf.__name__)\n"
             "    assert adjacent.archive == reader.archive and adjacent.prefix == reader.prefix\n"
             "    root = files(leaf)\n"
@@ -1273,11 +1782,12 @@ ACCEPTED = {
         "helper.py": (
             "from importlib import abc\n"
             "import importlib.abc as protocols\n"
-            "from importlib.abc import FileLoader\n"
+            "from importlib.abc import FileLoader, SourceLoader\n"
             "from importlib._abc import Loader\n"
             "from importlib.util import Loader as UtilLoader\n"
             "def check():\n"
             "    assert abc is protocols and FileLoader is abc.FileLoader\n"
+            "    assert SourceLoader is protocols.SourceLoader\n"
             "    assert Loader is UtilLoader is abc.Loader\n"
             "    assert abc.MetaPathFinder().invalidate_caches() is None\n"
         ),
@@ -1339,6 +1849,59 @@ ACCEPTED = {
         "data/__init__.py": "",
         "data/message.txt": "hello\n",
         "data/directory-payload.txt": "directory payload\n",
+    },
+    "lazy_loader": {
+        "main.py": (FIXTURES.parent / "importlib_lazy_loader.py").read_text(),
+        "price_events.py": "calls = []\n",
+        "price_plugin.py": (
+            "import price_events\nprice_events.calls.append(__name__)\ncurrency = 'USD'\n"
+            "def quote(value): return value + 2\n"
+        ),
+    },
+    "builtin_flag_release": {
+        "main.py": (FIXTURES.parent / "builtin_flag_release.py").read_text(),
+    },
+    "frozen_importer": {
+        "main.py": (FIXTURES.parent / "frozen_importer.py").read_text(),
+        "frozen_price_plugin.py": "def quote(n): return n * 7\n",
+    },
+    "builtin_method_creation": {
+        "main.py": (FIXTURES.parent / "builtin_method_creation.py").read_text(),
+    },
+    "builtin_importer": {
+        "main.py": (FIXTURES.parent / "builtin_importer.py").read_text(),
+        "price_plugin.py": "executions = globals().get('executions', 0) + 1\ndef quote(n): return n * 7\n",
+    },
+    "source_loader_external_code": {
+        "main.py": (FIXTURES.parent / "source_loader_external_code.py").read_text(),
+        "local_body.py": "value = 41\n",
+    },
+    "source_loader_namespace_directory": {
+        "main.py": (
+            "import os\n"
+            "from types import ModuleType\n"
+            "from importlib.machinery import SourceFileLoader\n"
+            "import ns.child\n"
+            "try:\n"
+            "    SourceFileLoader('ns', ns.__path__[0]).get_code('ns')\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    raise AssertionError('file loader returned code for a namespace directory')\n"
+            "path = ns.__path__[0] + '/late.py'\n"
+            "with open(path, 'wb'):\n"
+            "    pass\n"
+            "try:\n"
+            "    loader = SourceFileLoader('late', path)\n"
+            "    assert loader.get_code('late').co_filename == path\n"
+            "    loader.exec_module(ModuleType('late'))\n"
+            "finally:\n"
+            "    os.unlink(path)\n"
+        ),
+        "ns/child.py": "",
+    },
+    "bundled_source_loader_data": {
+        "main.py": (FIXTURES.parent / "bundled_source_loader_data.py").read_text(),
     },
     "source_loader_compile_override": {
         "main.py": (
@@ -1430,6 +1993,7 @@ ACCEPTED = {
     },
     "registered_source_spec": {
         "main.py": (
+            "import importlib.util\n"
             "from importlib.util import find_spec\nfrom importlib import import_module\n"
             "first = find_spec('orchard.leaf')\nsecond = find_spec('.leaf', 'orchard')\n"
             "print(first == second, first is second, first.parent, first.loader.is_package(first.name))\n"
@@ -1438,6 +2002,19 @@ ACCEPTED = {
             "print(package.__path__ is package.__spec__.submodule_search_locations, "
             "leaf.__file__ == first.origin, find_spec('orchard.missing') is None)\n"
             "leaf.__spec__ = 'app spec'\nprint(find_spec('.leaf', 'orchard'))\n"
+            "blocked = RuntimeError('parent import')\n"
+            "def deny_parent(name, /, *, fromlist):\n"
+            "    assert name == 'orchard' and fromlist == ['__path__']\n"
+            "    raise blocked\n"
+            "importlib.util.__import__ = deny_parent\n"
+            "assert find_spec('.leaf', 'orchard') is leaf.__spec__\n"
+            "try:\n"
+            "    find_spec('.missing', 'orchard')\n"
+            "except RuntimeError as error:\n"
+            "    assert error is blocked\n"
+            "else:\n"
+            "    raise AssertionError('find_spec skipped the parent import')\n"
+            "del importlib.util.__import__\n"
         ),
         "orchard/__init__.py": "print('parent init')\n",
         "orchard/leaf.py": "print('leaf init')\nmarker = __name__\n",
@@ -1498,6 +2075,28 @@ ACCEPTED = {
         "pkg/parent.py": "def increment(n: int) -> int:\n    return n + 1\nfrom . import child\nobserved = child.result\n",
         "pkg/child.py": "from .parent import increment\nresult = increment(41)\n",
     },
+    "published_function_in_cycle": {
+        "main.py": "from pkg import use\nprint(use(15))\n",
+        "pkg/__init__.py": "from .origin import deliver as selected\nfrom .child import use\n",
+        "pkg/child.py": "from . import selected as held\ndef use(n: int) -> int: return held(n)\n",
+        "pkg/origin.py": "def deliver(n: int) -> int: return n + 2\n",
+    },
+    "published_class_in_cycle": {
+        "main.py": "import pkg\n",
+        "pkg/__init__.py": "from .api import Item as Published\nfrom .api import Item as Published, child\n",
+        "pkg/api/__init__.py": "from .origin import Item\n",
+        "pkg/api/origin.py": "class Item:\n    def read(self) -> int:\n        return 7\n",
+        "pkg/api/child.py": "from pkg import Published\nfrom .origin import Item\nprint(Published is Item, Published().read())\n",
+    },
+    "child_export_shadows_module": {
+        "package/__init__.py": "from .token import number as token\n",
+        "package/token.py": "number = 42\n",
+        "main.py": (
+            "import package\nfrom package import token\nimport package.token as alias\n"
+            "from package.token import number as direct\n"
+            "print(package.token)\nprint(token)\nprint(alias)\nprint(direct)\n"
+        ),
+    },
     "partial_child_shared_storage": {
         "main.py": "import pkg.parent\n",
         "pkg/__init__.py": "",
@@ -1524,6 +2123,12 @@ ACCEPTED = {
     "library_effect": {"main.py": IMPORT, "helper.py": "print(7)\n" + HELPER},
     "library_state": {"main.py": "from helper import f, values\nprint(f(values[0]))\n", "helper.py": "values = [1]\n" + HELPER},
     "package_effect": {"main.py": "import package\n", "package/__init__.py": "print(1)\n"},
+    "module_expression_before_import": {
+        "main.py": "from provider import seen\nprint(seen)\n",
+        "state.py": "values: list[int] = []\n",
+        "provider.py": "from state import values\nvalues.append(7)\nfrom observer import seen\n",
+        "observer.py": "from state import values\nseen = values[0]\n",
+    },
     "active_library_else": {"main.py": IMPORT, "helper.py": HELPER + 'if __name__ == "__main__":\n    print(1)\nelse:\n    print(2)\n'},
     "module_literal_before_import": {
         "main.py": ('from parentlib import labels\nfrom visitorlib import shared\n'
@@ -1532,6 +2137,18 @@ ACCEPTED = {
                          'def expose() -> list[str]:\n    return labels\nimport visitorlib\n'),
         "visitorlib.py": ('from parentlib import expose\nshared = expose()\n'
                           'shared.append("visited")\n'),
+    },
+    "ordered_package_fromlist": {
+        "main.py": "import outer.pkg\nprint(outer.pkg.value)\n",
+        "outer/__init__.py": "",
+        "outer/pkg/__init__.py": (
+            "def prefix() -> int:\n    print('package prefix')\n    return 1\n"
+            "token = prefix()\nfrom .child import value\nprint('package suffix')\n"
+        ),
+        "outer/pkg/child.py": (
+            "def __getattr__(name: str) -> str:\n    print(name)\n    raise AttributeError(name)\n"
+            "print('child')\nvalue = 7\n"
+        ),
     },
     "ordered_library_effects": {
         "main.py": "from pkg.parent import value\nprint(value)\n", "pkg/__init__.py": "",
@@ -1567,6 +2184,78 @@ def write_files(root: Path, files: dict[str, str]) -> None:
 
 def require_success(result: subprocess.CompletedProcess[str]) -> None:
     assert result.returncode == 0, (result.args, result.stdout, result.stderr)
+
+
+def check_saved_package_files(args, temporary, build_flags):
+    # A FILE operand identifies the entry even when the build/run cwd offers a namesake.
+    module = "saved_entry.tools.driver"
+    entry_path = "saved_entry/tools/driver.py"
+    shadow = temporary / "shadow"
+    write_files(shadow, {
+        "saved_entry/__init__.py": "", "saved_entry/tools/__init__.py": "",
+        entry_path: 'print("cwd entry")\n',
+        "saved_entry/tools/leaf.py": 'value = "cwd sibling"\n',
+    })
+    shadowed = run([args.python, "-E", "-B", "-m", module], shadow)
+    require_success(shadowed)
+    assert shadowed.stdout == "cwd entry\n"
+    for regular, level in ((False, args.opt_levels[0]), (True, args.opt_levels[-1])):
+        root = temporary / ("regular-entry" if regular else "namespace-entry")
+        files = {
+            entry_path: (
+                "import sys\nfrom .leaf import value\nfrom ..outer import marker\n"
+                "assert __name__ == '__main__' and globals() is sys.modules['__main__'].__dict__\n"
+                "assert __spec__.name == 'saved_entry.tools.driver' and __spec__.name not in sys.modules\n"
+                "assert __package__ == __spec__.parent == 'saved_entry.tools'\n"
+                "assert __loader__ is __spec__.loader and __spec__.has_location\n"
+                "assert __loader__.get_code(__spec__.name).co_filename == __file__ == __spec__.origin\n"
+                "assert sys.argv[0] == sys.argv[1]\n"
+                "print(value, marker)\n"
+                "if len(sys.argv) == 3:\n"
+                "    try: __import__(sys.argv[2])\n"
+                "    except ModuleNotFoundError as e: print('missing', e.name)\n"
+                "    else: print('present')\n"
+            ),
+            "saved_entry/tools/leaf.py": 'value = "nested"\n',
+            "saved_entry/outer.py": 'marker = "outer"\n',
+            "saved_entry/tools/unreferenced.py": 'value = 41\n',
+        }
+        if regular:
+            files["sitecustomize.py"] = (
+                "import sys\nfrom types import ModuleType\n"
+                "held = ModuleType('__main__')\nheld.token = object()\nsys.modules['__main__'] = held\n"
+            )
+            files["saved_entry/__init__.py"] = (
+                "import sys\nfrom sitecustomize import held\n"
+                "assert held is sys.modules['__main__'] and not hasattr(held, '__file__')\n"
+                "held.parent_token = held.token\nprint('parent')\n"
+            )
+            files["saved_entry/tools/__init__.py"] = 'print("child")\n'
+            files[entry_path] += (
+                "import builtins\nfrom sitecustomize import held\n"
+                "assert globals() is held.__dict__ and parent_token is held.token\n"
+                "assert __builtins__ is builtins.__dict__\n"
+            )
+        write_files(root, files)
+        entry = str(root / entry_path)
+        baseline = run([args.python, "-E", "-B", "-m", module, entry], root)
+        require_success(baseline)
+        assert baseline.stdout == ("parent\nchild\n" if regular else "") + "nested outer\n"
+        product = root.parent / (root.name + "-application")
+        command = [str(args.compiler.resolve()), "build", entry, "--runtime", str(args.runtime.resolve()),
+                   "--opt-level", str(level), "--clang", args.clang, "-o", str(product), *build_flags]
+        # Infer the enclosing regular package. Namespace portions need their declared root.
+        if not regular:
+            command += ["--module-root", str(root)]
+        if args.sanitize:
+            command.append("--sanitize")
+        require_success(run(command, shadow, timeout=300))
+        executable = str(product.rename(shadow / product.name))
+        root.rename(root.with_suffix(".withdrawn"))
+        unused = "saved_entry.tools.unreferenced"
+        saved = run([executable, executable, unused], shadow)
+        require_success(saved)
+        assert saved.stdout == baseline.stdout + "missing " + unused + "\n" and saved.stderr == "", saved
 
 
 def main() -> None:
@@ -1612,8 +2301,21 @@ def main() -> None:
                 assert result.stdout == baseline.stdout, (entry, level, result.stdout, baseline.stdout)
                 checks += 1
 
+        check_saved_package_files(args, temporary, build_flags)
+        cached = temporary / "package-cache"
+        write_files(cached, {
+            "pkg/__init__.py": "import sys\nsys.modules['opcode'] = sys\n",
+            "pkg/main.py": "import __main__\nimport opcode\nprint(opcode.__name__)\n",
+            "__main__.py": "import opcode\n",
+            "opcode.py": "def take(x: int) -> int: return x\ndef text(): return 'wrong'\nprint(take(text()))\n",
+        })
+        require_success(run([compiler, "check", str(cached / "pkg/main.py"), "--module-root", str(cached)], temporary))
+        checks += 3
+
         build_timeout = 120 if args.lto_linker and not args.sanitize else 60
         for name, files in ACCEPTED.items():
+            if name == "frozen_zipimport_shadows_project" and os.name != "posix":
+                continue
             if name == "boxed_stat_shadow" and sys.platform not in ("linux", "darwin"):
                 continue
             case = temporary / name
@@ -1638,12 +2340,12 @@ def main() -> None:
                 for pkg, method in [("stored", ZIP_STORED), ("deflated", ZIP_DEFLATED)]:
                     with ZipFile(case / f"{pkg}.zip", "w", compression=method) as archive:
                         archive.writestr(f"{pkg}/__init__.py", "# coding: (ordinary comment)\nfrom witness import seen\nseen.append(__name__)\n")
-                        archive.writestr(f"{pkg}/leaf.py", "")
+                        archive.writestr(f"{pkg}/leaf.py", b"# coding: latin-1\r\nword = 'caf\xe9'\r\n")
                         archive.writestr(f"{pkg}/message.txt", b"hello")
             baseline = run([args.python, "-E", "-m", "main"], case)
             require_success(baseline)
             if name in {"codeop_module", "codeop_named_helper"}:
-                # Run these checked modules with the late-import executable below.
+                # Run these modules through the registered imports below.
                 require_success(run([compiler, "check", str(case / "main.py")], temporary))
                 checks += 1
                 continue
@@ -1656,15 +2358,19 @@ def main() -> None:
                     command.append("--sanitize")
                 # Optimizing these bundled-module integration cases can take several minutes.
                 slow_optimized = name in {
-                    "boxed_unittest_lazy_import",
-                    "email_address_parsers", "filesystem_resources", "fractions_indirect",
-                    "lzma_formats_and_error",
+                    "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data", "frozen_importer",
+                    "builtin_method_creation", "email_address_parsers", "filesystem_resources", "fractions_indirect",
+                    "function_type_for_selected_callback", "lzma_formats_and_error",
                     "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
-                    "warn_named_helper", "zip_source_spec",
+                    "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
+                    "warn_named_helper",
+                    "zip_source_spec",
+                    "builtin_flag_release",
                 }
                 timeout = 300 if slow_optimized and level > 0 else build_timeout
                 require_success(run(command, temporary, timeout=timeout))
-                result = run([str(executable)], temporary)
+                arguments = ["41"] if name == "source_loader_external_code" else []
+                result = run([str(executable), *arguments], temporary)
                 require_success(result)
                 assert result.stdout == baseline.stdout, (name, level, result.stdout, baseline.stdout)
                 if name == "entry_module_attribute_guard":
@@ -1673,33 +2379,38 @@ def main() -> None:
                     assert denied.returncode == expected.returncode == 1
                     assert denied.stdout == expected.stdout == "feature loaded\n"
                     assert denied.stderr.splitlines()[-1] == expected.stderr.splitlines()[-1]
+                executable.unlink()
                 checks += 1
 
         (temporary / "members.gz").write_bytes(gzip.compress(b"first", mtime=0) + gzip.compress(b"second", mtime=0))
-        late_import = temporary / "late_import.py"
-        late_import.write_text("import importlib, sys\nimportlib.import_module(sys.argv[1]).run()\n")
         for level in args.opt_levels:
-            executable = temporary / f"late-import-{level}"
-            command = [compiler, "build", str(late_import), "-o", str(executable),
-                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
-                       *build_flags, "--runtime-imports", "--no-cache"]
-            if args.sanitize:
-                command.append("--sanitize")
-            require_success(run(command, temporary, timeout=build_timeout))
-            # Load the probe from disk so the executable cannot resolve its imports at build time.
-            probe = temporary / f"late_import_probe_{level}.py"
-            probe.write_text(
-                "import builtins, sys\n"
+            project = temporary / f"provider-imports-O{level}"
+            project.mkdir()
+            for name in ("codeop_module", "codeop_named_helper"):
+                (project / f"{name}.py").write_bytes((temporary / name / "main.py").read_bytes())
+            (project / "helper.py").write_bytes((temporary / "codeop_named_helper" / "helper.py").read_bytes())
+            interactive = "boxed_interactive_interpreter"
+            type_aliases = "boxed_type_alias_values"
+            for fixture in (interactive, type_aliases):
+                shutil.copyfile(FIXTURES.parent / f"{fixture}.py", project / f"{fixture}.py")
+            entry = project / "main.py"
+            # Select a known provider at execution time. All Python sources exist before the build.
+            providers = ("opcode", "_opcode_metadata", "code", "codeop", "codeop_module",
+                         "codeop_named_helper", interactive, type_aliases, "gzip")
+            entry.write_text(
+                "import importlib, sys\n"
                 "def run():\n"
-                "    sys.path.insert(0, sys.argv[4])\n"
-                "    module = builtins.__import__(sys.argv[2])\n"
-                "    if sys.argv[3] == 'flags':\n"
+                + "".join(f"    {'if' if i == 0 else 'elif'} sys.argv[1] == {name!r}:\n"
+                          f"        module = importlib.import_module({name!r})\n"
+                          for i, name in enumerate(providers))
+                + "    else:\n        importlib.import_module('no_such_console_guard_module')\n"
+                "    if sys.argv[2] == 'flags':\n"
                 "        print(module.CommandCompiler().compiler.flags)\n"
-                "    elif sys.argv[3] == 'lookup':\n"
+                "    elif sys.argv[2] == 'lookup':\n"
                 "        print(module.opmap['POP_TOP'])\n"
-                "    elif sys.argv[3] == 'current':\n"
+                "    elif sys.argv[2] == 'current':\n"
                 "        module.current()\n"
-                "    elif sys.argv[3] == 'write':\n"
+                "    elif sys.argv[2] == 'write':\n"
                 "        import zlib\n"
                 "        member = module.compress(memoryview(b'payload'), compresslevel=1, mtime=42)\n"
                 "        assert member[4:10] == bytes((42, 0, 0, 0, 4, 255))\n"
@@ -1708,7 +2419,7 @@ def main() -> None:
                 "            print(stream.write(b'payload'))\n"
                 "            assert stream.seekable() and stream.tell() == 7\n"
                 "            stream.flush()\n"
-                "    elif sys.argv[3] == 'read':\n"
+                "    elif sys.argv[2] == 'read':\n"
                 "        with module.open('members.gz', 'rb') as stream:\n"
                 "            print(stream.read1(65536), stream.read(1), stream.tell(), stream.read())\n"
                 "        print(stream.closed)\n"
@@ -1752,17 +2463,29 @@ def main() -> None:
                 "                pass\n"
                 "            else:\n"
                 "                raise AssertionError('unrepresentable line size accepted')\n"
+                "\nrun()\n"
             )
-            for module, operation, path, expected in [
-                ("opcode", "lookup", temporary, "31\n"), ("_opcode_metadata", "lookup", temporary, "31\n"),
-                ("code", "flags", temporary, "16896\n"), ("codeop", "flags", temporary, "16896\n"),
-                ("main", "import", temporary / "codeop_module", ""),
-                ("main", "import", temporary / "codeop_named_helper", "16896\n"),
-                ("boxed_interactive_interpreter", "current", FIXTURES.parent, ""),
-                ("gzip", "write", temporary, "7\n"),
-                ("gzip", "read", temporary, "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
+            executable = temporary / f"provider-imports-{level}"
+            command = [compiler, "build", str(entry), "-o", str(executable),
+                       "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
+                       *build_flags, "--no-cache"]
+            if args.sanitize:
+                command.append("--sanitize")
+            require_success(run(command, temporary, timeout=build_timeout))
+            # The saved image must initialize the application modules from its registrations.
+            for source in project.glob("*.py"):
+                source.unlink()
+            for module, operation, expected in [
+                ("opcode", "lookup", "31\n"), ("_opcode_metadata", "lookup", "31\n"),
+                ("code", "flags", "16896\n"), ("codeop", "flags", "16896\n"),
+                ("codeop_module", "import", ""),
+                ("codeop_named_helper", "import", "16896\n"),
+                (interactive, "current", ""),
+                (type_aliases, "current", "checked lazy aliases\n"),
+                ("gzip", "write", "7\n"),
+                ("gzip", "read", "b'first' b's' 6 b'econd'\nTrue\nb'' b'fir' b'stsecond' b''\n"),
             ]:
-                result = run([str(executable), probe.stem, module, operation, str(path)], temporary)
+                result = run([str(executable), module, operation], temporary)
                 require_success(result)
                 assert result.stdout == expected, (module, level, result.stdout)
                 checks += 1
@@ -1770,23 +2493,22 @@ def main() -> None:
             assert gzip.decompress((temporary / "written.gz").read_bytes()) == b"payload"
 
             absent = "no_such_console_guard_module"
-            result = run([str(executable), probe.stem, absent, "flags", str(temporary)], temporary)
+            result = run([str(executable), absent, "flags"], temporary)
             assert result.returncode == 1 and f"ModuleNotFoundError: No module named '{absent}'" in result.stderr, result
             checks += 1
 
         # These are build capabilities: CPython's flags depend on its build; Imre emits native code.
         for level in args.opt_levels:
-            for fixture, route, output in [
-                ("opcode_flags", [], "0\n0\nno bytecode specialization\n"),
-                ("opcode_stack_effect", [], "-1\n"),
-                ("opcode_module", [], "opcode module OK\n"),
-                ("opcode_operations", [], "opcode operations OK\n"),
-                ("opcode_operations", ["--runtime-imports"], "opcode operations OK\n"),
+            for fixture, output in [
+                ("opcode_flags", "0\n0\nno bytecode specialization\n"),
+                ("opcode_stack_effect", "-1\n"),
+                ("opcode_module", "opcode module OK\n"),
+                ("opcode_operations", "opcode operations OK\n"),
             ]:
                 executable = temporary / f"{fixture}-{level}"
                 command = [compiler, "build", str(root / f"{fixture}.py"), "-o", str(executable),
                            "--runtime", runtime, "--clang", args.clang, "--opt-level", str(level),
-                           *build_flags, *route]
+                           *build_flags]
                 if args.sanitize:
                     command.append("--sanitize")
                 require_success(run(command, temporary))
@@ -1822,7 +2544,7 @@ def main() -> None:
         if sys.platform in ("linux", "darwin"):
             constants = ["SO_ERROR"]
             if sys.platform == "linux":
-                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC"])
+                constants.extend(["SOCK_NONBLOCK", "SOCK_CLOEXEC", "TCP_QUICKACK"])
             for module in ("socket", "_socket"):
                 case = temporary / f"{module}_constants_keep_typed_calls"
                 write_files(case, {"main.py": (
@@ -1845,6 +2567,32 @@ def main() -> None:
             assert result.returncode != 0 and expected in result.stderr, (name, result.stdout, result.stderr)
             checks += 1
 
+        # A provider can return to the application's check without acquiring its signature policy.
+        app = temporary / "provider-owner"
+        provider = temporary / "provider-search"
+        call = (
+            "def take(value: int) -> int: return value\n"
+            "def text(): return 'wrong'\n"
+            "print(take(text()))\n"
+        )
+        for entry, helper, diagnostic in (
+            ("import helper\n" + call + "import opcode\n", "def marker(): pass\n", "main.py:4:12: Imre: expected int, got str"),
+            ("import helper\nimport opcode\n", call, None),
+        ):
+            write_files(app, {"main.py": entry})
+            write_files(provider, {"helper.py": helper})
+            result = run([compiler, "check", str(app / "main.py"), "--extension-path", str(provider)], temporary)
+            if diagnostic is None:
+                require_success(result)
+            else:
+                assert result.returncode != 0 and diagnostic in result.stderr, result.stderr
+            checks += 1
+
+        write_files(app, {"main.py": "import _imre_decimal_ratio\n" + call + "import opcode\n"})
+        result = run([compiler, "check", str(app / "main.py")], temporary)
+        assert result.returncode != 0 and "main.py:4:12: Imre: expected int, got str" in result.stderr, result.stderr
+        checks += 1
+
         # Check even uncalled functions when a different function requires boxed operations.
         mock_setup = "from unittest.mock import patch\nclass Owner:\n    value = 0\n"
         invalid = "def uncalled() -> int:\n    return f('wrong')\n"
@@ -1853,8 +2601,15 @@ def main() -> None:
             (mock_setup, "def helper() -> object:\n    return patch.object(Owner, 'value', 1)\n"),
             ("from math import atan2\n", "def helper() -> float:\n    return atan2(1.0, -1.0)\n"),
             ("from math import exp\n", "def helper() -> float:\n    return exp(1.0)\n"),
+            ("from math import frexp\n", "def helper() -> float:\n    return frexp(6.0)[0]\n"),
+            ("from math import fsum\n", "def helper() -> float:\n    return fsum([1.0, 2.0])\n"),
             ("from math import isfinite\n", "def helper() -> bool:\n    return isfinite(1.0)\n"),
+            ("from math import sin\n", "def helper() -> float:\n    return sin(1.0)\n"),
             ("from math import sqrt\n", "def helper() -> float:\n    return sqrt(4.0)\n"),
+            ("from math import tan\n", "def helper() -> float:\n    return tan(1.0)\n"),
+            ("from random import uniform\n", "def helper() -> float:\n    return uniform(-1.0, 1.0)\n"),
+            ("from random import expovariate\n", "def helper() -> float:\n    return expovariate(0.5)\n"),
+            ("from sys import float_repr_style\n", "def helper() -> str:\n    return float_repr_style\n"),
             ("from socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
             ("from _socket import htons\n", "def helper() -> int:\n    return htons(4660)\n"),
         ):
@@ -1883,7 +2638,10 @@ def main() -> None:
             for flags in ([], ["--reachable-only"]):
                 result = run(command + flags, temporary)
                 assert result.returncode == 1 and diagnostic in result.stderr, (name, result)
-            require_success(run(command + ["--runtime-imports"], temporary))
+            # A consistent return type still admits the imported AST operation.
+            corrected = function.replace("return flag\n", "return int(flag)\n").replace("return 'one'\n", "return 0\n")
+            (case / "helper.py").write_text("import ast\ntree = ast.parse('1')\n" + corrected + "choose(True)\n")
+            require_success(run(command, temporary))
             checks += 3
 
         caller = "def gzip_caller() -> bytes: return compress(b'payload')\n"

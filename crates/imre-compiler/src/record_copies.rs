@@ -74,17 +74,18 @@ fn copy(function: &Function, module: &Module) -> Option<Overrides> {
         let Statement::SetField(base, field, parameter) = statement else {
             return None;
         };
-        if slot(base) != Some(init.params[0]) || *field != fields.len() {
+        let field = field.slot();
+        if slot(base) != Some(init.params[0]) || field != fields.len() {
             return None;
         }
         let param = slot(parameter)?;
         let pos = init.params[1..].iter().position(|p| *p == param)?;
         let arg = &args.values[args.order[pos]];
-        if arg.ty != module.class_fields[class][*field] {
+        if arg.ty != module.class_fields[class][field] {
             return None;
         }
         fields.push(match &arg.kind {
-            ExprKind::Field(source, i) if slot(source) == Some(root) && i == field => None,
+            ExprKind::Field(source, i) if slot(source) == Some(root) && *i == field => None,
             _ if constant(arg) => Some(arg.clone()),
             ExprKind::Local(id) => Some(updates.iter().rev().find_map(|stmt| match stmt {
                 Statement::Assign(s, value) if s == id => Some(value.clone()),
@@ -345,7 +346,6 @@ impl Copies<'_> {
             Statement::Assign(_, value)
             | Statement::Return(value)
             | Statement::Expr(value)
-            | Statement::Assert(value)
             | Statement::If(value, _, _) => value,
             _ => return,
         };
@@ -385,6 +385,11 @@ impl Copies<'_> {
 
 /// Return each newly generated reader's original function for code-unit ownership.
 pub(crate) fn scalarize(module: &mut Module) -> Vec<usize> {
+    // A scalarized copy skips its Python method and constructor. Keep both calls
+    // when entering their frames can raise at the recursion limit.
+    if !module.source_frames.is_empty() {
+        return Vec::new();
+    }
     let methods: Vec<_> = module.functions.iter().map(|f| copy(f, module)).collect();
     if methods.iter().all(Option::is_none) {
         return Vec::new();
@@ -502,5 +507,14 @@ mod tests {
             2,
             "the list escape and two-use local retain their copies"
         );
+
+        let tracked = format!(
+            "{source}\ndef down(n: int) -> int:\n    return down(n - 1) if n else 1\nprint(down(2))\n"
+        );
+        let graph = crate::modules::SourceGraph::single(&tracked).unwrap();
+        let mut module = crate::frontend::lower(&graph).unwrap();
+        assert!(!module.source_frames.is_empty());
+        assert!(scalarize(&mut module).is_empty());
+        crate::verify::module(&module).unwrap();
     }
 }

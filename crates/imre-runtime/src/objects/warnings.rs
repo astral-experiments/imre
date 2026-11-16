@@ -12,6 +12,8 @@ use std::sync::{LazyLock, Mutex};
 enum Action {
     Ignore,
     Always,
+    /// Keep both accepted spellings distinct when deduplicating filter tuples.
+    All,
     Error,
     Default,
     Module,
@@ -22,7 +24,8 @@ impl Action {
     fn parse(value: &str) -> Option<Self> {
         Some(match value {
             "ignore" => Self::Ignore,
-            "always" | "all" => Self::Always,
+            "always" => Self::Always,
+            "all" => Self::All,
             "error" => Self::Error,
             "default" => Self::Default,
             "module" => Self::Module,
@@ -35,7 +38,7 @@ impl Action {
 #[derive(Clone)]
 struct Pattern {
     original: String,
-    regex: Regex,
+    regex: Option<Regex>,
 }
 
 impl Pattern {
@@ -54,14 +57,48 @@ impl Pattern {
             })?;
         Ok(Some(Self {
             original: original.into(),
-            regex,
+            regex: Some(regex),
         }))
+    }
+
+    /// A startup option stores a literal message prefix or an exact module name.
+    fn literal(original: &str) -> Option<Self> {
+        (!original.is_empty()).then(|| Self {
+            original: original.into(),
+            regex: None,
+        })
+    }
+
+    fn matches(&self, text: &str, message_prefix: bool) -> bool {
+        if let Some(regex) = &self.regex {
+            return regex.is_match(Input::new(text).anchored(Anchored::Yes));
+        }
+        if !message_prefix {
+            return self.original == text;
+        }
+        let mut chars = text.chars();
+        self.original.chars().all(|expected| {
+            chars.next().is_some_and(|actual| {
+                if expected.is_ascii() && actual.is_ascii() {
+                    expected.eq_ignore_ascii_case(&actual)
+                } else {
+                    expected == actual || literal_fold(expected) == literal_fold(actual)
+                }
+            })
+        })
+    }
+}
+
+/// Unicode IGNORECASE also groups dotted and dotless I with ASCII i.
+fn literal_fold(ch: char) -> u32 {
+    match ch {
+        'İ' | 'ı' => u32::from('i'),
+        _ => unicode_case_mapping::case_folded(ch).map_or(u32::from(ch), |n| n.get()),
     }
 }
 
 #[derive(Clone)]
 struct Rule {
-    name: String,
     action: Action,
     category: u32,
     message: Option<Pattern>,
@@ -75,17 +112,17 @@ impl Rule {
             pattern.as_ref().map(|p| p.original.as_str())
         }
         self.category == other.category
-            && self.name == other.name
+            && self.action == other.action
             && self.lineno == other.lineno
             && source(&self.message) == source(&other.message)
             && source(&self.module) == source(&other.module)
     }
 
     fn matches(&self, text: &str, category: u32, module: &str, lineno: isize) -> Option<bool> {
-        fn matches(pattern: &Option<Pattern>, text: &str) -> bool {
+        fn matches(pattern: &Option<Pattern>, text: &str, message_prefix: bool) -> bool {
             pattern
                 .as_ref()
-                .is_none_or(|p| p.regex.is_match(Input::new(text).anchored(Anchored::Yes)))
+                .is_none_or(|p| p.matches(text, message_prefix))
         }
         // CPython converts every visited rule's line to Py_ssize_t during
         // emission, even when that rule's category or regex would not match.
@@ -93,8 +130,8 @@ impl Rule {
         Some(
             (self.category == 0 || self.category == category)
                 && (line == 0 || line == lineno)
-                && matches(&self.message, text)
-                && matches(&self.module, module),
+                && matches(&self.message, text, true)
+                && matches(&self.module, module, false),
         )
     }
 }
@@ -115,18 +152,13 @@ struct Filters {
 // them, and appending a rule cannot supersede an earlier match.
 static FILTERS: LazyLock<Mutex<Filters>> = LazyLock::new(|| {
     let mut rules = vec![Rule {
-        name: "default".into(),
         action: Action::Default,
         category: 4,
         message: None,
-        module: Some(Pattern {
-            original: "__main__".into(),
-            regex: Regex::new(r"__main__\z").expect("fixed main module name"),
-        }),
+        module: Pattern::literal("__main__"),
         lineno: BigInt::ZERO,
     }];
     rules.extend([4, 5, 8, 1].map(|category| Rule {
-        name: "ignore".into(),
         action: Action::Ignore,
         category,
         message: None,
@@ -183,7 +215,6 @@ pub unsafe extern "C" fn imre_warning_filter(
                 return Err(Error::new(Kind::ValueError, "lineno must be an int >= 0"));
             }
             let rule = Rule {
-                name: name.into(),
                 action,
                 category,
                 lineno: lineno.into_owned(),
@@ -216,6 +247,7 @@ fn category_number(name: &str) -> Option<u32> {
 }
 
 /// Install a -W option. Messages and module names here are literal.
+#[cold]
 pub(crate) fn startup_filter(option: &str) -> Result<(), String> {
     let repr = |s: &str| exceptions::string_repr(s).as_str().to_owned();
     let mut fields = option.split(':').map(str::trim);
@@ -244,17 +276,10 @@ pub(crate) fn startup_filter(option: &str) -> Result<(), String> {
             .filter(|n| !n.is_negative())
             .ok_or_else(|| format!("invalid lineno {}", repr(line)))?
     };
-    let message = Pattern::compile(message, &regex_syntax::escape(message), true)
-        .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
-    let module = Pattern::compile(
-        module,
-        &format!(r"{}\z", regex_syntax::escape(module)),
-        false,
-    )
-    .map_err(|_| "warning filter pattern exceeds native regex limits".to_owned())?;
+    let message = Pattern::literal(message);
+    let module = Pattern::literal(module);
     insert_rule(
         Rule {
-            name: action.into(),
             action: Action::parse(action).unwrap(),
             category,
             message,
@@ -402,5 +427,25 @@ pub(super) fn internal_warning(
             Ok(())
         }
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pattern;
+
+    #[test]
+    fn startup_message_and_module_patterns_follow_python_literal_matching() {
+        let message = Pattern::literal("i.σ").unwrap();
+        assert!(message.matches("İ.ς suffix", true));
+        assert!(message.matches("ı.Σ", true));
+        assert!(!message.matches("iXσ", true));
+        assert!(!message.matches("i.", true));
+
+        let module = Pattern::literal("pkg.[x]").unwrap();
+        assert!(module.matches("pkg.[x]", false));
+        assert!(!module.matches("pkg.[x].child", false));
+        assert!(!module.matches("pkg.x", false));
+        assert!(!module.matches("PKG.[x]", false));
     }
 }

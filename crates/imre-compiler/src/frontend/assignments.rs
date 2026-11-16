@@ -3,261 +3,79 @@
 
 use super::*;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
-use ruff_python_ast::visitor::{Visitor, walk_comprehension, walk_expr};
 
-/// Previously allocated slots keep their facts throughout an expression unless
-/// the expression can write the name or use it in a narrowing test. Names
-/// introduced by a walrus may acquire a slot while checking the first arm.
+/// The assignment and narrowing facts at a checked control-flow edge.
 #[derive(Clone)]
-pub(super) struct ConditionalFacts<'a> {
-    writes: Vec<(String, bool)>,
-    narrowed: Vec<(&'a str, Option<Type>)>,
+pub(super) struct Flow {
+    assigned: Assigned,
+    narrowed: Narrowed,
 }
 
-impl<'a> ConditionalFacts<'a> {
-    pub(super) fn capture(checker: &Checker<'_>, value: &'a ast::ExprIf) -> Self {
-        Self::for_expressions(
-            checker,
-            [&*value.test, &*value.body, &*value.orelse],
-            [&*value.test],
-        )
-    }
-
-    fn for_expressions(
-        checker: &Checker<'_>,
-        expressions: impl IntoIterator<Item = &'a ast::Expr>,
-        tests: impl IntoIterator<Item = &'a ast::Expr>,
-    ) -> Self {
-        struct Names<'a>(HashSet<&'a str>);
-        impl<'a> Names<'a> {
-            /// Names that apply_facts can narrow when testing this expression.
-            fn predicate(&mut self, test: &'a ast::Expr) {
-                match test {
-                    ast::Expr::Name(name) => {
-                        self.0.insert(name.id.as_str());
-                    }
-                    ast::Expr::Named(node) => self.visit_expr(&node.target),
-                    ast::Expr::UnaryOp(node) => self.predicate(&node.operand),
-                    ast::Expr::BoolOp(node) => {
-                        for value in &node.values {
-                            self.predicate(value);
-                        }
-                    }
-                    ast::Expr::Call(node) if matches!(&*node.func, ast::Expr::Name(name) if name.id == "bool" || name.id == "isinstance") => {
-                        if let Some(first) = node.arguments.args.first() {
-                            self.predicate(first);
-                        }
-                    }
-                    ast::Expr::Compare(node) => {
-                        for value in &node.operands {
-                            if matches!(value, ast::Expr::Name(_) | ast::Expr::Named(_)) {
-                                self.predicate(value);
-                            } else if let ast::Expr::Call(call) = value
-                                && matches!(&*call.func, ast::Expr::Name(name) if name.id == "type")
-                                && let [ast::Expr::Name(name)] = call.arguments.args.as_ref()
-                            {
-                                // An exact type comparison can narrow the argument's slot.
-                                self.0.insert(name.id.as_str());
-                            } else if let ast::Expr::Attribute(field) = value
-                                && let ast::Expr::Name(receiver) = &*field.value
-                            {
-                                // A subcommand comparison narrows its namespace receiver.
-                                self.0.insert(receiver.id.as_str());
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        impl<'a> Visitor<'a> for Names<'a> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                if let ast::Expr::Name(name) = expr {
-                    self.0.insert(name.id.as_str());
-                } else {
-                    walk_expr(self, expr);
-                }
-            }
-        }
-        // Only truth tests, bindings, and comprehension targets can change
-        // narrowing inside an expression. Plain reads in wide displays do not.
-        struct FlowNames<'a> {
-            names: Names<'a>,
-        }
-        impl<'a> Visitor<'a> for FlowNames<'a> {
-            fn visit_expr(&mut self, expr: &'a ast::Expr) {
-                match expr {
-                    ast::Expr::If(node) => self.names.predicate(&node.test),
-                    ast::Expr::Named(node) => self.names.visit_expr(&node.target),
-                    ast::Expr::BoolOp(_) => self.names.predicate(expr),
-                    _ => {}
-                }
-                walk_expr(self, expr);
-            }
-            fn visit_comprehension(&mut self, node: &'a ast::Comprehension) {
-                self.names.visit_expr(&node.target);
-                for test in &node.ifs {
-                    self.names.predicate(test);
-                }
-                walk_comprehension(self, node);
-            }
-        }
-        let mut flow = FlowNames {
-            names: Names(HashSet::new()),
-        };
-        for test in tests {
-            flow.names.predicate(test);
-        }
-        let mut writes = HashSet::new();
-        for expr in expressions {
-            flow.visit_expr(expr);
-            writes.extend(narrowing::expression_assignments(expr));
-        }
+impl Flow {
+    pub(super) fn read(checker: &Checker<'_>) -> Self {
         Self {
-            writes: writes
-                .into_iter()
-                .map(|name| {
-                    let assigned = checker
-                        .names
-                        .get(&name)
-                        .is_some_and(|s| checker.assigned.contains(s));
-                    (name, assigned)
-                })
-                .collect(),
-            narrowed: flow
-                .names
-                .0
-                .into_iter()
-                .map(|name| {
-                    let ty = checker
-                        .names
-                        .get(name)
-                        .and_then(|s| checker.narrowed.get(s))
-                        .copied();
-                    (name, ty)
-                })
-                .collect(),
+            assigned: checker.assigned.clone(),
+            narrowed: checker.narrowed.clone(),
         }
     }
 
-    fn read(&mut self, checker: &Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            *assigned = checker
-                .names
-                .get(name)
-                .is_some_and(|slot| checker.assigned.contains(slot));
-        }
-        for (name, ty) in &mut self.narrowed {
-            *ty = checker
-                .names
-                .get(*name)
-                .and_then(|slot| checker.narrowed.get(slot))
-                .copied();
-        }
+    pub(super) fn restore(&self, checker: &mut Checker<'_>) {
+        checker.assigned.clone_from(&self.assigned);
+        checker.narrowed.clone_from(&self.narrowed);
     }
 
-    fn retain_common(&mut self, checker: &Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            *assigned &= checker
-                .names
-                .get(name)
-                .is_some_and(|slot| checker.assigned.contains(slot));
-        }
-        for (name, ty) in &mut self.narrowed {
-            if checker
-                .names
-                .get(*name)
-                .and_then(|slot| checker.narrowed.get(slot))
-                .copied()
-                != *ty
-            {
-                *ty = None;
-            }
-        }
-    }
-
-    /// Restore the input facts and keep the completed arm's facts for the join.
+    /// Resume the alternative branch, keeping the completed branch for the join.
     pub(super) fn switch_arm(&mut self, checker: &mut Checker<'_>) {
-        for (name, assigned) in &mut self.writes {
-            if let Some(&slot) = checker.names.get(name) {
-                let current = checker.assigned.contains(&slot);
-                if *assigned {
-                    checker.assigned.insert(slot);
-                } else {
-                    checker.assigned.remove(&slot);
-                }
-                *assigned = current;
-            }
-        }
-        for (name, ty) in &mut self.narrowed {
-            if let Some(&slot) = checker.names.get(*name) {
-                let incoming = checker.narrowed.get(&slot).copied();
-                match *ty {
-                    Some(previous) => checker.narrowed.insert_mut(slot, previous),
-                    None => {
-                        checker.narrowed.remove_mut(&slot);
-                    }
-                }
-                *ty = incoming;
-            }
-        }
+        std::mem::swap(&mut self.assigned, &mut checker.assigned);
+        std::mem::swap(&mut self.narrowed, &mut checker.narrowed);
     }
 
-    pub(super) fn join(self, checker: &mut Checker<'_>) {
-        for (name, assigned) in self.writes {
-            if !assigned && let Some(slot) = checker.names.get(&name) {
-                checker.assigned.remove(slot);
-            }
-        }
-        for (name, ty) in self.narrowed {
-            if let Some(slot) = checker.names.get(name)
-                && checker.narrowed.get(slot).copied() != ty
-            {
-                checker.narrowed.remove_mut(slot);
-            }
-        }
+    pub(super) fn join(&self, checker: &mut Checker<'_>) {
+        intersect(
+            &mut checker.assigned,
+            &mut checker.narrowed,
+            &self.assigned,
+            &self.narrowed,
+        );
+    }
+
+    pub(super) fn intersect(&mut self, other: &Self) {
+        intersect(
+            &mut self.assigned,
+            &mut self.narrowed,
+            &other.assigned,
+            &other.narrowed,
+        );
     }
 }
 
-/// Each boolean operator joins the exits that skip the remaining operands.
-/// Nested operators retain only the names their operands can affect.
-pub(super) struct BooleanExits<'a> {
-    after: ConditionalFacts<'a>,
-    exit: Option<ConditionalFacts<'a>>,
-}
+/// Intersect the exits that short-circuit before the next operand is evaluated.
+#[derive(Default)]
+pub(super) struct BooleanExits(Option<Flow>);
 
-impl<'a> BooleanExits<'a> {
-    pub(super) fn new(checker: &Checker<'_>, boolean: &'a ast::ExprBoolOp) -> Self {
-        Self {
-            after: ConditionalFacts::for_expressions(checker, &boolean.values, &boolean.values),
-            exit: None,
-        }
-    }
-
+impl BooleanExits {
     pub(super) fn short_circuit(
         &mut self,
         checker: &mut Checker<'_>,
         operand: &ast::Expr,
         truth: bool,
     ) {
-        self.after.read(checker);
+        let mut branch = Flow::read(checker);
         checker.apply_facts(operand, truth);
-        if let Some(exit) = &mut self.exit {
-            exit.retain_common(checker);
+        branch.switch_arm(checker);
+        if let Some(exit) = &mut self.0 {
+            exit.intersect(&branch);
         } else {
-            let mut first = self.after.clone();
-            first.read(checker);
-            self.exit = Some(first);
+            self.0 = Some(branch);
         }
-        self.after.switch_arm(checker);
     }
 
     pub(super) fn finish(self, checker: &mut Checker<'_>, reachable: bool) {
-        if let Some(mut exit) = self.exit {
+        if let Some(exit) = self.0 {
             if reachable {
                 exit.join(checker);
             } else {
-                exit.switch_arm(checker);
+                exit.restore(checker);
             }
         }
     }
@@ -266,26 +84,61 @@ impl<'a> BooleanExits<'a> {
 // Snapshots share unchanged trie nodes with the current flow. Entering a
 // nested suite only copies the paths for slots whose facts actually change.
 #[derive(Clone, Default)]
-pub(super) struct Assigned(rpds::HashTrieMap<usize, u64>);
+pub(super) struct Assigned {
+    words: rpds::HashTrieMap<usize, u64>,
+    /// A value keeps its storage origin only when every incoming write agrees.
+    type_sources: rpds::HashTrieMap<usize, ValueSource>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ValueSource {
+    /// The selected invoke produces a live Python handle and has no alternative fixed layout.
+    PythonCall,
+    Declaration(TypeDeclaration),
+    /// A single unbound target stored under an exact coroutine callback annotation.
+    CoroutineCallback(TypeDeclaration, usize),
+    InferredList(DefinitionId),
+    LiteralStrings(Type),
+    Function(usize),
+    /// A different source method can occupy this captured slot when it is called.
+    ReboundMethod,
+}
 
 impl Assigned {
+    pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
+        self.type_sources.get(&slot).copied()
+    }
+
+    pub(super) fn set_type_source(&mut self, slot: usize, source: Option<TypeDeclaration>) {
+        self.set_value_source(slot, source.map(ValueSource::Declaration));
+    }
+
+    pub(super) fn set_value_source(&mut self, slot: usize, source: Option<ValueSource>) {
+        if let Some(source) = source {
+            self.type_sources.insert_mut(slot, source);
+        } else {
+            self.type_sources.remove_mut(&slot);
+        }
+    }
+
     pub(super) fn contains(&self, slot: &usize) -> bool {
-        let bits = self.0.get(&(slot / 64)).copied().unwrap_or(0);
+        let bits = self.words.get(&(slot / 64)).copied().unwrap_or(0);
         bits & (1 << (slot % 64)) != 0
     }
 
     pub(super) fn insert(&mut self, slot: usize) {
         let index = slot / 64;
         let mask = 1 << (slot % 64);
-        let bits = self.0.get(&index).copied().unwrap_or(0);
+        let bits = self.words.get(&index).copied().unwrap_or(0);
         if bits & mask == 0 {
-            self.0.insert_mut(index, bits | mask);
+            self.words.insert_mut(index, bits | mask);
         }
     }
 
     pub(super) fn remove(&mut self, slot: &usize) {
+        self.type_sources.remove_mut(slot);
         let index = slot / 64;
-        if let Some(&bits) = self.0.get(&index) {
+        if let Some(&bits) = self.words.get(&index) {
             let remaining = bits & !(1 << (slot % 64));
             if remaining != bits {
                 self.set_word(index, remaining);
@@ -295,16 +148,33 @@ impl Assigned {
 
     fn set_word(&mut self, index: usize, bits: u64) {
         if bits == 0 {
-            self.0.remove_mut(&index);
+            self.words.remove_mut(&index);
         } else {
-            self.0.insert_mut(index, bits);
+            self.words.insert_mut(index, bits);
         }
     }
 
+    fn intersect_type_sources(&mut self, other: &Self) {
+        if !self.type_sources.ptr_eq(&other.type_sources) {
+            for (&slot, &source) in &self.type_sources.clone() {
+                if other.value_source(slot) != Some(source) {
+                    self.type_sources.remove_mut(&slot);
+                }
+            }
+        }
+    }
+
+    pub(super) fn after_iteration(&mut self, mut before: Self) {
+        // A loop can perform zero assignments, or finish after a different value was stored.
+        before.intersect_type_sources(self);
+        *self = before;
+    }
+
     fn intersect(&mut self, other: &Self) {
-        if !self.0.ptr_eq(&other.0) {
-            for (&index, &bits) in &self.0.clone() {
-                let common = bits & other.0.get(&index).copied().unwrap_or(0);
+        self.intersect_type_sources(other);
+        if !self.words.ptr_eq(&other.words) {
+            for (&index, &bits) in &self.words.clone() {
+                let common = bits & other.words.get(&index).copied().unwrap_or(0);
                 if common != bits {
                     self.set_word(index, common);
                 }
@@ -313,16 +183,37 @@ impl Assigned {
     }
 
     pub(super) fn extend(&mut self, other: &Self) {
-        for (&index, &bits) in &other.0 {
-            let old = self.0.get(&index).copied().unwrap_or(0);
+        if !self.type_sources.ptr_eq(&other.type_sources) {
+            for (&slot, &source) in &self.type_sources.clone() {
+                if other.contains(&slot) && other.value_source(slot) != Some(source) {
+                    self.type_sources.remove_mut(&slot);
+                }
+            }
+            for (&slot, &source) in &other.type_sources {
+                if !self.contains(&slot) {
+                    self.type_sources.insert_mut(slot, source);
+                }
+            }
+        }
+        for (&index, &bits) in &other.words {
+            let old = self.words.get(&index).copied().unwrap_or(0);
             if old | bits != old {
-                self.0.insert_mut(index, old | bits);
+                self.words.insert_mut(index, old | bits);
             }
         }
     }
 }
 
 pub(super) type Narrowed = rpds::HashTrieMap<usize, Type>;
+
+/// A successful pull can replace any local written while binding its target.
+pub(super) fn forget_binding_writes(facts: &mut Narrowed, binding: &[Statement]) {
+    if !facts.is_empty() {
+        ir::walk_writes(binding, |slot, _| {
+            facts.remove_mut(&slot);
+        });
+    }
+}
 
 pub(super) fn intersect(
     assigned: &mut Assigned,
@@ -344,21 +235,39 @@ pub(super) fn intersect(
 /// internal spelling. Builtin fast paths can then match names without ever
 /// interpreting a local `bytes`, `map`, or `len` as the builtin.
 pub(super) fn alias_builtin_parameters(
-    function: &mut ast::StmtFunctionDef,
-    bindings: &HashMap<String, Binding>,
-) {
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
+    graph: &SourceGraph,
+    module: ModuleId,
+) -> bool {
+    let needs_alias = |name: &str| {
+        RESERVED.contains(&name)
+            && name.starts_with(|c: char| c.is_ascii_lowercase())
+            && graph.modules[module]
+                .bindings
+                .get(name)
+                .is_none_or(|&binding| {
+                    graph.builtin_function_shadow(name, binding).is_some()
+                        || binding == Binding::Intrinsic(Intrinsic::BuiltinsPrint)
+                })
+    };
+    let Some(first) = function
+        .parameters
+        .iter_non_variadic_params()
+        .position(|param| needs_alias(param.name().as_str()))
+    else {
+        return false;
+    };
+    let function = function.to_mut();
     let params = &mut function.parameters;
     for parameter in params
         .posonlyargs
         .iter_mut()
         .chain(&mut params.args)
         .chain(&mut params.kwonlyargs)
+        .skip(first)
     {
         let name = &mut parameter.parameter.name.id;
-        if RESERVED.contains(&name.as_str())
-            && name.starts_with(|c: char| c.is_ascii_lowercase())
-            && !bindings.contains_key(name.as_str())
-        {
+        if needs_alias(name.as_str()) {
             let alias = BuiltinAlias {
                 original: name.clone(),
                 local: format!("$param:{name}").into(),
@@ -367,6 +276,7 @@ pub(super) fn alias_builtin_parameters(
             alias.visit_body(&mut function.body);
         }
     }
+    true
 }
 
 struct BuiltinAlias {
@@ -434,15 +344,228 @@ impl Transformer for BuiltinAlias {
     }
 }
 
+/// Effects on Python namespaces along the current control-flow path.
+#[derive(Clone, Default)]
+pub(super) struct ModuleNamespace {
+    aliases: HashSet<usize>,
+    keys: HashMap<usize, String>,
+    exposed: HashSet<String>,
+    unknown_key: bool,
+    last_python_call: Option<TextSize>,
+    released_owner: bool,
+    /// Pairs of supplied class objects and layouts whose fields a parser can write.
+    pub(super) supplied_classes: HashSet<(usize, usize)>,
+}
+
+impl ModuleNamespace {
+    /// During signature discovery, only the initial module bindings have a
+    /// concrete owner independent of the eventual registered calling convention.
+    pub(super) fn is_unexposed(&self) -> bool {
+        self.last_python_call.is_none()
+            && !self.released_owner
+            && !self.unknown_key
+            && self.exposed.is_empty()
+    }
+
+    pub(super) fn join(&mut self, other: &Self) {
+        self.supplied_classes.extend(&other.supplied_classes);
+        self.aliases.extend(&other.aliases);
+        self.keys
+            .retain(|slot, key| other.keys.get(slot) == Some(key));
+        self.exposed.extend(other.exposed.iter().cloned());
+        self.unknown_key |= other.unknown_key;
+        self.last_python_call = self.last_python_call.max(other.last_python_call);
+        self.released_owner |= other.released_owner;
+    }
+
+    fn key(&self, value: &Expr) -> Option<String> {
+        match &value.kind {
+            ExprKind::Str(name) => Some(name.clone()),
+            ExprKind::Builtin(
+                Builtin::RegisteredLocation(..) | Builtin::RegisteredIndexConstant(_),
+                args,
+            ) => self.key(args.first()?),
+            ExprKind::Local(slot) => self.keys.get(slot).cloned(),
+            _ => None,
+        }
+    }
+}
+
+impl Checker<'_> {
+    pub(super) fn live_module_binding(&self, expr: &ast::Expr) -> Option<Expr> {
+        let name = &expr.as_name_expr()?.id;
+        self.live_module_name(name)
+            .then(|| registered::values::name_binding(name.clone()))
+    }
+
+    pub(super) fn live_module_name(&self, name: &str) -> bool {
+        self.module_scope
+            && (self.module_namespace.exposed.contains(name)
+                || self.module_namespace.unknown_key && self.names.contains_key(name))
+    }
+
+    pub(super) fn is_module_namespace(&self, value: &Expr) -> bool {
+        match &value.kind {
+            ExprKind::Invoke { args, .. } => args
+                .site
+                .python()
+                .is_some_and(|site| self.namespace_calls.contains(&site.call.range)),
+            ExprKind::Local(slot) => self.module_namespace.aliases.contains(slot),
+            _ => false,
+        }
+    }
+
+    pub(super) fn closed_passive_call(&self, call: &ast::ExprCall) -> bool {
+        if self.module_namespace.unknown_key
+            || self.module_namespace.released_owner
+            || self.live_module_binding(&call.func).is_some()
+            || !call.func.is_name_expr()
+            || !call.arguments.args.iter().all(ast::Expr::is_literal_expr)
+            || !call
+                .arguments
+                .keywords
+                .iter()
+                .all(|keyword| keyword.arg.is_some() && keyword.value.is_literal_expr())
+        {
+            return false;
+        }
+        let Some(Binding::Definition(id)) = self.resolve(&call.func) else {
+            return false;
+        };
+        let definition = &self.graph.modules[id.module].parsed.syntax().body[id.statement];
+        id.module == self.module
+            && self
+                .module_namespace
+                .last_python_call
+                .is_none_or(|end| end <= definition.start())
+            && definition
+                .as_function_def_stmt()
+                .is_some_and(crate::analysis::passive_function)
+    }
+
+    /// Calling Python can replace any module binding visible when control enters the
+    /// callee. A later first assignment still establishes its normal checked layout.
+    pub(super) fn invalidate_called_bindings(
+        &mut self,
+        call: &ast::Expr,
+        checked: &Result<Expr, String>,
+    ) {
+        if checked
+            .as_ref()
+            .is_ok_and(|value| self.is_module_namespace(value))
+        {
+            return;
+        }
+        let can_call_python = match checked {
+            Ok(value) => matches!(
+                &value.kind,
+                ExprKind::Call(..)
+                    | ExprKind::Invoke { .. }
+                    | ExprKind::Construct { .. }
+                    | ExprKind::Builtin(Builtin::UnrepresentedCall, _)
+            ),
+            Err(error) => error.is_object(),
+        };
+        if can_call_python {
+            self.module_namespace.last_python_call =
+                self.module_namespace.last_python_call.max(Some(call.end()));
+            if !self.globals.registered_initializers {
+                return;
+            }
+            self.module_namespace.exposed.extend(
+                self.names
+                    .iter()
+                    .filter(|(_, slot)| self.assigned.contains(slot))
+                    .map(|(name, _)| name.clone()),
+            );
+            self.module_namespace.keys.clear();
+        }
+    }
+
+    fn can_release_owner(&self, slot: usize) -> bool {
+        self.assigned.contains(&slot) && self.types.stores_python_object(self.locals[slot])
+    }
+
+    // A store installs its RHS before releasing the previous owner. A Python finalizer
+    // can change any binding already visible in this module before the next lookup.
+    fn release_module_owner(&mut self) {
+        // A finalizer can replace a function before the next direct call looks it up.
+        self.module_namespace.released_owner = true;
+        self.module_namespace
+            .exposed
+            .extend(self.names.keys().cloned());
+        self.module_namespace.keys.clear();
+    }
+
+    pub(super) fn namespace_item_store(&mut self, index: &Expr, value: &Expr) {
+        if let Some(name) = self.module_namespace.key(index) {
+            if self.module_namespace.unknown_key
+                || self.module_namespace.exposed.contains(&name)
+                || self
+                    .names
+                    .get(&name)
+                    .is_some_and(|&slot| self.can_release_owner(slot))
+            {
+                self.release_module_owner();
+            }
+            if self.types.stores_python_object(value.ty) {
+                self.module_namespace.exposed.insert(name);
+            }
+        } else if matches!(index.ty, Type::Str | Type::PythonObject) {
+            if !self.module_namespace.exposed.is_empty()
+                || self.module_namespace.unknown_key
+                || self
+                    .names
+                    .values()
+                    .any(|&slot| self.can_release_owner(slot))
+            {
+                self.release_module_owner();
+            }
+            self.module_namespace.unknown_key |= self.types.stores_python_object(value.ty);
+        }
+    }
+
+    pub(super) fn namespace_assignment(&mut self, slot: usize, value: &Expr) {
+        let alias = self.is_module_namespace(value);
+        let key = self.module_namespace.key(value);
+        let releases_owner = self.can_release_owner(slot)
+            || self.module_namespace.unknown_key
+            || !self.module_namespace.exposed.is_empty()
+                && self.names.iter().any(|(name, &local)| {
+                    local == slot && self.module_namespace.exposed.contains(name)
+                });
+        if releases_owner {
+            self.release_module_owner();
+        }
+        if alias {
+            self.module_namespace.aliases.insert(slot);
+        } else if !releases_owner {
+            self.module_namespace.aliases.remove(&slot);
+        }
+        if let Some(key) = key.filter(|_| !releases_owner) {
+            self.module_namespace.keys.insert(slot, key);
+        } else {
+            self.module_namespace.keys.remove(&slot);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LocalState {
     pub(super) assigned: Assigned,
     pub(super) narrowed: Narrowed,
+    module_namespace: ModuleNamespace,
 }
 
 impl LocalState {
-    pub(super) fn retain_common(&mut self, assigned: &Assigned, narrowed: &Narrowed) {
-        intersect(&mut self.assigned, &mut self.narrowed, assigned, narrowed);
+    pub(super) fn retain_common(&mut self, other: &Self) {
+        intersect(
+            &mut self.assigned,
+            &mut self.narrowed,
+            &other.assigned,
+            &other.narrowed,
+        );
+        self.module_namespace.join(&other.module_namespace);
     }
 }
 
@@ -461,13 +584,14 @@ impl Checker<'_> {
         LocalState {
             assigned: self.assigned.clone(),
             narrowed: self.narrowed.clone(),
+            module_namespace: self.module_namespace.clone(),
         }
     }
 
     /// Intersects one normally completed branch with the exits checked so far.
     pub(super) fn merge_exit(&self, joined: &mut Option<LocalState>) {
         if let Some(exit) = joined {
-            exit.retain_common(&self.assigned, &self.narrowed);
+            exit.retain_common(&self.local_state());
         } else {
             *joined = Some(self.local_state());
         }
@@ -477,6 +601,7 @@ impl Checker<'_> {
     pub(super) fn restore_state(&mut self, state: LocalState) {
         self.assigned = state.assigned;
         self.narrowed = state.narrowed;
+        self.module_namespace = state.module_namespace;
     }
 
     /// A binding yields the original RHS value; optional promotion belongs to
@@ -500,6 +625,10 @@ impl Checker<'_> {
                 "assignment expressions cannot rebind a comprehension iteration variable",
             ));
         }
+        if expression.value.is_bool_op_expr() {
+            // An unrolled loop can check the same source with different operands.
+            self.stable_selections.remove(&expression.range());
+        }
         let existing = self.names.get(name.id.as_str()).copied();
         let value = if let Some(slot) = existing {
             self.expr_expected(&expression.value, self.locals[slot])?
@@ -510,11 +639,27 @@ impl Checker<'_> {
         };
         let value = unpromoted(value);
         let storage = existing.map_or(value.ty, |slot| self.locals[slot]);
-        let stored = self.coerce(value.clone(), storage, expression)?;
+        let stored = if value.ty == storage {
+            self.keep_module_list_layout(&value);
+            Cow::Borrowed(&value)
+        } else {
+            Cow::Owned(self.coerce(value.clone(), storage, expression)?)
+        };
         let slot = self.declare(name.id.as_str(), storage, expression)?;
         self.assigned_value(slot, &stored);
-        if self.comprehension_depth != 0 {
-            self.comprehension_exports.insert(name.id.to_string(), slot);
+        if let Some(exports) = &mut self.comprehension_exports {
+            exports.insert(name.id.to_string(), slot);
+        }
+        if self.registered.is_none()
+            && !self.placement_only
+            && value.ty.builtin_scalar_name().is_some()
+            && matches!(
+                value.kind,
+                ExprKind::BooleanValue(..) | ExprKind::Boolean(..)
+            )
+            && expression.value.is_bool_op_expr()
+        {
+            self.stable_selections.insert(expression.range());
         }
         Ok(Expr {
             ty: value.ty,
@@ -578,10 +723,36 @@ impl Checker<'_> {
         &self,
         target: &ast::Expr,
         rhs: Option<&ast::Expr>,
-    ) -> Option<Type> {
+    ) -> Option<(Type, Option<TypeDeclaration>)> {
+        let receiver = match target {
+            ast::Expr::Attribute(attribute) => &*attribute.value,
+            ast::Expr::Subscript(subscript) => &*subscript.value,
+            _ => return None,
+        };
+        // A bound Python method returns a live object. Neither the local nor that
+        // call supplies a fixed field or item type for the assignment's RHS.
+        let object = if self.checked_call_contracts
+            && let Some(module) = self.registered
+            && let Some(call) = receiver.as_call_expr()
+            && stdlib::registered_string_method(call).is_none()
+            && let Some(method) = module
+                .operands(self.source, self.graph.python_optimization())
+                .direct_method(call)
+        {
+            method.value.as_ref()
+        } else {
+            receiver
+        };
+        if let Some(name) = object.as_name_expr()
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && self.locals[slot] == Type::PythonObject
+            && !self.narrowed.contains_key(&slot)
+            && !self.is_class_receiver(object)
+            && self.graph.resolve(self.module, object).is_none()
+        {
+            return None;
+        }
         let helpers = Helpers::new(0);
-        let omitted_locals = self.omitted_assert_locals.clone();
-        let omitted_free = self.omitted_assert_free.clone();
         let mut probe = Checker::new(
             self.graph,
             self.module,
@@ -591,8 +762,8 @@ impl Checker<'_> {
             &helpers,
             self.globals,
         );
-        probe.omitted_assert_locals = omitted_locals;
-        probe.omitted_assert_free = omitted_free;
+        probe.omitted_assert_locals = self.omitted_assert_locals.clone();
+        probe.omitted_assert_free = self.omitted_assert_free.clone();
         probe.returns = self.returns;
         probe.class = self.class;
         probe.class_receiver = self.class_receiver.clone();
@@ -607,30 +778,31 @@ impl Checker<'_> {
                 if let Some(class) = probe.class_reference(&attribute.value)
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {
-                    return Some(ty);
+                    return Some((ty, None));
                 }
                 let receiver = Self::weak_target(probe.expr(&attribute.value).ok()?);
                 // A mock accepts arbitrary effects and return values, including empty containers.
                 if self.native_mock_instance(receiver.ty)
                     && matches!(attribute.attr.as_str(), "side_effect" | "return_value")
                 {
-                    return rhs.and_then(|value| self.empty_argument_type(value));
+                    return rhs
+                        .and_then(|value| self.empty_argument_type(value))
+                        .map(|ty| (ty, None));
                 }
                 if let Type::Class(class) = receiver.ty
                     && let Some(ty) = probe.class_data_type(class, attribute.attr.as_str())
                 {
-                    return Some(ty);
+                    return Some((ty, None));
                 }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
-                    return Some(self.types.list(Type::Dict(id)));
+                    return Some((self.types.list(Type::Dict(id)), None));
                 }
-                if let Some(class) = self.writable_property(receiver.ty, attribute) {
-                    let setter = &self.classes.setters[class][attribute.attr.as_str()];
+                if let Some((_, setter)) = self.writable_property(receiver.ty, attribute) {
                     return match self.inference {
-                        Some(inference) => inference.parameter(setter.id, 1),
-                        None => Some(setter.params[1].ty),
+                        Some(inference) => inference.parameter(setter.id, 1).map(|ty| (ty, None)),
+                        None => Some((setter.params[1].ty, None)),
                     };
                 }
                 if matches!(receiver.ty, Type::ModuleSpec(_))
@@ -641,66 +813,34 @@ impl Checker<'_> {
                 probe
                     .writable_field_value(attribute, receiver)
                     .ok()
-                    .map(|(_, _, ty)| ty)
+                    .map(|(_, _, ty)| (ty, None))
             }
             ast::Expr::Subscript(subscript) => {
                 let receiver = probe.expr(&subscript.value).ok()?;
+                self.keep_module_list_layout(&receiver);
+                let declaration = probe.value_declaration(&receiver);
                 if matches!(receiver.ty, Type::Document(_)) {
-                    return Some(if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
-                        self.types.list(documents::ANY)
-                    } else {
-                        documents::ANY
-                    });
+                    return Some((
+                        if matches!(&*subscript.slice, ast::Expr::Slice(_)) {
+                            self.types.list(documents::ANY)
+                        } else {
+                            documents::ANY
+                        },
+                        declaration,
+                    ));
                 }
                 if receiver.ty == Type::JsonRoot {
-                    return Some(Type::JsonValue);
+                    return Some((Type::JsonValue, declaration));
                 }
                 self.types
                     .mapping(receiver.ty)
                     .map(|(_, value)| value)
                     .or_else(|| self.types.indexed_element(receiver.ty))
+                    .map(|ty| (ty, declaration))
             }
             _ => None,
         }
     }
-}
-
-/// Reserve an optional slot when a later assignment calls a function with that
-/// declared return type. The ordinary checker still enforces every assignment.
-pub(super) fn nullable_assignments(
-    checker: &Checker<'_>,
-    body: &[ast::Stmt],
-) -> HashMap<String, Type> {
-    use ruff_python_ast::visitor::{Visitor, walk_stmt};
-    struct Scan<'a, 'b> {
-        checker: &'a Checker<'b>,
-        found: HashMap<String, Type>,
-    }
-    impl<'a> Visitor<'a> for Scan<'_, '_> {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)) {
-                return;
-            }
-            if let ast::Stmt::Assign(a) = stmt
-                && let [ast::Expr::Name(target)] = a.targets.as_slice()
-                && let ast::Expr::Call(call) = &*a.value
-                && let Some(Binding::Definition(def)) = self.checker.resolve(&call.func)
-                && let Some(sig) = self.checker.functions.get(&def)
-                && self.checker.types.payload(sig.returns).is_some()
-            {
-                self.found.insert(target.id.to_string(), sig.returns);
-            }
-            walk_stmt(self, stmt);
-        }
-    }
-    let mut scan = Scan {
-        checker,
-        found: HashMap::new(),
-    };
-    for stmt in body {
-        scan.visit_stmt(stmt);
-    }
-    scan.found
 }
 
 #[cfg(test)]
@@ -711,7 +851,11 @@ mod tests {
     fn subcommand_fields_stay_inside_their_conditional_arm() {
         let source = include_str!("../../../../tests/fixtures/argparse/commands.py");
         let checked = |expr: &str| crate::check(&source.replace("    print(args.label)", expr));
-        checked("    print(args.text if args.command == 'write' else args.label)").unwrap();
+        let (result, lowered) = crate::frontend::caller_cache::observe_lowerings(|| {
+            checked("    print(args.text if args.command == 'write' else args.label)")
+        });
+        result.unwrap();
+        assert_eq!(lowered.iter().filter(|name| *name == "read").count(), 1);
         for expr in [
             "    print(args.text if args.command == 'write' else args.text)",
             "    print(args.command == 'write' and args.text != '')\n    print(args.text)",
@@ -727,7 +871,7 @@ mod tests {
             original.insert(slot);
         }
         let mut branch = original.clone();
-        assert!(branch.0.ptr_eq(&original.0));
+        assert!(branch.words.ptr_eq(&original.words));
         branch.remove(&0);
         branch.remove(&128);
         branch.insert(65);

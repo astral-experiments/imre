@@ -3,6 +3,7 @@
 use super::calls::parameter;
 use super::*;
 use crate::ir::TextOperation;
+use ruff_python_ast::CmpOp;
 
 /// A contiguous slice has no fallible stride or user-defined indexing operation.
 fn unit_string_slice(value: &Expr) -> bool {
@@ -49,10 +50,7 @@ pub(super) fn slice_equality(
         kind: ExprKind::Builtin(Builtin::StringSliceEqual, args),
     };
     Some(if *op == ast::CmpOp::NotEq {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(equal)),
-        }
+        Expr::not(equal)
     } else {
         equal
     })
@@ -60,6 +58,72 @@ pub(super) fn slice_equality(
 
 /// Constructs a fixed signature slot for the shared argument binder.
 impl Checker<'_> {
+    pub(super) fn unicode_character_property(
+        &mut self,
+        call: &ast::ExprCall,
+        property: ir::UnicodeProperty,
+    ) -> Result<Expr, String> {
+        let name = property.name();
+        calls::reject_unpacking(call, self.source)?;
+        let ([arg], []) = (
+            call.arguments.args.as_ref(),
+            call.arguments.keywords.as_ref(),
+        ) else {
+            return self.one_positional_error(
+                call,
+                &format!("unicodedata.{name}"),
+                "chr",
+                Type::Str,
+            );
+        };
+        let value = Self::string_value(self.evaluated_argument(arg)?);
+        self.graph.checked_overload(self.module, call.range());
+        if matches!(value.ty, Type::Str | Type::StrLiteral(_)) {
+            // chr accepts lone surrogates, which cannot be materialized as native UTF-8.
+            // Query these properties directly from the checked ordinal.
+            let kind = if matches!(
+                property,
+                ir::UnicodeProperty::Category | ir::UnicodeProperty::Bidirectional
+            ) && let ExprKind::Builtin(Builtin::Chr, ordinal) = value.kind
+            {
+                ExprKind::Builtin(Builtin::UnicodePropertyOfOrdinal(property), ordinal)
+            } else {
+                ExprKind::Builtin(
+                    Builtin::Text(TextOperation::UnicodeProperty(property)),
+                    vec![value],
+                )
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind,
+            });
+        }
+        let actual = match value.ty {
+            Type::None => "None",
+            Type::BuiltinClass => "type",
+            Type::BytesIO => "_io.BytesIO",
+            Type::StringIO => "_io.StringIO",
+            Type::Deque(_) => "collections.deque",
+            Type::RegexPattern | Type::RegexBytesPattern => "re.Pattern",
+            Type::RegexMatch | Type::RegexBytesMatch => "re.Match",
+            Type::Calendar(ir::CalendarType::Date) => "datetime.date",
+            Type::Calendar(ir::CalendarType::DateTime) => "datetime.datetime",
+            Type::Calendar(ir::CalendarType::Delta) => "datetime.timedelta",
+            Type::Calendar(ir::CalendarType::Zone) => "datetime.timezone",
+            Type::VarTuple(_) => "tuple",
+            ty => self.exact_argument_type_name(ty).ok_or_else(|| {
+                error(
+                    self.source,
+                    arg,
+                    &format!("{name} requires str or an exact argument type"),
+                )
+            })?,
+        };
+        let actual = &actual[..actual.floor_char_boundary(50)];
+        let message = format!("{name}() argument must be a unicode character, not {actual}");
+        Ok(calls::type_error(Type::Str, vec![value], message))
+    }
+
     pub(super) fn unicode_normalize(
         &mut self,
         call: &ast::ExprCall,
@@ -116,15 +180,20 @@ impl Checker<'_> {
         Ok(scope.finish(if check {
             Expr {
                 ty: Type::Bool,
-                kind: ExprKind::Compare(vec![normalized, text], vec![Compare::Equal]),
+                kind: ExprKind::Compare(vec![normalized, text], vec![CmpOp::Eq]),
             }
         } else {
             normalized
         }))
     }
 
-    /// Convert a nullable string to text and evaluate its operand once.
-    pub(super) fn optional_text(&mut self, value: Expr) -> Expr {
+    /// Evaluate a nullable text operand once and use the present class's normal str method.
+    pub(super) fn optional_text(
+        &mut self,
+        value: Expr,
+        at: &ast::ExprCall,
+    ) -> Result<Expr, String> {
+        let payload = self.types.payload(value.ty).expect("nullable text operand");
         let mut scope = calls::ArgumentScope::default();
         let local = scope.hold(self, value);
         let absent = Expr {
@@ -132,17 +201,22 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::IsNone, vec![local.clone()]),
         };
         let present = Expr {
-            ty: Type::Str,
+            ty: payload,
             kind: ExprKind::Unwrap(Box::new(local)),
         };
-        scope.finish(Expr {
+        let present = if matches!(payload, Type::Class(_)) {
+            self.record_text(present, at)?
+        } else {
+            present
+        };
+        Ok(scope.finish(Expr {
             ty: Type::Str,
             kind: ExprKind::Conditional(
                 Box::new(absent),
                 Box::new(unpacking::string("None")),
                 Box::new(present),
             ),
-        })
+        }))
     }
 
     pub(super) fn shlex_split(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -292,8 +366,14 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let split = name == "splitlines";
-        let mapping = matches!(name, "title" | "swapcase");
-        let returns = if mapping {
+        let mapping = match name {
+            "capitalize" => Some(TextOperation::Capitalize),
+            "title" | "swapcase" => Some(TextOperation::CaseMap {
+                title: name == "title",
+            }),
+            _ => None,
+        };
+        let returns = if mapping.is_some() {
             Type::Str
         } else if split {
             self.types.list(Type::Str)
@@ -303,13 +383,8 @@ impl Checker<'_> {
         let args = &call.arguments;
         let count = args.args.len() + args.keywords.len();
         if count == 0 {
-            let kind = if mapping {
-                ExprKind::Builtin(
-                    Builtin::Text(TextOperation::CaseMap {
-                        title: name == "title",
-                    }),
-                    vec![receiver],
-                )
+            let kind = if let Some(operation) = mapping {
+                ExprKind::Builtin(Builtin::Text(operation), vec![receiver])
             } else if split {
                 // Preserve the existing bytes.decode().splitlines() path and
                 // direct-iteration fusion for the no-argument method.
@@ -336,7 +411,9 @@ impl Checker<'_> {
                     "isalnum" => ir::TextPredicate::Alnum,
                     "isascii" => ir::TextPredicate::Ascii,
                     "isalpha" => ir::TextPredicate::Alpha,
+                    "isdecimal" => ir::TextPredicate::Decimal,
                     "isdigit" => ir::TextPredicate::Digit,
+                    "isnumeric" => ir::TextPredicate::Numeric,
                     "isspace" => ir::TextPredicate::Space,
                     "islower" => ir::TextPredicate::Lower,
                     "istitle" => ir::TextPredicate::Title,
@@ -352,7 +429,7 @@ impl Checker<'_> {
         }
         // Typeshed overloads splitlines and the case mappings. Their runtime
         // paths check these arguments after evaluating the operands.
-        if split || mapping {
+        if split || mapping.is_some() {
             self.graph.checked_overload(self.module, call.range());
         }
         if !split {
@@ -409,7 +486,7 @@ impl Checker<'_> {
         if let ast::Expr::Dict(dict) = argument {
             if dict.items.is_empty() {
                 // The empty literal has no observable key/value layout.
-                return self.dictionary(dict, Some((Type::Int, Type::Int)));
+                return self.dictionary(dict, Some((Type::Int, Type::Int)), None);
             }
             // Choose the storage before lowering any operands. The ordinary dictionary
             // constructor then still evaluates every key and value once, in source order.
@@ -454,7 +531,7 @@ impl Checker<'_> {
                 ))
             })();
             if let Some(shape) = shape {
-                return self.dictionary(dict, Some(shape));
+                return self.dictionary(dict, Some(shape), None);
             }
         }
         self.expr(argument)
@@ -681,7 +758,6 @@ impl Checker<'_> {
         let (operation, returns, parameters) = match name {
             "lower" => (TextOperation::Lower, Type::Str, vec![]),
             "upper" => (TextOperation::Upper, Type::Str, vec![]),
-            "capitalize" => (TextOperation::Capitalize, Type::Str, vec![]),
             "split" | "rsplit" => (
                 TextOperation::Split(name == "rsplit"),
                 self.types.list(Type::Str),
@@ -697,11 +773,11 @@ impl Checker<'_> {
                     _ => 0,
                 }),
                 Type::Str,
-                vec![PositionalOnly.parameter(
-                    "chars",
-                    optional_string,
-                    Some(Expr::absent(optional_string)),
-                )],
+                if call.arguments.is_empty() {
+                    vec![]
+                } else {
+                    vec![PositionalOnly.parameter("chars", optional_string, None)]
+                },
             ),
             "startswith" | "endswith" => (
                 if name == "startswith" {
@@ -721,19 +797,20 @@ impl Checker<'_> {
                 )],
             ),
             "find" => {
-                let optional_index = self.types.optional(Type::Int);
-                (
-                    TextOperation::Find,
-                    Type::Int,
-                    vec![
-                        PositionalOnly.parameter("sub", Type::Str, None),
-                        PositionalOnly.parameter(
-                            "start",
-                            optional_index,
-                            Some(Expr::absent(optional_index)),
-                        ),
-                    ],
-                )
+                let mut parameters = vec![PositionalOnly.parameter("sub", Type::Str, None)];
+                // An omitted bound belongs to the native search ABI. A Python
+                // method selected on a live receiver sees only supplied operands.
+                if !matches!(call.arguments.args.as_ref(), [sub] if !sub.is_starred_expr())
+                    || !call.arguments.keywords.is_empty()
+                {
+                    let start = self.types.optional(Type::Int);
+                    parameters.push(PositionalOnly.parameter(
+                        "start",
+                        start,
+                        Some(Expr::absent(start)),
+                    ));
+                }
+                (TextOperation::Find, Type::Int, parameters)
             }
             "partition" => (
                 TextOperation::Partition,
@@ -746,7 +823,12 @@ impl Checker<'_> {
             self.arguments_with(call, &parameters, Some(receiver), |checker, i, arg| {
                 let parameter = &parameters[i];
                 if name == "find" && parameter.name == "start" {
-                    checker.optional_scalar_argument(arg, parameter.ty)
+                    let bound = checker.optional_scalar_argument(arg, parameter.ty)?;
+                    // An Int is already the nonzero word accepted by the search ABI.
+                    Ok(match bound.kind {
+                        ExprKind::Present(value) if value.ty == Type::Int => *value,
+                        _ => bound,
+                    })
                 } else {
                     checker.direct_argument(arg, parameter.ty, parameter.sign_only)
                 }
@@ -774,17 +856,9 @@ impl Checker<'_> {
         self.coerce(value, optional, node)
     }
 
-    /// CPython turns a missing or incompatible split('\n') into a catchable TypeError.
-    pub(super) fn dedent_call(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
-        let source = match (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) {
-            ([arg], []) => arg,
-            ([], [kw]) if kw.arg.as_deref() == Some("text") => &kw.value,
-            _ => return self.text_function(call, "text", TextOperation::Dedent),
-        };
-        let value = self.expr(source)?;
+    /// A fixed string can enter the source body. Exact non-string layouts fail
+    /// before the first split, after evaluating the supplied value.
+    pub(super) fn dedent_text(&mut self, value: Expr, site: &ast::Expr) -> Result<Expr, String> {
         let name = match value.ty {
             Type::None => "NoneType",
             Type::Int => "int",
@@ -795,13 +869,7 @@ impl Checker<'_> {
             Type::Dict(_) => "dict",
             Type::Set(_) => "set",
             Type::Tuple(_) => "tuple",
-            _ => {
-                let value = self.coerce(value, Type::Str, source)?;
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(Builtin::Text(TextOperation::Dedent), vec![value]),
-                });
-            }
+            _ => return self.coerce(value, Type::Str, site),
         };
         let exception = Expr {
             ty: Type::Exception,
@@ -812,22 +880,16 @@ impl Checker<'_> {
                 )))),
             },
         };
-        Ok(Expr {
-            ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::RaiseException, vec![value, exception]),
-        })
-    }
-
-    /// Binds standard-library functions taking one positional or named string.
-    pub(super) fn text_function(
-        &mut self,
-        call: &ast::ExprCall,
-        name: &str,
-        operation: TextOperation,
-    ) -> Result<Expr, String> {
-        let parameters = [parameter(name, Type::Str, None)];
-        let arguments = self.arguments(call, &parameters, None)?;
-        Ok(self.ordered_builtin(Builtin::Text(operation), Type::Str, arguments))
+        let held = self.hidden(value.ty);
+        let cause = Expr::absent(self.types.optional(Type::Exception));
+        Ok(Expr::scope(
+            vec![
+                Statement::Assign(held, value),
+                Statement::raise_at(exception, Some(cause), None),
+            ],
+            unpacking::string(""),
+            vec![held],
+        ))
     }
 }
 

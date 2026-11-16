@@ -1,5 +1,7 @@
 """Decimal construction and spelling used by serializers under the default context."""
 
+from _imre_decimal_ratio import _coefficient_as_int, _unsigned_ratio
+
 
 class DecimalException(ArithmeticError):
     pass
@@ -114,22 +116,11 @@ class Decimal:
             raise OverflowError("cannot convert Infinity to integer ratio")
 
         coefficient, exponent = _parts(text)
-        digits = coefficient.lstrip("-")
-        # A Decimal coefficient can exceed the limit for int(string).
-        first = len(digits) % 18 or 18
-        numerator = int(digits[:first])
-        for start in range(first, len(digits), 18):
-            numerator = numerator * 10**18 + int(digits[start:start + 18])
+        magnitude = _coefficient_as_int(coefficient.lstrip("-"))
+        numerator, denominator = _unsigned_ratio(magnitude, exponent)
         if coefficient.startswith("-"):
             numerator = -numerator
-        scale = 10**abs(exponent)
-        if exponent >= 0:
-            return numerator * scale, 1
-
-        divisor, remainder = scale, abs(numerator)
-        while remainder:
-            divisor, remainder = remainder, divisor % remainder
-        return numerator // divisor, scale // divisor
+        return numerator, denominator
 
     def __bool__(self) -> bool:
         mantissa, marker, exponent = self._text.lstrip("-").partition("E")
@@ -140,56 +131,3 @@ class Decimal:
 
     def __repr__(self) -> str:
         return "Decimal('" + self._text + "')"
-
-    # Object-protocol methods for the boxed runtime.
-    def __float__(self, /) -> float:
-        if not issubclass(type(self), Decimal):
-            raise TypeError(
-                f"descriptor '__float__' requires a 'decimal.Decimal' object "
-                f"but received a '{type(self).__name__}'"
-            )
-        text = self._text
-        magnitude = text.lstrip("-")
-        if magnitude.startswith("sNaN"):
-            raise ValueError("cannot convert signaling NaN to float")
-        if magnitude.startswith("NaN"):
-            text = "-nan" if text.startswith("-") else "nan"
-        return float(text)
-
-    def __eq__(self, other: object):
-        if not isinstance(other, Decimal):
-            return NotImplemented
-        left = self._text
-        right = other._text
-        if left.lstrip("-").startswith("sNaN") or right.lstrip("-").startswith("sNaN"):
-            raise InvalidOperation([InvalidOperation])
-        if left.lstrip("-").startswith("NaN") or right.lstrip("-").startswith("NaN"):
-            return False
-        if left.endswith("Infinity") or right.endswith("Infinity"):
-            return left == right
-        return _parts(left) == _parts(right)
-
-    def __hash__(self) -> int:
-        from sys import hash_info
-
-        text = self._text
-        magnitude = text.lstrip("-")
-        if magnitude.startswith("sNaN"):
-            raise TypeError("Cannot hash a signaling NaN value")
-        if magnitude.startswith("NaN"):
-            return object.__hash__(self)
-        if magnitude == "Infinity":
-            return -hash_info.inf if text.startswith("-") else hash_info.inf
-
-        coefficient, exponent = _parts(text)
-        digits = coefficient.lstrip("-")
-        modulus = hash_info.modulus
-        # Fold the coefficient in bounded chunks, even beyond the int-string limit.
-        first = len(digits) % 18 or 18
-        result = int(digits[:first])
-        for start in range(first, len(digits), 18):
-            result = (result * 10**18 + int(digits[start:start + 18])) % modulus
-        result = result * pow(10, exponent, modulus) % modulus
-        if coefficient.startswith("-"):
-            result = -result
-        return -2 if result == -1 else result

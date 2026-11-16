@@ -35,6 +35,17 @@ def run() -> None:
     write(path, "UTF-8", "strict")
     for policy in ["strict", "ignore", "replace", "backslashreplace", "unknown-handler"]:
         write(path, "ascii", policy)
+    for encoding in ["utf-16", "utf-32"]:
+        with path.open("w", encoding=encoding) as stream:
+            print(stream.write("A"), stream.write("é"))
+        print(path.read_bytes())
+        with path.open("a", encoding=encoding) as stream:
+            print(stream.write("𝄞"))
+        print(path.read_bytes())
+        path.write_bytes(b"")
+        with path.open("a", encoding=encoding) as stream:
+            print(stream.write("B"))
+        print(path.read_bytes())
     path.unlink()
 
 

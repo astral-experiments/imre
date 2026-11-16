@@ -5,6 +5,7 @@ import errno
 import os
 import pty
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
@@ -55,6 +56,21 @@ print(1 // zero)
 ''',
     "input_eof": 'print("before input EOF")\ninput()\n',
     "pipe_input": 'print("input-ready")\nanswer = input()\nprint(answer)\nprint("input-finished")\n',
+    "prompt_input": """import io
+import sys
+
+class Prompt:
+    def __str__(self) -> str:
+        sys.stdout = io.StringIO()
+        return "desk> "
+
+saved = sys.stdout
+try:
+    answer = input(Prompt())
+finally:
+    sys.stdout = saved
+print(answer)
+""",
     "terminal_loop": 'print("terminal-ready")\nwhile True:\n    pass\n',
 }
 ERRORS = {"division_error": b"ZeroDivisionError", "input_eof": b"EOFError"}
@@ -151,7 +167,7 @@ def stop(process: subprocess.Popen[bytes]) -> tuple[bytes | None, bytes | None]:
     return process.communicate(timeout=10)
 
 
-def pipe_exchange(command: list[str], payload: bytes, timeout: float) -> bytes:
+def pipe_exchange(command: list[str], payload: bytes, timeout: float, ready: bytes = b"input-ready\n") -> bytes:
     process = subprocess.Popen(
         command,
         stdin=subprocess.PIPE,
@@ -162,7 +178,7 @@ def pipe_exchange(command: list[str], payload: bytes, timeout: float) -> bytes:
     )
     try:
         assert process.stdout is not None
-        prefix = visible_output(process.stdout.fileno(), b"input-ready\n", timeout)
+        prefix = visible_output(process.stdout.fileno(), ready, timeout)
         assert process.poll() is None, "child exited before receiving input"
         rest, error = process.communicate(input=payload, timeout=timeout)
         assert process.returncode == 0 and not error, (
@@ -249,7 +265,7 @@ def check_link_options(directory: Path, compiler: str, runtime: str) -> int:
     return 7
 
 
-def check_run_command(directory: Path, compiler: str, flags: list[str], timeout: float) -> int:
+def check_run_command(directory: Path, compiler: str, python: str, flags: list[str], timeout: float) -> int:
     help_text = run([compiler, "run", "--help"], cwd=directory, input=b"")
     require_success(help_text, "imre run --help")
     assert b"imre run SOURCE.py" in help_text.stdout
@@ -311,9 +327,13 @@ def check_run_command(directory: Path, compiler: str, flags: list[str], timeout:
 
     source.write_text("raise ValueError('script failed')\n", encoding="utf-8")
     compiled = [compiler, "run", path, *flags]
+    # Resolve --python in the caller's cwd before running the reference in the fixture directory.
+    interpreter = Path(shutil.which(python) or python).absolute()
+    reference = subprocess.run([interpreter, path], cwd=directory, env=env, capture_output=True, timeout=60)
     failed = subprocess.run(compiled, cwd=directory, env=env, capture_output=True, timeout=60)
-    assert failed.returncode == 1 and failed.stderr == b"ValueError: script failed\n", failed
-    assert not failed.stdout and not list(scratch.iterdir())
+    assert failed.returncode == reference.returncode == 1, (failed, reference)
+    assert failed.stderr == reference.stderr, (failed.stderr, reference.stderr)
+    assert failed.stdout == reference.stdout == b"" and not list(scratch.iterdir())
     before = source.read_bytes()
     collision = run([*compiled, "--emit-llvm", path], cwd=directory, input=b"")
     assert collision.returncode and b"distinct paths" in collision.stderr and source.read_bytes() == before
@@ -356,7 +376,7 @@ def main() -> None:
         if args.sanitize:
             flags.append("--sanitize")
         passed += check_link_options(temporary, compiler, runtime)
-        passed += check_run_command(temporary, compiler, flags, args.timeout)
+        passed += check_run_command(temporary, compiler, args.python, flags, args.timeout)
         sources = {}
         for name, source in PROGRAMS.items():
             path = temporary / f"{name}.py"
@@ -377,6 +397,9 @@ def main() -> None:
             )
             for ending, payload in PAYLOADS.items()
         }
+        prompt_reference = pipe_exchange(
+            [args.python, "-I", str(sources["prompt_input"])], b"reply\n", args.timeout, b"desk> "
+        )
         reference["terminal_loop"] = terminal_message(
             [args.python, "-I", str(sources["terminal_loop"])], args.timeout
         )
@@ -428,6 +451,11 @@ def main() -> None:
                     pipe_reference[ending], f"pipe input {ending} O{level}",
                 )
                 passed += 1
+            same_output(
+                pipe_exchange([binaries["prompt_input"]], b"reply\n", args.timeout, b"desk> "),
+                prompt_reference, f"prompted input O{level}",
+            )
+            passed += 1
             same_output(
                 terminal_message([binaries["terminal_loop"]], args.timeout),
                 reference["terminal_loop"], f"terminal output O{level}",

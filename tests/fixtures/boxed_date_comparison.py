@@ -14,6 +14,27 @@ class ChildDateTime(datetime):
 
 
 def current():
+    assert date.__base__ is object and date.__bases__ == (object,)
+    assert date.__mro__ == (date, object)
+    assert datetime.__base__ is date and datetime.__bases__ == (date,)
+    assert datetime.__mro__ == (datetime, date, object)
+    assert ChildDateTime.__mro__ == (ChildDateTime, datetime, date, object)
+
+    class Mixin:
+        __slots__ = ()
+
+    class LabeledDate(date):
+        __slots__ = ("label",)
+
+    mixed = type("MixedDate", (Mixin, LabeledDate), {"__slots__": ("label",)})
+    instance = mixed(2024, 2, 29)
+    LabeledDate.label.__set__(instance, "parent label")
+    instance.label = "leap day"
+    assert mixed.__base__ is LabeledDate
+    assert type(instance) is mixed and instance.toordinal() == date(2024, 2, 29).toordinal()
+    assert LabeledDate.label.__get__(instance) == "parent label"
+    assert mixed.label.__get__(instance) == "leap day"
+
     day = date(2024, 2, 29)
     earlier = date(2024, 2, 28)
     child = ReflectedDate(2024, 2, 29)

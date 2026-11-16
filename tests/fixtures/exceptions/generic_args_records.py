@@ -71,3 +71,8 @@ asyncio.run(observe_group())
 original_error = Envelope(carry(ticket))
 ticket.value = 43
 examine(original_error, ticket)
+
+status = SystemExit(63)
+assert repr(carry(status)) == "SystemExit(63)"
+assert carry(status) != 63
+assert carry(status.code) == 63

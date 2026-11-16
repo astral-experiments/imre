@@ -2,6 +2,7 @@
 use super::*;
 use crate::ir::InstanceType;
 use crate::types::DispatchFunction;
+use ruff_python_ast::CmpOp;
 
 fn builtin(op: Builtin, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
@@ -51,7 +52,7 @@ fn lookup(table: &Expr, name: Expr, target: Type) -> Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Compare(
                     vec![name.clone(), unpacking::string("bool")],
-                    vec![ir::Compare::Equal],
+                    vec![CmpOp::Eq],
                 ),
             };
             conditional(is_bool, int(), base)
@@ -176,7 +177,7 @@ pub(super) fn format_argument(types: &Types, fmt: &Expr, rhs: &Expr) -> Option<E
         return None;
     }
     let positional = field(arg.clone(), 1, types.callback_positional());
-    let unsupported = Statement::Raise(Some(Expr {
+    let unsupported = Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("NotImplementedError").unwrap(),
@@ -184,7 +185,7 @@ pub(super) fn format_argument(types: &Types, fmt: &Expr, rhs: &Expr) -> Option<E
                 "formatting a callback argument with opaque fields is unsupported",
             ))),
         },
-    }));
+    });
     Some(Expr {
         ty: Type::Str,
         kind: ExprKind::Scope {
@@ -234,7 +235,7 @@ impl Registration {
         Ok(self.scope.finish(Expr {
             ty: target.ty,
             kind: ExprKind::Scope {
-                body: vec![Statement::SetItem(self.table, self.key, target.clone())],
+                body: vec![Statement::assign_item(self.table, self.key, target.clone())],
                 value: Box::new(target),
                 clear: vec![],
             },
@@ -364,18 +365,12 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(node, "recursive indirect single dispatch is unsupported"),
                 function,
             },
         );
         let table = Expr {
             ty: layout.registry,
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: target.ty,
-                entries: vec![(unpacking::string("object"), target.clone())],
-            },
+            kind: ExprKind::dict_pairs(vec![(unpacking::string("object"), target.clone())]),
         };
         let metadata = if let Some(text) = text {
             let doc = text

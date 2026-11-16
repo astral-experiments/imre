@@ -9,9 +9,18 @@ from pathlib import Path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "argparse"
 CASES = {
+    "guarded_constructor": [[], ["--name", "explicit"]],
+    "computed_options": [
+        [], ["--key", "explicit"], ["--number", "1+2j"], ["--number", "bad"],
+        ["--letter", "a"], ["--letter", "c"], ["--a-b", "first", "--a_b", "last"],
+        ["--a_b", "first", "--a-b", "last"],
+    ],
+    "evaluated_default": [[], ["--repository", "explicit"], ["--repository="], ["--repository"]],
     "registration_errors": [[], ["const"], ["invalid"], ["both"], ["effects"], ["interrupt"],
                             ["nested-group"], ["nested-child"], ["nested-child-group"],
-                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"]],
+                            ["mutex-group"], ["mutex-child"], ["mutex-child-name"],
+                            ["repeated_flag"], ["invalid_arity"], ["zero_arity"],
+                            ["mixed_positionals"], ["metavar_arity"], ["bad_template"]],
     "class_constants": [[], ["--as-class"], ["--optional"], ["--as-class", "--optional"],
                         ["--help"], ["--as-class=value"], ["--text", "<class 'tuple'>"]],
     "boolean_options": [
@@ -54,6 +63,7 @@ CASES = {
     "tuple_metavars": [
         [], ["--help"], ["--op2", "a", "b"], ["--op7", "first", "second", "third"], ["--op7", "short"],
         ["labels", "--help"], ["labels", "--one", "x", "--many", "a", "b"], ["labels", "--one", "bad"],
+        ["labels", "--mixed"], ["labels", "--mixed", "first", "second"],
     ],
     "blank_help": [[], ["format"], ["print"], ["parse"]],
     "counts": [
@@ -179,21 +189,6 @@ CASES = {
                   ["abbrev", "-fabc"], ["abbrev", "-foor", "y"], ["abbrev", "-foobar=a"],
                   ["abbrev", "-3-2"], ["abbrev", "-f", "-2"], ["abbrev", "--help"]],
 }
-REJECTED = {
-    "computed_flag": 'parser.add_argument("--" + "item")',
-    "repeated_flag": 'parser.add_argument("-v", "--verbose")\n    parser.add_argument("-v")',
-    "invalid_arity": 'parser.add_argument("input", nargs="bad")',
-    "zero_arity": 'parser.add_argument("input", nargs=0)',
-    "mixed_positionals": 'parser.add_argument("input", "--other")',
-    "foreign_converter": 'parser.add_argument("--number", type=complex)',
-    "choice_expression": 'parser.add_argument("--key", choices=list("ab"))',
-    "metavar_arity": 'parser.add_argument("--key", nargs="?", metavar=("A", "B"))',
-    "metavar_element": 'parser.add_argument("--key", nargs="*", metavar=("A", 2))',
-    "metavar_digit_limit": f"parser.add_argument('-n', type=int, choices=[0x{'f' * 600}], metavar='N')",
-    "duplicate_destination": 'parser.add_argument("--a-b")\n    parser.add_argument("--a_b")',
-    "escaped_builder": "copy = parser",
-    "bad_template": 'parser.add_argument("--key", help="%(value)s")',
-}
 
 
 def result(command, env):
@@ -277,37 +272,26 @@ def main():
         # An integer written in the source is already a value. A large hex
         # default/const remains usable even when decimal argv conversion is limited.
         source = Path(directory) / "literal_default.py"
-        literal = "0x" + "f" * 560
+        literal = "0x" + "f" * 600
         source.write_text(
             "import argparse\ndef read():\n    parser = argparse.ArgumentParser()\n"
             f"    parser.add_argument('-n', nargs='?', type=int, default={literal}, const={literal})\n"
-            f"    return parser.parse_args()\nprint(read().n == {literal})\n"
+            f"    parser.add_argument('--choice', type=int, choices=[{literal}], metavar='N')\n"
+            "    return parser.parse_args()\n"
+            f"try:\n    print(read().n == {literal})\n"
+            "except ValueError as error:\n    print(type(error).__name__, str(error))\n"
         )
-        native = source.with_suffix("")
+        native = Path(directory) / "bin" / source.name
+        native.parent.mkdir()
         env = {**os.environ, "PYTHONINTMAXSTRDIGITS": "640", "PYTHON_COLORS": "0"}
         for level in args.opt_levels:
             subprocess.run([args.compiler, "build", source, "-o", native, "--opt-level", level, *compile_flags], check=True)
-            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650]):
+            for arguments in ([], ["-n"], ["-n", "1" + "0" * 650], ["--help"], ["--choice", "3"]):
                 expected = result([args.python, source, *arguments], env)
                 actual = result([native, *arguments], env)
                 if actual != expected:
                     raise AssertionError(("literal_default", arguments, level, expected, actual))
                 checks += 1
-        for name, declaration in REJECTED.items():
-            source = Path(directory) / (name + ".py")
-            source.write_text(
-                "from argparse import ArgumentParser\ndef read():\n    parser = ArgumentParser()\n"
-                f"    {declaration}\n    return parser.parse_args()\nread()\n"
-            )
-            check = subprocess.run(
-                [args.compiler, "check", source], capture_output=True, check=False
-            )
-            if (
-                check.returncode == 0
-                or b"argparse" not in check.stderr.lower()
-                and b"add_argument" not in check.stderr
-            ):
-                raise AssertionError((name, check.returncode, check.stderr))
         # The successful guard relies on a stable receiver and a read-only field.
         source = Path(directory) / "bad_field.py"
         prelude = "from argparse import ArgumentParser\nfrom pathlib import Path\ndef read():\n    p = ArgumentParser()\n    p.add_argument('--out', type=Path)\n    return p.parse_args()\na = read()\n"
@@ -326,8 +310,18 @@ def main():
             )
             if check.returncode == 0:
                 raise AssertionError(statement)
-        # A field unique to one child is accessible only after dispatch.
         source = Path(directory) / "unchecked_command.py"
+        supplied = (FIXTURES / "supplied_namespace.py").read_text()
+        for missing in ("Other.count", "Target.unknown"):
+            source.write_text("class Other: pass\n" + supplied.replace("Target.count, extras", f"{missing}, extras"))
+            checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+            if checked.returncode == 0 or b"unknown class member" not in checked.stderr:
+                raise AssertionError((missing, checked.stderr))
+        source.write_text(supplied.replace("    print(result is Target,", "    broken: int = Target.label\n    print(result is Target,"))
+        checked = subprocess.run([args.compiler, "check", source], capture_output=True)
+        if checked.returncode == 0 or b"expected int, got str" not in checked.stderr:
+            raise AssertionError(checked.stderr)
+        # A field unique to one child is accessible only after dispatch.
         commands = (FIXTURES / "commands.py").read_text()
         for wrong in ["print(args.text)", "print(args.first)"]:
             source.write_text(commands.replace("    print(args.label)", "    " + wrong))
@@ -350,8 +344,17 @@ def main():
         checked = subprocess.run([args.compiler, "check", source], capture_output=True)
         if checked.returncode == 0 or b"argparse.Namespace requires" not in checked.stderr:
             raise AssertionError(checked.stderr)
+        source.write_text(
+            "import argparse\n"
+            "def parse(choices: list[str]) -> argparse.Namespace:\n"
+            "    parser = argparse.ArgumentParser(prog='parser')\n"
+            "    parser.add_argument('--item', default=['first'], nargs='+')\n"
+            "    return parser.parse_args(choices)\n"
+            "print(parse([]))\n"
+        )
+        subprocess.run([args.compiler, "check", source], check=True)
     print(
-        f"Validated {checks} argparse process comparisons and {len(REJECTED) + len(invalid_field_reads) + 5} compile-time rejections"
+        f"Validated {checks} argparse process comparisons and {len(invalid_field_reads) + 8} compile-time rejections"
     )
 
 

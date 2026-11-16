@@ -4,7 +4,7 @@ use super::*;
 
 /// ListGet also represents dictionary subscriptions; only a list carries rows.
 pub(super) fn packed_get(item: &Expr) -> Option<(&Builtin, &[Expr])> {
-    if let ExprKind::Builtin(op @ (Builtin::SequenceGetInBounds | Builtin::ListGet), args) =
+    if let ExprKind::Builtin(op @ (Builtin::SequenceGetInBounds | Builtin::ListGet(_)), args) =
         &item.kind
         && matches!(args[0].ty, Type::List(_))
     {
@@ -91,6 +91,12 @@ pub(super) fn snapshot_locals(module: &Module, f: &Function) -> Vec<bool> {
         *v &= assigned[i] && reads[i] == safe[i];
     }
     eligible
+}
+
+pub(super) struct PackedRow {
+    scratch: String,
+    layout: String,
+    values: Vec<Operand>,
 }
 
 impl Emitter<'_, '_> {
@@ -197,7 +203,7 @@ impl Emitter<'_, '_> {
     ) {
         let [
             Statement::Assign(index, subscript),
-            Statement::SetItem(list, at, row),
+            Statement::SetItem(_, list, at, row),
         ] = body
         else {
             return;
@@ -269,6 +275,14 @@ impl Emitter<'_, '_> {
         let (stride, upper, modulus) = (word(stride), word(bound), word(modulus));
         let (list, row_value) = (self.borrow_slot(*list_slot), self.borrow_slot(*row_slot));
         let (at, stop) = (self.borrow_slot(*index), self.borrow_slot(stop));
+        self.output.local_helper(
+            "imre_modular_write_stride",
+            include_str!("modular_write_stride.ll"),
+        );
+        let stride = self.instruction(format!(
+            "call i64 @imre_modular_write_stride(i64 {stride}, i64 {}, i64 {modulus})",
+            stop.operand
+        ));
         let layout = self.output.record_layout(row.ty);
         let last_index = self.entry_alloca("i64");
         let last = self.instruction(format!("call i64 @imre_struct_set_modular(ptr {}, ptr @{layout}, ptr {}, i64 {}, i64 {}, i64 {}, i64 {stride}, i64 {upper}, i64 {modulus}, ptr {last_index})",list.operand,row_value.operand,current.operand,stop.operand,at.operand));
@@ -292,14 +306,12 @@ impl Emitter<'_, '_> {
         self.start(&resume);
     }
 
-    /// Evaluate constructor operands in source order; copy only their checked
-    /// scalar values to the destination in declared field order.
-    pub(super) fn append_struct_constructor(&mut self, list: &Value, item: &Expr) -> bool {
+    pub(super) fn packed_constructor(&mut self, item: &Expr) -> Option<PackedRow> {
         let ExprKind::Construct { args, .. } = &item.kind else {
-            return false;
+            return None;
         };
         if !self.module.types.is_value_struct(item.ty) {
-            return false;
+            return None;
         }
         let name = self.output.record_type(item.ty);
         let scratch = self.entry_alloca(format!("%{name}"));
@@ -313,6 +325,19 @@ impl Emitter<'_, '_> {
             let word = self.word(v);
             self.line(format!("store i64 {word}, ptr {p}"));
         }
+        Some(PackedRow {
+            scratch,
+            layout,
+            values,
+        })
+    }
+
+    pub(super) fn append_packed(&mut self, list: &Value, row: PackedRow) {
+        let PackedRow {
+            scratch,
+            layout,
+            values,
+        } = row;
         self.checked_status(format!(
             "call i32 @imre_struct_append(ptr {}, ptr @{layout}, ptr {scratch})",
             list.operand
@@ -320,7 +345,6 @@ impl Emitter<'_, '_> {
         for value in &values {
             self.release_operand(value);
         }
-        true
     }
 
     /// Snapshot one complete row before releasing either operand or allowing
@@ -393,10 +417,12 @@ impl Emitter<'_, '_> {
                 ))
             }
         } else {
-            self.checked_pointer(format!(
-                "call ptr @imre_struct_row_checked(ptr {}, i64 {})",
-                list.value.operand, index.value.operand
-            ))
+            self.at_builtin_origin(op, |e| {
+                e.checked_pointer(format!(
+                    "call ptr @imre_struct_row_checked(ptr {}, i64 {})",
+                    list.value.operand, index.value.operand
+                ))
+            })
         };
         let scratch = self.entry_alloca(format!("%{name}"));
         let value = self.instruction(format!("load %{name}, ptr {src}"));

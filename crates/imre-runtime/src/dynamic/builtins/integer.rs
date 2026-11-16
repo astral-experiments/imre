@@ -1,5 +1,5 @@
-use num_bigint::{BigInt, Sign};
-
+#[cfg(target_os = "linux")]
+use super::super::stdlib::mmap;
 use super::*;
 
 /// Apply the integer addition slot without invoking a reflected method or coercion.
@@ -32,15 +32,18 @@ pub(super) fn truncate_real(ctx: &mut Context, receiver: Id) -> Result<Id> {
     }
 }
 
-/// Both read-only rational fields use the stored integer, bypassing subclass conversions.
-pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
+/// Read an integer getset field without invoking subclass conversions.
+pub(super) fn field(ctx: &mut Context, field: &str, args: &[Id]) -> Result<Id> {
     let [receiver] = *args else {
         return Err(type_error("expected one integer getset receiver"));
     };
     let value = ctx.scalar_value(receiver);
     match ctx.heap.get(value) {
-        Value::Int(_) | Value::Bool(_) if field == "denominator" => Ok(ctx.int(1)),
-        Value::Int(_) | Value::Bool(_) => Ok(exact_value(ctx, receiver)),
+        Value::Int(_) | Value::Bool(_) => match field {
+            "denominator" => Ok(ctx.int(1)),
+            "imag" => Ok(ctx.int(0)),
+            _ => Ok(exact_value(ctx, receiver)),
+        },
         _ => Err(type_error(format!(
             "descriptor '{field}' for 'int' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
@@ -48,26 +51,38 @@ pub(super) fn rational_field(ctx: &mut Context, field: &str, args: &[Id]) -> Res
     }
 }
 
-pub(super) fn bit_length(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Read the magnitude of an integer receiver with the no-argument descriptor convention.
+pub(super) fn bit_count_or_length(
+    ctx: &mut Context,
+    method: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
     let (&receiver, args) = args
         .split_first()
-        .ok_or_else(|| type_error("unbound method int.bit_length() needs an argument"))?;
+        .ok_or_else(|| type_error(format!("unbound method int.{method}() needs an argument")))?;
     let value = ctx.as_int(receiver).map_err(|_| {
         type_error(format!(
-            "descriptor 'bit_length' for 'int' objects doesn't apply to a '{}' object",
+            "descriptor '{method}' for 'int' objects doesn't apply to a '{}' object",
             ctx.type_name(receiver)
         ))
     })?;
     if !kwargs.is_empty() {
-        return Err(type_error("int.bit_length() takes no keyword arguments"));
+        return Err(type_error(format!(
+            "int.{method}() takes no keyword arguments"
+        )));
     }
     if !args.is_empty() {
         return Err(type_error(format!(
-            "int.bit_length() takes no arguments ({} given)",
+            "int.{method}() takes no arguments ({} given)",
             args.len()
         )));
     }
-    let bits = value.bit_length();
+    let bits = if method == "bit_count" {
+        value.bit_count()
+    } else {
+        value.bit_length()
+    };
     Ok(ctx.alloc(Value::Int(bits)))
 }
 
@@ -123,6 +138,13 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     let bytes = match ctx.heap.get(ctx.scalar_value(source)) {
         Value::Bytes(data) | Value::ByteArray(data) => data.as_slice(),
         Value::MemoryView { .. } => ctx.bytes_like(source)?,
+        #[cfg(target_os = "linux")]
+        map @ Value::Mmap { .. } => {
+            // A snapshot followed by num-bigint's infallible limb allocation can abort.
+            // Keep live maps at the same unsupported boundary as mapped memoryviews.
+            mmap::region(map)?;
+            return Err(mmap::unsupported_borrow());
+        }
         Value::Array(array) => array.as_bytes(),
         Value::Str(_) | Value::SurrogateStr(_) => {
             return Err(type_error(format!(
@@ -135,13 +157,9 @@ pub(super) fn from_bytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
             &items
         }
     };
-    let number = match (little, signed) {
-        (true, true) => BigInt::from_signed_bytes_le(bytes),
-        (false, true) => BigInt::from_signed_bytes_be(bytes),
-        (true, false) => BigInt::from_bytes_le(Sign::Plus, bytes),
-        (false, false) => BigInt::from_bytes_be(Sign::Plus, bytes),
-    };
-    let value = ctx.alloc(Value::Int(crate::Int::new(number)));
+    let value = ctx.alloc(Value::Int(crate::objects::integer_from_bytes(
+        bytes, little, signed,
+    )));
     if class == ctx.builtin("int") {
         Ok(value)
     } else {

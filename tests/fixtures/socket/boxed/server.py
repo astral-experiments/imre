@@ -39,6 +39,9 @@ with create_server(("127.0.0.1", 0), backlog=2, reuse_port=True) as server:
             assert client.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR) == 0
             peer, _ = server.accept()
             with peer:
+                for quickack in (0, 1):
+                    peer.setsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK, quickack)
+                    assert peer.getsockopt(socket.IPPROTO_TCP, socket.TCP_QUICKACK) == quickack
                 peer.sendall(b"r")
                 assert select.select([client], [], [], 2)[0] == [client]
                 assert client.recv(1) == b"r"

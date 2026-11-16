@@ -1,6 +1,8 @@
 """Native call recording for fixed-layout unittest.mock users."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+FILTER_DIR: bool = True
 
 
 def _format_list(parts: list[str], pretty: bool) -> str:
@@ -10,15 +12,11 @@ def _format_list(parts: list[str], pretty: bool) -> str:
     return "[" + entries + "]"
 
 
-def _key(text: str, kind: str) -> str:
-    if kind == "bool":
-        return "int:1" if text == "True" else "int:0"
-    return kind + ":" + text
-
-
-def _change_mapping(target: dict[str, str], values: dict[str, str], clear: bool) -> None:
+def _change_mapping(target: dict[str, str], values: dict[str, str] | None, clear: bool) -> None:
     if clear:
         target.clear()
+    if values is None:
+        raise TypeError("'NoneType' object is not iterable")
     for key in values:
         target[key] = values[key]
 
@@ -28,36 +26,43 @@ class _DictionaryPatch:
     values: dict[str, str]
     clear: bool
     _original: dict[str, str] | None
-    _starts: int
 
     def __init__(self, mapping: dict[str, str], values: dict[str, str], clear: bool) -> None:
         self.in_dict = mapping
         self.values = values
         self.clear = clear
         self._original = None
-        self._starts = 0
 
     def _enter(self) -> dict[str, str]:
         self._original = self.in_dict.copy()
         _change_mapping(self.in_dict, self.values, self.clear)
         return self.in_dict
 
+    def _change(self, values: dict[str, str] | None, clear: bool) -> None:
+        _change_mapping(self.in_dict, values, clear)
+
     def _exit(self) -> bool:
-        original = self._original
-        if original is not None:
-            _change_mapping(self.in_dict, original, True)
+        if self._original is not None:
+            self._change(self._original, True)
         return False
 
     def start(self) -> dict[str, str]:
         result = self._enter()
-        self._starts += 1
+        _active_patches.append(self)
         return result
 
     def stop(self) -> bool | None:
-        if self._starts == 0:
-            return None
-        self._starts -= 1
-        return self._exit()
+        for index in range(len(_active_patches)):
+            if _active_patches[index] is self:
+                # Keep start order for stopall, including after a manual stop.
+                for tail in range(index + 1, len(_active_patches)):
+                    _active_patches[tail - 1] = _active_patches[tail]
+                _active_patches.pop()
+                return self._exit()
+        return None
+
+
+_active_patches: list[_DictionaryPatch] = []
 
 
 class _PatchFactory:
@@ -65,6 +70,10 @@ class _PatchFactory:
 
     def __init__(self) -> None:
         self.TEST_PREFIX = "test"
+
+    def stopall(self) -> None:
+        for patcher in reversed(_active_patches):
+            patcher.stop()
 
     def _dictionary(self, in_dict: dict[str, str], values: dict[str, str] | None, clear: bool, kwargs: dict[str, str]) -> _DictionaryPatch:
         if values is None:
@@ -74,21 +83,22 @@ class _PatchFactory:
         return _DictionaryPatch(in_dict, changes, clear)
 
 
-@dataclass(repr=False)
-class _Arg:
-    text: str = field(compare=False)
-    key: str
-
-    def __init__(self, text: str, kind: str) -> None:
-        self.text = text
-        self.key = _key(text, kind)
+def _format_call_signature(name: str, args: tuple[object, ...], kwargs: dict[str, object]) -> str:
+    positional = ", ".join([repr(arg) for arg in args])
+    parts: list[str] = []
+    for key, value in kwargs.items():
+        parts.append(f"{key!s}={value!r}")
+    keywords = ", ".join(parts)
+    if positional and keywords:
+        positional += ", "
+    return name + "(" + positional + keywords + ")"
 
 
 class _Ancestor:
     prefix: str
-    calls: list[str]
+    calls: list[tuple[str, _Call]]
 
-    def __init__(self, prefix: str, calls: list[str]) -> None:
+    def __init__(self, prefix: str, calls: list[tuple[str, _Call]]) -> None:
         self.prefix = prefix
         self.calls = calls
 
@@ -102,7 +112,7 @@ class _Node:
     _mock_name: str | None
     _children: dict[str, int]
     _result: int
-    _history: list[str]
+    _history: list[tuple[str, _Call]]
     _ancestors: list[_Ancestor]
 
     def __init__(self, *, name: str | None = None, side_effect: Exception | None = None) -> None:
@@ -140,6 +150,15 @@ class _Node:
             if node._result != -1:
                 # A retained return value resets its calls, but keeps its configuration.
                 pending.append((nodes[node._result], False, False))
+
+
+def _store_call(mock: Mock, args: tuple[object, ...], kwargs: dict[str, object]) -> _Call:
+    mock.called = True
+    received = _new_call(args, kwargs)
+    mock.call_args = received
+    mock.call_args_list.append(received)
+    mock.call_count = len(mock.call_args_list)
+    return received
 
 
 def _check_child_name(name: str) -> None:
@@ -195,15 +214,11 @@ class Mock:
     def return_value(self) -> Mock:
         return self._at(self._return_index())
 
-    def _record(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> Mock:
-        received = _new_call(args, kwargs)
-        self._node.called = True
-        self._node.call_args = received
-        self._node.call_args_list.append(received)
-        self._node.call_count = len(self._node.call_args_list)
-        self._node._history.append(_format_recorded_call(received, "call"))
+    def _record(self, args: tuple[object, ...], kwargs: dict[str, object]) -> Mock:
+        received = _store_call(self, args, kwargs)
+        self._node._history.append(("call", received))
         for ancestor in self._node._ancestors:
-            ancestor.calls.append(_format_recorded_call(received, ancestor.prefix))
+            ancestor.calls.append((ancestor.prefix, received))
         effect = self._node.side_effect
         if effect is not None:
             raise effect
@@ -218,7 +233,8 @@ class Mock:
     def _calls_repr(self) -> str:
         if len(self._node._history) == 0:
             return ""
-        return "\nCalls: " + _format_list(self._node._history, True) + "."
+        parts = [_format_recorded_call(value, name) for name, value in self._node._history]
+        return "\nCalls: " + _format_list(parts, True) + "."
 
     def reset_mock(self, *, return_value: bool = False, side_effect: bool = False) -> None:
         self._node._reset(self._nodes, return_value, side_effect)
@@ -235,22 +251,23 @@ class Mock:
         if self._node.call_count != 1:
             raise AssertionError(f"Expected '{self._name()}' to have been called once. Called {self._node.call_count} times." + self._calls_repr())
 
-    def _assert_called_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
+    def _assert_called_with(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
         expected = _new_call(args, kwargs)
         observed = self._node.call_args
         if observed is not None and observed == expected:
             return
+        expected_text = _format_recorded_call(expected, self._name())
         actual = "not called." if observed is None else _format_recorded_call(observed, self._name())
-        raise AssertionError("expected call not found.\nExpected: " + _format_recorded_call(expected, self._name()) + "\n  Actual: " + actual)
+        raise AssertionError("expected call not found.\nExpected: " + expected_text + "\n  Actual: " + actual)
 
-    def _assert_any_call(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
+    def _assert_any_call(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
         expected = _new_call(args, kwargs)
         for actual in self._node.call_args_list:
             if expected == actual:
                 return
         raise AssertionError(_format_recorded_call(expected, self._name()) + " call not found")
 
-    def _assert_called_once_with(self, args: list[_Arg], kwargs: dict[str, _Arg]) -> None:
+    def _assert_called_once_with(self, args: tuple[object, ...], kwargs: dict[str, object]) -> None:
         if self._node.call_count != 1:
             raise AssertionError(f"Expected '{self._name()}' to be called once. Called {self._node.call_count} times." + self._calls_repr())
         self._assert_called_with(args, kwargs)

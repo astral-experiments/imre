@@ -1,3 +1,4 @@
+import gc
 import types
 from types import get_original_bases
 
@@ -159,10 +160,74 @@ def prepared_class_statements():
 
     class Product(metaclass=Meta):
         value = seed
+        field: (value, lambda: marker)
         def owner(self):
             return __class__
 
+        def record(self):
+            self.value: [0 for self.never in ()] = 1
+
+        def ordered(self, other):
+            ignored: {[self for other in ()]: [other for self in ()] for _ in ()}
+
     assert type(Product) is Meta and Product().owner() is Product and Product.value == 9
+    assert Product.record.__code__.co_cellvars == ("self",)
+    assert Product.ordered.__code__.co_cellvars == ("other",)
+    assert Product.__static_attributes__ == ("value",)
+    assert Product.__annotate__.__code__.co_freevars == ("__classdict__", "marker")
+    value, read = Product.__annotations__["field"]
+    assert value == 9 and read() is marker
+
+    observed = []
+    class Namespace(dict):
+        def __missing__(self, name):
+            if name == "supplied":
+                return 42
+            raise KeyError(name)
+        def __setitem__(self, key, value):
+            if key == "answer":
+                observed.append(value)
+            super().__setitem__(key, value)
+            if key == "matched" and value is None:
+                gc.collect()
+                observed.append("cleared")
+        def __delitem__(self, key):
+            if key == "matched":
+                observed.append(("delete", self[key] is None))
+            super().__delitem__(key)
+
+    class Prepared(type):
+        @classmethod
+        def __prepare__(meta, name, bases):
+            return Namespace()
+
+    class FromMapping(metaclass=Prepared):
+        answer = supplied
+        answer += 1
+    assert FromMapping.answer == 43 and observed == [42, 43]
+
+    try:
+        class Abandoned(metaclass=Prepared):
+            try:
+                raise ExceptionGroup("original", [ValueError()])
+            except* ValueError as matched:
+                raise LookupError("replacement")
+    except LookupError as replacement:
+        assert replacement.args == ("replacement",)
+        assert observed == [42, 43, "cleared", ("delete", True)]
+    else:
+        raise AssertionError("except* lost its replacement")
+
+    observed.clear()
+    try:
+        class Ordinary(metaclass=Prepared):
+            try:
+                raise ValueError
+            except ValueError as matched:
+                raise LookupError("replacement")
+    except LookupError as replacement:
+        observed.append(replacement.args)
+    assert observed == ["cleared", ("delete", True), ("replacement",)]
 
     prepared = {"__name__": "local", "x": "prepared"}
     x = "outer"
@@ -176,6 +241,13 @@ def prepared_class_statements():
     missing = object()
     old = {key: module.get(key, missing) for key in ("__module__", "__static_attributes__")}
     try:
+        module["__module__"] = "before"
+        class Plain:
+            global __module__
+            def captured(value=__module__):
+                return value
+        assert Plain.captured() == module["__name__"]
+
         class Scoped(metaclass=ScopeMeta):
             global __name__, __module__, __static_attributes__
             nonlocal x

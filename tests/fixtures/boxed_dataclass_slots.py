@@ -1,6 +1,8 @@
 import gc
 import weakref
-from dataclasses import FrozenInstanceError, dataclass, field
+from dataclasses import FrozenInstanceError, dataclass, field, fields
+from inspect import getattr_static
+from typing import Generic, Protocol, TypeVar
 
 
 def current():
@@ -11,7 +13,20 @@ def current():
         def owner(self) -> type:
             return __class__
 
+    old_namespace = Original.__dict__
+    dict_descriptor = old_namespace['__dict__']
+    old_instance = Original()
+    old_instance.note = 'kept'
+    old_ref = weakref.ref(old_instance)
     Slotted = dataclass(frozen=True, slots=True)(Original)
+    assert '__dict__' not in old_namespace and '__weakref__' not in old_namespace
+    assert not hasattr(old_instance, '__dict__') and not hasattr(old_instance, '__weakref__')
+    names = dir(old_instance)
+    assert '__dict__' not in names and 'note' not in names
+    assert getattr_static(old_instance, '__dict__', None) is None
+    assert getattr_static(old_instance, 'note', None) is None
+    assert old_ref() is old_instance
+    assert dict_descriptor.__get__(old_instance, Original)['note'] == old_instance.note == 'kept'
     assert Slotted is not Original and Slotted.__qualname__ == Original.__qualname__
     assert Slotted.__slots__ == ('number', 'label')
     obj = Slotted(4)
@@ -35,6 +50,81 @@ def current():
     clone.__setstate__(obj.__getstate__())
     assert clone == obj
 
+    hooks = []
+
+    class Group(Protocol):
+        __slots__ = ()
+
+        def __init_subclass__(cls):
+            super().__init_subclass__()
+            hooks.append((cls, __class__))
+
+        def owner(self):
+            return __class__
+
+    class Bounds(Group):
+        value: int
+
+        def owners(self):
+            return (__class__, super().owner())
+
+        def __iter__(self):
+            yield self.value
+
+    slotted = dataclass(frozen=True, slots=True)(Bounds)
+    assert hooks == [(Bounds, Group), (slotted, Group)]
+    instance = slotted(7)
+    assert tuple(instance) == (7,) and not hasattr(instance, '__dict__')
+    assert instance.owners() == (slotted, Group)
+
+    registrations = []
+
+    class Registry:
+        def __init_subclass__(cls, label='replacement'):
+            registrations.append((cls, cls.__qualname__, label))
+            cls.__qualname__ = 'registered ' + label
+
+    class Registered(Registry, label='original'):
+        pass
+
+    replacement = dataclass(slots=True)(Registered)
+    assert registrations == [(Registered, 'current.<locals>.Registered', 'original'),
+                             (replacement, 'Registered', 'replacement')]
+    assert replacement.__qualname__ == Registered.__qualname__ == 'registered original'
+
+    @dataclass
+    class Schema:
+        shared: int
+
+        def __init_subclass__(cls):
+            if '__slots__' in vars(cls):
+                cls.__annotations__ = {'value': str}
+                dataclass(cls)
+
+    class Row(Schema):
+        value: int
+
+    slotted_row = dataclass(slots=True)(Row)
+    original_fields, replacement_fields = fields(Row), fields(slotted_row)
+    assert original_fields[0] is replacement_fields[0] is fields(Schema)[0]
+    assert original_fields[1] is not replacement_fields[1]
+    assert original_fields[1].type is int and replacement_fields[1].type is str
+
+    class TypeName(str):
+        def __get__(self, obj, owner):
+            raise AssertionError('read type metadata as a descriptor')
+
+        def __set_name__(self, owner, name):
+            raise AssertionError('assigned a member name to type metadata')
+
+    class Named:
+        pass
+
+    Named.__name__ = TypeName('Short')
+    Named.__qualname__ = TypeName('qualified.Short')
+    renamed = dataclass(slots=True)(Named)
+    assert renamed.__name__ is Named.__name__ and renamed.__qualname__ is Named.__qualname__
+
     class Marker:
         pass
     Marker.__wrapped__ = Marker
@@ -50,15 +140,34 @@ def current():
     assert left.count == right.count == 2
     left.xs.append("left")
     assert right.xs == []
+    class WeakBase:
+        __slots__ = ('__weakref__',)
+
+    @dataclass(slots=True)
+    class WithDict(WeakBase):
+        __dict__: dict = {}
+
+    storage = {}
+    with_dict = WithDict(storage)
+    with_dict.reading = 41
+    assert WithDict.__slots__ == ('__dict__',)
+    assert vars(WithDict)['__dict__'].__objclass__ is WithDict
+    assert vars(with_dict) is storage and storage == {'reading': 41}
+
     def discarded():
         class Temporary:
-            x: int
+            x: list[Unresolved]
         replacement = dataclass(frozen=True, slots=True)(Temporary)
-        return weakref.ref(Temporary), weakref.ref(replacement)
+        return weakref.ref(Temporary), replacement
 
-    original_ref, replacement_ref = discarded()
+    original_ref, replacement = discarded()
     gc.collect()
-    assert original_ref() is None and replacement_ref() is None
+    assert original_ref() is None and replacement([41]).x == [41]
+    assert replacement.__dataclass_fields__['x'].type.__args__[0].__owner__ is replacement
+    replacement_ref = weakref.ref(replacement)
+    del replacement
+    gc.collect()
+    assert replacement_ref() is None
     @dataclass(slots=True, weakref_slot=True)
     class Parent:
         x: int
@@ -80,10 +189,12 @@ def current():
     class Bad(IteratorSlots):
         y: list = []
 
+    bad_namespace = Bad.__dict__
     try:
         dataclass(Bad, slots=True)
     except ValueError as exc:
         assert 'mutable default' in str(exc)
+        assert '__dict__' in bad_namespace and '__weakref__' in bad_namespace
     else:
         raise AssertionError('slot inspection preceded field validation')
 
@@ -101,12 +212,140 @@ def current():
     class Late(IteratorSlots):
         y: int
 
+    late_namespace = Late.__dict__
     try:
         dataclass(Late, slots=True)
     except TypeError as exc:
         assert str(exc) == "Slots of 'IteratorSlots' cannot be determined"
         assert '__init__' in Late.__dict__
+        assert '__dict__' not in late_namespace and '__weakref__' not in late_namespace
     else:
         raise AssertionError('accepted an iterator as an inherited slot declaration')
+
+    T = TypeVar('T')
+
+    class Station:
+        __slots__ = ('name',)
+
+    @dataclass(slots=True, weakref_slot=True)
+    class Reading(Generic[T], Station):
+        name: str
+        value: T
+
+    assert Reading.__bases__ == (Generic, Station)
+    assert Reading.__slots__ == ('value', '__weakref__')
+    reading = Reading[int]('outside', 7)
+    assert (reading.name, reading.value) == ('outside', 7)
+    assert type(reading) is Reading and weakref.ref(reading)() is reading
+
+    events = []
+
+    class BaseAlias:
+        armed = False
+
+        def __mro_entries__(self, bases):
+            events.append('resolve')
+            return (Station,)
+
+        def __eq__(self, other):
+            if other is Generic:
+                events.append('compare')
+                if self.armed:
+                    raise ValueError('alias membership')
+            return NotImplemented
+
+    alias = BaseAlias()
+
+    class Row(alias, Generic[T]):
+        value: T
+
+    assert events == ['resolve', 'compare']
+    alias.armed = True
+    try:
+        dataclass(slots=True)(Row)
+    except ValueError as exc:
+        assert exc.args == ('alias membership',)
+    else:
+        raise AssertionError('replacement skipped alias equality')
+    assert events == ['resolve', 'compare', 'compare']
+
+    class Indirect(Generic[T]):
+        pass
+
+    failure = LookupError('name lookup')
+    fail_lookup = False
+
+    class PublishedName(type):
+        def __eq__(cls, other):
+            if other is Generic:
+                events.append('compare base')
+                return True
+            return NotImplemented
+
+        def __hash__(cls):
+            return hash(Generic)
+
+        @property
+        def __name__(cls):
+            events.append('read name')
+            if fail_lookup:
+                raise failure
+            return 'Protocol'
+
+    class Base(metaclass=PublishedName):
+        pass
+
+    @dataclass
+    class Record(Base, Indirect):
+        value: int
+
+    assert Record(7).value == 7
+    fail_lookup = True
+    events.clear()
+    try:
+        type('Another', (Base, Indirect), {})
+    except LookupError as exc:
+        assert exc is failure
+    else:
+        raise AssertionError('ignored metaclass name lookup')
+    assert events == ['compare base', 'read name']
+
+    import typing
+
+    class RebindGeneric:
+        def __init_subclass__(cls):
+            super().__init_subclass__()
+            typing.Generic = int
+            events.append('rebind')
+
+    events.clear()
+    try:
+        class Rebound(Base, Indirect, RebindGeneric):
+            pass
+    finally:
+        typing.Generic = Generic
+    assert Rebound.__parameters__ == ()
+    assert events == ['rebind']
+
+    # The published module selects the helper. A forwarded Python function still
+    # reads Generic in its defining module when a superclass hook delegates.
+    import sys
+    from types import ModuleType
+
+    view = ModuleType('typing')
+    view.Generic = int
+    view._generic_init_subclass = typing._generic_init_subclass
+
+    class Forward:
+        def __init_subclass__(cls):
+            sys.modules['typing'] = view
+            try:
+                super().__init_subclass__()
+            finally:
+                sys.modules['typing'] = typing
+
+    class Forwarded(Forward, Indirect): pass
+
+    assert Forwarded.__parameters__ == ()
 
     print('replacement slots, class cell, state and initializer annotations')

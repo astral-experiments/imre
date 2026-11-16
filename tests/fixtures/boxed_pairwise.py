@@ -33,6 +33,35 @@ def current():
         raise AssertionError("source exception was lost")
     assert next(cursor, "end") == "end" and pulls.count("next") == 3
 
+    pulls.clear()
+    exact = pairwise(Input())
+    assert pulls == ["iter"] and next(exact) == (2, 3)
+
+    class Reenter:
+        def __init__(self):
+            self.items = iter(range(6))
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            value = next(self.items)
+            if value == 0:
+                assert next(nested) == (1, 2)
+            return value
+
+    nested = pairwise(Reenter())
+    assert next(nested) == (0, 3) and list(nested) == [(3, 4), (4, 5)]
+
+    class Override(pairwise):
+        def __next__(self):
+            return "override", pairwise.__next__(self)
+
+    override = Override([None, 1, 2])
+    assert next(override) == ("override", (None, 1))
+    Override.__next__ = lambda self: pairwise.__next__(self)
+    assert next(override) == (1, 2)
+
     class StepError(StopIteration):
         pass
 
@@ -58,6 +87,22 @@ def current():
         else:
             raise AssertionError("source's StopIteration payload was lost")
         assert next(stopped, "end") == "end"
+
+    import gc
+    import weakref
+
+    class Item:
+        pass
+
+    items = pairwise(Item() for _ in range(3))
+    left, right = next(items)
+    previous = weakref.ref(right)
+    del left, right
+    gc.collect()
+    assert previous() is not None and next(items)[0] is previous()
+    del items
+    gc.collect()
+    assert previous() is None
 
     from importlib import import_module
     import sys

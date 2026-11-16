@@ -191,7 +191,10 @@ impl Emitter<'_, '_> {
                 self.call("imre_union_path_text", Type::Str, &[&args[0].value])
             }
             PathOperation::Resolve => {
-                let strict = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let strict = args.get(1).map_or_else(
+                    || "0".to_owned(),
+                    |strict| self.instruction(format!("zext i1 {} to i32", strict.value.operand)),
+                );
                 let operand = self.checked_instruction(format!(
                     "call ptr @imre_path_resolve(ptr {}, i32 {strict})",
                     args[0].value.operand,
@@ -269,7 +272,11 @@ impl Emitter<'_, '_> {
                 })
             }
             PathOperation::Query(query) => {
-                let follow = self.instruction(format!("zext i1 {} to i32", args[1].value.operand));
+                let follow = if let Some(follow) = args.get(1) {
+                    self.instruction(format!("zext i1 {} to i32", follow.value.operand))
+                } else {
+                    i32::from(!matches!(query, ir::PathQuery::Symlink)).to_string()
+                };
                 let byte = self.instruction(format!(
                     "call i32 @imre_path_query(ptr {}, i32 {}, i32 {follow})",
                     args[0].value.operand, query as u32
@@ -338,8 +345,6 @@ impl Emitter<'_, '_> {
                     PathOperation::Scripts => "imre_sysconfig_scripts",
                     PathOperation::Absolute => "imre_path_absolute",
                     PathOperation::New => "imre_path_new",
-                    PathOperation::Join => "imre_path_join",
-                    PathOperation::JoinObject => "imre_path_join_object",
                     PathOperation::AsPosix => "imre_path_as_posix",
                     PathOperation::Text => "imre_path_text",
                     PathOperation::Info => "imre_path_info",

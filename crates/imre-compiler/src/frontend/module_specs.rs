@@ -39,7 +39,7 @@ impl Checker<'_> {
             body: vec![
                 Statement::Assign(rhs, value),
                 Statement::Assign(object, receiver),
-                Statement::SetField(owner, field, truth),
+                Statement::set_field(owner, field, truth),
             ],
             clear: vec![rhs, object],
         })
@@ -170,7 +170,7 @@ impl Checker<'_> {
                         ty: Type::Bool,
                         kind: ExprKind::Boolean(true, vec![is_none(cached.clone()), loc]),
                     },
-                    vec![Statement::SetField(obj, CACHED, from_origin)],
+                    vec![Statement::set_field(obj, CACHED, from_origin)],
                     vec![],
                 );
                 Expr {

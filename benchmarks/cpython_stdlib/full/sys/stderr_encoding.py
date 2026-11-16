@@ -46,8 +46,8 @@ print(render("local"))
 """
 
 
-def run(command, env):
-    child = subprocess.run(command, env=env, capture_output=True, timeout=45)
+def run(command, env, *, timeout=45):
+    child = subprocess.run(command, env=env, capture_output=True, timeout=timeout)
     return {"status": child.returncode, "stdout": child.stdout.hex(), "stderr": child.stderr.hex()}
 
 
@@ -73,13 +73,13 @@ def compare(toolchain, source):
             path.mkdir()
             return toolchain.build(program.encode(), path)
 
-        def expect(label, code, command, setting, flags=()):
+        def expect(label, code, command, setting, flags=(), *, native_timeout=45):
             env = base.copy()
             if setting is not None:
                 env["PYTHONIOENCODING"] = setting
             env["IMRE_ENCODED_FLAGS"] = "\x1f".join(["--quiet", "--no-cache", "--runtime", str(toolchain.runtime),
                                                    "--clang", str(toolchain.clang), "--opt-level", str(toolchain.level)])
-            native = run(command, env)
+            native = run(command, env, timeout=native_timeout)
             stock = run([sys.executable, *flags, "-c", code], env)
             if native != stock:
                 raise AssertionError((label, setting, stock, native))
@@ -107,8 +107,9 @@ def compare(toolchain, source):
                      "source_sha256": hashlib.sha256(SHADOWED_REPR.encode()).hexdigest(),
                      "diagnostic": rejected.stderr.decode().replace(str(root), "[case]").strip()})
         isolated = 'import os\n' + METADATA + '\nsetting = os.getenv("PYTHONIOENCODING")\nif setting is not None:\n    err.write(setting)\n'
+        # -I ignores IMRE_ENCODED_FLAGS, so allow the same cold build budget as Toolchain.build.
         expect("isolated command preserves environment and ignores codec", isolated,
-               [toolchain.imre, "-I", "-c", isolated], "not-a-codec", ["-I"])
+               [toolchain.imre, "-I", "-c", isolated], "not-a-codec", ["-I"], native_timeout=180)
         for index, (code, expected, extra) in enumerate(exit_children(source)):
             if extra or expected == b"unflushed,message":
                 row = expect(CASE + " child", code, [binary(code, f"exit{index}")], extra.get("PYTHONIOENCODING"))

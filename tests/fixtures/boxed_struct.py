@@ -2,11 +2,24 @@ import struct
 
 
 def current():
+    from array import array
     from struct import error
 
     assert error is struct.error and error.__bases__ == (Exception,)
     assert (error.__module__, error.__name__, error.__qualname__) == ("struct", "error", "error")
     saved = struct.Struct(">I")
+    from struct import _clearcache as clear
+    unpack = saved.unpack
+    iterator = saved.iter_unpack(b"\0\0\0\1\0\0\0\2")
+    assert next(iterator) == (1,)
+    assert clear is struct._clearcache and clear() is None
+    assert unpack(saved.pack(7)) == (7,) and list(iterator) == [(2,)]
+    try:
+        clear(1)
+    except TypeError as exc:
+        assert str(exc) == "_struct._clearcache() takes no arguments (1 given)"
+    else:
+        raise AssertionError("_clearcache accepted an argument")
     struct.error = ValueError
     try:
         try:
@@ -18,6 +31,59 @@ def current():
             raise AssertionError("short struct buffer was accepted")
     finally:
         struct.error = error
+
+    class Frequency(str):
+        def __complex__(self):
+            return complex(-0.0, 1.5)
+
+    for code, component in (("F", "f"), ("D", "d")):
+        for prefix in ("@", "=", "<", ">"):
+            sample = struct.Struct(prefix + code)
+            wire = struct.pack(prefix + "2" + component, -0.0, 1.5)
+            assert sample.pack(Frequency("ignored")) == wire
+            assert list(sample.iter_unpack(wire * 2)) == [(-0.0 + 1.5j,)] * 2
+            assert struct.calcsize(prefix + "B0" + code) == struct.calcsize(prefix + "B0" + component)
+            decoded, = sample.unpack_from(b"!" + wire, 1)
+            assert sample.pack(decoded) == wire
+    try:
+        struct.pack("F", "2j")
+    except struct.error as error:
+        assert error.args == ("required argument is not a complex",)
+    else:
+        raise AssertionError("complex field parsed text")
+
+    import sys
+    swapped = ">" if sys.byteorder == "little" else "<"
+    target = bytearray(b"!" * 10)
+    try:
+        struct.pack_into(swapped + "F", target, 1, complex(1.5, 1e100))
+    except OverflowError:
+        assert target == b"!" + struct.pack(swapped + "f", 1.5) + bytes(4) + b"!"
+    else:
+        raise AssertionError("out-of-range imaginary component packed")
+
+    words = array("I", [0x12345678])
+    assert struct.unpack("@I", words) == (0x12345678,)
+    assert struct.Struct("@I").unpack(memoryview(words)) == (0x12345678,)
+
+    events = []
+
+    class Source(bytearray):
+        def __buffer__(self, flags):
+            events.append(flags)
+            return memoryview(b"XY")
+        def __release_buffer__(self, view):
+            events.append(view.tobytes())
+
+    source = Source(b"!")
+    assert struct.Struct(">H").unpack(source) == (0x5859,)
+    try:
+        struct.unpack(">I", source)
+    except struct.error as caught:
+        assert caught.args == ("unpack requires a buffer of 4 bytes",)
+    else:
+        raise AssertionError("short export was accepted")
+    assert events == [0, b"XY", 0, b"XY"]
 
     for prefix in ("", "@", "=", "<", ">", "!"):
         layout = struct.Struct(prefix + "B2xI")
@@ -90,6 +156,9 @@ def current():
     header = struct.Struct("!2cI")
     assert header.pack(Data(b"M"), b"\xff", 258) == b"M\xff\0\0\x01\x02"
     assert header.unpack_from(b"XM\xff\0\0\x01\x02", 1) == (b"M", b"\xff", 258)
+    a, b, c = struct.unpack("c1s2p", b"xx\x01x")
+    assert a is b is c
+    assert next(struct.iter_unpack("c", b"x"))[0] is a
     target = bytearray(b"1234")
     try:
         struct.pack_into("2c", target, 1, b"A", bytearray(b"B"))
@@ -122,10 +191,41 @@ def current():
         except struct.error as error:
             print(str(error))
 
+    class WireField(struct.Struct):
+        def __init__(self, fmt):
+            super().__init__(fmt)
+
+        @property
+        def size(self):
+            return super().size - 1
+
+    field = WireField(">H")
+    assert field.size == 1
+    assert repr(field) == "WireField('>H')"
+    pack_field = field.pack
+    payload = bytearray(b"\x00\x01abcd")
+    rows = field.iter_unpack(payload)
+    assert next(rows) == (1,)
+    field.__init__("B")
+    assert repr(field) == "WireField('B')"
+    assert rows.__length_hint__() == 4
+    assert list(rows) == [(97,), (98,), (99,), (100,)]
+    payload.append(0)
+
+    for bad, exc in (("$", struct.error), (chr(0xdc00), UnicodeEncodeError)):
+        try:
+            field.__init__(bad)
+        except exc:
+            pass
+        else:
+            raise AssertionError("invalid format accepted")
+        assert field.format == "B" and pack_field(7) == b"\x07"
+
     # End of central directory record with a fixed byte string and repeated integers.
     fmt = b"<4s4H2LH"
     values = (b"PK\x05\x06", 0, 0, 1, 1, 55, 99, 0)
     record = struct.Struct(fmt)
+    assert repr(record) == "Struct('<4s4H2LH')"
     data = struct.pack(fmt, *values)
     assert struct.calcsize(fmt) == record.size == len(data) == 22
     assert record.unpack(data) == struct.unpack(fmt, data) == values
@@ -229,6 +329,38 @@ def current():
     else:
         raise AssertionError("lost index error")
 
+    try:
+        struct.pack("B", OverflowingIndex())
+    except struct.error as error:
+        assert str(error) == "'B' format requires 0 <= number <= 255"
+    else:
+        raise AssertionError("unsigned byte accepted a failed conversion")
+
+    target = bytearray(b"!" * 12)
+    try:
+        struct.pack_into(opposite_endian + "BQB", target, 1, 7, Field((1 << 80) + 99), 8)
+    except struct.error:
+        assert target == b"!\x07" + (99).to_bytes(8, "big" if opposite_endian == ">" else "little") + b"\0!"
+    else:
+        raise AssertionError("unsigned long long accepted an out-of-range index")
+
+    # The length field of a native cmsghdr has type size_t.
+    header = struct.Struct("@Nii")
+    assert header.unpack(header.pack(Field(20), 1, 1)) == (20, 1, 1)
+    bits = 8 * struct.calcsize("P")
+    assert struct.calcsize("@B0N") == struct.calcsize("@B0n") == struct.calcsize("@B0P")
+    for code, low, high in (("n", -(1 << (bits - 1)), (1 << (bits - 1)) - 1),
+                            ("N", 0, (1 << bits) - 1)):
+        pair = struct.Struct("@2" + code)
+        assert pair.unpack(pair.pack(low, high)) == (low, high)
+        for value in (low - 1, high + 1, OverflowingIndex()):
+            try:
+                struct.pack(code, value)
+            except struct.error as error:
+                assert str(error) == f"'{code}' format requires {low} <= number <= {high}"
+            else:
+                raise AssertionError("native size overflow accepted")
+
     sample = struct.Struct("<h?")
     assert sample.pack(Field(-32768), [1]) == b"\x00\x80\x01"
     value, flag = sample.unpack(b"\xff\x7f\x80")
@@ -261,6 +393,21 @@ def current():
                 assert str(error) == "'i' format requires -2147483648 <= number <= 2147483647"
             else:
                 raise AssertionError("signed int overflow accepted")
+
+    half = struct.Struct(">e")
+    assert struct.calcsize("@Be") == struct.calcsize("@Bh")
+    assert half.pack(Double()) == b"\x3e\x00"
+    midpoint = 1.0 + 2.0**-11
+    assert half.pack(midpoint) == b"\x3c\x00"
+    assert half.pack(midpoint + 2.0**-52) == b"\x3c\x01"
+    for word in (b"\x00\x01", b"\x7b\xff", b"\x80\x00", b"\xfc\x01"):
+        assert half.pack(half.unpack(word)[0]) == word
+    try:
+        half.pack(65520.0)
+    except OverflowError as error:
+        assert str(error) == "float too large to pack with e format"
+    else:
+        raise AssertionError("half-float overflow accepted")
 
     sample = struct.Struct(">f")
     assert sample.pack(Double()) == b"\x3f\xc0\x00\x00"
@@ -301,3 +448,42 @@ def current():
             assert str(error) == "required argument is not a float"
         else:
             raise AssertionError("invalid double accepted")
+
+    from operator import length_hint
+
+    data = bytearray(b"\x00\x01\x00\x02")
+    events = []
+
+    class Source:
+        def __buffer__(self, flags):
+            events.append(flags)
+            self.view = memoryview(data)
+            return self.view
+
+        def __release_buffer__(self, view):
+            assert view is self.view
+            view.release()
+            events.append("released")
+
+    source = Source()
+    rows = struct.Struct(">H").iter_unpack(source)
+    assert iter(rows) is rows and length_hint(rows) == 2
+    assert next(rows) == (1,)
+    data[3] = 7
+    assert next(rows) == (7,) and rows.__length_hint__() == 0
+    try:
+        source.view.release()
+    except BufferError:
+        pass
+    else:
+        raise AssertionError("iterator released the view before exhaustion")
+    assert next(rows, None) is None and next(rows, None) is None
+    assert events == [0, "released"]
+    data.append(0)
+    try:
+        struct.iter_unpack(">H", source)
+    except struct.error as caught:
+        assert caught.args == ("iterative unpacking requires a buffer of a multiple of 2 bytes",)
+    else:
+        raise AssertionError("partial record was accepted")
+    assert events == [0, "released", 0, "released"]

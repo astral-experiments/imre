@@ -8,6 +8,10 @@ def function(value):
     return value + 1
 
 
+async def deferred():
+    raise AssertionError("inspection awaited the coroutine")
+
+
 class Callable:
     def __call__(self):
         return 3
@@ -70,4 +74,14 @@ def current():
     assert obj.render("text") == ("default", obj)
     assert obj.render(6) == 7
     assert obj.render.__wrapped__ is Callable.__dict__["render"].func
+    obj.__name__ = "deferred"
+    obj.__code__ = deferred.__code__
+    obj.__defaults__ = ()
+    obj.__kwdefaults__ = None
+    assert inspect.iscoroutinefunction(obj)
+    obj.__defaults__ = []
+    assert not inspect.iscoroutinefunction(obj)
+    obj.__defaults__ = None
+    obj.__code__ = function.__code__
+    assert not inspect.iscoroutinefunction(obj)
     print("routine predicates and bound dispatch")

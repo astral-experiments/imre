@@ -1,0 +1,478 @@
+{
+  "family": "unittest",
+  "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock",
+  "occurrence": 1,
+  "frozen_ordinal": 789,
+  "selection": {
+    "method_lines": [
+      237,
+      264
+    ],
+    "method_sha256": "387d1ed94ba5daa73bafd563ddb53a434352b85b716d4701959e667bda24e8d6",
+    "testmock_blob": "764585ec5d54688b483dca510d6fa187a9fc2531",
+    "testmock_sha256": "4b28e9359c4689cbadd401ac1f90275814bf0adedba3738e420c89a8a97d16e0",
+    "reference_blob": "7d144d659f73af563a45a9d95287dfbd24a36334",
+    "test_root": "/dev/shm/autospec7238/tests/Lib",
+    "occurrences_run": 1,
+    "previous_credit": 0,
+    "paired_delta": 1,
+    "reference_json_line": 799,
+    "uncredited_7236_tsv_line": 29
+  },
+  "stock": {
+    "source": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+    "binary_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "passes": {
+      "file": {
+        "pid": 14011,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/workspace/fault/stock-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/dev/shm/autospec7238/tests/Lib/test/test_unittest/testmock/testmock.py",
+          "MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "a626407facf1102b512cc38f00f6e7d889aa6280a5c03d1722ac6d1c4eb08dc5",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "stderr": ".\n----------------------------------------------------------------------\nRan 1 test in 0.004s\n\nOK\n"
+      },
+      "named": {
+        "pid": 14012,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/workspace/fault/stock-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "-m",
+          "unittest",
+          "-v",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "73a58969756f966a765d369d967ee0b8c628417cd4a0d962997140b7ddce6501",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "stderr": "test_autospec_mock (test.test_unittest.testmock.testmock.MockTest.test_autospec_mock) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.004s\n\nOK\n"
+      },
+      "events": {
+        "pid": 14013,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/workspace/fault/stock-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/dev/shm/credit7292/selectors/observe_stock.py",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "ec72709998e8b21a353b57abe75dca6d78fd64e1b468e18b75c4ecb26c1f5d10",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "terminal": {
+          "event": "addSuccess",
+          "id": "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        }
+      }
+    }
+  },
+  "before": {
+    "public": "974eb619bdd165da139081bc12d6dbe1938984e4",
+    "earlier_controls_sha256": "287802c1a167fd2b5abb49dcea863f0bd3fbb6b50476dbafe1a4a841e55ee99a",
+    "named": {
+      "O0": {
+        "pid": 13127,
+        "wait_status": 256,
+        "returncode": 1,
+        "argv": [
+          "/dev/shm/mock7274/sdk/imre",
+          "-B",
+          "--include-module",
+          "test.test_unittest.testmock.testmock",
+          "-m",
+          "unittest",
+          "-v",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c00fd6c4dc0f94b45044c45f75ba876feb9372064fd990bf487254f5c8740a58",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/dev/shm/mock7274/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 13127,
+          "bytes": 184080256,
+          "sha256": "1a1abf357e83c9793a33f0a28ae3a6ac4a683ccf1c0b1df59b1d68031b31ef90",
+          "build_id": "b57e17a4d6f34bd83bfbd178d5b1064d621f0cce"
+        },
+        "assertion": "AssertionError: \"Cannot autospec attr 'B' from target <MagicMock spec='A'\" does not match \"Cannot autospec a Mock object\""
+      },
+      "O3": {
+        "pid": 13126,
+        "wait_status": 256,
+        "returncode": 1,
+        "argv": [
+          "/dev/shm/mock7274/sdk/imre",
+          "-B",
+          "--include-module",
+          "test.test_unittest.testmock.testmock",
+          "-m",
+          "unittest",
+          "-v",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "20c61064bedad4035ca31c0608fffe894127dcd1e6c21a667d62d6c38a7fc8dd",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/dev/shm/mock7274/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 13126,
+          "bytes": 163086912,
+          "sha256": "cdaa8e7c5a4767157c65a0872f365bd1d1f8b055b8fa53736f6135d26a50cd64",
+          "build_id": "e33b7c1da8ab407ace3ae35a5d81df7eb426d7c5"
+        },
+        "assertion": "AssertionError: \"Cannot autospec attr 'B' from target <MagicMock spec='A'\" does not match \"Cannot autospec a Mock object\""
+      }
+    }
+  },
+  "after": {
+    "public": "420dfb2632846e35773fe4c6d31819f7a194a0c3",
+    "tree": "88547380f5e54f404419429c8b9249616d972344",
+    "provider": {
+      "blob": "09aae6fec92444116a53ae64009dee7c16b478ea",
+      "sha256": "5a390c8a41c5433fc92986fdcf77feaba272febaa8ab8ab1185fc4e5e137f383"
+    },
+    "cargo_lock_sha256": "d3da127b24e83ff06e8dae6179e87f0e65ad9e6463a03c7eacc1afb789271c6a",
+    "cargo_raw_wait": 0,
+    "compiler_runtime_stdlib_sha256": {
+      "imre": "733f9377eacdf818de24d03d2ee156d8b2198b15b56fda981703747d87a52c63",
+      "libimre_runtime.a": "8d6edb4eaa9f6960c86a073f205906345a2425a726752983931187956345ab25",
+      "imre-stdlib.zip": "872aac3fa14dc82aae1a9bdc74fb7b83f064301e10dc3affd19d7d52fdd6c244"
+    },
+    "compiler_build_id": "2938568556596a975c0d7cf84bdcd7d04936f040",
+    "named": {
+      "O0": {
+        "pid": 15369,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/dev/shm/credit7292/sdk/imre",
+          "-B",
+          "--include-module",
+          "test.test_unittest.testmock.testmock",
+          "-m",
+          "unittest",
+          "-v",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "c0be152b5151ddf65a504d21e1fb399a402dee7d066f48be3087668b058f21be",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/dev/shm/credit7292/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 15369,
+          "bytes": 184513416,
+          "sha256": "ea692035c4ce3bd030fcd240e2b779d4e0b871753133d5e87683f73832b38626",
+          "build_id": "797b588a3893856882e8b631c82c29deb2f9a411"
+        },
+        "stderr": "test_autospec_mock (test.test_unittest.testmock.testmock.MockTest.test_autospec_mock) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.158s\n\nOK\n"
+      },
+      "O3": {
+        "pid": 15370,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/dev/shm/credit7292/sdk/imre",
+          "-B",
+          "--include-module",
+          "test.test_unittest.testmock.testmock",
+          "-m",
+          "unittest",
+          "-v",
+          "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock"
+        ],
+        "cwd": "/dev/shm/autospec7238/tests/Lib",
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "5732ff207e856d0e2b9de3c00ee4cf3065eb69d42febdd19d88b3e9be1f92b0e",
+        "pythonpath": "/dev/shm/autospec7238/tests/Lib",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/dev/shm/credit7292/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 15370,
+          "bytes": 163517896,
+          "sha256": "2c729fe45bbe340a11cac7d79a330a3f818e95c8310cce531368d93090b47c94",
+          "build_id": "30143a2022d36b920ad4960af681b39047ceba67"
+        },
+        "stderr": "test_autospec_mock (test.test_unittest.testmock.testmock.MockTest.test_autospec_mock) ... ok\n\n----------------------------------------------------------------------\nRan 1 test in 0.207s\n\nOK\n"
+      }
+    }
+  },
+  "original_observations": {
+    "stock_producer": {
+      "function": "NonCallableMock.__getattr__",
+      "file": "/workspace/fault/stock-python/cpython-3.14.5-linux-x86_64-gnu/lib/python3.14/unittest/mock.py",
+      "line": 731
+    },
+    "failing_expression": "create_autospec(A).B",
+    "expected_first_message_on_stock": "Cannot autospec attr 'B' from target <MagicMock spec='A' id='140334587450704'> as it has already been mocked out. [target=<MagicMock spec='A' id='140334587450704'>, attr=<MagicMock name='B' id='140334587449024'>]",
+    "expected_errors": [
+      {
+        "line": 245,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 248,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 251,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 254,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 257,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 260,
+        "type": "InvalidSpecError"
+      },
+      {
+        "line": 262,
+        "type": "InvalidSpecError"
+      }
+    ],
+    "final_patched_open": [
+      "            with mock.patch('builtins.open', mock.mock_open()):",
+      "                mock.mock_open()  # should still be valid with open() mocked"
+    ]
+  },
+  "package_control": {
+    "source_sha256": "7b068f1e19f43cc5b779522aaaa09983cc27cb6a871ccefd84d8b1e94cb5785b",
+    "stdout": "None InvalidSpecError InvalidSpecError\nexplicit-owner InvalidSpecError InvalidSpecError\n['class', 'instance', 'instance', 'class'] ['before', 'after']\n",
+    "runs": {
+      "stock": {
+        "pid": 14374,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/workspace/fault/stock-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "-B",
+          "/dev/shm/credit7292/package/descriptor_patch.py"
+        ],
+        "cwd": "/dev/shm/credit7292/package-work/stock",
+        "stdout_sha256": "89d998b2926e3d2c597fb100bbbfb77097a1e2dc85379616aa99aa4d0031aaa6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "O0": {
+        "pid": 15382,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/dev/shm/credit7292/sdk/imre",
+          "-B",
+          "/dev/shm/credit7292/package/descriptor_patch.py"
+        ],
+        "cwd": "/dev/shm/credit7292/package-work/public-420dfb26-O0",
+        "stdout_sha256": "89d998b2926e3d2c597fb100bbbfb77097a1e2dc85379616aa99aa4d0031aaa6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/dev/shm/credit7292/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 15382,
+          "bytes": 179486616,
+          "sha256": "ed9695e1679e41e204f5947a0b9289ba8f4c9d45fcdeb2738aec3a127e22f333",
+          "build_id": "299c42d61bc4cce0bb7fbcf097a12f0d9d296590"
+        }
+      },
+      "O3": {
+        "pid": 15436,
+        "wait_status": 0,
+        "returncode": 0,
+        "argv": [
+          "/dev/shm/credit7292/sdk/imre",
+          "-B",
+          "/dev/shm/credit7292/package/descriptor_patch.py"
+        ],
+        "cwd": "/dev/shm/credit7292/package-work/public-420dfb26-O3",
+        "stdout_sha256": "89d998b2926e3d2c597fb100bbbfb77097a1e2dc85379616aa99aa4d0031aaa6",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "encoded_flags_argv": [
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/dev/shm/credit7292/sdk/libimre_runtime.a"
+        ],
+        "executed_elf": {
+          "pid": 15436,
+          "bytes": 160181272,
+          "sha256": "06066e187e0fcbdde4efa66ef4c028dc85fcad593deb5ee31a2262bb88ec9eee",
+          "build_id": "40dfcc48ae56bb947eac0dc2f84fc94283f8e2cb"
+        }
+      }
+    }
+  },
+  "census": {
+    "family_paired_before": 1053,
+    "family_paired_after": 1054,
+    "family_originals": 1090,
+    "family_frozen_stock_passes": 1088,
+    "remaining_stock_positive": 34,
+    "earlier_44": {
+      "paired": 13146,
+      "originals": 16202,
+      "frozen_stock_paired": 13048,
+      "frozen_stock_passes": 15161
+    },
+    "all_45": {
+      "paired": 13168,
+      "originals": 16225,
+      "frozen_stock_paired": 13070,
+      "frozen_stock_passes": 15183
+    }
+  },
+  "historical_neighbors": [
+    {
+      "ordinal": 786,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_attribute_access_returns_mocks",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    },
+    {
+      "ordinal": 787,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_attribute_deletion",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    },
+    {
+      "ordinal": 788,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_attributes_have_name_and_parent_set",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    },
+    {
+      "ordinal": 789,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_autospec_mock",
+      "occurrence": 1,
+      "prior_credit": 0,
+      "new_row": 1
+    },
+    {
+      "ordinal": 790,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_autospec_side_effect",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    },
+    {
+      "ordinal": 791,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_autospec_side_effect_exception",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    },
+    {
+      "ordinal": 792,
+      "canonical_id": "test.test_unittest.testmock.testmock.MockTest.test_baseexceptional_side_effect",
+      "occurrence": 1,
+      "prior_credit": 1,
+      "new_row": 0
+    }
+  ],
+  "previously_credited_guards": {
+    "ordinals": [
+      807,
+      811
+    ],
+    "runs": [
+      {
+        "label": "public-420dfb26-O0",
+        "pid": 15443,
+        "wait_status": 0,
+        "new_credit": 0,
+        "terminals": [
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class",
+            "identification_line": "test_create_autospec_instance_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class)",
+            "terminal_line": "Autospec a class instance with wraps & test if the call is passed ... ok"
+          },
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class",
+            "identification_line": "test_create_autospec_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class)",
+            "terminal_line": "Autospec a class with wraps & test if the call is passed to the ... ok"
+          }
+        ]
+      },
+      {
+        "label": "public-420dfb26-O3",
+        "pid": 15444,
+        "wait_status": 0,
+        "new_credit": 0,
+        "terminals": [
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class",
+            "identification_line": "test_create_autospec_instance_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class)",
+            "terminal_line": "Autospec a class instance with wraps & test if the call is passed ... ok"
+          },
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class",
+            "identification_line": "test_create_autospec_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class)",
+            "terminal_line": "Autospec a class with wraps & test if the call is passed to the ... ok"
+          }
+        ]
+      },
+      {
+        "label": "stock-named",
+        "pid": 15246,
+        "wait_status": 0,
+        "new_credit": 0,
+        "terminals": [
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class",
+            "identification_line": "test_create_autospec_instance_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_instance_wraps_class)",
+            "terminal_line": "Autospec a class instance with wraps & test if the call is passed ... ok"
+          },
+          {
+            "id": "test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class",
+            "identification_line": "test_create_autospec_wraps_class (test.test_unittest.testmock.testmock.MockTest.test_create_autospec_wraps_class)",
+            "terminal_line": "Autospec a class with wraps & test if the call is passed to the ... ok"
+          }
+        ]
+      }
+    ]
+  }
+}

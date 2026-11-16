@@ -5,11 +5,14 @@ use std::fmt::{Display, Write};
 use super::*;
 use crate::CodegenUnit;
 
-pub(super) struct Output {
+pub(super) struct Output<'units> {
     /// Whether a reference to this named type also needs its destruction descriptor.
     pub(super) record_types: HashMap<Type, bool>,
-    units: Vec<String>,
-    common: Option<String>,
+    units: &'units mut [CodegenUnit],
+    integers: Vec<body::IntegerFunctions>,
+    /// Named LLVM layouts must precede instructions that use them.
+    common: String,
+    split: bool,
     pub entry: usize,
     pub current: usize,
     functions: Vec<(usize, usize)>,
@@ -19,12 +22,20 @@ pub(super) struct Output {
     local_helpers: HashSet<(usize, &'static str)>,
 }
 
-impl Output {
-    pub fn new(functions: &[usize], count: usize, entry: usize, split: bool) -> Self {
+impl<'units> Output<'units> {
+    pub(super) fn new(
+        functions: impl IntoIterator<Item = usize>,
+        units: &'units mut [CodegenUnit],
+        entry: usize,
+        split: bool,
+    ) -> Self {
+        #[cfg(test)]
+        crate::single_emission_tests::record_llvm_start(None);
+        let count = units.len();
         let mut next = vec![0; count];
         let functions = functions
-            .iter()
-            .map(|&owner| {
+            .into_iter()
+            .map(|owner| {
                 let local = next[owner];
                 next[owner] += 1;
                 (owner, local)
@@ -32,8 +43,15 @@ impl Output {
             .collect();
         Self {
             record_types: HashMap::new(),
-            units: vec![String::new(); count],
-            common: split.then(|| "source_filename = \"imre-unit\"\n".to_owned()),
+            units,
+            integers: vec![body::IntegerFunctions::default(); count],
+            common: if split {
+                "source_filename = \"imre-unit\"\n"
+            } else {
+                ""
+            }
+            .to_owned(),
+            split,
             entry,
             current: entry,
             functions,
@@ -44,26 +62,38 @@ impl Output {
         }
     }
 
+    pub(super) fn include_integers(&mut self, function: body::IntegerFunctions) {
+        self.integers[self.current].include(function);
+    }
+
     pub fn split(&self) -> bool {
-        self.common.is_some()
+        self.split
     }
 
     pub fn common(&mut self) -> &mut String {
-        self.common.as_mut().unwrap_or(&mut self.units[self.entry])
+        &mut self.common
     }
 
     pub fn local_helper(&mut self, name: &'static str, definition: &str) {
         if self.local_helpers.insert((self.current, name)) {
-            self.units[self.current].push_str(definition);
+            self.units[self.current].llvm_ir.push_str(definition);
         }
     }
 
     pub fn entry_buffer(&mut self) -> &mut String {
-        &mut self.units[self.entry]
+        &mut self.units[self.entry].llvm_ir
+    }
+
+    fn function_location(&self, id: usize) -> (usize, usize) {
+        if self.split() {
+            self.functions[id]
+        } else {
+            (0, id)
+        }
     }
 
     pub fn function_owner(&self, id: usize) -> usize {
-        self.functions[id].0
+        self.function_location(id).0
     }
 
     pub fn add_string(&mut self) {
@@ -85,18 +115,87 @@ impl Output {
     }
 
     pub fn function_name(&self, id: usize) -> String {
-        self.numbered("fn", id, self.functions[id])
+        let name = self.numbered("fn", id, self.function_location(id));
+        if self.units.len() > 1 {
+            format!("{name}.local")
+        } else {
+            name
+        }
+    }
+
+    /// Finish the checked function in its owning unit as soon as its frame is complete.
+    pub(super) fn finish_function(
+        &mut self,
+        id: usize,
+        function: &Function,
+        attrs: &str,
+        code: &str,
+        stack_layout: Option<&str>,
+    ) {
+        let name = self.function_name(id);
+        let owner = self.function_owner(id);
+        let params = function
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, &slot)| format!("{} %arg{i}", function.locals[slot].llvm()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.units[owner].llvm_ir.push('\n');
+        let returns = function.returns.llvm();
+        if let Some(layout) = stack_layout {
+            let body_name = format!("{name}.frame");
+            self.local_helper(
+                "imre_on_call_stack",
+                "declare void @imre_on_call_stack(ptr, ptr)\n",
+            );
+            self.define_function(owner, &name, returns, &params, attrs, |out| {
+                writeln!(out, "entry:\n  %frame = alloca {layout}").unwrap();
+                for (i, &slot) in function.params.iter().enumerate() {
+                    let ty = function.locals[slot].llvm();
+                    writeln!(
+                        out,
+                        "  %slot{i} = getelementptr {layout}, ptr %frame, i32 0, i32 {}",
+                        i + 1
+                    )
+                    .unwrap();
+                    writeln!(out, "  store {ty} %arg{i}, ptr %slot{i}").unwrap();
+                }
+                writeln!(
+                    out,
+                    "  call void @imre_on_call_stack(ptr @{body_name}, ptr %frame)"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "  %result = load {returns}, ptr %frame\n  ret {returns} %result"
+                )
+                .unwrap();
+            });
+            self.define_function(
+                owner,
+                &body_name,
+                "void",
+                "ptr %stack_frame",
+                attrs,
+                |out| out.push_str(code),
+            );
+        } else {
+            self.define_function(owner, &name, returns, &params, attrs, |out| {
+                out.push_str(code)
+            });
+        }
     }
 
     pub fn adapter_name(&self, id: usize, bound: bool) -> String {
-        let name = self.numbered("callable", id, self.functions[id]);
+        let name = self.numbered("callable", id, self.function_location(id));
         format!("{name}_{}", if bound { "bound" } else { "plain" })
     }
 
     pub fn async_name(&self, id: usize) -> String {
         format!(
             "{}_async",
-            self.numbered("callable", id, self.functions[id])
+            self.numbered("callable", id, self.function_location(id))
         )
     }
 
@@ -147,12 +246,52 @@ impl Output {
         self.used(self.string_owner(id), self.string_name(id, "literal"))
     }
 
-    pub fn function_ref(&mut self, id: usize) -> String {
-        self.used(self.function_owner(id), self.function_name(id))
+    /// A foreign use can appear after its body has finished, including a class descriptor.
+    pub fn function_ref(&mut self, module: &Module, id: usize) -> String {
+        let (owner, local) = self.function_location(id);
+        let target = self.function_name(id);
+        if self.current == owner {
+            return target;
+        }
+        let symbol = self.numbered("fn", id, (owner, local));
+        let users = self.users.entry(symbol.clone()).or_default();
+        if users.insert(self.current) {
+            let function = &module.functions[id];
+            let returns = function.returns.llvm();
+            let params = function
+                .params
+                .iter()
+                .map(|&slot| function.locals[slot].llvm())
+                .collect::<Vec<_>>()
+                .join(", ");
+            if users.len() == 1 {
+                writeln!(
+                    self.units[owner].llvm_ir,
+                    "@{symbol} = hidden alias {returns} ({params}), ptr @{target}"
+                )
+                .unwrap();
+            }
+            writeln!(
+                self.units[self.current].llvm_ir,
+                "declare hidden {returns} @{symbol}({params})"
+            )
+            .unwrap();
+        }
+        symbol
     }
 
     pub fn adapter_ref(&mut self, id: usize, bound: bool) -> String {
         self.used(self.function_owner(id), self.adapter_name(id, bound))
+    }
+
+    pub fn byte_constant(&mut self, owner: usize, name: &str, bytes: &[u8]) {
+        let output = self.global(
+            owner,
+            name,
+            "unnamed_addr constant",
+            format_args!("[{} x i8]", bytes.len()),
+        );
+        write_byte_string(output, bytes.iter().copied(), ByteEscapes::All);
     }
 
     pub fn global(
@@ -170,7 +309,7 @@ impl Output {
                     "constant"
                 };
                 writeln!(
-                    self.units[unit],
+                    self.units[unit].llvm_ir,
                     "@{name} = external hidden {declaration} {ty}"
                 )
                 .unwrap();
@@ -181,74 +320,92 @@ impl Output {
         } else {
             "private"
         };
-        write!(self.units[owner], "@{name} = {linkage} {kind} {ty} ").unwrap();
-        &mut self.units[owner]
+        write!(
+            self.units[owner].llvm_ir,
+            "@{name} = {linkage} {kind} {ty} "
+        )
+        .unwrap();
+        &mut self.units[owner].llvm_ir
     }
 
-    pub fn function(
+    pub(super) fn define_function(
         &mut self,
         owner: usize,
         name: &str,
         returns: &str,
         params: &str,
         attrs: &str,
-    ) -> &mut String {
+        write_body: impl FnOnce(&mut String),
+    ) {
         let linkage = if let Some(users) = self.users.get(name) {
             for &unit in users {
                 writeln!(
-                    self.units[unit],
+                    self.units[unit].llvm_ir,
                     "declare hidden {returns} @{name}({params})"
                 )
                 .unwrap();
             }
-            "hidden "
-        } else if name == "main" {
-            ""
+            "hidden"
         } else {
-            "internal "
+            "internal"
         };
-        writeln!(
-            self.units[owner],
-            "define {linkage}{returns} @{name}({params}){attrs} {{"
-        )
-        .unwrap();
-        &mut self.units[owner]
+        body::write_definition(
+            &mut self.units[owner].llvm_ir,
+            format_args!("{linkage} {returns} @{name}({params}){attrs}"),
+            write_body,
+        );
     }
 
-    fn finish(self) -> Vec<String> {
-        let Some(common) = self.common else {
-            return self.units;
-        };
-        self.units
-            .into_iter()
-            .map(|body| {
-                let mut unit = String::with_capacity(common.len() + body.len());
-                unit.push_str(&common);
-                unit.push_str(&body);
-                unit
-            })
-            .collect()
+    pub(super) fn emit(
+        mut self,
+        module: &Module,
+        ranges: &RangeFacts<'_>,
+        sanitize: bool,
+        program: crate::callables::Layouts,
+    ) {
+        emit_program(module, ranges, sanitize, &mut self, program);
+        for (integers, unit) in self.integers.into_iter().zip(self.units.iter_mut()) {
+            integers.write(&mut unit.llvm_ir, false);
+            unit.llvm_ir.insert_str(0, &self.common);
+        }
     }
 }
 
-pub(crate) fn emit_units(
-    module: &Module,
-    ranges: &RangeFacts<'_>,
-    sanitize: bool,
-    functions: &[usize],
-    names: &[String],
-    entry: usize,
-) -> Result<Vec<CodegenUnit>, String> {
-    let mut output = Output::new(functions, names.len(), entry, true);
-    emit_program(module, ranges, sanitize, &mut output)?;
-    Ok(names
-        .iter()
-        .zip(output.finish())
-        .map(|(name, llvm_ir)| CodegenUnit {
-            name: name.clone(),
-            llvm_ir,
-        })
-        .collect())
+impl crate::ProgramOutput {
+    pub(crate) fn emit_fixed(
+        &mut self,
+        graph: &crate::modules::SourceGraph,
+        fixed: &mut crate::FixedProgram,
+        sanitize: bool,
+        program: crate::callables::Layouts,
+    ) {
+        fixed.prepare_native_sources(graph);
+        let (module, owners) = &fixed.ir;
+        let split = matches!(self.layout, crate::CodegenLayout::Split);
+        let source = &graph.modules[graph.entry];
+        let (sources, entry, owners) = if split {
+            (
+                graph.modules.as_slice(),
+                (graph.entry, source.name.as_str()),
+                owners.as_slice(),
+            )
+        } else {
+            (std::slice::from_ref(source), (0, "__main__"), &[][..])
+        };
+        let Ok(()) = self.emit_sources(
+            sources.iter().map(Ok::<_, std::convert::Infallible>),
+            entry,
+            split,
+            program,
+            |_, _, source, separate| Ok((source.name.as_str(), separate.then(String::new))),
+            |program, units, entry| {
+                let output = Output::new(owners.iter().copied(), units, entry, split);
+                let ranges = crate::ranges::analyze(module);
+                output.emit(module, &ranges, sanitize, program);
+                Ok(None)
+            },
+        );
+    }
 }
 
 #[cfg(test)]
@@ -284,6 +441,65 @@ mod tests {
             assert_eq!(uses > 0, unit.name == "loops");
             assert_eq!(definitions, usize::from(uses > 0));
             assert!(!unit.llvm_ir.contains("@imre_repeat_fadd"));
+        }
+    }
+
+    #[test]
+    fn arithmetic_definitions_follow_calls_in_their_own_unit() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from math_ops import add, magnitude\ndef negative(x: float) -> bool:\n    return x < 0\nprint(add(1, magnitude(-2)), negative(4))\n",
+        )
+        .unwrap();
+        fs::write(temp.path().join("math_ops.py"), "def add(a: int, b: int) -> int:\n    return a + b\ndef magnitude(n: int) -> int:\n    return -n if n < 0 else n\n").unwrap();
+        let compiled =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        for unit in compiled.units {
+            let ir = unit.llvm_ir;
+            for helper in ["add", "sub", "mul", "mod", "abs", "abs_slow"] {
+                let defined = ir
+                    .matches(&format!("define internal i64 @int_{helper}("))
+                    .count();
+                assert_eq!(
+                    defined,
+                    usize::from(ir.contains(&format!("call i64 @int_{helper}("))),
+                    "{}: {helper}",
+                    unit.name
+                );
+            }
+            assert_eq!(ir.contains("call i64 @int_add("), unit.name == "math_ops");
+            assert_eq!(
+                ir.matches("define internal i32 @int_sign(").count(),
+                usize::from(ir.contains("call i32 @int_sign("))
+            );
+        }
+    }
+
+    #[test]
+    fn tagged_floor_division_is_defined_only_in_its_calling_unit() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(&entry, "from ratios import divide\nprint(divide(-7, 3))\n").unwrap();
+        fs::write(
+            temp.path().join("ratios.py"),
+            "def divide(a: int, b: int) -> int:\n    return (a // b) // b\n",
+        )
+        .unwrap();
+
+        let compiled =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(compiled.units.len(), 2);
+        for unit in compiled.units {
+            let calls = unit.llvm_ir.matches("call i64 @int_floordiv(").count();
+            assert_eq!(calls, if unit.name == "ratios" { 2 } else { 0 });
+            assert_eq!(
+                unit.llvm_ir
+                    .matches("define internal i64 @int_floordiv(")
+                    .count(),
+                usize::from(calls > 0)
+            );
         }
     }
 
@@ -327,6 +543,39 @@ mod tests {
                 _ => assert!(!ir.contains("@sequence_layout")),
             }
         }
+    }
+
+    #[test]
+    fn a_missing_key_links_the_foreign_repr_discovered_after_its_body() {
+        let temp = tempfile::tempdir().unwrap();
+        let entry = temp.path().join("main.py");
+        fs::write(
+            &entry,
+            "from leaf import Detail\nrecords = {Detail(1): 0}\nrecords[Detail(2)]\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("leaf.py"),
+            concat!(
+                "from dataclasses import dataclass\n\n",
+                "@dataclass(frozen=True)\n",
+                "class Detail:\n",
+                "    n: int\n",
+                "    def __repr__(self) -> str:\n",
+                "        return f\"detail-{self.n}\"\n",
+            ),
+        )
+        .unwrap();
+        let program =
+            crate::compile_file_units(&entry, None, &crate::CompileOptions::default()).unwrap();
+        assert!(
+            program.units[0]
+                .llvm_ir
+                .contains("declare hidden ptr @fn_m1_0(ptr)")
+        );
+        let owner = &program.units[1].llvm_ir;
+        assert!(owner.contains("@fn_m1_0 = hidden alias ptr (ptr), ptr @fn_m1_0.local"));
+        assert!(owner.contains("define internal ptr @fn_m1_0.local("));
     }
 
     #[test]

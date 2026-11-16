@@ -30,6 +30,9 @@ class CustomPredicates(str):
     def isdigit(self):
         return "custom digit"
 
+    def isnumeric(self):
+        return "custom numeric"
+
 
 class CustomAlnum(str):
     def isalnum(self):
@@ -137,6 +140,8 @@ def current():
         assert value.isidentifier() is expected
         assert str.isidentifier(value) is expected
     assert str.isidentifier.__text_signature__ == "($self, /)"
+    for value in ("", "42", "½四", "9x", Text("7\udfff"), CustomPredicates("²")):
+        print(value.isnumeric(), str.isnumeric(value))
     bound_digit = Digit.TWO.isdigit
     print(bound_digit(), str.isalpha(Digit.TWO))
     for value in (Text("é"), Text("²"), "\ud800", Text("7\udfff"), Text("a\udfff"),

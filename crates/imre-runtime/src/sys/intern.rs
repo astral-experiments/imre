@@ -14,17 +14,21 @@ struct Interned {
 }
 
 impl Interned {
-    fn try_intern(&mut self, value: &crate::StrOwner) -> Option<crate::StrOwner> {
-        if let Some(singleton) = crate::objects::short_string(value) {
+    fn try_intern(&mut self, value: &StrOwner) -> Option<StrOwner> {
+        self.intern_with(value, || value.clone())
+    }
+
+    fn intern_with(&mut self, text: &str, owner: impl FnOnce() -> StrOwner) -> Option<StrOwner> {
+        if let Some(singleton) = crate::objects::short_string(text) {
             return Some(singleton);
         }
-        let hash = self.hash.hash_one(value.as_str());
+        let hash = self.hash.hash_one(text);
         if let Some(existing) = self
             .strings
             .iter_hash(hash)
             .filter(|(key, _)| *key == hash)
             .filter_map(|(_, weak)| weak.upgrade())
-            .find(|existing| existing.as_str() == value.as_str())
+            .find(|existing| existing.as_str() == text)
         {
             return Some(existing);
         }
@@ -56,9 +60,10 @@ impl Interned {
         if self.strings.try_reserve(1, |entry| entry.0).is_err() {
             return None;
         }
+        let value = owner();
         self.strings
-            .insert_unique(hash, (hash, StrOwner::downgrade(value)), |(key, _)| *key);
-        Some(StrOwner::clone(value))
+            .insert_unique(hash, (hash, StrOwner::downgrade(&value)), |(key, _)| *key);
+        Some(value)
     }
 
     fn contains(&self, value: &Str) -> bool {
@@ -90,7 +95,10 @@ pub(crate) fn try_intern_owner(value: &StrOwner) -> Option<StrOwner> {
 
 /// Keep module metadata in the same table as interned literals and sys.intern.
 pub(crate) fn canonical(name: &'static str) -> StrOwner {
-    intern_owner(&StrOwner::new(Str::const_new(name)))
+    let owner = || StrOwner::new(Str::const_new(name));
+    INTERNED
+        .with_borrow_mut(|table| table.intern_with(name, owner))
+        .unwrap_or_else(owner)
 }
 
 /// # Safety
@@ -115,8 +123,7 @@ pub unsafe extern "C" fn imre_sys_is_interned(value: *const Str) -> u32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_interned_literal(data: *const u8, len: usize) -> *const Str {
     // SAFETY: the literal's backing bytes remain live as long as the program.
-    let literal = StrOwner::new(Str::const_new(unsafe { crate::text(data, len) }));
-    StrOwner::into_raw(intern_owner(&literal))
+    StrOwner::into_raw(canonical(unsafe { crate::text(data, len) }))
 }
 
 #[cfg(test)]

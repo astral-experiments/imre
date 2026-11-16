@@ -1,0 +1,2 @@
+family	id	occurrence	frozen_row_1based	frozen_stock	previous_credit	cpython_commit	tested_parent	parent_stock	parent_O0	parent_O3	tested_private	private_stock	private_O0	private_O3	merged_source	paired	frozen_stock_pair_delta
+io	test.test_io.CTextIOWrapperTest.test_uninitialized	1	759	addSuccess	0	5607950ef232dad16d75c0cf53101d9649d89115	fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af	pass	error	error	9e078380e720a3c86e2abe7d9fbc2631c929261c	pass	pass	pass	29da99f2b381f4744c7773ffae9edec9c571782f	1	1

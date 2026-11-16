@@ -89,11 +89,7 @@ impl Checker<'_> {
             .map(|mapping| {
                 mapping.unwrap_or_else(|| Expr {
                     ty: dictionary,
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 })
             })
             .collect();

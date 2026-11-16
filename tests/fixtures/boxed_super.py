@@ -104,10 +104,109 @@ def current():
         print(str(error))
 
     check_mro()
+    check_native_base_lookup()
     check_super_initialization()
     check_native_classmethod()
     check_super_descriptor()
+    check_metaclass_setattr()
     check_subclass_hooks()
+
+
+def check_native_base_lookup():
+    calls = []
+
+    class Metadata:
+        def __init__(self, flag):
+            calls.append(flag)
+            self.flag = flag
+
+    class Token(str, Metadata):
+        def __new__(cls, text, flag):
+            return str.__new__(cls, text)
+
+        def __init__(self, text, flag):
+            super().__init__(flag)
+
+    value = Token("word", 1)
+    assert value.flag == 1 and calls == [1]
+    assert super(Token, Token).__init__ is Metadata.__init__
+    super(Token, value).__init__(2)
+    assert value.flag == 2 and calls == [1, 2]
+
+    class Init(Exception):
+        def __init__(self, arg):
+            calls.append(arg)
+
+    class Failure(ValueError, Init):
+        pass
+
+    assert Failure.__init__ is super(Failure, Failure).__init__ is Init.__init__
+    Failure(3)
+    assert calls == [1, 2, 3]
+
+    class Missing(NameError, Init):
+        pass
+
+    raw = NameError.__init__
+    assert raw.__objclass__ is NameError and raw is not BaseException.__init__
+    assert Missing.__init__ is super(Missing, Missing).__init__ is raw
+    missing = Missing("field")
+    saved = super(Missing, missing).__init__
+    saved("updated")
+    assert saved.__self__ is missing and missing.args == ("updated",)
+    assert calls == [1, 2, 3]
+
+    class Alias(Missing):
+        __init__ = BaseException.__init__
+
+    assert Alias.__init__ is BaseException.__init__
+    assert super(Alias, Alias).__init__ is raw
+    unrelated = RuntimeError("original")
+    try:
+        raw(unrelated, "changed")
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("accepted an unrelated receiver")
+    assert unrelated.args == ("original",)
+
+
+def check_metaclass_setattr():
+    writes = []
+
+    class Field:
+        def __set__(self, cls, value):
+            writes.append((cls, value))
+
+    class Meta(type):
+        field = Field()
+
+        def __setattr__(cls, name, value):
+            writes.append(name)
+            return super().__setattr__(name, value)
+
+    class Target(metaclass=Meta):
+        pass
+
+    marker = object()
+    Target.field = marker
+    assert type.__setattr__(Target, "field", marker) is None
+    assert writes == ["field", (Target, marker), (Target, marker)]
+    Target.other = marker
+    assert Target.__dict__["other"] is marker
+    assert "field" not in Target.__dict__
+    mro = Target.__mro__
+    try:
+        type.__setattr__(Target, "__mro__", ())
+    except AttributeError as exc:
+        assert exc.args == ("attribute '__mro__' of 'type' objects is not writable",)
+    else:
+        raise AssertionError("wrote a read-only type field")
+    assert Target.__mro__ is mro and "__mro__" not in Target.__dict__
+
+    qualified = "Target" + chr(0xD800)
+    type.__setattr__(Target, "__qualname__", qualified)
+    assert Target.__qualname__ is qualified
 
 
 def check_super_descriptor():
@@ -139,6 +238,7 @@ def check_super_descriptor():
 def check_mro():
     original = D.mro()
     assert original == [D, C, B, A, object] and D.__mro__ == tuple(original)
+    assert D.__base__ is C and Mapping.__base__ is dict
     original.clear()
     assert D.mro() == type.mro(D) == [D, C, B, A, object]
     from collections import defaultdict
@@ -146,8 +246,17 @@ def check_mro():
     from os import terminal_size
     from types import ModuleType
     assert bool.mro() == type.mro(bool) == [bool, int, object]
+    none_type = type(None)
+    assert none_type.__base__ is object and none_type.__bases__ == (object,)
+    assert none_type.__mro__ == (none_type, object)
     assert terminal_size.mro() == [terminal_size, tuple, object]
     assert type.mro(defaultdict) == [defaultdict, dict, object]
+    assert defaultdict.__base__ is dict and defaultdict.__bases__ == (dict,)
+    assert defaultdict.__mro__ == (defaultdict, dict, object)
+    mapping = defaultdict()
+    assert type(mapping).__mro__ is defaultdict.__mro__
+    assert type(mapping).__bases__ is defaultdict.__bases__
+    assert not any(hasattr(mapping, name) for name in ("__base__", "__bases__", "__mro__"))
     assert timezone.mro() == [timezone, tzinfo, object]
     assert D.mro.__self__ is D and not hasattr(super(D, D()), "mro")
 
@@ -343,6 +452,9 @@ def check_subclass_hooks():
     class Rebound(Custom):
         pass
     assert events[-1] == "rebound"
+    assert object.__base__ is None
+    assert bool.__base__ is int
+    assert ExceptionGroup.__base__ is BaseExceptionGroup
     assert object.__init_subclass__.__self__ is object
     assert (2).__init_subclass__.__self__ is int
     try:

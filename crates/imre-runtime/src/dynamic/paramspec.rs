@@ -6,7 +6,7 @@ use super::{Context, Error, Id, NONE, Result, Value, builtins, typing, value::NO
 pub(super) struct ParamSpec {
     pub name: Id,
     pub bound: Id,
-    pub default: Id,
+    pub default: typing::ParameterValue,
     pub namespace: Id,
     pub covariant: bool,
     pub contravariant: bool,
@@ -120,7 +120,7 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     Ok(ctx.alloc(Value::ParamSpec(ParamSpec {
         name,
         bound,
-        default,
+        default: typing::ParameterValue::Eager(default),
         namespace,
         covariant,
         contravariant,
@@ -129,14 +129,14 @@ pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     })))
 }
 
-/// A declaration has no bound or default evaluator and inherits its module from the type.
+/// A declared parameter specification inherits its module from the type.
 pub(super) fn declared(ctx: &mut Context, name: Id) -> Id {
     let default = typing::no_default(ctx);
     let namespace = ctx.dict(Vec::new());
     ctx.alloc(Value::ParamSpec(ParamSpec {
         name,
         bound: NONE,
-        default,
+        default: typing::ParameterValue::Eager(default),
         namespace,
         covariant: false,
         contravariant: false,
@@ -200,14 +200,18 @@ pub(super) fn attribute(ctx: &mut Context, value: Id, name: &str) -> Option<Resu
         Value::ParamSpec(p) => match name {
             "__name__" => p.name,
             "__bound__" => p.bound,
-            "__default__" => p.default,
+            "__default__" => {
+                return Some(p.default.read(ctx, value, typing::ParameterField::Default));
+            }
             "__covariant__" => builtins::boolean(p.covariant),
             "__contravariant__" => builtins::boolean(p.contravariant),
             "__infer_variance__" => builtins::boolean(p.infer_variance),
             "args" => ctx.alloc(Value::ParamSpecMarker(Marker::Args, value)),
             "kwargs" => ctx.alloc(Value::ParamSpecMarker(Marker::Kwargs, value)),
-            "evaluate_default" if p.declared => NONE,
-            "evaluate_default" => ctx.alloc(Value::ConstEvaluator(p.default)),
+            "evaluate_default" => {
+                p.default
+                    .evaluator(p.declared, typing::ParameterField::Default, ctx)
+            }
             _ if let Some(item) = ctx.dict_named_item(p.namespace, name) => item,
             "__module__" => ctx.text("typing"),
             "has_default" | "__reduce__" | "__typing_subst__" | "__typing_prepare_subst__" => {

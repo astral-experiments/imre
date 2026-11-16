@@ -3,6 +3,7 @@
 //! property dispatch has selected the concrete class.
 
 use super::*;
+use std::result::Result;
 
 pub(super) type Slots = HashMap<(usize, usize), (usize, usize)>;
 
@@ -75,8 +76,8 @@ impl Checker<'_> {
                         vec![Statement::Assign(result, field(value, getter.returns))],
                         vec![
                             Statement::Assign(result, compute),
-                            Statement::SetField(self.local(owner), value, self.local(result)),
-                            Statement::SetField(self.local(owner), ready, Expr::boolean(true)),
+                            Statement::set_field(self.local(owner), value, self.local(result)),
+                            Statement::set_field(self.local(owner), ready, Expr::boolean(true)),
                         ],
                     ),
                 ],

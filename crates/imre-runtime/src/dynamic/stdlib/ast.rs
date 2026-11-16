@@ -26,6 +26,7 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         ctx.bind(scope, "__module__", module_name);
         let fields = string_tuple(ctx, spec.fields.iter().map(|(key, _)| *key));
         ctx.bind(scope, "_fields", fields);
+        ctx.bind(scope, "__match_args__", fields);
         ctx.bind(
             scope,
             "_attributes",
@@ -170,35 +171,28 @@ fn parsed_instance(
     ctx.alloc(Value::Instance {
         namespace: None,
         class: ctx.builtins[spec.qualified_name],
-        fields,
+        fields: Box::new(fields),
         dictionary: None,
         scalar: None,
         property: None,
         weak_reference: None,
-        cycle: None,
+        itertools: None,
         member_values: None,
+        socket: None,
         memory_stream: None,
     })
 }
 
-pub(in super::super) fn has_item(ctx: &Context, iter: Id) -> Result<bool> {
-    let Value::AstWalk { queue, running } = ctx.heap.get(iter) else {
+pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
+    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
         unreachable!()
     };
     if *running {
         return Err(Error::new("ValueError", "generator already executing"));
     }
-    Ok(!queue.is_empty())
-}
-
-pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id>> {
-    if !has_item(ctx, iter)? {
+    let Some(node) = queue.pop_front() else {
         return Ok(None);
-    }
-    let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
-        unreachable!()
     };
-    let node = queue.pop_front().expect("checked nonempty AST walk");
     *running = true;
     let result = children(ctx, node);
     let Value::AstWalk { queue, running } = ctx.heap.get_mut(iter) else {
@@ -220,29 +214,53 @@ pub(in super::super) fn advance(ctx: &mut Context, iter: Id) -> Result<Option<Id
 fn children(ctx: &mut Context, node: Id) -> Result<Vec<Id>> {
     ctx.heap.keep(node);
     let fields = ctx.lookup_attr(node, "_fields")?;
-    let fields = ctx.iterator(fields)?;
-    ctx.heap.keep(fields);
     let mut children = Vec::new();
     let ast = ctx.builtins["ast.AST"];
-    while let Some(field) = ctx.next_item(fields)? {
-        let name = ctx.str_value(field)?.to_owned();
-        let value = match ctx.lookup_attr(node, &name) {
-            Ok(value) => value,
-            Err(error) if error.kind == "AttributeError" => continue,
-            Err(error) => return Err(error),
-        };
-        let first = children.len();
-        if ctx.instance_of(value, ast) {
-            children.push(value);
-        } else if let Value::List(values) = ctx.heap.get(value) {
-            children.extend(values.iter().copied().filter(|&v| ctx.instance_of(v, ast)));
+    if let Value::Tuple(names) = ctx.heap.get(fields) {
+        let count = names.len();
+        ctx.heap.keep(fields);
+        for index in 0..count {
+            let Value::Tuple(names) = ctx.heap.get(fields) else {
+                unreachable!("rooted field tuple")
+            };
+            let field = names[index];
+            append_field_children(ctx, node, field, ast, &mut children)?;
         }
-        // A later field getter can detach children before they reach the walker's queue.
-        for &child in &children[first..] {
-            ctx.heap.keep(child);
+    } else {
+        let iter = ctx.iterator(fields)?;
+        ctx.heap.keep(iter);
+        while let Some(field) = ctx.next_item(iter)? {
+            append_field_children(ctx, node, field, ast, &mut children)?;
         }
     }
     Ok(children)
+}
+
+/// Retain the children found by each attribute lookup before evaluating the next field.
+fn append_field_children(
+    ctx: &mut Context,
+    node: Id,
+    field: Id,
+    ast: Id,
+    children: &mut Vec<Id>,
+) -> Result<()> {
+    let name = ctx.str_value(field)?.to_owned();
+    let value = match ctx.lookup_attr(node, &name) {
+        Ok(value) => value,
+        Err(error) if error.kind == "AttributeError" => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let first = children.len();
+    if ctx.instance_of(value, ast) {
+        children.push(value);
+    } else if let Value::List(values) = ctx.heap.get(value) {
+        children.extend(values.iter().copied().filter(|&v| ctx.instance_of(v, ast)));
+    }
+    // A later field getter can detach children before they reach the walker's queue.
+    for &child in &children[first..] {
+        ctx.heap.keep(child);
+    }
+    Ok(())
 }
 
 pub(super) fn call(

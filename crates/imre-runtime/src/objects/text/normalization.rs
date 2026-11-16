@@ -8,6 +8,26 @@ use unicode_normalization::{
     IsNormalized, UnicodeNormalization, is_nfc_quick, is_nfd_quick, is_nfkc_quick, is_nfkd_quick,
 };
 
+#[derive(Clone, Copy)]
+pub(crate) enum Form {
+    Nfc,
+    Nfd,
+    Nfkc,
+    Nfkd,
+}
+
+impl Form {
+    pub(crate) fn parse(form: &str) -> Result<Self> {
+        match form {
+            "NFC" => Ok(Self::Nfc),
+            "NFD" => Ok(Self::Nfd),
+            "NFKC" => Ok(Self::Nfkc),
+            "NFKD" => Ok(Self::Nfkd),
+            _ => Err(Error::new(Kind::ValueError, "invalid normalization form")),
+        }
+    }
+}
+
 /// Unicode 17 additions affecting normalization were unassigned starters in Unicode 16.
 /// Keep each such scalar and normalize independently on either side of it.
 fn normalize<'a, I: Iterator<Item = char>>(
@@ -45,12 +65,11 @@ pub(crate) fn normalize_unicode(form: &str, text: &str) -> Result<Option<Str>> {
     let chars = text
         .chars()
         .map(|ch| if newer_printable(ch) { '\0' } else { ch });
-    match form {
-        "NFC" => normalize(text, is_nfc_quick(chars), |s| s.nfc()),
-        "NFD" => normalize(text, is_nfd_quick(chars), |s| s.nfd()),
-        "NFKC" => normalize(text, is_nfkc_quick(chars), |s| s.nfkc()),
-        "NFKD" => normalize(text, is_nfkd_quick(chars), |s| s.nfkd()),
-        _ => Err(Error::new(Kind::ValueError, "invalid normalization form")),
+    match Form::parse(form)? {
+        Form::Nfc => normalize(text, is_nfc_quick(chars), |s| s.nfc()),
+        Form::Nfd => normalize(text, is_nfd_quick(chars), |s| s.nfd()),
+        Form::Nfkc => normalize(text, is_nfkc_quick(chars), |s| s.nfkc()),
+        Form::Nfkd => normalize(text, is_nfkd_quick(chars), |s| s.nfkd()),
     }
 }
 

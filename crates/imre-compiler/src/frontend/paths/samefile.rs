@@ -142,10 +142,10 @@ impl Checker<'_> {
             }
         } else {
             (
-                vec![Statement::Raise(Some(missing_attribute(
+                vec![Statement::raise(missing_attribute(
                     &self.path_argument_type_name(other.ty),
                     "stat",
-                )))],
+                ))],
                 self.samefile_stats(left, self.local(fs_result), at)?,
             )
         };
@@ -157,7 +157,9 @@ impl Checker<'_> {
                 body: vec![Statement::Try {
                     body,
                     handlers: vec![ir::ExceptHandler {
-                        kinds: vec![exception_kind("AttributeError").unwrap()],
+                        matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                            exception_kind("AttributeError").unwrap(),
+                        ]),
                         name: None,
                         body: handler,
                     }],
@@ -182,7 +184,7 @@ impl Checker<'_> {
         let result = self.types.stat_result();
         let record = &self.classes.declarations.definitions[class];
         let value = if let Some(method) = self.classes.methods[class].get("stat").cloned() {
-            if method.method.unwrap().kind(&self.classes.declarations)
+            if method.method.unwrap().kind(self.classes.declarations)
                 != crate::classes::MethodKind::Property
             {
                 return self
@@ -262,7 +264,7 @@ impl Checker<'_> {
             Type::Int | Type::Float => field,
             Type::Bool => Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![field]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![field]),
             },
             Type::None
             | Type::Str

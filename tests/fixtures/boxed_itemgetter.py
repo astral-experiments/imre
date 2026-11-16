@@ -72,6 +72,17 @@ def index_lifetime():
 
 
 def current():
+    class IndexedList(list):
+        def __getitem__(self, key):
+            return ("list", key)
+
+    class IndexedTuple(tuple):
+        def __getitem__(self, key):
+            return ("tuple", key)
+
+    assert IndexedList([1])[0] == ("list", 0)
+    assert IndexedTuple((1,))[0] == ("tuple", 0)
+
     index_lifetime()
     getter_repr()
     column = itemgetter(1)

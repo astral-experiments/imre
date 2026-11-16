@@ -93,6 +93,26 @@ fn watch_checks_object_fallback_after_type_inference() {
 }
 
 #[test]
+fn watch_tracks_package_source_discovered_by_object_fallback() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("main.py");
+    let package = dir.path().join("local_backend_resource");
+    fs::create_dir(&package).unwrap();
+    fs::write(
+        &entry,
+        "import ast\nimport pkgutil\nast.parse('1')\npkgutil.get_data('local_backend_resource', 'payload')\n",
+    )
+    .unwrap();
+    let watch = Watch::start("--watch", &entry, None);
+    watch.expect(&entry, None, true);
+    let initializer = package.join("__init__.py");
+    fs::write(&initializer, "if :\n").unwrap();
+    watch.expect(&entry, None, false);
+    fs::write(&initializer, "label = 'ready'\n").unwrap();
+    watch.expect(&entry, None, true);
+}
+
+#[test]
 fn watch_recovers_from_missing_files_and_package_shadowing() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();

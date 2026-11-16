@@ -1,6 +1,7 @@
 //! Bind binascii and the standard library's base64 wrappers in Python call order.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 fn bytes_op(op: Builtin, args: Vec<Expr>) -> Expr {
     Expr {
@@ -251,7 +252,7 @@ impl Checker<'_> {
             .map(|v| scope.hold(self, v))
             .collect();
         let input = self.codec_buffer(values[args.order[0]].clone(), decode, false, call)?;
-        let flag = self.truth_value(values[args.order[1]].clone());
+        let flag = self.test_truth(values[args.order[1]].clone(), call)?;
         let op = if decode {
             Builtin::BinasciiDecode
         } else {
@@ -317,7 +318,7 @@ impl Checker<'_> {
             }
         };
         let result = if decode {
-            let flag = self.truth_value(values[args.order[2]].clone());
+            let flag = self.test_truth(values[args.order[2]].clone(), call)?;
             bytes_op(Builtin::BinasciiDecode, vec![data, flag])
         } else {
             data
@@ -335,7 +336,7 @@ impl Checker<'_> {
         let two = Expr::integer(2);
         let correct_length = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(vec![length, two], vec![Compare::Equal]),
+            kind: ExprKind::Compare(vec![length, two], vec![CmpOp::Eq]),
         };
         let buffer_error = calls::type_error(
             Type::Bytes,

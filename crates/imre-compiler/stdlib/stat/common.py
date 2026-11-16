@@ -122,7 +122,7 @@ _filemode_table: list[list[tuple[int, str]]] = [
 
 def filemode(mode: int, /) -> str:
     mode = _checked_mode(mode)
-    perm: list[str] = []
+    perm = []
     for index, table in enumerate(_filemode_table):
         for bit, char in table:
             if index == 0:

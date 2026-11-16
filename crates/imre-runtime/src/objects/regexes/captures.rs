@@ -264,9 +264,9 @@ mod tests {
                         .search_slots_with(&mut p.cache, &input, &mut slots)
                         .is_some();
                     let got = if anchored {
-                        p.match_start(&text)
+                        p.match_start(text.as_bytes())
                     } else {
-                        p.search(&text)
+                        p.search(text.as_bytes())
                     };
                     assert_eq!(want, got, "{source} {anchored} {text:?}");
                     if want {

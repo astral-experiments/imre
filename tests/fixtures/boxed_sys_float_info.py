@@ -3,9 +3,13 @@ import sys
 
 def current():
     info = sys.float_info
-    from sys import float_info
+    from sys import float_info, float_repr_style
 
     assert info is float_info and info is vars(sys)["float_info"]
+    assert type(float_repr_style) is str and float_repr_style == "short"
+    assert sys.float_repr_style is float_repr_style is vars(sys)["float_repr_style"]
+    value = 900719925474099.25
+    assert repr(value) == "900719925474099.2" and float(repr(value)) == value
     owner = type(info)
     assert isinstance(info, tuple)
     assert (owner.__module__, owner.__name__) == ("sys", "float_info")

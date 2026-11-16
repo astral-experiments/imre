@@ -52,7 +52,7 @@ pub(super) fn path_operation(
             Ok(class)
         }
         ("random_name", []) => Ok(ctx.text(tempdirs::random_name().map_err(errno_error)?)),
-        ("abspath" | "mkdir" | "cleanup_directory", &[arg]) => {
+        ("abspath" | "cleanup_directory", &[arg]) => {
             let arg = super::posixpath::fspath(ctx, arg)?;
             let value = ctx.heap.get(ctx.scalar_value(arg));
             let is_bytes = matches!(value, Value::Bytes(_));
@@ -84,18 +84,6 @@ pub(super) fn path_operation(
                         };
                         Err(ctx.with_errno_filename(errno_error(error).into(), filename)?)
                     }
-                };
-            }
-            if name == "mkdir" {
-                if path.as_os_str().as_bytes().contains(&0) {
-                    return Err(Error::new(
-                        "ValueError",
-                        "mkdir: embedded null character in path",
-                    ));
-                }
-                return match tempdirs::create_private_directory(path) {
-                    Ok(()) => Ok(NONE),
-                    Err(error) => Err(ctx.with_errno_filename(errno_error(error).into(), arg)?),
                 };
             }
             let path = tempdirs::absolute(path).map_err(errno_error)?;
@@ -178,7 +166,10 @@ pub(super) fn open(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     } else {
         let owner = crate::Shared::try_new(RefCell::new(FileState::buffered_random(file)?))
             .map_err(|_| crate::Error::allocation())?;
-        ctx.alloc(Value::BufferedRandom(owner, name))
+        ctx.alloc(Value::BufferedRandom(
+            super::super::value::BoxedFile::new(owner),
+            name,
+        ))
     };
     if binary {
         return Ok(buffer);

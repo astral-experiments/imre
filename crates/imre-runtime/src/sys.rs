@@ -1,16 +1,22 @@
 //! Process text streams and their native encoding and buffering.
+pub(crate) const MAXSIZE: usize = isize::MAX as usize;
+pub(crate) const STDLIB_MODULE_NAMES: &str = include_str!("../native/stdlib-module-names.txt");
+
 pub(crate) mod context_warnings;
 #[cfg(target_os = "linux")]
 pub(crate) mod cpu_count;
 mod recursion;
 
 use super::{Int, LazyLock, Mutex, OUTPUT, Output, Str, flush_stdout, initialize_io};
-pub(crate) use recursion::{recursion_limit, set_recursion_limit};
+pub(crate) use recursion::{
+    on_call_stack, recursion_limit, set_recursion_limit, with_recursion_frame,
+};
 mod intern;
 use crate::StrOwner;
 use crate::objects::{Codec, errno_error};
 pub(crate) use intern::{canonical, intern_owner, try_intern_owner};
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 mod encoding;
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 pub(crate) use encoding::langinfo;
@@ -206,46 +212,6 @@ pub(super) fn flush_standard(stderr: bool) -> io::Result<()> {
     }
 }
 
-/// The incremental UTF-8-SIG encoder consumes the signature on its first
-/// attempt, even if that write subsequently raises UnicodeEncodeError.
-pub(crate) fn standard_write_encoding(stderr: bool) -> &'static str {
-    let codec = encoding::settings(false, None).codec;
-    if !matches!(codec, Codec::Utf8 { signature: true }) {
-        return codec.name();
-    }
-    let emitted = if stderr {
-        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::replace(&mut err.stream.signature_emitted, true)
-    } else {
-        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
-        std::mem::replace(&mut out.signature_emitted, true)
-    };
-    if emitted { "utf-8" } else { codec.name() }
-}
-
-/// Non-scalar Python strings are encoded by the boxed codec. Successful writes
-/// still share the original text buffer and its line buffering.
-pub(crate) fn write_standard_encoded(
-    stderr: bool,
-    bytes: &[u8],
-    newline: bool,
-) -> super::Result<()> {
-    fn write<W: Write>(out: &mut Output<W>, bytes: &[u8], newline: bool) -> io::Result<()> {
-        if !out.captures.is_empty() {
-            return out.write_all(bytes);
-        }
-        out.write_chunk(bytes, out.line_buffered && newline)
-    }
-    if stderr {
-        let mut err = STDERR.lock().unwrap_or_else(|p| p.into_inner());
-        write(&mut err.stream, bytes, newline)
-    } else {
-        let mut out = OUTPUT.lock().unwrap_or_else(|p| p.into_inner());
-        write(&mut out, bytes, newline)
-    }
-    .map_err(errno_error)
-}
-
 fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> T) -> T {
     if stderr {
         operation(&mut stderr_writer().stream)
@@ -254,45 +220,120 @@ fn with_standard_output<T>(stderr: bool, operation: impl FnOnce(&mut Output) -> 
     }
 }
 
-/// Write bytes without flushing the text that precedes them.
-pub(crate) fn write_standard_buffer(stderr: bool, bytes: &[u8]) -> super::Result<()> {
-    with_standard_output(stderr, |out| out.raw.write_all(bytes)).map_err(errno_error)
+/// A binary view keeps its own closed state and uses the process output's byte buffer.
+pub(crate) struct StandardBuffer {
+    stderr: bool,
+    closed: AtomicBool,
 }
 
-pub(crate) fn flush_standard_buffer(stderr: bool) -> io::Result<()> {
-    with_standard_output(stderr, |out| out.raw.flush())
+impl StandardBuffer {
+    pub(crate) fn new(stderr: bool) -> Self {
+        Self {
+            stderr,
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn is_stderr(&self) -> bool {
+        self.stderr
+    }
+
+    pub(crate) fn closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn check_open(&self, message: &'static str) -> crate::Result<()> {
+        if self.closed() {
+            return Err(crate::Error::new(crate::Kind::ValueError, message));
+        }
+        Ok(())
+    }
+
+    fn with_open<T>(
+        &self,
+        message: &'static str,
+        op: impl FnOnce(&mut Output, i32) -> crate::Result<T>,
+    ) -> crate::Result<T> {
+        with_standard_output(self.stderr, |out| {
+            self.check_open(message)?;
+            op(out, if self.stderr { 2 } else { 1 })
+        })
+    }
+
+    pub(crate) fn write(&self, bytes: &[u8]) -> crate::Result<()> {
+        self.with_open("write to closed file", |out, _| {
+            out.raw.write_all(bytes).map_err(errno_error)
+        })
+    }
+
+    pub(crate) fn flush(&self) -> crate::Result<()> {
+        self.with_open("flush of closed file", |out, _| {
+            out.raw.flush().map_err(errno_error)
+        })
+    }
+
+    pub(crate) fn position(&self, seek: Option<(i64, i32)>) -> crate::Result<i64> {
+        self.with_open("I/O operation on closed file.", |out, fd| {
+            buffer_position(out, fd, seek)
+        })
+    }
+
+    pub(crate) fn seekable(&self, message: &'static str) -> crate::Result<bool> {
+        self.with_open(
+            message,
+            |out, fd| Ok(buffer_position(out, fd, None).is_ok()),
+        )
+    }
+
+    pub(crate) fn fileno(&self, message: &'static str) -> crate::Result<i32> {
+        self.check_open(message)?;
+        Ok(if self.stderr { 2 } else { 1 })
+    }
+
+    pub(crate) fn close(&self) -> crate::Result<()> {
+        with_standard_output(self.stderr, |out| {
+            if self.closed.swap(true, Ordering::Relaxed) {
+                return Ok(());
+            }
+            close_output(out, false).map_err(errno_error)
+        })
+    }
+}
+
+impl Drop for StandardBuffer {
+    fn drop(&mut self) {
+        if !*self.closed.get_mut() {
+            let _ = close_standard_output(self.stderr, true);
+        }
+    }
+}
+
+pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
+    with_standard_output(stderr, |out| close_output(out, flush_text))
 }
 
 /// Text close attempts both flushes; either view discards any bytes left after close.
-pub(crate) fn close_standard_output(stderr: bool, flush_text: bool) -> io::Result<()> {
-    with_standard_output(stderr, |out| {
-        let text = if flush_text { out.flush() } else { Ok(()) };
-        let binary = out.raw.flush();
-        out.text = Default::default();
-        out.raw.buffer.clear();
-        out.raw.written = 0;
-        binary.and(text)
-    })
+fn close_output(out: &mut Output, flush_text: bool) -> io::Result<()> {
+    let text = if flush_text { out.flush() } else { Ok(()) };
+    let binary = out.raw.flush();
+    out.text = Default::default();
+    out.raw.buffer.clear();
+    out.raw.written = 0;
+    binary.and(text)
 }
 
 /// Seek after draining binary writes, or report their logical position without flushing.
-pub(crate) fn standard_buffer_position(
-    stderr: bool,
-    seek: Option<(i64, i32)>,
-) -> super::Result<i64> {
-    let fd = if stderr { 2 } else { 1 };
-    with_standard_output(stderr, |out| {
-        if let Some((offset, whence)) = seek {
-            out.raw.flush().map_err(errno_error)?;
-            crate::objects::os::seek(fd, offset, whence)
-        } else {
-            let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
-            let buffered = out.raw.buffer.len() - out.raw.written;
-            offset
-                .checked_add(buffered as i64)
-                .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
-        }
-    })
+fn buffer_position(out: &mut Output, fd: i32, seek: Option<(i64, i32)>) -> crate::Result<i64> {
+    if let Some((offset, whence)) = seek {
+        out.raw.flush().map_err(errno_error)?;
+        crate::objects::os::seek(fd, offset, whence)
+    } else {
+        let offset = crate::objects::os::seek(fd, 0, libc::SEEK_CUR)?;
+        let buffered = out.raw.buffer.len() - out.raw.written;
+        offset
+            .checked_add(buffered as i64)
+            .ok_or_else(|| errno_error(io::Error::from_raw_os_error(libc::EOVERFLOW)))
+    }
 }
 
 /// Escaped displayhook bytes go to stdout.buffer ahead of any previously buffered text.
@@ -301,7 +342,13 @@ pub(super) fn write_escaped_stdout(text: &str) -> super::Result<()> {
     let bytes = settings
         .codec
         .encode(text, Some("backslashreplace"), || error_text(text))?;
-    write_standard_buffer(false, &bytes)
+    with_standard_output(false, |out| out.raw.write_all(&bytes)).map_err(errno_error)
+}
+
+/// Return the largest signed index for the executable target.
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_sys_maxsize() -> usize {
+    Int::from_usize(MAXSIZE).into_raw()
 }
 
 /// Return the Python platform name of the target that built this runtime.
@@ -380,15 +427,15 @@ pub extern "C" fn imre_os_name() -> *const Str {
 /// # Safety
 /// The caller roots the UTF-8 string throughout the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, text: *const Str) -> usize {
+pub unsafe extern "C" fn imre_sys_stream_write(stderr: u32, source: *const Str) -> usize {
     // SAFETY: the caller roots the string until the stream write finishes.
-    let text = unsafe { &*text };
+    let text = unsafe { &*source };
     let result = if stderr != 0 {
         write_stderr(text, false).map_err(errno_error)
     } else {
         write_stdout_with(text, false, || {
             // SAFETY: the caller roots this exact string throughout the write.
-            Ok(unsafe { StrOwner::acquire_word(text as *const Str as usize) })
+            Ok(unsafe { StrOwner::acquire_word(source as usize) })
         })
     };
     match result {

@@ -2,35 +2,15 @@
 //! expressions run inline with private iteration slots so writes reach their
 //! enclosing function, including when a later iteration raises.
 
-use std::cell::RefCell;
+use ruff_python_ast::UnaryOp;
+use std::cell::{Cell, RefCell};
 
-use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
+use imre_ast::comprehension::{Output, Plan};
+use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
 mod slices;
-
-/// Only a stored field of the same local can be read again under its guard.
-fn local_field(value: &Expr) -> Option<(usize, usize)> {
-    if let ExprKind::Field(receiver, field) = &value.kind
-        && let ExprKind::Local(local) = receiver.kind
-    {
-        Some((local, *field))
-    } else {
-        None
-    }
-}
-
-fn present_field(condition: &Expr) -> Option<(usize, usize)> {
-    if let ExprKind::Not(inner) = &condition.kind
-        && let ExprKind::Builtin(Builtin::IsNone, args) = &inner.kind
-        && let [value] = args.as_slice()
-    {
-        local_field(value)
-    } else {
-        None
-    }
-}
 
 /// Evaluating the dict key precedes the value. A call, property or assignment
 /// could change the guarded field through an alias during that interval.
@@ -51,7 +31,6 @@ pub(super) struct Helper {
     pub function: ir::Function,
     pub calls: HashSet<usize>,
     pub class_reads: HashSet<DefinitionId>,
-    pub recursion_error: String,
     /// Local functions and lambdas own frames; implementation helpers run in the caller.
     pub source_frame: bool,
 }
@@ -60,6 +39,8 @@ pub(super) struct Helper {
 /// checking their bodies, then fill it without disturbing earlier call targets.
 pub(super) struct Helpers {
     first: usize,
+    // Inference needs stable call edges even when it never emits a helper body.
+    reserved: Cell<usize>,
     functions: RefCell<Vec<Option<Helper>>>,
     /// Lifted functions normally leave scope after checking their enclosing body.
     pub(super) local_annotations:
@@ -71,6 +52,7 @@ impl Helpers {
     pub fn new(first: usize) -> Self {
         Self {
             first,
+            reserved: Cell::new(0),
             functions: RefCell::new(Vec::new()),
             local_annotations: RefCell::default(),
             list_builds: RefCell::default(),
@@ -78,134 +60,414 @@ impl Helpers {
     }
 
     pub(super) fn len(&self) -> usize {
-        self.functions.borrow().len()
+        self.reserved.get()
     }
 
     pub(super) fn reserve(&self) -> usize {
-        let mut functions = self.functions.borrow_mut();
-        let id = self.first + functions.len();
-        functions.push(None);
-        id
+        let index = self.len();
+        self.reserved.set(index + 1);
+        self.first + index
     }
 
     pub(super) fn finish(&self, id: usize, helper: Helper) {
-        self.functions.borrow_mut()[id - self.first] = Some(helper);
+        let mut functions = self.functions.borrow_mut();
+        functions.resize_with(self.len(), || None);
+        functions[id - self.first] = Some(helper);
     }
 
-    pub fn into_functions(self) -> impl Iterator<Item = Helper> {
-        self.functions
-            .into_inner()
+    /// Only completed list producers without a frame of their own can move with the caller.
+    pub(super) fn caller_list_helpers_since(&self, start: usize, types: &Types) -> bool {
+        let helpers = self.functions.borrow();
+        start < self.len()
+            && helpers.len() == self.len()
+            && helpers[start..].iter().all(|helper| {
+                helper.as_ref().is_some_and(|helper| {
+                    !helper.source_frame && types.element(helper.function.returns).is_some()
+                })
+            })
+    }
+
+    pub(super) fn only_direct_locals_since(
+        &self,
+        start: usize,
+        locals: &HashMap<String, local_functions::Binding>,
+    ) -> bool {
+        let ids = self.first + start..self.first + self.len();
+        ids.is_empty()
+            || locals
+                .values()
+                .filter_map(|local| local.direct_definition())
+                .filter(|id| ids.contains(id))
+                .count()
+                == ids.len()
+    }
+
+    pub fn take_functions(&self) -> impl Iterator<Item = Helper> {
+        let functions = self.functions.take();
+        assert_eq!(functions.len(), self.reserved.replace(0));
+        functions
             .into_iter()
             .map(|helper| helper.expect("checked comprehension filled its helper"))
     }
 }
 
+/// Frame slots and the Python namespace use the same ordered declaration for each target.
+pub(super) fn namespace_targets(plan: &Plan<'_>) -> Vec<String> {
+    let mut names = plan.collect_target_names::<Vec<_>>();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// The creating frame acquires the outer iterator before the target names shadow it.
+pub(super) fn acquire_in_namespace(
+    input: &mut pipelines::Prepared,
+    namespace: usize,
+    parent: Option<usize>,
+    names: Vec<String>,
+) -> Vec<Statement> {
+    let mut body = std::mem::take(&mut input.evaluate);
+    body.append(&mut input.acquire);
+    body.push(Statement::Assign(
+        namespace,
+        Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(
+                Builtin::RegisteredNamespace(names),
+                parent
+                    .map(|slot| Expr::local(slot, Type::PythonObject))
+                    .into_iter()
+                    .collect(),
+            ),
+        },
+    ));
+    body
+}
+
+/// The result escapes the display. Private slots unwind together, except for
+/// assignment expressions that wrote a binding in the surrounding function.
+pub(super) fn scoped_result(
+    body: Vec<Statement>,
+    value: Expr,
+    private: std::ops::Range<usize>,
+    exported: impl Iterator<Item = usize>,
+) -> Expr {
+    let exported: HashSet<_> = exported.filter(|slot| private.contains(slot)).collect();
+    Expr {
+        ty: value.ty,
+        kind: ExprKind::Scope {
+            body,
+            value: Box::new(value),
+            clear: private.filter(|slot| !exported.contains(slot)).collect(),
+        },
+    }
+}
+
+/// A consumer can fuse integer addition into an eager list plan.
 #[derive(Clone, Copy)]
-enum Yield<'a> {
-    List(&'a ast::Expr),
-    Sum(&'a ast::Expr),
-    Set(&'a ast::Expr),
-    Dict(&'a ast::Expr, &'a ast::Expr),
+pub(super) enum Collector {
+    Display(Option<Type>),
+    IntegerSum,
 }
 
-#[derive(Clone, Copy)]
-struct Display<'a> {
-    clauses: &'a [ast::Comprehension],
-    value: Yield<'a>,
-}
+/// The enclosing frame supplies the first iterator. Each target scope checks its filters
+/// before opening an inner iterator or checking the result of the last clause.
+pub(super) trait ClauseLowering: Sized {
+    type Input;
+    type Error;
+    type Body;
 
-impl<'a> Display<'a> {
-    fn from_expr(expression: &'a ast::Expr) -> Option<Self> {
-        match expression {
-            ast::Expr::ListComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::List(&value.elt),
-            }),
-            ast::Expr::SetComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::Set(&value.elt),
-            }),
-            ast::Expr::DictComp(value) => Some(Self {
-                clauses: &value.generators,
-                value: Yield::Dict(value.key.as_deref()?, &value.value),
-            }),
-            _ => None,
-        }
+    fn before_pull(&mut self, _plan: &Plan<'_>, _depth: usize) {}
+    fn input(&mut self, clause: &ast::Comprehension) -> StdResult<Self::Input, Self::Error>;
+    fn with_target(
+        &mut self,
+        target: &ast::Expr,
+        input: Self::Input,
+        output: Output<'_>,
+        body: impl FnOnce(&mut Self) -> StdResult<(Vec<Expr>, Self::Body), Self::Error>,
+    ) -> StdResult<Self::Body, Self::Error>;
+    fn filter(&mut self, test: &ast::Expr) -> StdResult<Expr, Self::Error>;
+
+    fn comprehension_loop<'p>(
+        &mut self,
+        plan: &Plan<'p>,
+        depth: usize,
+        input: Self::Input,
+        emit: &mut impl FnMut(&mut Self, Output<'p>, &[Expr]) -> StdResult<Self::Body, Self::Error>,
+    ) -> StdResult<Self::Body, Self::Error> {
+        let clause = &plan.clauses[depth];
+        self.with_target(&clause.target, input, plan.output, |scope| {
+            let conditions = clause
+                .ifs
+                .iter()
+                .map(|test| scope.filter(test))
+                .collect::<StdResult<Vec<_>, _>>()?;
+            let body = if let Some(inner) = plan.clauses.get(depth + 1) {
+                let input = scope.input(inner)?;
+                scope.before_pull(plan, depth + 1);
+                stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
+                    scope.comprehension_loop(plan, depth + 1, input, emit)
+                })?
+            } else {
+                emit(scope, plan.output, &conditions)?
+            };
+            Ok((conditions, body))
+        })
     }
+}
 
-    fn visit_value(self, visitor: &mut impl Visitor<'a>) {
-        match self.value {
-            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => {
-                visitor.visit_expr(value);
+pub(super) trait EagerDisplay: ClauseLowering<Body = Vec<Statement>> {
+    fn collection_guard(_: &[Expr]) -> Option<(usize, usize)> {
+        None
+    }
+    fn collection_key(
+        &mut self,
+        key: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> StdResult<Expr, Self::Error>;
+    fn collection_value(
+        &mut self,
+        output: Output<'_>,
+        collector: Collector,
+        key: Option<&Expr>,
+        guarded: Option<(usize, usize)>,
+    ) -> StdResult<(Expr, Type), Self::Error>;
+
+    /// Seed the accumulator before its first pull and update it only after the filters pass.
+    fn comprehension_body(
+        &mut self,
+        plan: &Plan<'_>,
+        input: Self::Input,
+        collector: Collector,
+        mut destination: Option<(usize, &mut Vec<Statement>)>,
+        mut replaces_loop: impl FnMut(&Self, &Expr, Type) -> bool,
+    ) -> StdResult<Type, Self::Error> {
+        let mut result_type = Type::None;
+        let loops = self.comprehension_loop(plan, 0, input, &mut |scope, output, conditions| {
+            let guarded = Self::collection_guard(conditions);
+            let key = match (collector, output) {
+                (Collector::Display(expected), Output::Dict(key, _)) => {
+                    Some(scope.collection_key(key, expected, guarded)?)
+                }
+                _ => None,
+            };
+            let (item, ty) = scope.collection_value(output, collector, key.as_ref(), guarded)?;
+            result_type = ty;
+            if replaces_loop(scope, &item, ty) {
+                destination = None;
             }
-            Yield::Dict(key, value) => {
-                visitor.visit_expr(key);
-                visitor.visit_expr(value);
+            let Some((result, ref mut body)) = destination else {
+                return Ok(Vec::new());
+            };
+            let (empty, store) = match (collector, output, key) {
+                (Collector::Display(_), Output::Dict(..), Some(key)) => (
+                    ExprKind::Dict(Vec::new()),
+                    Statement::SetItem(ir::ItemOrder::Display, Expr::local(result, ty), key, item),
+                ),
+                (Collector::Display(_), Output::List(_) | Output::Set(_), None) => {
+                    let (empty, operation) = if matches!(output, Output::Set(_)) {
+                        let element = if ty == Type::PythonObject {
+                            ty
+                        } else {
+                            item.ty
+                        };
+                        (
+                            ExprKind::Set {
+                                element,
+                                values: Vec::new(),
+                            },
+                            Builtin::SetAdd,
+                        )
+                    } else {
+                        (ExprKind::List(Vec::new()), Builtin::Append)
+                    };
+                    (
+                        empty,
+                        Statement::Expr(Expr {
+                            ty: Type::None,
+                            kind: ExprKind::Builtin(operation, vec![Expr::local(result, ty), item]),
+                        }),
+                    )
+                }
+                (Collector::IntegerSum, Output::List(_), None) => (
+                    ExprKind::Int("0".into()),
+                    Statement::Assign(
+                        result,
+                        Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Binary(
+                                Binary::Add,
+                                Box::new(Expr::local(result, Type::Int)),
+                                Box::new(item),
+                            ),
+                        },
+                    ),
+                ),
+                _ => unreachable!("invalid eager comprehension collector"),
+            };
+            body.push(Statement::Assign(result, Expr { ty, kind: empty }));
+            Ok(vec![store])
+        })?;
+        if let Some((_, body)) = destination {
+            body.extend(loops);
+        }
+        Ok(result_type)
+    }
+}
+
+/// A rejected filter skips the remaining predicates and the whole accepted suite,
+/// including acquisition of the next clause's iterator.
+pub(super) fn filter_suite(conditions: Vec<Expr>, mut accepted: Vec<Statement>) -> Vec<Statement> {
+    for condition in conditions.into_iter().rev() {
+        accepted = vec![Statement::If(condition, accepted, Vec::new())];
+    }
+    accepted
+}
+
+pub(super) fn async_pull(clause: &ast::Comprehension) -> Option<ir::AsyncPull> {
+    clause.is_async.then(|| ir::AsyncPull {
+        range: clause.target.range(),
+        header: None,
+    })
+}
+
+impl ClauseLowering for Checker<'_> {
+    type Input = Iteration;
+    type Error = Failure;
+    type Body = Vec<Statement>;
+
+    fn before_pull(&mut self, plan: &Plan<'_>, depth: usize) {
+        self.forget_comprehension_writes(plan, depth)
+    }
+
+    fn input(&mut self, clause: &ast::Comprehension) -> Result<Iteration, String> {
+        self.iteration_input(&clause.iter, None, async_pull(clause))
+    }
+
+    fn with_target(
+        &mut self,
+        target: &ast::Expr,
+        input: Iteration,
+        _: Output<'_>,
+        body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Vec<Statement>), String>,
+    ) -> Result<Vec<Statement>, String> {
+        self.lower_iteration_after(target, input, &[], Vec::new(), |checker, output| {
+            let (conditions, body) = body(checker)?;
+            // A discarded display has checked its filters and item without emitting a store.
+            if body.is_empty() {
+                return Ok(false);
             }
-        }
+            statements::append_block(output, filter_suite(conditions, body));
+            Ok(true)
+        })
+        .map(|(body, _)| body)
     }
 
-    /// Only this clause's suffix repeats on its backedge. An earlier filter can
-    /// safely narrow a name when the remaining filters and yielded value do not
-    /// replace it.
-    fn repeated_writes(self, index: usize) -> HashSet<String> {
-        let (first, second) = match self.value {
-            Yield::List(value) | Yield::Sum(value) | Yield::Set(value) => (value, None),
-            Yield::Dict(key, value) => (key, Some(value)),
-        };
-        self.clauses[index..]
-            .iter()
-            .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
-            .chain([first])
-            .chain(second)
-            .flat_map(narrowing::expression_assignments)
-            .collect()
+    fn filter(&mut self, test: &ast::Expr) -> Result<Expr, String> {
+        let condition = self.condition(test)?;
+        self.apply_facts(test, true);
+        Ok(condition)
     }
 }
 
-pub(crate) fn target_names(target: &ast::Expr, names: &mut HashSet<String>) {
-    if let ast::Expr::Name(name) = target {
-        names.insert(name.id.to_string());
-    } else if let ast::Expr::Starred(starred) = target {
-        target_names(&starred.value, names);
-    } else if let Some(elements) = pattern_elements(target) {
-        for element in elements {
-            target_names(element, names);
-        }
+impl EagerDisplay for Checker<'_> {
+    fn collection_guard(conditions: &[Expr]) -> Option<(usize, usize)> {
+        conditions
+            .last()
+            .and_then(|test| records::present_field(test, true))
+    }
+
+    fn collection_key(
+        &mut self,
+        key: &ast::Expr,
+        expected: Option<Type>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<Expr, String> {
+        let expected = expected
+            .and_then(|ty| self.types.mapping(ty))
+            .map(|(key, _)| key);
+        let value = self.guarded_element(key, expected, guarded)?;
+        self.check_dictionary_key(value.ty, key)?;
+        Ok(value)
+    }
+
+    fn collection_value(
+        &mut self,
+        output: Output<'_>,
+        collector: Collector,
+        key: Option<&Expr>,
+        guarded: Option<(usize, usize)>,
+    ) -> Result<(Expr, Type), String> {
+        let item = output.value();
+        Ok(match (collector, key) {
+            (Collector::IntegerSum, _) => (
+                self.guarded_element(item, Some(Type::Int), guarded)?,
+                Type::Int,
+            ),
+            (Collector::Display(expected), Some(key)) => {
+                let expected = expected
+                    .and_then(|ty| self.types.mapping(ty))
+                    .map(|(_, value)| value);
+                let value =
+                    self.guarded_element(item, expected, guarded.filter(|_| preserves_field(key)))?;
+                let ty = self.types.dict(key.ty, value.ty);
+                (value, ty)
+            }
+            (Collector::Display(expected), None) => {
+                let is_set = matches!(output, Output::Set(_));
+                let element = expected.and_then(|ty| {
+                    if is_set {
+                        self.types.set_element(ty)
+                    } else {
+                        self.types.element(ty)
+                    }
+                });
+                let value = self.guarded_element(item, element, guarded)?;
+                let ty = if self.registered.is_some() && value.ty == Type::PythonObject {
+                    Type::PythonObject
+                } else if is_set {
+                    if !self.comprehension_key(value.ty) {
+                        return Err(error(
+                            self.source,
+                            item,
+                            "set elements must be int, str, bytes, Path, or immutable scalar tuples",
+                        ));
+                    }
+                    self.types.set(value.ty)
+                } else {
+                    self.types.list(value.ty)
+                };
+                (value, ty)
+            }
+        })
     }
 }
 
-/// Free reads respect nested comprehension scopes: only their leftmost iterable
-/// belongs to the surrounding scope; all target names shadow throughout the rest.
-struct Reads {
+/// Writes on the backedge of this loop invalidate earlier narrowing facts.
+fn repeated_writes(plan: &Plan<'_>, depth: usize) -> HashSet<String> {
+    plan.clauses[depth..]
+        .iter()
+        .flat_map(|clause| std::iter::once(&clause.target).chain(clause.ifs.iter()))
+        .chain(plan.output.elements())
+        .flat_map(narrowing::expression_assignments)
+        .collect()
+}
+
+/// Fixed local functions capture reads outside their own enclosing function bindings.
+#[derive(Default)]
+struct FunctionReads {
     names: HashSet<String>,
     bound: Vec<HashSet<String>>,
-    nested_lambdas: bool,
-}
-
-/// Finds lexical free reads for capture rejection, including through nested
-/// lambdas. Comprehension targets and each lambda's own locals shadow normally.
-pub(super) fn free_reads(expression: &ast::Expr, bound: HashSet<String>) -> HashSet<String> {
-    let mut reads = Reads {
-        names: HashSet::new(),
-        bound: vec![bound],
-        nested_lambdas: true,
-    };
-    reads.visit_expr(expression);
-    reads.names
 }
 
 pub(super) fn function_reads(function: &ast::StmtFunctionDef) -> HashSet<String> {
-    let mut reads = Reads {
-        names: HashSet::new(),
-        bound: Vec::new(),
-        nested_lambdas: true,
-    };
+    let mut reads = FunctionReads::default();
     reads.visit_function(function);
     reads.names
 }
 
-impl Reads {
+impl FunctionReads {
     fn visit_function(&mut self, function: &ast::StmtFunctionDef) {
         let mut bound = narrowing::assigned_names(&function.body);
         bound.extend(closed_calls::parameters(&function.parameters).map(|p| p.name.to_string()));
@@ -215,7 +477,7 @@ impl Reads {
     }
 }
 
-impl<'a> Visitor<'a> for Reads {
+impl<'a> Visitor<'a> for FunctionReads {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
         if let ast::Stmt::FunctionDef(function) = statement {
             self.visit_function(function);
@@ -225,70 +487,22 @@ impl<'a> Visitor<'a> for Reads {
     }
 
     fn visit_expr(&mut self, expression: &'a ast::Expr) {
-        if let ast::Expr::Lambda(lambda) = expression {
-            if self.nested_lambdas {
-                let mut bound = narrowing::expression_assignments(&lambda.body);
-                if let Some(parameters) = &lambda.parameters {
-                    for parameter in parameters.iter_non_variadic_params() {
-                        if let Some(default) = &parameter.default {
-                            self.visit_expr(default);
-                        }
-                        bound.insert(parameter.name().to_string());
-                    }
-                }
-                self.bound.push(bound);
-                self.visit_expr(&lambda.body);
-                self.bound.pop();
-            }
-        } else if let ast::Expr::Generator(generator) = expression {
-            self.visit_expr(&generator.generators[0].iter);
-            let mut targets = HashSet::new();
-            for clause in &generator.generators {
-                target_names(&clause.target, &mut targets);
-            }
-            self.bound.push(targets);
-            for (index, clause) in generator.generators.iter().enumerate() {
-                self.visit_expr(&clause.target);
-                if index != 0 {
-                    self.visit_expr(&clause.iter);
-                }
-                for condition in &clause.ifs {
-                    self.visit_expr(condition);
-                }
-            }
-            self.visit_expr(&generator.elt);
-            self.bound.pop();
-        } else if let Some(display) = Display::from_expr(expression) {
-            self.visit_expr(&display.clauses[0].iter);
-            let mut targets = HashSet::new();
-            for clause in display.clauses {
-                target_names(&clause.target, &mut targets);
-            }
-            self.bound.push(targets);
-            for (index, clause) in display.clauses.iter().enumerate() {
-                self.visit_expr(&clause.target);
-                if index != 0 {
-                    self.visit_expr(&clause.iter);
-                }
-                for condition in &clause.ifs {
-                    self.visit_expr(condition);
-                }
-            }
-            display.visit_value(self);
-            self.bound.pop();
-        } else if let ast::Expr::Name(name) = expression {
-            if name.ctx == ast::ExprContext::Load
-                && !self
-                    .bound
-                    .iter()
-                    .any(|scope| scope.contains(name.id.as_str()))
-            {
-                self.names.insert(name.id.to_string());
-            }
-        } else {
-            walk_expr(self, expression);
-        }
+        self.names.extend(
+            function_scope::expression_reads(expression)
+                .into_iter()
+                .filter(|name| !self.bound.iter().any(|scope| scope.contains(name))),
+        );
     }
+}
+
+/// Caller-local state shadowed by comprehension iteration targets. Walrus
+/// bindings are exported to the enclosing scope when the body is complete.
+pub(super) struct ComprehensionScope {
+    state: LocalState,
+    names: HashMap<String, usize>,
+    class_receiver: Option<String>,
+    targets: HashSet<String>,
+    outer_exports: Option<HashMap<String, usize>>,
 }
 
 impl Checker<'_> {
@@ -351,7 +565,7 @@ impl Checker<'_> {
                     if matches!(input.ty, Type::List(_)) {
                         Builtin::SequenceGetInBounds
                     } else {
-                        Builtin::ListGet
+                        Builtin::ListGet(None)
                     },
                     vec![input.clone(), Expr::integer(index)],
                 ),
@@ -406,153 +620,69 @@ impl Checker<'_> {
         expression: &ast::Expr,
         expected: Option<Type>,
     ) -> Result<Expr, String> {
-        if let ast::Expr::SetComp(set) = expression
-            && let Some(filtered) = self.character_set_filter(set, expected)?
-        {
-            return Ok(filtered);
-        }
-        if let ast::Expr::ListComp(list) = expression
-            && let Some(filtered) = self.string_list_filter(
-                &list.generators,
-                &list.elt,
-                expected.and_then(|ty| self.types.element(ty)),
-                false,
-            )?
-        {
-            return Ok(filtered);
-        }
-        let display = Display::from_expr(expression)
+        let display = Plan::from_expr(expression)
             .ok_or_else(|| error(self.source, expression, "unsupported comprehension display"))?;
-        self.comprehension_display(expression, display, expected)
+        self.comprehension_display(expression, &display, Collector::Display(expected))
     }
 
-    /// A dict can consume an exact two-column zip in the same order as a
-    /// dictionary comprehension; the iterator itself never escapes.
-    pub(super) fn dict_from_zip(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
-        let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref() else {
-            return Ok(None);
-        };
-        if !call.arguments.keywords.is_empty()
-            || zip.arguments.args.len() != 2
-            || !matches!(&*zip.func,ast::Expr::Name(n) if n.id == "zip" && !self.names.contains_key("zip"))
-            || self.resolve(&zip.func).is_some()
-        {
-            return Ok(None);
-        }
-        let range = call.range();
-        let node_index = || ast::AtomicNodeIndex::NONE;
-        let item = |name: &str, ctx| {
-            ast::Expr::Name(ast::ExprName {
-                range,
-                node_index: node_index(),
-                id: name.into(),
-                ctx,
-            })
-        };
-        let target = ast::Expr::Tuple(ast::ExprTuple {
-            range,
-            node_index: node_index(),
-            parenthesized: false,
-            ctx: ast::ExprContext::Store,
-            elts: vec![
-                item("@zipkey", ast::ExprContext::Store),
-                item("@zipvalue", ast::ExprContext::Store),
-            ],
-        });
-        let clauses = [ast::Comprehension {
-            range,
-            node_index: node_index(),
-            target,
-            iter: source.clone(),
-            ifs: Vec::new(),
-            is_async: false,
-        }];
-        let key = item("@zipkey", ast::ExprContext::Load);
-        let value = item("@zipvalue", ast::ExprContext::Load);
-        self.comprehension_display(
-            &call.func,
-            Display {
-                clauses: &clauses,
-                value: Yield::Dict(&key, &value),
-            },
-            None,
-        )
-        .map(Some)
-    }
-
-    /// Reduces an immediately consumed integer comprehension in its original
-    /// eager order. Integer addition has no callbacks or recoverable failures;
-    /// the private list and its element owners cannot otherwise be observed.
-    pub(super) fn sum_comprehension(&mut self, expression: &ast::Expr) -> Result<Expr, String> {
-        let ast::Expr::ListComp(value) = expression else {
-            unreachable!("sum selected a list comprehension");
-        };
-        self.comprehension_display(
-            expression,
-            Display {
-                clauses: &value.generators,
-                value: Yield::Sum(&value.elt),
-            },
-            Some(Type::Int),
-        )
-    }
-
-    fn comprehension_display(
+    pub(super) fn comprehension_display(
         &mut self,
         expression: &ast::Expr,
-        display: Display<'_>,
-        expected: Option<Type>,
+        display: &Plan<'_>,
+        collector: Collector,
     ) -> Result<Expr, String> {
-        if display.clauses.iter().any(|clause| clause.is_async) {
-            return Err(error(
-                self.source,
-                expression,
-                "asynchronous comprehensions are unsupported",
-            ));
-        }
-        if display
-            .clauses
-            .iter()
-            .any(|clause| !narrowing::expression_assignments(&clause.iter).is_empty())
+        let mut input = self.input(&display.clauses[0])?;
+        // A Python iterator owns its pulls and method dispatch. Only a plain
+        // container can supply the exact operand required by a bulk filter.
+        if let Collector::Display(expected) = collector
+            && let Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } = &mut input
         {
-            return Err(error(
-                self.source,
-                expression,
-                "assignment expressions are forbidden in comprehension iterables",
-            ));
-        }
-        let input = self.iteration_input(&display.clauses[0].iter, None)?;
-        if matches!(input, Iteration::Prepared(_))
-            || !narrowing::expression_assignments(expression).is_empty()
-            || pipelines::is_pipeline_expression(self, &display.clauses[0].iter)
-            || !self.local_functions.is_empty()
-                && free_reads(expression, HashSet::new())
-                    .iter()
-                    .any(|name| self.local_functions.contains_key(name))
-        {
-            return self.inline_comprehension(expression, display, expected, input);
-        }
-        let mut targets = HashSet::new();
-        for clause in display.clauses {
-            target_names(&clause.target, &mut targets);
-        }
-        let mut reads = Reads {
-            names: HashSet::new(),
-            bound: vec![targets.clone()],
-            nested_lambdas: false,
-        };
-        for (index, clause) in display.clauses.iter().enumerate() {
-            reads.visit_expr(&clause.target);
-            if index != 0 {
-                reads.visit_expr(&clause.iter);
-            }
-            for condition in &clause.ifs {
-                reads.visit_expr(condition);
+            let filtered = match display.output {
+                Output::List(_) => self.string_list_filter(
+                    display,
+                    expected.and_then(|ty| self.types.element(ty)),
+                    Some(iterable),
+                )?,
+                Output::Set(_) => self.character_set_filter(display, expected, iterable)?,
+                _ => None,
+            };
+            if let Some(value) = filtered {
+                return Ok(value);
             }
         }
-        display.visit_value(&mut reads);
-        let mut captures = reads.names.into_iter().collect::<Vec<_>>();
-        captures.sort();
+        let prepared = matches!(input, Iteration::Prepared(_));
+        if prepared
+            // A typed await uses the enclosing coroutine's task and frame.
+            || display.body_suspends()
+            || pipelines::is_pipeline_expression(self, display.outer)
+        {
+            let writes = if prepared && self.narrowed.is_empty() {
+                HashSet::new()
+            } else {
+                narrowing::expression_assignments(expression)
+            };
+            return self.inline_comprehension(display, collector, input, writes);
+        }
+        // Only the body enters the helper. Its outer iterable was checked in the caller.
+        let (targets, captures, writes) = function_scope::display_bindings(display);
+        let check_only = self.registered.is_none() && self.discarded_function_body();
+        if !writes.is_empty()
+            || captures
+                .iter()
+                .any(|name| self.local_functions.contains_key(name))
+            || check_only && captures.iter().all(|name| !self.names.contains_key(name))
+        {
+            return self.inline_comprehension(
+                display,
+                collector,
+                input,
+                writes.into_iter().collect(),
+            );
+        }
         let id = self.helpers.reserve();
         // Eager displays share the enclosing Python frame, even when lowered to a helper.
         let omitted_locals = self.omitted_assert_locals.clone();
@@ -566,6 +696,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.frame = LexicalFrame::Positioned(self.fixed_frame());
         helper.omitted_assert_locals = omitted_locals;
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
@@ -581,7 +712,7 @@ impl Checker<'_> {
             // Literal range bounds stay visible to interval analysis. Moving an
             // immutable literal into the helper cannot reorder observable work.
             let mut literal = &value;
-            while let ExprKind::Negate(inner) = &literal.kind {
+            while let ExprKind::Unary(UnaryOp::USub, inner) = &literal.kind {
                 literal = inner;
             }
             if matches!(literal.kind, ExprKind::Int(_)) {
@@ -641,8 +772,9 @@ impl Checker<'_> {
         let gather_input = plain_iterable
             .filter(|value| value.ty == Type::Str)
             .cloned();
-        let result = helper.hidden(Type::None);
-        let list_binding = if matches!(display.value, Yield::List(_))
+        let list_binding = if self.inference.is_none()
+            && matches!(collector, Collector::Display(_))
+            && matches!(display.output, Output::List(_))
             && let [clause] = display.clauses
             && clause.ifs.is_empty()
             && let Some(target) = clause.target.as_name_expr()
@@ -656,8 +788,29 @@ impl Checker<'_> {
         } else {
             None
         };
-        let loops = helper.comprehension_clause(display, 0, Some(input), expected, result)?;
-        if let Some((iterable, target)) = list_binding {
+        let slice = matches!(collector, Collector::IntegerSum)
+            && display.clauses.len() == 1
+            && args
+                .first()
+                .is_some_and(|arg| matches!(arg.kind, ExprKind::Builtin(Builtin::Slice, _)));
+        let mut body = Vec::new();
+        let first_private = helper.locals.len();
+        let result =
+            (self.inference.is_none() && !check_only || slice).then(|| helper.hidden(Type::None));
+        let mut mapping = None;
+        let ty = helper.comprehension_body(
+            display,
+            input,
+            collector,
+            result.map(|slot| (slot, &mut body)),
+            |checker, item, ty| {
+                if gather_input.is_some() && ty == Type::ListInt {
+                    mapping = checker.dictionary_gather_mapping(display, item);
+                }
+                mapping.is_some()
+            },
+        )?;
+        if let (Some(result), Some((iterable, target))) = (result, list_binding) {
             self.helpers.list_builds.borrow_mut().insert(
                 id,
                 ir::ListBuild {
@@ -667,29 +820,8 @@ impl Checker<'_> {
                 },
             );
         }
-        let ty = helper.locals[result];
-        let empty = match display.value {
-            Yield::List(_) => ExprKind::List(Vec::new()),
-            Yield::Sum(_) => ExprKind::Int("0".into()),
-            Yield::Set(_) => ExprKind::Set {
-                element: self.types.set_element(ty).unwrap(),
-                values: Vec::new(),
-            },
-            Yield::Dict(..) => {
-                let (key, value) = self.types.mapping(ty).unwrap();
-                ExprKind::Dict {
-                    key,
-                    value,
-                    entries: Vec::new(),
-                }
-            }
-        };
-        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
-        body.extend(loops);
-        body.push(Statement::Return(helper.local(result)));
-        if ty == Type::ListInt
-            && let Some(mut input) = gather_input
-            && let Some(mapping) = helper.dictionary_gather_mapping(display)?
+        if let Some(mut input) = gather_input
+            && let Some(mapping) = mapping
         {
             // Validate at exactly the original decode's evaluation point, before
             // subsequent captures and before entering the helper. Immutable bytes
@@ -728,30 +860,34 @@ impl Checker<'_> {
                     }),
                 ),
             };
-            body = vec![Statement::Return(gather)];
+            // The gather uses only the incoming iterable and a captured or global mapping.
+            helper.locals.truncate(first_private);
+            body.push(Statement::Return(gather));
+        } else if let Some(result) = result {
+            helper.locals[result] = ty;
+            body.push(Statement::Return(helper.local(result)));
         }
-        if matches!(display.value, Yield::Sum(_)) && display.clauses.len() == 1 {
+        if slice {
             slices::fuse(&mut body, &params, &mut args);
         }
-        self.helpers.finish(
-            id,
-            Helper {
-                module: self.module,
-                function: ir::Function {
-                    params,
-                    returns: ty,
-                    locals: helper.locals,
-                    body,
+        helper.finish_region(Ok(()))?;
+        if self.inference.is_none() {
+            self.helpers.finish(
+                id,
+                Helper {
+                    module: self.module,
+                    function: ir::Function {
+                        params,
+                        returns: ty,
+                        locals: helper.locals,
+                        body,
+                    },
+                    calls: helper.calls,
+                    class_reads: helper.class_reads.into_inner(),
+                    source_frame: false,
                 },
-                calls: helper.calls,
-                class_reads: helper.class_reads.into_inner(),
-                source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    expression,
-                    "recursive calls are unsupported in this prototype",
-                ),
-            },
-        );
+            );
+        }
         self.calls.insert(id);
         Ok(Expr {
             ty,
@@ -759,41 +895,67 @@ impl Checker<'_> {
         })
     }
 
-    /// Finds the mapping in a checked, callback-free character comprehension.
-    /// Ordinary captures and type checks remain intact; the replacement skips
-    /// this mapping load for an empty source, just as the original loop does.
-    fn dictionary_gather_mapping(&mut self, display: Display<'_>) -> Result<Option<Expr>, String> {
+    /// The fused helper reads the same mapping as the accepted character lookup.
+    fn dictionary_gather_mapping(&self, display: &Plan<'_>, item: &Expr) -> Option<Expr> {
         let [clause] = display.clauses else {
-            return Ok(None);
+            return None;
         };
-        if !clause.ifs.is_empty() {
-            return Ok(None);
-        }
-        let ast::Expr::Name(target) = &clause.target else {
-            return Ok(None);
+        let ExprKind::Builtin(Builtin::DictGet, operands) = &item.kind else {
+            return None;
         };
-        let Yield::List(ast::Expr::Subscript(subscript)) = display.value else {
-            return Ok(None);
+        let [mapping, key] = operands.as_slice() else {
+            return None;
         };
-        let ast::Expr::Name(key) = &*subscript.slice else {
-            return Ok(None);
+        let ExprKind::Local(key) = &key.kind else {
+            return None;
         };
-        let ast::Expr::Name(mapping) = &*subscript.value else {
-            return Ok(None);
-        };
-        if key.id != target.id || mapping.id == target.id {
-            return Ok(None);
-        }
-        let mapping = self.expr(&subscript.value)?;
-        if self.types.mapping(mapping.ty) != Some((Type::Str, Type::Int))
-            || !matches!(
+        (clause.ifs.is_empty()
+            && self.names.get(clause.target.as_name_expr()?.id.as_str()) == Some(key)
+            && self.types.mapping(mapping.ty) == Some((Type::Str, Type::Int))
+            && matches!(
                 mapping.kind,
                 ExprKind::Local(_) | ExprKind::Builtin(Builtin::GlobalGet(_), _)
-            )
-        {
-            return Ok(None);
+            ))
+        .then(|| mapping.clone())
+    }
+
+    pub(super) fn enter_comprehension(&mut self, targets: Vec<String>) -> ComprehensionScope {
+        let scope = ComprehensionScope {
+            state: self.local_state(),
+            names: self.names.clone(),
+            class_receiver: self.class_receiver.clone(),
+            targets: self.comprehension_targets.clone(),
+            outer_exports: self.comprehension_exports.replace(HashMap::new()),
+        };
+        for name in targets {
+            self.names.remove(&name);
+            if self.class_receiver.as_ref() == Some(&name) {
+                self.class_receiver = None;
+            }
+            self.comprehension_targets.insert(name);
         }
-        Ok(Some(mapping))
+        scope
+    }
+
+    pub(super) fn leave_comprehension(
+        &mut self,
+        scope: ComprehensionScope,
+    ) -> HashMap<String, usize> {
+        let exports = std::mem::replace(&mut self.comprehension_exports, scope.outer_exports)
+            .expect("entered comprehension");
+        self.comprehension_targets = scope.targets;
+        self.names = scope.names;
+        self.class_receiver = scope.class_receiver;
+        for (name, &slot) in &exports {
+            if !self.comprehension_targets.contains(name) {
+                self.names.insert(name.clone(), slot);
+            }
+            if let Some(outer) = &mut self.comprehension_exports {
+                outer.insert(name.clone(), slot);
+            }
+        }
+        self.restore_state(scope.state);
+        exports
     }
 
     /// Shares enclosing bindings while reserving private targets and owners.
@@ -801,209 +963,107 @@ impl Checker<'_> {
     /// cleared on both normal completion and exceptional loop exits.
     fn inline_comprehension(
         &mut self,
-        expression: &ast::Expr,
-        display: Display<'_>,
-        expected: Option<Type>,
+        display: &Plan<'_>,
+        collector: Collector,
         input: Iteration,
+        writes: HashSet<String>,
     ) -> Result<Expr, String> {
-        let before = self.local_state();
-        let names = self.names.clone();
-        let class_receiver = self.class_receiver.clone();
-        let targets = self.comprehension_targets.clone();
         let first_private = self.locals.len();
-        let writes = narrowing::expression_assignments(expression);
-        let mut private_targets = HashSet::new();
-        for clause in display.clauses {
-            target_names(&clause.target, &mut private_targets);
-        }
-        for name in &private_targets {
-            self.names.remove(name);
-        }
-        if self
-            .class_receiver
-            .as_ref()
-            .is_some_and(|name| private_targets.contains(name))
-        {
-            self.class_receiver = None;
-        }
-        self.comprehension_targets.extend(private_targets);
-        self.comprehension_depth += 1;
-        let result = self.hidden(Type::None);
-        let loops = self.comprehension_clause(display, 0, Some(input), expected, result)?;
-        let ty = self.locals[result];
-        let empty = match display.value {
-            Yield::List(_) => ExprKind::List(Vec::new()),
-            Yield::Sum(_) => ExprKind::Int("0".into()),
-            Yield::Set(_) => ExprKind::Set {
-                element: self.types.set_element(ty).unwrap(),
-                values: Vec::new(),
-            },
-            Yield::Dict(..) => {
-                let (key, value) = self.types.mapping(ty).unwrap();
-                ExprKind::Dict {
-                    key,
-                    value,
-                    entries: Vec::new(),
-                }
-            }
+        let first_pull = matches!(&input, Iteration::Container { iterable, .. } if iterable.is_nonempty_list_literal());
+        // Acquire the outer iterator before declaring the comprehension's shadowing names.
+        let mut input = input;
+        let enclosing = self.namespace;
+        let (mut prefix, targets) = if self.registered.is_some() {
+            let Iteration::Prepared(cursor) = &mut input else {
+                unreachable!("Python iterables have an explicit acquisition")
+            };
+            let slot = self.hidden(Type::PythonObject);
+            let targets = namespace_targets(display);
+            let prefix = acquire_in_namespace(cursor, slot, enclosing, targets.clone());
+            self.namespace = Some(slot);
+            (prefix, targets)
+        } else {
+            (Vec::new(), display.collect_target_names())
         };
-        let mut body = vec![Statement::Assign(result, Expr { ty, kind: empty })];
-        body.extend(loops);
-        self.comprehension_depth -= 1;
-        self.comprehension_targets = targets;
-        self.names = names;
-        self.class_receiver = class_receiver;
-        for (name, &slot) in &self.comprehension_exports {
-            if !self.comprehension_targets.contains(name) {
-                self.names.insert(name.clone(), slot);
+        let scope = self.enter_comprehension(targets);
+        let result = self.hidden(Type::None);
+        // The outer loop can only invalidate a narrowing when the display writes a name.
+        // Displays checked in a private helper have already proved this set empty.
+        if !writes.is_empty() {
+            self.before_pull(display, 0);
+        }
+        let checked = self.comprehension_body(
+            display,
+            input,
+            collector,
+            (!self.discarded_function_body()).then_some((result, &mut prefix)),
+            // A refused fixed region still needs the element checks and result type.
+            |cx, _, _| cx.registered.is_none() && cx.unrepresented.borrow().is_some(),
+        );
+        self.namespace = enclosing;
+        let exports = self.leave_comprehension(scope);
+        self.locals[result] = checked?;
+        if first_pull && !writes.is_empty() {
+            // A filter runs before it can suppress the output or the next clause.
+            let mut bind = |expression| {
+                for name in narrowing::guaranteed_assignments(expression, None) {
+                    if let Some(&slot) = exports.get(&name) {
+                        self.assigned.insert(slot);
+                    }
+                }
+            };
+            let passes = display.clauses[0].ifs.iter().all(|test| {
+                bind(test);
+                ast::helpers::Truthiness::from_expr(test, |_| false).into_bool() == Some(true)
+            });
+            if passes && display.clauses.len() == 1 {
+                display.output.elements().for_each(bind);
             }
         }
-        self.restore_state(before);
         for name in writes {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
         }
-        let exported = self
-            .comprehension_exports
-            .values()
-            .copied()
-            .collect::<HashSet<_>>();
-        let clear = (first_private..self.locals.len())
-            .filter(|slot| !exported.contains(slot))
-            .collect();
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear,
-            },
-        })
+        Ok(scoped_result(
+            prefix,
+            self.local(result),
+            first_private..self.locals.len(),
+            exports.into_values(),
+        ))
     }
 
-    /// Filters are nested in source order and contribute facts only on their true
-    /// edges. Each nested iterable is evaluated anew under the preceding bindings.
-    fn comprehension_clause(
-        &mut self,
-        display: Display<'_>,
-        index: usize,
-        first: Option<Iteration>,
-        expected: Option<Type>,
-        result: usize,
-    ) -> Result<Vec<Statement>, String> {
-        let clause = &display.clauses[index];
-        let input = match first {
-            Some(input) => input,
-            None => self.iteration_input(&clause.iter, None)?,
-        };
-        for name in display.repeated_writes(index) {
+    pub(super) fn forget_comprehension_writes(&mut self, plan: &Plan<'_>, depth: usize) {
+        if self.narrowed.is_empty() {
+            return;
+        }
+        for name in repeated_writes(plan, depth) {
             if let Some(slot) = self.names.get(&name) {
                 self.narrowed.remove_mut(slot);
             }
         }
-        self.lower_iteration(&clause.target, input, &[], |checker| {
-            let mut conditions = Vec::new();
-            for condition in &clause.ifs {
-                conditions.push(checker.condition(condition)?);
-                checker.apply_facts(condition, true);
-            }
-            let mut body = if index + 1 == display.clauses.len() {
-                let guarded = conditions.last().and_then(present_field);
-                checker.comprehension_leaf(display.value, expected, result, guarded)?
-            } else {
-                checker.comprehension_clause(display, index + 1, None, expected, result)?
-            };
-            for condition in conditions.into_iter().rev() {
-                body = vec![Statement::If(condition, body, Vec::new())];
-            }
-            Ok(body)
-        })
-        .map(|(body, _)| body)
     }
 
-    /// A dict display evaluates and roots its key before its value. Ordinary
-    /// subscript assignment cannot express that order because it evaluates RHS first.
-    fn comprehension_leaf(
-        &mut self,
-        value: Yield<'_>,
-        expected: Option<Type>,
-        result: usize,
-        guarded: Option<(usize, usize)>,
-    ) -> Result<Vec<Statement>, String> {
-        match value {
-            Yield::Sum(expression) => {
-                let value = self.guarded_element(expression, Some(Type::Int), guarded)?;
-                self.locals[result] = Type::Int;
-                Ok(vec![Statement::Assign(
-                    result,
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Binary(
-                            Binary::Add,
-                            Box::new(self.local(result)),
-                            Box::new(value),
-                        ),
-                    },
-                )])
-            }
-            Yield::List(expression) | Yield::Set(expression) => {
-                let is_set = matches!(value, Yield::Set(_));
-                let element = expected.and_then(|ty| {
-                    if is_set {
-                        self.types.set_element(ty)
-                    } else {
-                        self.types.element(ty)
-                    }
-                });
-                let value = self.guarded_element(expression, element, guarded)?;
-                if is_set && !self.types.hashable_key(value.ty) {
-                    return Err(error(
-                        self.source,
-                        expression,
-                        "set elements must be int, str, bytes, Path, or immutable scalar tuples",
-                    ));
-                }
-                self.locals[result] = if is_set {
-                    self.types.set(value.ty)
-                } else {
-                    self.types.list(value.ty)
-                };
-                Ok(vec![Statement::Expr(Expr {
-                    ty: Type::None,
-                    kind: ExprKind::Builtin(
-                        if is_set {
-                            Builtin::SetAdd
-                        } else {
-                            Builtin::Append
-                        },
-                        vec![self.local(result), value],
-                    ),
-                })])
-            }
-            Yield::Dict(key, value) => {
-                let expected = expected.and_then(|ty| self.types.mapping(ty));
-                let key_value = self.guarded_element(key, expected.map(|(ty, _)| ty), guarded)?;
-                if !self.types.hashable_key(key_value.ty) {
-                    return Err(error(
-                        self.source,
-                        key,
-                        "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
-                    ));
-                }
-                let captured = self.hidden(key_value.ty);
-                let guarded = guarded.filter(|_| preserves_field(&key_value));
-                let value = self.guarded_element(value, expected.map(|(_, ty)| ty), guarded)?;
-                self.locals[result] = self.types.dict(key_value.ty, value.ty);
-                Ok(vec![Statement::Scope {
-                    body: vec![
-                        Statement::Assign(captured, key_value),
-                        Statement::SetItem(self.local(result), self.local(captured), value),
-                    ],
-                    clear: vec![captured],
-                }])
-            }
+    pub(super) fn check_dictionary_key(&self, ty: Type, site: &impl Ranged) -> Result<(), String> {
+        if self.comprehension_key(ty) {
+            Ok(())
+        } else {
+            let failure = error(
+                self.source,
+                site,
+                "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
+            );
+            // A parsed value can be a Python key even when its native view has no hash layout.
+            Err(if matches!(ty, Type::JsonRoot | Type::JsonValue) {
+                failure.classify(Kind::UnsupportedRepresentation)
+            } else {
+                failure
+            })
         }
+    }
+
+    fn comprehension_key(&self, ty: Type) -> bool {
+        self.types.hashable_key(ty) || self.registered.is_some() && ty == Type::PythonObject
     }
 
     fn guarded_element(
@@ -1012,29 +1072,14 @@ impl Checker<'_> {
         expected: Option<Type>,
         guarded: Option<(usize, usize)>,
     ) -> Result<Expr, String> {
-        if let Some((slot, field)) = guarded
-            && let ast::Expr::Attribute(attribute) = expression
-            && let ast::Expr::Name(receiver) = &*attribute.value
-            && self.names.get(receiver.id.as_str()) == Some(&slot)
-            && let Type::Class(class) = self.locals[slot]
-            && self.classes.declarations.definitions[class].fields[field].name
-                == attribute.attr.as_str()
-            && let Some(payload) = self.types.payload(self.classes.fields[class][field])
-        {
-            let value = self.expr(expression)?;
-            let unwrapped = Expr {
-                ty: payload,
-                kind: ExprKind::Unwrap(Box::new(value)),
-            };
-            return match expected {
-                Some(ty) => self.coerce(unwrapped, ty, expression),
-                None => Ok(unwrapped),
-            };
-        }
-        match expected {
+        let depth = self.present_fields.len();
+        self.guard_field_read(expression, guarded);
+        let value = match expected {
             Some(ty) => self.expr_expected(expression, ty),
             None => self.expr(expression),
-        }
+        };
+        self.present_fields.truncate(depth);
+        value
     }
 }
 
@@ -1042,6 +1087,92 @@ impl Checker<'_> {
 mod tests {
     use crate::ir::{Builtin, ExprKind, Statement, Type, walk_expressions};
     use crate::{CompileOptions, check, compile};
+
+    #[test]
+    fn provisional_displays_keep_call_edges_and_slice_rewrites_without_filling_helpers() {
+        use super::{
+            Checker, ClassInfo, Classes, HashMap, Helpers, ModuleValues, SourceGraph, Types, ast,
+            inference,
+        };
+
+        let graph = SourceGraph::single(concat!(
+            "sum([n + 1 for n in [1, 5] if n])\n",
+            "sum([n + 1 for n in [1, 5][::-1]])\n",
+            "[n + 1 for n in [1, 5]]\n",
+        ))
+        .unwrap();
+        let module = graph.entry;
+        let types = Types::default();
+        let mut declarations = Classes::collect(&graph).unwrap();
+        let (classes, _) = ClassInfo::new(&graph, &types, &mut declarations).unwrap();
+        let signatures = HashMap::new();
+        let globals = ModuleValues::default();
+        let helpers = Helpers::new(0);
+        let inference = inference::Inference::default();
+        let mut checker = Checker::new(
+            &graph,
+            module,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        );
+        checker.inference = Some(&inference);
+        for (id, stmt) in graph.modules[module]
+            .parsed
+            .syntax()
+            .body
+            .iter()
+            .enumerate()
+        {
+            let ast::Stmt::Expr(stmt) = stmt else {
+                unreachable!()
+            };
+            let value = checker.expr(&stmt.value).unwrap();
+            assert_eq!(value.ty, [Type::Int, Type::Int, Type::ListInt][id]);
+            let ExprKind::Call(callee, args) = value.kind else {
+                panic!("expected a helper call")
+            };
+            assert_eq!(callee, id);
+            assert!(matches!(args.values[0].kind, ExprKind::List(_)));
+            assert!(checker.calls.contains(&id));
+        }
+        assert_eq!(helpers.len(), 3);
+        assert_eq!(helpers.functions.borrow().capacity(), 0);
+    }
+
+    #[test]
+    fn outer_await_acquires_a_synchronous_generator_iterator_in_its_caller() {
+        let source = r#"
+async def items() -> list[int]:
+    return [1, 2]
+
+async def total() -> int:
+    return sum(x for x in await items())
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        super::super::lower(&graph).unwrap();
+    }
+
+    #[test]
+    fn synchronous_consumer_requires_a_synchronous_generator_protocol() {
+        let source = r#"
+async def identity(value: int) -> int:
+    return value
+
+async def invalid(values: list[int]) -> int:
+    return sum(await identity(x) for x in values)
+"#;
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let diagnostic = super::super::lower(&graph)
+            .err()
+            .expect("async generator requires an async iterator");
+        assert!(
+            diagnostic.contains("asynchronous generator expressions are unsupported"),
+            "{diagnostic}"
+        );
+    }
 
     #[test]
     fn unrelated_guard_keeps_context_for_bound_method_inference() {
@@ -1105,6 +1236,20 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_comprehension_before_a_nonreturning_call_has_one_helper() {
+        let graph = crate::modules::SourceGraph::single(
+            "def stop(selected: bool) -> None:\n    if selected:\n        raise ValueError('first')\n    else:\n        raise LookupError('second')\ndef emit(value: int) -> None:\n    print(value)\nif __name__ == '__main__':\n    print([str(i) for i in range(4)])\n    stop(True)\n    emit(0)\n",
+        )
+        .unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let helpers = module
+            .functions
+            .iter()
+            .filter(|function| module.types.element(function.returns) == Some(Type::Str));
+        assert_eq!(helpers.count(), 1);
+    }
+
+    #[test]
     fn decoded_gather_validates_before_calling_the_lazy_global_helper() {
         let directory = tempfile::tempdir().unwrap();
         let entry = directory.path().join("entry.py");
@@ -1133,6 +1278,7 @@ mod tests {
             }
         });
         let helper = &module.functions[helper.unwrap()];
+        assert_eq!(helper.locals.len(), helper.params.len());
         assert_eq!(helper.locals[helper.params[0]], Type::Bytes);
         let [Statement::Return(value)] = helper.body.as_slice() else {
             panic!("the fused helper must contain only its conditional gather")
@@ -1179,13 +1325,13 @@ def values() -> list[int]:
     }
 
     #[test]
-    fn helper_calls_participate_in_recursion_validation() {
+    fn recursive_comprehension_calls_share_a_stack_growth_entry() {
         let source = r#"
 def recur(count: int) -> list[int]:
     return [len(recur(item)) for item in range(count)]
 "#;
-        let diagnostic = check(source).unwrap_err();
-        assert!(diagnostic.contains("recursive calls"), "{diagnostic}");
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call void @imre_on_call_stack(").count(), 1);
     }
 
     #[test]

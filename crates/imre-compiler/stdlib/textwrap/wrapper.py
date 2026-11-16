@@ -203,14 +203,7 @@ class TextWrapper:
 
         # Arrange in reverse order so items can be efficiently popped
         # from a stack of chucks.
-        left = 0
-        right = len(chunks) - 1
-        while left < right:
-            saved = chunks[left]
-            chunks[left] = chunks[right]
-            chunks[right] = saved
-            left += 1
-            right -= 1
+        chunks.reverse()
 
         while chunks:
 
@@ -306,99 +299,42 @@ class TextWrapper:
         return "\n".join(self.wrap(text))
 
 
-def wrap(
-    text: str,
-    width: int = 70,
-    *,
-    initial_indent: str = "",
-    subsequent_indent: str = "",
-    expand_tabs: bool | int = True,
-    replace_whitespace: bool | int = True,
-    fix_sentence_endings: bool | int = False,
-    break_long_words: bool | int = True,
-    drop_whitespace: bool | int = True,
-    break_on_hyphens: bool | int = True,
-    tabsize: int = 8,
-    max_lines: int | None = None,
-    placeholder: str = " [...]",
-) -> list[str]:
-    w = TextWrapper(
-        width=width,
-        initial_indent=initial_indent,
-        subsequent_indent=subsequent_indent,
-        expand_tabs=expand_tabs,
-        replace_whitespace=replace_whitespace,
-        fix_sentence_endings=fix_sentence_endings,
-        break_long_words=break_long_words,
-        drop_whitespace=drop_whitespace,
-        break_on_hyphens=break_on_hyphens,
-        tabsize=tabsize,
-        max_lines=max_lines,
-        placeholder=placeholder,
-    )
+def wrap(text, width=70, **kwargs):
+    """Wrap a single paragraph of text, returning a list of wrapped lines.
+
+    Reformat the single paragraph in 'text' so it fits in lines of no
+    more than 'width' columns, and return a list of wrapped lines.  By
+    default, tabs in 'text' are expanded with string.expandtabs(), and
+    all other whitespace characters (including newline) are converted to
+    space.  See TextWrapper class for available keyword args to customize
+    wrapping behaviour.
+    """
+    w = TextWrapper(width=width, **kwargs)
     return w.wrap(text)
 
+def fill(text, width=70, **kwargs):
+    """Fill a single paragraph of text, returning a new string.
 
-def fill(
-    text: str,
-    width: int = 70,
-    *,
-    initial_indent: str = "",
-    subsequent_indent: str = "",
-    expand_tabs: bool | int = True,
-    replace_whitespace: bool | int = True,
-    fix_sentence_endings: bool | int = False,
-    break_long_words: bool | int = True,
-    drop_whitespace: bool | int = True,
-    break_on_hyphens: bool | int = True,
-    tabsize: int = 8,
-    max_lines: int | None = None,
-    placeholder: str = " [...]",
-) -> str:
-    w = TextWrapper(
-        width=width,
-        initial_indent=initial_indent,
-        subsequent_indent=subsequent_indent,
-        expand_tabs=expand_tabs,
-        replace_whitespace=replace_whitespace,
-        fix_sentence_endings=fix_sentence_endings,
-        break_long_words=break_long_words,
-        drop_whitespace=drop_whitespace,
-        break_on_hyphens=break_on_hyphens,
-        tabsize=tabsize,
-        max_lines=max_lines,
-        placeholder=placeholder,
-    )
+    Reformat the single paragraph in 'text' to fit in lines of no more
+    than 'width' columns, and return a new string containing the entire
+    wrapped paragraph.  As with wrap(), tabs are expanded and other
+    whitespace characters converted to space.  See TextWrapper class for
+    available keyword args to customize wrapping behaviour.
+    """
+    w = TextWrapper(width=width, **kwargs)
     return w.fill(text)
 
+def shorten(text, width, **kwargs):
+    """Collapse and truncate the given text to fit in the given width.
 
-def shorten(
-    text: str,
-    width: int,
-    *,
-    initial_indent: str = "",
-    subsequent_indent: str = "",
-    expand_tabs: bool | int = True,
-    replace_whitespace: bool | int = True,
-    fix_sentence_endings: bool | int = False,
-    break_long_words: bool | int = True,
-    drop_whitespace: bool | int = True,
-    break_on_hyphens: bool | int = True,
-    tabsize: int = 8,
-    placeholder: str = " [...]",
-) -> str:
-    w = TextWrapper(
-        width=width,
-        max_lines=1,
-        initial_indent=initial_indent,
-        subsequent_indent=subsequent_indent,
-        expand_tabs=expand_tabs,
-        replace_whitespace=replace_whitespace,
-        fix_sentence_endings=fix_sentence_endings,
-        break_long_words=break_long_words,
-        drop_whitespace=drop_whitespace,
-        break_on_hyphens=break_on_hyphens,
-        tabsize=tabsize,
-        placeholder=placeholder,
-    )
-    return w.fill(" ".join(text.strip().split()))
+    The text first has its whitespace collapsed.  If it then fits in
+    the *width*, it is returned as is.  Otherwise, as many words
+    as possible are joined and then the placeholder is appended::
+
+        >>> textwrap.shorten("Hello  world!", width=12)
+        'Hello world!'
+        >>> textwrap.shorten("Hello  world!", width=11)
+        'Hello [...]'
+    """
+    w = TextWrapper(width=width, max_lines=1, **kwargs)
+    return w.fill(' '.join(text.strip().split()))

@@ -27,6 +27,7 @@ ITEM = IMPORT + "@dataclass\nclass Item:\n    value: int\n"
 FROZEN = ITEM.replace("@dataclass\n", "@dataclass(frozen=True)\n")
 METHOD = ITEM + "    @classmethod\n    def make(cls, value: int) -> \"Item\":\n        return cls(value)\n"
 PROPERTY = ITEM + "    @property\n    def double(self) -> int:\n        return self.value * 2\n"
+WRONG_PROPERTY_RETURN = PROPERTY.replace("self.value * 2", '"wrong"')
 ITEMS_METHOD = ITEM + "    def items(self, value: int) -> list[int]:\n        return [value]\n"
 
 SLOTS = ITEM.replace("@dataclass\n", "@dataclass(slots=True)\n")
@@ -87,8 +88,6 @@ Option().updated(unknown=True)
     "non_default_after_default": IMPORT + "@dataclass\nclass Item:\n    first: int = 1\n    second: int\n",
     "mutable_default": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = []\n",
     "wrong_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default_factory=dict)\n",
-    "called_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default_factory=list())\n",
-    "custom_factory": IMPORT + "def values() -> list[int]:\n    return [1]\n@dataclass\nclass Item:\n    values: list[int] = field(default_factory=values)\n",
     "default_and_factory": IMPORT + "@dataclass\nclass Item:\n    values: list[int] = field(default=None, default_factory=list)\n",
     "field_init_false": IMPORT + "@dataclass\nclass Item:\n    value: int = field(default=1, init=False)\n",
     "field_metadata": IMPORT + "@dataclass\nclass Item:\n    value: int = field(metadata={})\n",
@@ -113,8 +112,9 @@ Option().updated(unknown=True)
     "cached_property_has_no_setter": "from functools import cached_property\n"
         + PROPERTY.replace("@property", "@cached_property")
         + "    @double.setter\n    def double(self, value: int) -> None:\n        self.value = value // 2\n",
-    "property_recursion": PROPERTY.replace("return self.value * 2", "return self.double"),
-    "classmethod_recursion": METHOD.replace("return cls(value)", "return cls.make(value)"),
+    "property_wrong_return": WRONG_PROPERTY_RETURN,
+    "property_wrong_return_read": WRONG_PROPERTY_RETURN + "print(Item(3).double)\n",
+    "classmethod_wrong_return": METHOD.replace("return cls(value)", 'return "wrong"'),
     "classmethod_missing_receiver": METHOD.replace("def make(cls, value: int)", "def make(value: int)"),
     "classmethod_wrong_receiver": METHOD.replace("def make(cls,", "def make(self,").replace("return cls(value)", "return Item(value)"),
     "classmethod_receiver_rebind": METHOD.replace("return cls(value)", "cls = Item\n        return cls(value)"),
@@ -153,6 +153,10 @@ ERRORS = {
         + "def argument() -> int:\n    print(\"must not evaluate argument\")\n    return 1\n"
         + "print(receiver().make(argument()))\n",
         "ValueError",
+    ),
+    "classmethod_recursion_called": (
+        METHOD.replace("return cls(value)", "return cls.make(value)") + "Item.make(3)\n",
+        "RecursionError",
     ),
     "constructor_argument_failure": (
         IMPORT + "@dataclass\nclass Item:\n    name: str\n    value: int\n"
@@ -211,12 +215,22 @@ display((8, 1, 2), stats)
     (fixtures / "upstream_teststats.py").write_bytes(b"import dataclasses\n\n" + original + driver.encode())
 
 
+def check_return_diagnostic(name: str, stderr: str) -> None:
+    if name in {"property_wrong_return", "property_wrong_return_read"}:
+        assert "main.py:7:16" in stderr, (name, stderr)
+        assert "expected int, got str" in stderr or "invalid-return-type" in stderr, (name, stderr)
+    elif name == "classmethod_wrong_return":
+        first_line = stderr.partition("\n")[0]
+        assert "main.py:7:16: Imre: expected main.Item, got str" in first_line, (name, stderr)
+
+
 def run_suite(fixtures: Path) -> None:
     assignments.main(
         fixtures=fixtures,
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors=ERRORS,
+        check_rejection=check_return_diagnostic,
         label="dataclass and descriptor",
         description=__doc__,
         thinlto_build_timeout=120,

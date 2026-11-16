@@ -58,28 +58,32 @@ def main():
                 continue
             new = rows[old['id']]
             stat_fields = args.stat and new['id'].endswith('.test_stat')
+            # A historical bridge can verify its own receipt. A native baseline requires the full body.
+            stat_bridge = (stat_fields and old['classification'] == 'host-driven-native-operation'
+                           and without_revision(new) == without_revision(old))
             byte_errors = args.segments and new['id'].endswith('.test_bytes_exc_message')
             byte_bridge = (byte_errors and new['classification'] == 'host-driven-native-operation'
                            and old['classification'] != 'native-body-host-fixture')
-            driven = stat_fields or byte_bridge or args.samefile
+            driven = stat_bridge or byte_bridge or args.samefile
             body = 'cpython' if driven else 'imre'
             hooks = ['setUp'] if args.segments and new['id'].rsplit('.', 2)[1].startswith('Pure') else ['setUp', 'tearDown']
-            if byte_errors and not byte_bridge:
-                # The pinned method has three unconditional assertRaisesRegex contexts and one
-                # constructor call in each (b, bs, sb). native_method checks its completion
-                # marker; only the older host bridge observes individual calls dynamically.
+            if (stat_fields and not stat_bridge) or (byte_errors and not byte_bridge):
+                # native_method checks the completion marker after the original assertions.
+                # Only the historical host bridges report individual calls.
                 expected = {
-                    'operation': 'reject a bytes argument in each of the three original constructor calls',
+                    'operation': ('native stat_result fields' if stat_fields else
+                                  'reject a bytes argument in each of the three original constructor calls'),
                     'fixture': 'CPython module/class/instance hooks; native instance in child',
                     'method_sha256': old['evidence']['method_sha256'],
                     'opt_level': level, 'host_fixture_hooks': hooks,
                 }
                 if without_revision(new)['evidence'] != expected:
-                    raise ValueError(f'unverified native constructor body: {new["id"]} at O{level}')
+                    kind = 'stat' if stat_fields else 'constructor'
+                    raise ValueError(f'unverified native {kind} body: {new["id"]} at O{level}')
             if (new['classification'] != ('host-driven-native-operation' if driven else 'native-body-host-fixture')
                     or new['roles'] != {'body': body, 'assertions': body, 'operation': 'imre',
                                         'fixture': 'cpython' if driven else 'mixed'}
-                    or stat_fields and (new['evidence'].get('calls') != FIELD_CALLS
+                    or stat_bridge and (new['evidence'].get('calls') != FIELD_CALLS
                                         or new['evidence'].get('host_assertions') != FIELD_ASSERTIONS)
                     or byte_bridge and (new['evidence'].get('native_calls') != BYTE_CALLS
                                         or new['evidence'].get('host_calls') != BYTE_ASSERTIONS)
@@ -93,8 +97,8 @@ def main():
                 measured_commit = new['evidence'].get('imre_commit')
                 if measured_commit and measured_commit != args.imre_commit:
                     raise ValueError(f'measured compiler mismatch for {new["id"]}')
-                # Keep the recorded revision for segment observations that did not change.
-                if not args.segments or without_revision(old) != without_revision(new):
+                # Retain the measured revision of unchanged stat and segment observations.
+                if not (args.stat or args.segments) or without_revision(old) != without_revision(new):
                     new['evidence']['imre_commit'] = args.imre_commit
                     report['records'][i] = new
             else:

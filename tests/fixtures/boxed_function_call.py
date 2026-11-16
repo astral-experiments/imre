@@ -5,6 +5,19 @@ def current():
     def f(first=0, /, *rest, second=2, **extras):
         return first, rest, second, extras
 
+    class Keyword(str):
+        pass
+
+    def capture(**kwargs):
+        return kwargs
+
+    key = Keyword("field")
+    original = {key: 1}
+    received = capture(**original)
+    assert next(iter(received)) is key
+    received.clear()
+    assert original == {key: 1}
+
     slot = FunctionType.__call__
     bound = f.__call__
     assert slot is type(f).__call__
@@ -30,7 +43,16 @@ def current():
     del f.__call__
     assert f.__call__.__self__ is f
 
+    builtin_slot = type(len).__dict__["__call__"]
+    items = []
+    append = items.append
+    assert builtin_slot is type(append).__call__
+    assert len.__call__.__self__ is len
+    assert builtin_slot.__get__(append)("added") is None
+    assert builtin_slot(len, items) == 1 and items == ["added"]
+
     for invoke, message in (
+        (lambda: builtin_slot(f), "descriptor '__call__' requires a 'builtin_function_or_method' object but received a 'function'"),
         (lambda: get(list.append, f), "descriptor '__get__' requires a 'wrapper_descriptor' object but received a 'method_descriptor'"),
         (lambda: get.__get__(list.append), "descriptor '__get__' for 'wrapper_descriptor' objects doesn't apply to a 'method_descriptor' object"),
         (lambda: slot(), "descriptor '__call__' of 'function' object needs an argument"),

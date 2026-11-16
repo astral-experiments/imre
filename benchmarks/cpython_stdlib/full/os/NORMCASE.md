@@ -7,7 +7,7 @@ Both `os.path.normcase(s)` and `posixpath.normcase(s)` return `os.fspath(s)`. Th
 | Original method | Body and assertions | Operations and fixture |
 | --- | --- | --- |
 | `PathLikeTests.test_path_normcase` | Imre compiles the unchanged test and its unchanged assertion helper. | The real CPython fixture creates and cleans up its test file. Its two strings are transferred independently; the native fixture reconstructs the string-valued FakePath, invokes its protocol, and calls the public operation twice. |
-| `PosixCommonTest.test_normcase` | CPython runs the unchanged method and assertions. | Twelve native calls cover idempotence, empty strings and bytes, and six rejected types. The thirteenth call uses CPython: Imre cannot construct the invalid `bytearray` input. The full method’s compile diagnostic is recorded separately. |
+| `PosixCommonTest.test_normcase` | CPython runs the unchanged method and assertions. | All 13 calls run in Imre. Six calls check idempotence and empty values for strings and bytes. Seven invalid inputs, including an empty `bytearray`, raise `TypeError`. The full method’s compile diagnostic is recorded separately. |
 
 The runner also compiles the two platform assignments from the pinned `test_fnmatch.py` byte for byte. On POSIX both `IGNORECASE` and `NORMSEP` are false. These are import-time checks, not test occurrences. The [direct regression](../../../../tests/fixtures/paths/posix_normcase.py) additionally checks identity, exceptional protocol results, evaluation order, and unchanged raw spellings.
 

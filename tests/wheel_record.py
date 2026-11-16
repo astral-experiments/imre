@@ -67,8 +67,16 @@ def make_wheel(path, compression, case):
 def tamper_real(source, out):
     out.parent.mkdir(parents=True)
     with ZipFile(source) as original, ZipFile(out, "w") as changed:
-        name = next(m.filename for m in original.infolist()
-                    if m.filename.endswith(".py") and m.file_size)
+        record = next(name for name in original.namelist()
+                      if name.count("/") == 1 and name.endswith(".dist-info/RECORD"))
+        with original.open(record) as stream:
+            rows = csv.reader(io.TextIOWrapper(stream, encoding="utf-8", newline=""))
+            hashed = {name for name, digest, _ in rows if digest}
+        candidates = [m.filename for m in original.infolist()
+                      if m.file_size and not m.is_dir() and m.filename in hashed]
+        if not candidates:
+            raise ValueError("wheel has no nonempty hash-covered member to tamper")
+        name = next((path for path in candidates if path.endswith(".py")), candidates[0])
         for m in original.infolist():
             data = original.read(m)
             if m.filename == name:

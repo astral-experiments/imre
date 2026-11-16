@@ -1,6 +1,7 @@
 import errno
 import os
 import socket
+from socket import CMSG_SPACE, _LOCALHOST
 
 
 def last_owner() -> int:
@@ -23,7 +24,7 @@ def accept_into(listener: socket.socket, clients: dict[int, socket.socket]) -> t
 
 def duplicated_connection() -> None:
     with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
+        listener.bind((_LOCALHOST, 0))
         listener.listen()
         with socket.socket() as original:
             original.connect(listener.getsockname())
@@ -72,6 +73,9 @@ def duplicated_connection() -> None:
 
 
 def main() -> None:
+    assert socket.SCM_RIGHTS > 0
+    assert socket.CMSG_LEN(4) == socket.CMSG_LEN(0) + 4
+    assert CMSG_SPACE(4) >= socket.CMSG_LEN(4)
     duplicated_connection()
     with socket.socket() as listener:
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

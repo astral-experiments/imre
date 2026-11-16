@@ -26,7 +26,27 @@ def first_kept(text: str) -> str:
     return "empty"
 
 
+def repeated_score(text: str) -> int:
+    score = 0
+    for repeat in range(3):
+        for ch in text:
+            score += ord(ch)
+    return score
+
+
+def replaced_score(text: str) -> int:
+    score = 0
+    for repeat in range(3):
+        for ch in text + "🦀é":
+            text = "replacement"
+            score += ord(ch)
+    return score
+
+
 def main() -> None:
+    print(repeated_score("aé🌍\0"))
+    print(repeated_score(""))
+    print(replaced_score("a previously allocated string 🌍"))
     for text in ["", "a", "é", "\x00", "aé🌍\x00e\u0301"]:
         print(len(text))
         for index in range(-len(text), len(text)):

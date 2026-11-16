@@ -125,15 +125,17 @@ print(os.getenv("PYTHONPYCACHEPREFIX", ""))
 """
     flags = ["--runtime", str(lang.runtime.resolve()), "--clang", str(lang.clang.resolve()), "--opt-level", str(lang.level), "--no-cache"]
     env = dict(os.environ, PYTHONPYCACHEPREFIX=str(root / "prefix"), IMRE_ENCODED_FLAGS="\x1f".join(flags))
-    def compare(options, source, environment):
+    def compare(options, source, environment, *, native_timeout=45):
         args = [*options, "-c", source]
-        params = dict(cwd=root, env=environment, capture_output=True, timeout=45)
-        ref = subprocess.run([sys.executable, *args], **params)
-        actual = subprocess.run([lang.imre.resolve(), *args], **params)
+        params = dict(cwd=root, env=environment, capture_output=True)
+        ref = subprocess.run([sys.executable, *args], timeout=45, **params)
+        actual = subprocess.run([lang.imre.resolve(), *args], timeout=native_timeout, **params)
         assert ref.returncode == actual.returncode == 0 and (actual.stdout, actual.stderr) == (ref.stdout, ref.stderr), (actual,ref)
 
+    # The prefix command can need a cold optimized build even in the O0 loop:
+    # -I ignores IMRE_ENCODED_FLAGS. Give it the same build budget as Toolchain.build.
     for options in (["-B"], ["-I", "-B"]):
-        compare(options, code, env)
+        compare(options, code, env, native_timeout=180)
     # -I ignores PYTHONOPTIMIZE, while explicit cache options override it.
     source = (HERE / "cache_command.py").read_text()
     for options, level in (([], ""), (["-O"], ""), (["-OO"], ""), ([], "4"), (["-I"], "4")):

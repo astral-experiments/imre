@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_pattern, walk_stmt};
+use ruff_text_size::{Ranged, TextRange};
 
 /// Return the other operand of a single identity test with None and whether it is present.
 pub(crate) fn none_identity(compare: &ast::ExprCompare, truth: bool) -> Option<(&ast::Expr, bool)> {
@@ -98,15 +99,16 @@ pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> 
     struct Writes(HashSet<String>);
     impl<'a> Visitor<'a> for Writes {
         fn visit_expr(&mut self, expression: &'a ast::Expr) {
-            if matches!(expression, ast::Expr::Lambda(_)) {
-                return;
+            match expression {
+                ast::Expr::Named(value) => {
+                    if let Some(name) = value.target.as_name_expr() {
+                        self.0.insert(name.id.to_string());
+                    }
+                    self.visit_expr(&value.value);
+                }
+                ast::Expr::Lambda(lambda) => imre_ast::visit_lambda_defaults(self, lambda),
+                _ => walk_expr(self, expression),
             }
-            if let ast::Expr::Named(value) = expression
-                && let ast::Expr::Name(name) = &*value.target
-            {
-                self.0.insert(name.id.to_string());
-            }
-            walk_expr(self, expression);
         }
     }
     let mut writes = Writes(HashSet::new());
@@ -119,33 +121,45 @@ pub(crate) fn expression_assignments(expression: &ast::Expr) -> HashSet<String> 
 /// on every path; a true `and` or false `or` proves all of its operands ran.
 pub(crate) fn guaranteed_assignments(
     expression: &ast::Expr,
-    truth: Option<bool>,
+    branch: Option<(bool, &HashSet<TextRange>)>,
 ) -> HashSet<String> {
+    let truth = branch.map(|(truth, _)| truth);
     match expression {
-        ast::Expr::Lambda(_) => HashSet::new(),
         ast::Expr::Call(call)
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "bool")
                 && call.arguments.args.len() == 1
                 && call.arguments.keywords.is_empty() =>
         {
-            guaranteed_assignments(&call.arguments.args[0], truth)
+            guaranteed_assignments(&call.arguments.args[0], branch)
         }
         ast::Expr::Named(value) => {
-            let mut names = guaranteed_assignments(&value.value, truth);
+            let mut names = guaranteed_assignments(&value.value, None);
+            // A short circuit returns the operand that stopped it. Retesting an
+            // immutable scalar cannot reverse its truth, so the suffix must have run.
+            if let Some((truth, stable)) = branch
+                && let ast::Expr::BoolOp(boolean) = value.value.as_ref()
+                && truth == (boolean.op == ast::BoolOp::And)
+                && stable.contains(&value.range())
+            {
+                for operand in &boolean.values[1..] {
+                    names.extend(guaranteed_assignments(operand, None));
+                }
+            }
             if let ast::Expr::Name(name) = &*value.target {
                 names.insert(name.id.to_string());
             }
             names
         }
-        ast::Expr::UnaryOp(value) if value.op == ast::UnaryOp::Not => {
-            guaranteed_assignments(&value.operand, truth.map(|truth| !truth))
-        }
+        ast::Expr::UnaryOp(value) if value.op == ast::UnaryOp::Not => guaranteed_assignments(
+            &value.operand,
+            branch.map(|(truth, stable)| (!truth, stable)),
+        ),
         ast::Expr::BoolOp(value) => {
             if truth == Some(value.op == ast::BoolOp::And) {
                 value
                     .values
                     .iter()
-                    .flat_map(|value| guaranteed_assignments(value, truth))
+                    .flat_map(|value| guaranteed_assignments(value, branch))
                     .collect()
             } else {
                 guaranteed_assignments(&value.values[0], None)
@@ -163,15 +177,14 @@ pub(crate) fn guaranteed_assignments(
             .collect(),
         ast::Expr::If(value) => {
             let mut names = guaranteed_assignments(&value.test, None);
-            let yes = guaranteed_assignments(&value.body, truth);
-            let no = guaranteed_assignments(&value.orelse, truth);
+            let yes = guaranteed_assignments(&value.body, branch);
+            let no = guaranteed_assignments(&value.orelse, branch);
             names.extend(yes.intersection(&no).cloned());
             names
         }
-        ast::Expr::ListComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::SetComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::DictComp(value) => guaranteed_assignments(&value.generators[0].iter, None),
-        ast::Expr::Generator(value) => guaranteed_assignments(&value.generators[0].iter, None),
+        expr if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) => {
+            guaranteed_assignments(plan.outer, None)
+        }
         _ => {
             struct Children(HashSet<String>);
             impl<'a> Visitor<'a> for Children {
@@ -180,7 +193,10 @@ pub(crate) fn guaranteed_assignments(
                 }
             }
             let mut children = Children(HashSet::new());
-            walk_expr(&mut children, expression);
+            match expression {
+                ast::Expr::Lambda(lambda) => imre_ast::visit_lambda_defaults(&mut children, lambda),
+                _ => walk_expr(&mut children, expression),
+            }
             children.0
         }
     }
@@ -190,20 +206,32 @@ pub(crate) fn guaranteed_assignments(
 /// Callers must invalidate these names' incoming facts before checking a loop:
 /// later iterations can observe a value written on an earlier backedge.
 pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
-    let mut visitor = Assignments(HashSet::new());
+    assigned_names_with_updates(body, &mut |_| {})
+}
+
+pub(crate) fn assigned_names_with_updates(
+    body: &[ast::Stmt],
+    updated: &mut dyn FnMut(&str),
+) -> HashSet<String> {
+    let mut visitor = Assignments(HashSet::new(), updated);
     for statement in body {
         visitor.visit_stmt(statement);
     }
     visitor.0
 }
 
-struct Assignments(HashSet<String>);
+struct Assignments<'a>(HashSet<String>, &'a mut dyn FnMut(&str));
 
-impl<'a> Visitor<'a> for Assignments {
+impl<'a> Visitor<'a> for Assignments<'_> {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
         if let ast::Stmt::FunctionDef(function) = statement {
             self.0.insert(function.name.to_string());
         } else {
+            if let ast::Stmt::AugAssign(assign) = statement
+                && let Some(name) = assign.target.as_name_expr()
+            {
+                (self.1)(name.id.as_str());
+            }
             walk_stmt(self, statement);
         }
     }
@@ -225,26 +253,21 @@ impl<'a> Visitor<'a> for Assignments {
         if matches!(expression, ast::Expr::Lambda(_)) {
             return;
         }
-        // Comprehensions and generators own iteration targets, but assignment expressions
-        // write in the enclosing non-comprehension scope.
-        let clauses = match expression {
-            ast::Expr::ListComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::SetComp(value) => Some(value.generators.as_slice()),
-            ast::Expr::DictComp(value) => Some(value.generators.as_ref()),
-            ast::Expr::Generator(value) => Some(value.generators.as_slice()),
-            _ => None,
-        };
-        if let Some(clauses) = clauses {
-            self.0.extend(expression_assignments(expression));
-            self.visit_expr(&clauses[0].iter);
-            return;
-        }
         if let ast::Expr::Name(name) = expression
             && name.ctx == ast::ExprContext::Store
         {
             self.0.insert(name.id.to_string());
         }
         walk_expr(self, expression);
+    }
+
+    fn visit_comprehension(&mut self, clause: &'a ast::Comprehension) {
+        // Iteration targets are local to the comprehension. Named expressions in
+        // the iterable, filters and element still write to the enclosing scope.
+        self.visit_expr(&clause.iter);
+        for condition in &clause.ifs {
+            self.visit_expr(condition);
+        }
     }
 
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
@@ -260,10 +283,19 @@ impl<'a> Visitor<'a> for Assignments {
 /// invalidate a binding that existed on entry.
 /// An outer handler cannot assume such a local survived the protected body.
 pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
-    struct Deletions(HashSet<String>);
+    protected_deletions(body).0
+}
+
+pub(crate) fn protected_deletions(body: &[ast::Stmt]) -> (HashSet<String>, bool) {
+    struct Deletions(HashSet<String>, bool);
     impl<'a> Visitor<'a> for Deletions {
+        // A Python expression cannot contain a del statement or an exception handler.
+        fn visit_expr(&mut self, _expression: &'a ast::Expr) {}
+
         fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
-            if let ast::Stmt::Delete(delete) = statement {
+            if statement.is_raise_stmt() {
+                self.1 = true;
+            } else if let ast::Stmt::Delete(delete) = statement {
                 self.0.extend(
                     delete
                         .targets
@@ -286,9 +318,9 @@ pub(crate) fn deleted_names(body: &[ast::Stmt]) -> HashSet<String> {
             walk_except_handler(self, handler);
         }
     }
-    let mut visitor = Deletions(HashSet::new());
+    let mut visitor = Deletions(HashSet::new(), false);
     for statement in body {
         visitor.visit_stmt(statement);
     }
-    visitor.0
+    (visitor.0, visitor.1)
 }

@@ -132,20 +132,27 @@ impl Context {
         }
         strings.push(pending.unwrap_or(empty));
         let strings = self.heap.packed_tuple(strings, false);
+        let interpolations = self.heap.packed_tuple(interpolations, false);
         Ok(self.make_template(strings, interpolations))
     }
 
-    pub(super) fn template_from_literal(&mut self, strings: Id, interpolations: Vec<Id>) -> Id {
+    pub(super) fn template_from_literal(&mut self, strings: Id, interpolations: Id) -> Result<Id> {
+        // Older linked providers supply the fields in a list.
+        let interpolations = if matches!(self.heap.get(interpolations), Value::Tuple(_)) {
+            interpolations
+        } else {
+            let fields = self.items(interpolations)?;
+            self.heap.packed_tuple(fields, false)
+        };
         // CPython folds BUILD_TUPLE into a code constant up to its stack-use guideline.
         let strings = match self.heap.get(strings) {
             Value::Tuple(items) if items.len() > 30 => self.heap.packed_tuple(items.clone(), false),
             _ => strings,
         };
-        self.make_template(strings, interpolations)
+        Ok(self.make_template(strings, interpolations))
     }
 
-    fn make_template(&mut self, strings: Id, interpolations: Vec<Id>) -> Id {
-        let interpolations = self.heap.packed_tuple(interpolations, false);
+    fn make_template(&mut self, strings: Id, interpolations: Id) -> Id {
         self.alloc(Value::Template {
             strings,
             interpolations,

@@ -27,6 +27,8 @@ def main() -> None:
     write(rows, base, 3, 1903, 17, 9, 8187)
     write(rows, alternate, 5, 16389, 128, 11, 8192)
     write(rows, base, 3, 9361, 512, 71, 7680)
+    write(rows, alternate, 5, 14013, 2, 61, 8189)
+    write(rows, base, 7, 5102, -4, 3, 8179)
     write(rows, Row(5.0, False), 8, 71, 0, 713, 8192)
     write(rows, base, 42, 11, 3, 0, 8192)
     total = 0.0
@@ -56,8 +58,36 @@ def covering(n: int, length: int, stop: int, stride: int) -> None:
     print(checksum)
 
 
+# A complete orbit fills one residue class. Observe the result through an alias
+# before clearing a visited row and assigning a third payload outside the orbit.
+def orbit(length: int, modulus: int, step: int, count: int) -> None:
+    base = Row(0.0, False)
+    other = Row(7.0, True)
+    rows = [base] * length
+    alias = rows
+    write(rows, other, 0, count, step, 11, modulus)
+    alias[11 % modulus] = base
+    alias[12 % modulus] = Row(-2.0, True)
+    total = 0.0
+    for i in range(length):
+        total += float(i + 1) * rows[i].value
+    print(total)
+
+
 main()
 covering(1024, 1024, 1020, 37)
 covering(1024, 1024, 2051, 1023)
 covering(1024, 1031, 1027, 37)
 covering(1024, 1024, 1027, 36)
+covering(1024, 1031, 777, 3)
+covering(1031, 1040, 799, 1026)
+orbit(1030, 1024, 94, 512)
+orbit(1040, 1032, 1014, 172)
+orbit(1031, 1024, 94, 511)
+
+# Negative strides include partial and complete orbits, a zero residue, and
+# products that must return to Python integer arithmetic.
+covering(8192, 8192, 4100, -127)
+covering(8192, 8192, 8200, -8193)
+covering(8192, 8192, 4200, -8192)
+covering(256, 267, 173, -(1 << 62))

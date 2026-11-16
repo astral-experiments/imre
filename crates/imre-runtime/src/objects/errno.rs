@@ -572,12 +572,24 @@ pub unsafe extern "C" fn imre_errno_member_contains(
     }) {
         return result;
     }
-    // SAFETY: the member roots a scalar or immutable tuple. Only bool and int
-    // can equal a concrete integer key in this closed dictionary.
+    // SAFETY: the member roots the scalar while its word is borrowed.
     let (kind, word) = unsafe { super::exceptions::exit_word(member) };
+    let integer;
     let key = match kind.raw() {
         1 => Int::small(word as i64).unwrap().0,
         2 => word,
+        7 => {
+            let value = f64::from_bits(word as u64);
+            if value.fract() != 0.0 {
+                return 0;
+            }
+            // Equal integral floats hash like the exact integer, including wide keys.
+            let Ok(exact) = crate::floats::float_to_integer(value) else {
+                return 0;
+            };
+            integer = Int::new(exact);
+            integer.0
+        }
         _ => return 0,
     };
     // SAFETY: the compiler supplied a live integer-key dictionary.

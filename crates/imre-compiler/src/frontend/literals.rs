@@ -1,4 +1,82 @@
 use super::*;
+use std::result::Result;
+
+pub(super) fn unsigned_scalar(
+    expression: &ast::Expr,
+    source: &str,
+) -> Result<Option<Expr>, String> {
+    let Some(literal) = expression.as_literal_expr() else {
+        return Ok(None);
+    };
+    if let ast::LiteralExpressionRef::StringLiteral(string) = literal {
+        check_string(string, source)?;
+    }
+    let kind = scalar(literal, None);
+    Ok(kind.scalar_literal_type().map(|ty| Expr { ty, kind }))
+}
+
+pub(super) fn scalar(
+    literal: ast::LiteralExpressionRef<'_>,
+    registered: Option<RegisteredSource<'_>>,
+) -> ExprKind {
+    use ast::LiteralExpressionRef as Literal;
+    match literal {
+        Literal::NumberLiteral(number) => number_literal(&number.value, false),
+        Literal::BooleanLiteral(value) => ExprKind::Bool(value.value),
+        Literal::StringLiteral(value) => {
+            if let Some(source) = registered
+                && !source.replacements.is_empty()
+            {
+                return source
+                    .string(value.value.iter().map(FStringLiteral::Adjacent))
+                    .kind;
+            }
+            ExprKind::Str(value.value.iter().map(|part| part.as_str()).collect())
+        }
+        Literal::BytesLiteral(value) => ExprKind::Bytes(value.value.bytes().collect()),
+        Literal::NoneLiteral(_) => ExprKind::None,
+        Literal::EllipsisLiteral(_) => ExprKind::Builtin(Builtin::RegisteredEllipsis, vec![]),
+    }
+}
+
+fn number_literal(number: &ast::Number, minus: bool) -> ExprKind {
+    match number {
+        ast::Number::Int(n) => {
+            let mut text = n.to_string();
+            if minus && text != "0" {
+                text.insert(0, '-');
+            }
+            ExprKind::Int(text)
+        }
+        ast::Number::Float(n) => ExprKind::Float(if minus { -*n } else { *n }),
+        ast::Number::Complex { real, imag } => {
+            let (real, imag) = if minus {
+                (-*real, -*imag)
+            } else {
+                (*real, *imag)
+            };
+            ExprKind::Builtin(Builtin::RegisteredComplex(real, imag), vec![])
+        }
+    }
+}
+
+/// A literal sign cannot dispatch to a Python override.
+pub(super) fn signed_number(node: &ast::Expr, accepts: impl FnOnce(Type) -> bool) -> Option<Expr> {
+    let unary = node.as_unary_op_expr()?;
+    if !matches!(unary.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub) {
+        return None;
+    }
+    let literal = unary.operand.as_number_literal_expr()?;
+    let ty = match literal.value {
+        ast::Number::Int(_) => Type::Int,
+        ast::Number::Float(_) => Type::Float,
+        ast::Number::Complex { .. } => Type::PythonObject,
+    };
+    accepts(ty).then(|| Expr {
+        ty,
+        kind: number_literal(&literal.value, unary.op == ast::UnaryOp::USub),
+    })
+}
 
 pub(super) fn annotation(slice: &ast::Expr, types: &Types, source: &str) -> Result<Type, String> {
     let arguments = match slice {
@@ -6,12 +84,16 @@ pub(super) fn annotation(slice: &ast::Expr, types: &Types, source: &str) -> Resu
         item => std::slice::from_ref(item),
     };
     if arguments.is_empty() {
-        return Err(error(source, slice, "Literal requires at least one string"));
+        return Err(diagnostic_message(
+            source,
+            slice,
+            "Literal requires at least one string",
+        ));
     }
     let mut values = Vec::with_capacity(arguments.len());
     for argument in arguments {
         let ast::Expr::StringLiteral(string) = argument else {
-            return Err(error(
+            return Err(diagnostic_message(
                 source,
                 argument,
                 "Literal requires fixed string values",

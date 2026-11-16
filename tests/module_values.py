@@ -1,10 +1,12 @@
 """Compare fixed module values and ordered initialization with CPython."""
 
 import argparse
+import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
+from subprocess import CompletedProcess
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
@@ -21,6 +23,9 @@ REJECTED = {
     },
     "early_namedtuple_imported": {
         "library.py": 'from collections import namedtuple\ndef early() -> str:\n    return Late("before").value\nVALUE = early()\nLate = namedtuple("Late", "value")\n',
+    },
+    "early_builtin_shadow_in_callback": {
+        "main.py": "def relay(label: str) -> None:\n    print(label)\nrelay('before')\ndef print(label: str) -> None:\n    pass\nrelay('after')\n",
     },
     "entry_call_before_definition": {"main.py": "VALUE = make()\ndef make() -> int:\n    return 1\n"},
     "entry_early_read": {"main.py": "def read() -> int:\n    return SECOND\nFIRST = read()\nSECOND = 2\ndef last() -> None:\n    pass\n"},
@@ -65,22 +70,48 @@ REJECTED = {
     "local_shadow": {
         "library.py": "VALUE = 1\ndef change() -> int:\n    VALUE = 2\n    return VALUE\n"
     },
-    "global_rebinding": {
-        "library.py": "VALUE = 1\ndef change() -> None:\n    global VALUE\n    VALUE = 2\n"
+    "wrong_global_rebinding": {
+        "library.py": 'VALUE: int = 1\ndef change() -> None:\n    global VALUE\n    VALUE = "wrong"\n'
     },
     "qualified_rebinding": {
         "main.py": "import library\nlibrary.VALUE = 2\n",
         "library.py": "VALUE = 1\n",
-    },
-    "import_after_value": {
-        "library.py": "VALUE = 1\nimport dependency\n",
-        "dependency.py": "VALUE = 2\n",
     },
     "conditional_export": {
         "main.py": "from library import VALUE\n",
         "library.py": "if True:\n    VALUE = 1\n",
     },
 }
+
+
+def write_file_finder_data(project: Path) -> None:
+    # Exercise the same discovery sequence while reading the winning package as bytes.
+    original = (project / "file_finder" / "main.py").read_text(encoding="utf-8")
+    execute = (
+        "    scope = {}\n"
+        '    exec(spec.loader.get_code("some.item"), scope)\n'
+        '    assert scope["value"] == 41\n'
+    )
+    assert original.count(execute) == 1, "file_finder execution block changed"
+    expected = ("value = 41" + os.linesep).encode("ascii")
+    read = f"    assert spec.loader.get_data(init) == {expected!r}\n"
+    write_files(project / "file_finder_data", {"main.py": original.replace(execute, read)})
+
+
+def require_file_finder_refusal(
+    build: CompletedProcess[str], source: Path, binary: Path, level: str
+) -> None:
+    assert build.returncode == 1 and not build.stdout, build
+    diagnostic = build.stderr.removeprefix(f" Compiling {source} (-O{level})\n")
+    refusal = (
+        ":36:10: Imre: this call may select builtins.exec without a linked body "
+        "for its source. Define the handlers as Python functions and select one "
+        "by name, or declare the finite modules with --include-module.\n"
+    )
+    assert diagnostic.endswith(refusal), diagnostic
+    reported = diagnostic.removesuffix(refusal)
+    assert "\n" not in reported and Path(reported).samefile(source), build.stderr
+    assert not binary.exists() and not binary.with_suffix(".exe").exists(), binary
 
 
 def write_distribution_archive(directory: Path) -> None:
@@ -134,6 +165,7 @@ def main() -> None:
         project = temporary / "project"
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         write_distribution_archive(project / "distribution_archive")
+        write_file_finder_data(project)
         for case in sorted(project.iterdir()):
             source = case / "main.py"
             error = ERRORS.get(case.name)
@@ -141,36 +173,39 @@ def main() -> None:
             expected_dir.mkdir(parents=True)
             expected = reference(args.python, source, expected_dir, error)
             expected_files = snapshot(expected_dir)
-            modes = [(level, ()) for level in args.opt_levels]
-            if case.name == "distribution_version":
-                modes.extend((level, ("--runtime-imports",)) for level in args.opt_levels)
-            for level, import_flags in modes:
-                actual_dir = temporary / case.name / (f"O{level}-boxed" if import_flags else f"O{level}")
+            for level in args.opt_levels:
+                actual_dir = temporary / case.name / f"O{level}"
                 actual_dir.mkdir()
                 binary = actual_dir / "program"
-                require_success(
-                    run_build(
-                        [
-                            compiler,
-                            "build",
-                            str(source),
-                            "--module-root",
-                            str(case),
-                            "--runtime",
-                            runtime,
-                            "--clang",
-                            args.clang,
-                            "--opt-level",
-                            level,
-                            "-o",
-                            str(binary),
-                            *import_flags,
-                            *flags,
-                        ],
-                        temporary,
-                        timeout=300 if args.lto_linker else 60,
-                    )
+                timeout = 300 if args.lto_linker else 60
+                if case.name == "file_finder_data":
+                    # The optimized filesystem-discovery links can take over 150 seconds.
+                    timeout = 900
+                build = run_build(
+                    [
+                        compiler,
+                        "build",
+                        str(source),
+                        "--module-root",
+                        str(case),
+                        "--runtime",
+                        runtime,
+                        "--clang",
+                        args.clang,
+                        "--opt-level",
+                        level,
+                        "-o",
+                        str(binary),
+                        *flags,
+                    ],
+                    temporary,
+                    timeout=timeout,
                 )
+                if case.name == "file_finder":
+                    require_file_finder_refusal(build, source, binary, level)
+                    checks += 1
+                    continue
+                require_success(build)
                 actual = run([str(binary)], actual_dir)
                 require_result(actual, error)
                 binary.unlink()
@@ -195,11 +230,13 @@ def main() -> None:
             assert "panicked" not in actual.stderr, (name, actual.stderr)
             if name.startswith("early_class_"):
                 assert "references a class before it is available" in actual.stderr, actual.stderr
+            if name == "early_builtin_shadow_in_callback":
+                assert "calls a definition before it is available" in actual.stderr, actual.stderr
             if name == "uninitialized_rebinding":
                 assert "module value is not initialized on this path" in actual.stderr, actual.stderr
             checks += 1
     print(
-        f"Passed {checks} module value checks ({len(REJECTED)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"
+        f"Passed {checks} module value checks ({len(REJECTED) + len(args.opt_levels)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})"
     )
 
 

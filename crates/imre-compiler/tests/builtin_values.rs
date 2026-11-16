@@ -16,9 +16,85 @@ for function in (sum, print):
 
     std::fs::write(&path, format!("{caller}\ntakes_int('wrong')\n")).unwrap();
     let error = imre_compiler::check_file(&path, None).unwrap_err();
-    assert!(
-        error.contains("error[invalid-argument-type]")
-            && error.contains("Argument to function `takes_int`"),
-        "{error}"
+    assert_eq!(
+        error,
+        format!(
+            "{}:9:11: Imre: expected int, got str; annotations are enforced contracts",
+            path.canonicalize().unwrap().display()
+        )
     );
+}
+
+#[test]
+fn iter_on_a_checked_deque_uses_its_native_cursor() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.py");
+    std::fs::write(
+        &path,
+        "\
+from collections import deque
+
+def take(q: deque[int]) -> int:
+    cursor = iter(q)
+    return next(iter(cursor))
+
+print(take(deque([41])))
+",
+    )
+    .unwrap();
+    let program = imre_compiler::compile_file(&path, None, &Default::default()).unwrap();
+    assert!(!program.source_inputs.boxed_imports);
+    assert_eq!(
+        program
+            .llvm_ir
+            .matches("call ptr @imre_deque_iter(")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn math_perm_with_computed_none_keeps_imported_calls_checked() {
+    let root = tempfile::tempdir().unwrap();
+    let scores = root.path().join("scores.py");
+    let entry = root.path().join("main.py");
+    std::fs::write(&scores, "def take(value: int) -> int:\n    return value\n").unwrap();
+    let source = "\
+import math
+from scores import take
+
+def default_k():
+    return None
+
+def unused():
+    return math.perm(6, default_k())
+";
+    std::fs::write(&entry, format!("{source}\nprint(take(7))\n")).unwrap();
+    let program =
+        imre_compiler::compile_file(&entry, Some(root.path()), &Default::default()).unwrap();
+    assert!(!program.llvm_ir.contains("@imre_boxed_named_op"));
+
+    std::fs::write(&entry, format!("{source}\nprint(take('x'))\n")).unwrap();
+    let error = imre_compiler::check_file(&entry, Some(root.path())).unwrap_err();
+    assert!(error.contains("int") && error.contains("str"), "{error}");
+}
+
+#[test]
+fn isinstance_narrows_an_imported_log_record() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("main.py");
+    std::fs::write(
+        &path,
+        r#"from logging import LogRecord as Entry
+
+def message(value: Entry | bool | None) -> str:
+    if isinstance(value, Entry):
+        return value.getMessage()
+    return "veto"
+
+print(message(Entry("root", 20, "log.py", 1, "ok", (), None)), message(False), message(None))
+"#,
+    )
+    .unwrap();
+    imre_compiler::check_file(&path, None).unwrap();
 }

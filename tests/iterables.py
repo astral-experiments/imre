@@ -9,6 +9,14 @@ from assignments import main
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "iterables"
 
 REJECTED = {
+    # A range's stored bounds are not tuple elements for the numeric literal shortcut.
+    "sumprod_range": "from math import sumprod\nprint(sumprod(range(3), [10, 20, 30]))\n",
+    "sumprod_unknown_length_unconditional_float_return": (
+        "from math import sumprod\n"
+        "def dot(a: list[float], b: list[float]) -> float:\n"
+        "    return sumprod(a, b)\n"
+        "print(dot([1.0], [2.0]))\n"
+    ),
     "ndiff_escape": 'from difflib import ndiff\nrows = ndiff(["a"], ["b"])\n',
     "ndiff_element_type": 'from difflib import ndiff\nrows = list(ndiff([1], [2]))\n',
     "generator_mapping_alias": 'from collections.abc import Iterator\nclass Example:\n    def __init__(self) -> None:\n        self.rows: dict[str, int] = {"a": 1}\n    def rows_view(self) -> Iterator[tuple[str, int]]:\n        yield from self.rows.items()\nprint(len(list(Example().rows_view())))\n',
@@ -36,7 +44,6 @@ REJECTED = {
     "sum_iterable_keyword": "print(sum(iterable=[1]))\n",
     "sum_unknown_keyword": "print(sum([1], initial=2))\n",
     "sum_duplicate_start": "print(sum([1], 2, start=3))\n",
-    "map_escaped": 'values = map(int, "12")\n',
     "map_wrong_callback": "values = list(map(len, [1]))\n",
     "map_missing_source": "values = list(map(int))\n",
     "map_extra_source": 'values = list(map(int, "12", "34"))\n',

@@ -9,6 +9,7 @@
 
 use crate::callables::Targets;
 use crate::ir::{Expr, ExprKind, Module, Statement, Type};
+use ruff_python_ast::CmpOp;
 
 pub(crate) struct ExceptionEffects {
     functions: Vec<bool>,
@@ -30,9 +31,7 @@ struct Context<'a> {
 }
 
 /// Removes fallibility only after every operation and callee is proved safe.
-/// Starting pessimistically also leaves unexpected recursive cycles fallible;
-/// the current frontend rejects them, and its acyclic graph reaches a fixed
-/// point after at most one successful transition per function.
+/// Recursive cycles stay fallible. Each function can change to infallible at most once.
 pub(crate) fn analyze(module: &Module, targets: &Targets) -> ExceptionEffects {
     let targets = Context {
         calls: targets,
@@ -77,8 +76,9 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
         }
         Statement::Move(..)
         | Statement::Clear(_)
-        | Statement::Break
-        | Statement::Continue
+        | Statement::Position(..)
+        | Statement::Break(_)
+        | Statement::Continue(_)
         | Statement::Exhaust => false,
         Statement::Scope { body, .. } => block(body, functions, targets),
         Statement::SetItem(..) => true,
@@ -92,6 +92,8 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(receiver, functions, targets)
                 || expression(value, functions, targets)
         }
+        // Matching an object can call arbitrary equality and truth hooks.
+        Statement::Match(..) => true,
         Statement::If(test, yes, no) => {
             expression(test, functions, targets)
                 || block(yes, functions, targets)
@@ -99,7 +101,8 @@ fn block(body: &[Statement], functions: &[bool], targets: Context<'_>) -> bool {
         }
         // Every native loop can propagate KeyboardInterrupt at its signal checkpoint.
         Statement::While(..) | Statement::For { .. } => true,
-        Statement::IterNext { .. } | Statement::Assert(_) | Statement::Raise(_) => true,
+        Statement::With { .. } => true,
+        Statement::IterNext { .. } | Statement::Raise(_) => true,
         Statement::Try {
             body,
             handlers,
@@ -127,6 +130,10 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Bytes(_)
         | ExprKind::None
         | ExprKind::Local(_) => false,
+        ExprKind::Unary(..) if value.uses_python_unary_protocol() => true,
+        ExprKind::Compare(_, ops) if crate::ir::Compare::uses_python_protocol(value.ty, ops) => {
+            true
+        }
         // Fixed-offset datetime ordering raises on a mix of naive and aware operands.
         // Preserve this effect across a direct call even when both operands are simple locals.
         ExprKind::Compare(values, ops)
@@ -134,7 +141,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 matches!(
                     value.ty,
                     crate::ir::Type::Calendar(crate::ir::CalendarType::DateTime)
-                ) && !matches!(op, crate::ir::Compare::Equal | crate::ir::Compare::NotEqual)
+                ) && !matches!(op, CmpOp::Eq | CmpOp::NotEq)
             }) =>
         {
             true
@@ -170,7 +177,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         ExprKind::List(values) | ExprKind::Boolean(_, values) => values
             .iter()
             .any(|value| expression(value, functions, targets)),
-        ExprKind::Dict { entries, .. } => !entries.is_empty(),
+        ExprKind::Dict(entries) => value.ty == Type::PythonObject || !entries.is_empty(),
         ExprKind::Set { values, .. } => !values.is_empty(),
         ExprKind::Scope { body, value, .. } => {
             block(body, functions, targets) || expression(value, functions, targets)
@@ -179,8 +186,7 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
         | ExprKind::Present(value)
         | ExprKind::Absent(value)
         | ExprKind::Unwrap(value)
-        | ExprKind::Not(value)
-        | ExprKind::Negate(value)
+        | ExprKind::Unary(_, value)
         | ExprKind::Field(value, _) => expression(value, functions, targets),
         ExprKind::Binary(op, left, right) => {
             op.may_raise_with_operands(left.ty, right.ty)
@@ -192,8 +198,11 @@ fn expression(value: &Expr, functions: &[bool], targets: Context<'_>) -> bool {
                 || expression(yes, functions, targets)
                 || expression(no, functions, targets)
         }
-        ExprKind::BooleanValue(_, left, right) => {
+        ExprKind::BooleanValue(_, left, right, predicate) => {
             targets.types.truth_may_materialize(left.ty)
+                || predicate
+                    .as_ref()
+                    .is_some_and(|p| expression(&p.condition, functions, targets))
                 || expression(left, functions, targets)
                 || expression(right, functions, targets)
         }
@@ -287,6 +296,7 @@ mod tests {
         let module = Module {
             list_builds: Default::default(),
             command_flags: None,
+            builtin_module_sources: None,
             types,
             functions,
             class_fields: Vec::new(),
@@ -294,6 +304,7 @@ mod tests {
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             entry: function(Vec::new()),
         };
         assert_eq!(analyze(&module).functions, [true, true, false, false]);
@@ -340,9 +351,11 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Return(Expr::integer(1))]),
@@ -401,9 +414,11 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(call(1, Vec::new()))]),
                 function(vec![Statement::Return(call(2, Vec::new()))]),
@@ -463,9 +478,11 @@ def integers(values: list[int]) -> int:
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: vec![
                 function(vec![Statement::Return(Expr::integer(1))]),
                 function(vec![Statement::Raise(None)]),
@@ -477,7 +494,7 @@ def integers(values: list[int]) -> int:
                     0,
                     vec![call(1, Vec::new())],
                 ))]),
-                function(vec![Statement::SetField(
+                function(vec![Statement::set_field(
                     Expr::integer(1),
                     0,
                     call(1, Vec::new()),
@@ -506,7 +523,7 @@ def integers(values: list[int]) -> int:
                     Vec::new()
                 },
                 handlers: vec![ExceptHandler {
-                    kinds: Vec::new(),
+                    matcher: crate::ir::ExceptionMatcher::Any,
                     name: None,
                     body: if part == 1 {
                         raises.clone()
@@ -580,6 +597,31 @@ def integers(values: list[int]) -> int:
     }
 
     #[test]
+    fn builtin_module_names_preserves_checked_calls() {
+        let source = r#"
+import sys
+from sys import builtin_module_names as names
+
+def get_names() -> tuple[str, ...]:
+    return sys.builtin_module_names
+
+def take(value: int) -> int:
+    return value
+
+print(take(2), 'errno' in sys.builtin_module_names)
+print(type(names) is tuple, type(sys.builtin_module_names) is tuple, type(get_names()) is tuple)
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_sys_builtin_module_names("));
+        assert!(llvm.contains("call i1 @imre_str_tuple_contains("));
+        assert!(!llvm.contains("call ptr @imre_dyn_new("));
+
+        let source = "import sys\ndef take(value: int) -> int:\n    return value\nif False:\n    print(sys.builtin_module_names)\nprint(take('x'))\n";
+        let error = crate::compile(source, &crate::CompileOptions::default()).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
+
+    #[test]
     fn codegen_checks_fallible_calls_but_not_fixed_field_call_chains() {
         let source = r#"
 class Record:
@@ -612,6 +654,10 @@ def indirect(value: str) -> int:
             (
                 "def lines(text: str) -> list[str]:\n    return text.splitlines()\ndef count(text: str) -> int:\n    return len(lines(text))\n",
                 "call ptr @imre_str_splitlines(",
+            ),
+            (
+                "import sys\ndef names() -> tuple[str, ...]:\n    return sys.builtin_module_names\ndef count() -> int:\n    return len(names())\n",
+                "call ptr @imre_sys_builtin_module_names(",
             ),
             (
                 "import sys\ndef names() -> frozenset[str]:\n    return sys.stdlib_module_names\ndef count() -> int:\n    return len(names())\n",

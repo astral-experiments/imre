@@ -25,8 +25,8 @@ pub(super) fn call(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> R
     };
     let names = if let Some(method) = ctx.bound_slot(object, "__dir__")? {
         ctx.call(method, vec![], vec![])?
-    } else if let Value::Module { scope, .. } = *ctx.heap.get(object) {
-        ctx.module_dir(object, scope)?
+    } else if matches!(ctx.heap.get(object), Value::Module { .. }) {
+        ctx.module_dir(object)?
     } else {
         object_names(ctx, object)?
     };
@@ -98,40 +98,39 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
             names.extend(super::super::paramspec::names().map(str::to_owned));
             ctx.builtin("object")
         }
-        Value::Native(symbol)
-            if let Some(descriptor) = BuiltinDescriptor::lookup(symbol)
-                && descriptor.class() == "method_descriptor" =>
-        {
-            names
-                .extend(["__get__", "__name__", "__objclass__", "__qualname__"].map(str::to_owned));
-            if descriptor
-                .attribute(ctx, "__text_signature__", None)
-                .is_some()
-            {
-                names.insert("__text_signature__".to_owned());
-            }
-            ctx.builtin("object")
+        Value::Native(symbol) if let Some(descriptor) = BuiltinDescriptor::lookup(symbol) => {
+            ctx.builtin(descriptor.class())
         }
         Value::Native(_) | Value::Method { .. }
             if ctx.builtin_type_name(object) == Some("builtin_function_or_method") =>
         {
             ctx.builtin("builtin_function_or_method")
         }
-        Value::Function { .. } | Value::ClassMethod { .. } | Value::StaticMethod { .. } => {
+        Value::Function { .. }
+        | Value::ClassMethod { .. }
+        | Value::StaticMethod { .. }
+        | Value::Raised(_) => {
             return namespace_directory(ctx, object, true);
         }
         Value::Method { .. } if ctx.builtin_type_name(object) == Some("method") => {
             return namespace_directory(ctx, object, true);
         }
-        value if value.is_weak_proxy() => return namespace_directory(ctx, object, true),
-        Value::Class { .. } if ctx.has_base(object, "tuple") => {
+        value if value.is_weak_proxy() || value.native_io_class_name().is_some() => {
+            return namespace_directory(ctx, object, true);
+        }
+        Value::Class { .. }
+            if ctx.has_base(object, "tuple") || ctx.layout_descriptors_cleared(object) =>
+        {
             return namespace_directory(ctx, object, false);
         }
-        Value::Instance { class, .. } if ctx.has_base(*class, "tuple") => {
+        Value::Instance { class, .. }
+            if ctx.has_base(*class, "tuple") || ctx.layout_descriptors_cleared(*class) =>
+        {
             return namespace_directory(ctx, object, true);
         }
         Value::Class { .. } | Value::Native(_) => object,
-        Value::Count { .. }
+        Value::Code(_)
+        | Value::Count { .. }
         | Value::Calendar { .. }
         | Value::Coroutine { .. }
         | Value::Repeat(_)
@@ -139,7 +138,17 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::Union(_)
         | Value::Dict(_)
         | Value::Int(_)
+        | Value::Bool(_)
+        | Value::Float(_)
+        | Value::Complex(_)
         | Value::MappingProxy(_)
+        | Value::Property(_)
+        | Value::GetSetDescriptor { .. }
+        | Value::LayoutDescriptor(..)
+        | Value::None
+        | Value::SlotMember { .. }
+        | Value::ReadOnlyMember(_, _)
+        | Value::TupleGetterDoc
         | Value::Tuple(_)
         | Value::List(_)
         | Value::Set { .. }
@@ -147,7 +156,7 @@ fn object_names(ctx: &mut Context, object: Id) -> Result<Id> {
         | Value::SurrogateStr(_) => ctx.exact_type(object)?,
         Value::NamedTuple {
             class: Some(class), ..
-        } if crate::dynamic::stdlib::os::stat::layout(class).is_some()
+        } if crate::dynamic::stdlib::structseq::layout(class).is_some()
             || crate::dynamic::stdlib::fixed_structseq::fixed_type(class).is_some() =>
         {
             ctx.builtin(class)
@@ -245,7 +254,10 @@ fn contributes_dict_descriptor(ctx: &mut Context, class: Id, mapping: Id) -> Res
         .class_namespace
         .as_deref()
         .expect("class namespace");
-    if layout.dictionary != Some(mapping) || !ctx.class_instances_have_dict(class) {
+    if layout.layout_descriptors_cleared
+        || layout.dictionary != Some(mapping)
+        || !ctx.class_instances_have_dict(class)
+    {
         return Ok(false);
     }
     let bases = ctx.items(layout.bases)?;
@@ -262,7 +274,7 @@ fn merge_class_names(ctx: &mut Context, class: Id, dictionary: Id) -> Result<()>
     {
         let mut names = BTreeSet::new();
         if ctx.enum_scopes.contains_key(&class) {
-            for base in ctx.lineage(class) {
+            for base in ctx.base_lineage(class, true) {
                 class_names(ctx, base, &mut names)?;
             }
         } else {
@@ -480,8 +492,13 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                 name.as_str(),
                 "builtin_function_or_method"
                     | "function"
-                    | "classmethod"
-                    | "staticmethod"
+                    | "property"
+                    | "member_descriptor"
+                    | "getset_descriptor"
+                    | "method_descriptor"
+                    | "classmethod_descriptor"
+                    | "wrapper_descriptor"
+                    | "NoneType"
                     | "method"
                     | "dict"
                     | "list"
@@ -513,21 +530,41 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__type_params__",
                     ],
                 ),
-                "classmethod" | "staticmethod" => (
-                    if name == "staticmethod" {
-                        &["__call__"]
-                    } else {
-                        &[]
-                    },
+                "property" => (
+                    &["getter", "setter", "deleter"],
                     &[
-                        "__annotate__",
-                        "__annotations__",
-                        "__class_getitem__",
-                        "__dict__",
-                        "__func__",
+                        "__delete__",
                         "__get__",
                         "__isabstractmethod__",
-                        "__wrapped__",
+                        "__name__",
+                        "__set__",
+                        "__set_name__",
+                        "fdel",
+                        "fget",
+                        "fset",
+                    ],
+                ),
+                "NoneType" => (&[], &["__bool__"]),
+                "method_descriptor" | "classmethod_descriptor" | "wrapper_descriptor" => (
+                    &[],
+                    &[
+                        "__call__",
+                        "__get__",
+                        "__name__",
+                        "__objclass__",
+                        "__qualname__",
+                        "__text_signature__",
+                    ],
+                ),
+                "getset_descriptor" | "member_descriptor" => (
+                    &[],
+                    &[
+                        "__delete__",
+                        "__get__",
+                        "__name__",
+                        "__objclass__",
+                        "__qualname__",
+                        "__set__",
                     ],
                 ),
                 "method" => (&[], &["__call__", "__func__", "__get__", "__self__"]),
@@ -561,7 +598,6 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
                         "__mul__",
                         "__reversed__",
                         "__rmul__",
-                        "__setitem__",
                     ],
                 ),
                 _ => {
@@ -639,24 +675,43 @@ fn class_names(ctx: &Context, class: Id, names: &mut BTreeSet<String>) -> Result
         Value::Native(_) if let Some(&scope) = ctx.enum_scopes.get(&class) => {
             names.extend(ctx.scope_bindings(scope).map(|(name, _)| name.to_owned()));
         }
-        Value::Native(owner) if let Some(&dictionary) = ctx.native_type_dicts.get(&class) => {
-            let base = if crate::dynamic::stdlib::datetime::members(owner).is_some() {
-                Context::native_base(owner).unwrap_or("object")
-            } else {
-                "object"
-            };
+        Value::Native(owner)
+            if ctx.native_type_dicts.get(&class).is_some()
+                || super::exception_kind(owner).is_some() =>
+        {
+            let base =
+                if owner == "bool" || crate::dynamic::stdlib::datetime::members(owner).is_some() {
+                    Context::native_base(owner).unwrap_or("object")
+                } else {
+                    "object"
+                };
             class_names(ctx, ctx.builtins[base], names)?;
-            for &(key, _) in ctx
-                .dict_entries(dictionary)
-                .expect("native class dictionary")
+            let ancestors = super::exception_kind(owner)
+                .into_iter()
+                .flat_map(super::exception_ancestors)
+                .filter_map(|base| ctx.native_type_dicts.get(&ctx.builtins[base]).copied());
+            for namespace in ctx
+                .native_type_dicts
+                .get(&class)
+                .copied()
+                .into_iter()
+                .chain(ancestors)
             {
-                names.insert(ctx.str_value(key)?.to_owned());
+                for &(key, _) in ctx
+                    .dict_entries(namespace)
+                    .expect("native class dictionary")
+                {
+                    names.insert(ctx.str_value(key)?.to_owned());
+                }
             }
         }
         Value::Native(name)
-            if let Some(layout) = crate::dynamic::stdlib::os::stat::layout(name) =>
+            if let Some(layout) = crate::dynamic::stdlib::structseq::layout(name) =>
         {
-            struct_sequence_names(names, crate::dynamic::stdlib::os::stat::field_names(layout));
+            struct_sequence_names(
+                names,
+                crate::dynamic::stdlib::structseq::field_names(layout),
+            );
         }
         Value::Native(name)
             if let Some(class) = crate::dynamic::stdlib::fixed_structseq::fixed_type(name) =>

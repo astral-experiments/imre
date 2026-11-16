@@ -53,8 +53,7 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
-            None,
-            |checker, i, argument| {
+            &mut |checker, i, argument| {
                 let node = argument.site();
                 let value = Self::string_value(argument.value(checker)?);
                 if op == Op::Shuffle {
@@ -75,7 +74,7 @@ impl Checker<'_> {
                 checker.coerce(value, Type::Int, node)
             },
         )?;
-        let mut values: Vec<_> = args.order.iter().map(|&i| args.values[i].clone()).collect();
+        let mut values = args.into_formal_order();
         let value = match op {
             Op::Shuffle | Op::Seed => random(op, Type::None, values),
             Op::Float => random(op, Type::Float, values),
@@ -123,13 +122,16 @@ impl Checker<'_> {
         if let ast::Expr::Call(range) = arg
             && self.unshadowed_builtin(&range.func, "range")
         {
+            if let Some(failure) = self.range_argument_error(range, Type::Int)? {
+                return Ok(failure);
+            }
             self.reject_builtin_keywords(range)?;
             let values = range
                 .arguments
                 .args
                 .iter()
                 .map(|v| self.expr_expected(v, Type::Int))
-                .collect::<Result<Vec<_>, _>>()?;
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let bounds = match values.as_slice() {
                 [stop] => vec![Expr::integer(0), stop.clone(), Expr::integer(1)],
                 [start, stop] => vec![start.clone(), stop.clone(), Expr::integer(1)],
@@ -151,9 +153,10 @@ impl Checker<'_> {
             ty if let Some(element) = self.types.homogeneous_tuple_element(ty) => {
                 (element, Builtin::TupleGet)
             }
-            Type::ListInt | Type::List(_) => {
-                (self.types.element(value.ty).unwrap(), Builtin::ListGet)
-            }
+            Type::ListInt | Type::List(_) => (
+                self.types.element(value.ty).unwrap(),
+                Builtin::ListGet(None),
+            ),
             _ => {
                 return Err(error(
                     self.source,

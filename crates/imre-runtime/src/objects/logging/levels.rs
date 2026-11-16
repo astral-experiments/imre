@@ -4,7 +4,7 @@ use crate::StrOwner;
 
 use super::super::exceptions::string_repr;
 use super::super::mappings::{imre_dict_new, imre_dict_set, lookup};
-use super::super::{Error, Int, Kind, Object, Str, finish};
+use super::super::{Error, Int, Kind, Object, Str};
 
 struct Levels {
     names: crate::ObjectOwner,
@@ -125,15 +125,6 @@ pub unsafe extern "C" fn imre_log_level_for_name(name: *const Str) -> usize {
         || StrOwner::into_raw(StrOwner::new(Str::from(format!("Level {name}")))) as usize,
         super::super::unions::integer,
     )
-}
-
-/// # Safety
-/// The exact string is rooted. Unknown names raise ValueError for level setters.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn imre_log_check_level(name: *const Str) -> usize {
-    // SAFETY: the caller retains the string until lookup and error formatting finish.
-    let name = unsafe { &*name };
-    finish(named_level(name).map(Int::into_raw), 0)
 }
 
 #[unsafe(no_mangle)]

@@ -6,6 +6,12 @@ def current():
     print(sum((n / 2 for n in range(10)), start=1000.25))
     print(sum([1, 0.5]), sum([0.5, 1]), sum([True, 1.5], 6))
     print(sum([1, 2], 1 << 90), sum([], False) is False)
+
+    integers = iter([10, True, -2, 8])
+    assert next(integers) == 10
+    assert sum(integers, 5) == 12
+    assert list(integers) == []
+    assert sum([2**63 - 1, 1, -(2**63)]) == 0
     print(sum([-0.0]), sum([-0.0], -0.0), sum([], -0.0))
     print(sum([1e308, 1e308]), sum([float('inf'), float('-inf')]))
     try:
@@ -23,8 +29,39 @@ def current():
     except ValueError as error:
         print(str(error))
 
+    for values in ([1, True, 3, 4], (1, True, 3, 4), (2**63, -1, 1), b"abc"):
+        reverse = reversed(values)
+        print(next(reverse), sum(reverse, 5), list(reverse))
+    for start in (2**63 - 1, 2**100, -(2**100)):
+        data = iter(b"\xff\x02")
+        assert sum(data, start) == start + 257
+        assert list(data) == []
+    remaining = iter(bytearray([1, 250, 3]))
+    print(next(remaining), sum(remaining, 2**63 - 100), list(remaining))
+
     class Extra:
         def __radd__(self, value):
             return ('rounded', value)
 
     print(sum([0.1] * 10 + [Extra()]))
+
+    class ConsumeNext:
+        def __radd__(self, prefix):
+            print("prefix", prefix, next(active))
+            return prefix + 100
+
+    class StopSum:
+        def __radd__(self, prefix):
+            raise LookupError(prefix)
+
+    for reverse in (False, True):
+        operands = [1, 2, ConsumeNext(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        print(sum(active, 10), list(active))
+        operands = [1, 2, StopSum(), 7, 11]
+        active = reversed(operands[::-1]) if reverse else iter(operands)
+        try:
+            sum(active)
+        except LookupError as error:
+            print(error.args, list(active))
+    print(sum(iter([1, 2, 2 ** 63 - 1, 4])))

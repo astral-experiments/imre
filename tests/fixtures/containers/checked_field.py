@@ -12,6 +12,12 @@ class Box:
         self.item = item
 
 
+def required(box: Box) -> Item:
+    if box.item is None:
+        raise ValueError("missing item")
+    return box.item
+
+
 def replace(box: Box, value: Item | None) -> None:
     box.item = value
 
@@ -30,6 +36,11 @@ def read(box: Box, alias: Box, value: Item | None, method: bool) -> None:
 
 first = Box(Item("initial"))
 second = Box(Item("other"))
+print(required(first).name)
+try:
+    required(Box(None))
+except ValueError as error:
+    print(str(error))
 read(first, second, None, False)
 read(first, first, Item("new"), True)
 read(first, first, None, False)

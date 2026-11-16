@@ -11,6 +11,14 @@ IMPORT = "from typing import Callable\n"
 FUNCTION = "def identity(value: int) -> int:\n    return value\n"
 
 REJECTED = {
+    "redefined_first_return": (
+        'def f(n: int) -> int:\n    return "bad"\n'
+        'old = f\ndef f(n: int) -> int:\n    return n\nprint(old(1), f(1))\n'
+    ),
+    "redefined_second_return": (
+        'def f(n: int) -> int:\n    return n\n'
+        'old = f\ndef f(n: int) -> int:\n    return "bad"\nprint(old(1), f(1))\n'
+    ),
     "overload_result_annotation": "from typing import get_overloads\nvalues: list[int] = get_overloads(sum)\n",
     "overload_bound_or_plain": (
         "from typing import Callable, overload\n"
@@ -19,7 +27,6 @@ REJECTED = {
         "class Reader:\n    def read(self) -> int: return 2\n"
         "register(source)\nregister(Reader().read)\n"
     ),
-    "local_callback_escape": IMPORT + "def outer(x: int) -> Callable[[int], int]:\n    def add(y: int) -> int:\n        return x + y\n    return add\n",
     "local_callback_captured_map": "def outer(x: int) -> int:\n    def add(y: int) -> int:\n        return x + y\n    return sum(map(add, [1]))\n",
     "local_recursive": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return inner(y)\n    return inner(x)\n",
     "local_recursive_via_outer": "def outer(x: int) -> int:\n    def inner(y: int) -> int:\n        return outer(y)\n    return inner(x)\n",
@@ -32,6 +39,13 @@ REJECTED = {
     "wrong_parameter": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[str], int] = identity\nrun()\n",
     "wrong_return": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], str] = identity\nrun()\n",
     "bool_is_not_int": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(True))\nrun()\n",
+    "raising_before_declared_argument": (
+        IMPORT + FUNCTION
+        + 'def stop() -> int:\n    raise ValueError("stop")\n'
+        + "def pair(x: int, y: int) -> int:\n    return x + y\n"
+        + "def run(f: Callable[[int, int], int]) -> int:\n"
+        + "    return f(stop(), identity('x'))\nprint(run(pair))\n"
+    ),
     "indirect_keyword": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(value=1))\nrun()\n",
     "indirect_missing": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn())\nrun()\n",
     "indirect_extra": IMPORT + FUNCTION + "def run() -> None:\n    fn: Callable[[int], int] = identity\n    print(fn(1, 2))\nrun()\n",
@@ -46,14 +60,17 @@ REJECTED = {
     "incomplete_bound_receiver": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\nclass Item:\n    value: int\n    def __init__(self) -> None:\n        self.value = apply(self.read, 1)\n    def read(self, value: int) -> int:\n        return value\n",
     "callable_list": IMPORT + "def use(values: list[Callable[[int], int]]) -> None:\n    pass\n",
     "callable_tuple": IMPORT + "def use(values: tuple[Callable[[int], int], int]) -> None:\n    pass\n",
+    "unselected_callable_storage": (
+        IMPORT + FUNCTION
+        + "def cold(values: dict[str, Callable[[int], int]]) -> None: pass\n"
+        + "handlers = {'id': identity}\nprint(handlers['id'](value=21))\n"
+    ),
     "callable_dictionary": IMPORT + "def use(values: dict[str, Callable[[int], int]]) -> None:\n    pass\n",
     "optional_without_guard": IMPORT + "def use(fn: Callable[[int], int] | None) -> int:\n    return fn(1)\n",
-    "untyped_lambda": "def run() -> None:\n    fn = lambda value: value + 1\nrun()\n",
     "lambda_default": IMPORT + "def run() -> None:\n    fn: Callable[[int], int] = lambda value=1: value\nrun()\n",
     "indirect_cycle": IMPORT + "def apply(fn: Callable[[int], int], value: int) -> int:\n    return fn(value)\ndef again(value: int) -> int:\n    return apply(again, value)\nprint(apply(again, 1))\n",
     "map_wrong_input": FUNCTION + 'print(sum(map(identity, ["1"])))\n',
     "map_multiple_sources": FUNCTION + "print(sum(map(identity, [1], [2])))\n",
-    "map_escaping": FUNCTION + "def run() -> None:\n    values = map(identity, [1])\nrun()\n",
     "filter_wrong_input": FUNCTION + 'print(len(list(filter(identity, ["1"]))))\n',
     "filter_wrong_predicate": "print(len(list(filter(1, [1]))))\n",
     "filter_missing_source": FUNCTION + "print(len(list(filter(identity))))\n",
@@ -63,13 +80,20 @@ REJECTED = {
 }
 
 IMPORTED_REJECTIONS = {
-    "callable_imported_global": {
-        "main.py": "import callbacks\n",
+    "callable_imported_argument": {
+        "main.py": "import callbacks\nprint(callbacks.fn('wrong'))\n",
         "callbacks.py": IMPORT + FUNCTION + "fn: Callable[[int], int] = identity\n",
     },
 }
 
 ERRORS = {
+    "empty_handler_lookup": (
+        IMPORT
+        + 'def argument() -> int:\n    print("argument")\n    return 21\n'
+        + 'def run() -> None:\n    handlers: dict[str, Callable[[int], int]] = {}\n'
+        + '    print("select")\n    print(handlers["missing"](argument()))\nrun()\n',
+        "KeyError",
+    ),
     "argument_failure": (
         IMPORT
         + "def target(value: int) -> int:\n    print(\"must not call\")\n    return value\n"
@@ -86,12 +110,21 @@ ERRORS = {
 }
 
 
+def check_redefinition_error(name: str, stderr: str) -> None:
+    if name == "raising_before_declared_argument":
+        assert "main.py:9:31: Imre: expected int, got str" in stderr, stderr
+    line = {"redefined_first_return": 2, "redefined_second_return": 5}.get(name)
+    if line is not None:
+        assert f"main.py:{line}:12: Imre: expected int, got str" in stderr, (name, stderr)
+
+
 if __name__ == "__main__":
     main(
         fixtures=FIXTURES,
         rejections=REJECTED,
         imported_rejections=IMPORTED_REJECTIONS,
         errors=ERRORS,
+        check_rejection=check_redefinition_error,
         label="callable value",
         description=__doc__,
     )

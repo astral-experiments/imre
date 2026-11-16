@@ -1,7 +1,7 @@
 """Decorator implementations from CPython 3.14.5 Lib/functools.py (PSF-2.0)."""
 
 from _thread import RLock
-from functools import Placeholder, _CacheInfo, _cache_wrapper, partial, reduce
+from functools import Placeholder, _CacheInfo, _cache_wrapper, partial
 from types import GenericAlias
 
 
@@ -51,6 +51,52 @@ def wraps(wrapped,
     """
     return partial(update_wrapper, wrapped=wrapped,
                    assigned=assigned, updated=updated)
+
+
+try:
+    from _functools import reduce
+except ImportError:
+    from functools import _reduce_iterator
+
+    _initial_missing = object()
+
+    def reduce(function, sequence, initial=_initial_missing):
+        """
+        reduce(function, iterable, /[, initial]) -> value
+
+        Apply a function of two arguments cumulatively to the items of an iterable, from left to right.
+
+        This effectively reduces the iterable to a single value.  If initial is present,
+        it is placed before the items of the iterable in the calculation, and serves as
+        a default when the iterable is empty.
+
+        For example, reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])
+        calculates ((((1 + 2) + 3) + 4) + 5).
+        """
+
+        it = iter(sequence)
+        if initial is _initial_missing:
+            return _reduce_iterator(function, it)
+        return _reduce_iterator(function, it, initial)
+
+    def _warn_python_reduce_kwargs(py_reduce):
+        @wraps(py_reduce)
+        def wrapper(*args, **kwargs):
+            if 'function' in kwargs or 'sequence' in kwargs:
+                import os
+                import warnings
+                warnings.warn(
+                    'Calling functools.reduce with keyword arguments '
+                    '"function" or "sequence" '
+                    'is deprecated in Python 3.14 and will be '
+                    'forbidden in Python 3.16.',
+                    DeprecationWarning,
+                    skip_file_prefixes=(os.path.dirname(__file__),))
+            return py_reduce(*args, **kwargs)
+        return wrapper
+
+    reduce = _warn_python_reduce_kwargs(reduce)
+    del _warn_python_reduce_kwargs
 
 
 _NOT_FOUND = object()

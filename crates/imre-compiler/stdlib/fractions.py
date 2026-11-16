@@ -10,6 +10,8 @@ import operator
 import re
 import sys
 
+_limit_candidates = __import__('_imre_fractions')._limit_candidates
+
 __all__ = ['Fraction']
 
 
@@ -20,7 +22,6 @@ _PyHASH_MODULUS = sys.hash_info.modulus
 # _PyHASH_MODULUS.
 _PyHASH_INF = sys.hash_info.inf
 
-@functools.lru_cache(maxsize = 1 << 14)
 def _hash_algorithm(numerator, denominator):
 
     # To make sure that the hash of a Fraction agrees with the hash
@@ -52,6 +53,10 @@ def _hash_algorithm(numerator, denominator):
         hash_ = hash(hash(abs(numerator)) * dinv)
     result = hash_ if numerator >= 0 else -hash_
     return -2 if result == -1 else result
+
+# Keep Python protocol dispatch for overridden operations and non-integral fields.
+_hash_algorithm = __import__('_imre_fractions')._hash_function(_hash_algorithm)
+
 
 _RATIONAL_FORMAT = re.compile(r"""
     \A\s*                                  # optional whitespace at the start,
@@ -420,6 +425,12 @@ class Fraction(numbers.Rational):
 
         p0, q0, p1, q1 = 0, 1, 1, 0
         n, d = self._numerator, self._denominator
+        candidates = _limit_candidates(n, d, max_denominator)
+        if candidates is not None:
+            p1, q1, p2, q2, distance = candidates
+            if distance <= self._denominator:
+                return Fraction._from_coprime_ints(p1, q1)
+            return Fraction._from_coprime_ints(p2, q2)
         while True:
             a = n//d
             q2 = q0+a*q1

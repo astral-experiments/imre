@@ -68,6 +68,12 @@ impl Revision {
                     hash.update(&(start - previous).to_le_bytes());
                     hash.update(&module.source.as_bytes()[previous..start]);
                     hash.update(&[tag]);
+                    // A wider default shifts traceback columns in a one-line suite.
+                    if function.body.first().is_some_and(|first| {
+                        !module.source[end..first.start().to_usize()].contains('\n')
+                    }) {
+                        hash.update(&(end - start).to_le_bytes());
+                    }
                     has_defaults = true;
                     previous = end;
                 }
@@ -114,7 +120,6 @@ impl Revision {
 struct Context {
     shapes: usize,
     helpers: usize,
-    regexes: usize,
     globals: usize,
     class_bindings: usize,
 }
@@ -124,7 +129,6 @@ impl Context {
         Self {
             shapes: checker.types.shape_count(),
             helpers: checker.helpers.len(),
-            regexes: checker.globals.regex_literals.borrow().len(),
             globals: checker.globals.types().len(),
             class_bindings: checker.globals.class_data.borrow().binding_count(),
         }
@@ -169,7 +173,7 @@ impl CallerCache {
     /// as well, since a saved function can address them by their numeric index.
     pub(super) fn validate_abi(
         &mut self,
-        definitions: &[(ModuleId, ast::StmtFunctionDef, Signature)],
+        definitions: &[FunctionDefinition<'_>],
         globals: &ModuleValues,
     ) {
         let mut defaults = HashMap::new();
@@ -241,7 +245,6 @@ impl CallerCache {
             && sums.is_empty()
             && before.shapes == types.shape_count()
             && before.helpers == helpers.len()
-            && before.regexes == globals.regex_literals.borrow().len()
             && before.globals == globals.types().len()
             && before.class_bindings == globals.class_data.borrow().binding_count()
             && diagnostics == graph.checked_diagnostic_count(module)
@@ -276,22 +279,23 @@ pub(super) fn record_lowering(name: &str) {
 }
 
 #[cfg(test)]
+pub(super) fn observe_lowerings<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
+    LOWERED.with_borrow_mut(|names| *names = Some(Vec::new()));
+    let result = run();
+    (
+        result,
+        LOWERED.with_borrow_mut(|names| names.take().unwrap()),
+    )
+}
+
+#[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::Path;
     use tempfile::tempdir;
 
-    use super::LOWERED;
+    use super::observe_lowerings as observe;
     use crate::{CompileOptions, IncrementalCompiler, UnitCompilation, compile_file_units};
-
-    fn observe<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
-        LOWERED.with_borrow_mut(|names| *names = Some(Vec::new()));
-        let result = run();
-        (
-            result,
-            LOWERED.with_borrow_mut(|names| names.take().unwrap()),
-        )
-    }
 
     fn llvm(compilation: UnitCompilation) -> Vec<(String, String)> {
         compilation
@@ -307,6 +311,35 @@ mod tests {
         let fresh = compile_file_units(entry, Some(root), &options);
         assert_eq!(retained.map(llvm).unwrap(), fresh.map(llvm).unwrap());
         ran
+    }
+
+    #[test]
+    fn sendfile_preserves_the_checked_result_after_a_caller_edit() {
+        let dir = tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let sockets = dir.path().join("transfers.py");
+        fs::write(
+            &sockets,
+            "import socket\ndef count() -> int:\n    return 1\ndef unused() -> int:\n    return socket.socket().sendfile(0, count=count())\n",
+        )
+        .unwrap();
+        let mut compiler = IncrementalCompiler::default();
+        for (value, diagnostic) in [
+            ("True", "expected int, got bool"),
+            (
+                "1",
+                "socket.sendfile requires native Python object operations",
+            ),
+            ("True", "expected int, got bool"),
+        ] {
+            fs::write(
+                &entry,
+                format!("import transfers\nvalues: list[int] = [1]\nvalues.append({value})\n"),
+            )
+            .unwrap();
+            let error = compiler.check_file(&entry, Some(dir.path())).unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        }
     }
 
     #[test]
@@ -327,6 +360,61 @@ mod tests {
         compile(&mut compiler, &entry, root);
         fs::write(&library, default.replace("= 1", "= 19")).unwrap();
         compile(&mut compiler, &entry, root);
+        compile(&mut compiler, &entry, root);
+    }
+
+    #[test]
+    fn a_cached_declared_function_keeps_its_real_return_completion() {
+        let directory = tempdir().unwrap();
+        let root = directory.path();
+        let entry = root.join("main.py");
+        let source = r#"def multiply(x: int, y: int = 7) -> int: return x * y
+print("scalar", multiply(6))
+def discard_return(flag: bool) -> list[str]:
+    try:
+        return ["owned " + str(multiply(6, 7))] if flag else ["other " + str(43)]
+    finally:
+        raise ValueError("discarded conditional return")
+
+
+def take(value: int) -> int: return value
+try:
+    print(take(discard_return(True)))
+except ValueError as e:
+    print(str(e))
+"#;
+        fs::write(&entry, source).unwrap();
+        let mut compiler = IncrementalCompiler::default();
+        compile(&mut compiler, &entry, root);
+
+        let edited_default = source.replace("y: int = 7", "y: int = 8");
+        fs::write(&entry, &edited_default).unwrap();
+        let ran = compile(&mut compiler, &entry, root);
+        assert!(!ran.iter().any(|name| name == "discard_return"), "{ran:?}");
+
+        fs::write(
+            &entry,
+            edited_default.replace(
+                r#"raise ValueError("discarded conditional return")"#,
+                "pass",
+            ),
+        )
+        .unwrap();
+        let options = CompileOptions::default();
+        let diagnostic = compiler
+            .compile_file_units(&entry, Some(root), &options)
+            .err()
+            .unwrap();
+        let fresh = compile_file_units(&entry, Some(root), &options)
+            .err()
+            .unwrap();
+        assert_eq!(diagnostic, fresh);
+        assert!(
+            diagnostic.contains("main.py:12:16: Imre: expected int, got list[str]"),
+            "{diagnostic}"
+        );
+
+        fs::write(&entry, edited_default).unwrap();
         compile(&mut compiler, &entry, root);
     }
 

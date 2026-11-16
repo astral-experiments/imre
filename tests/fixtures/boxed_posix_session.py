@@ -97,6 +97,28 @@ def current():
         assert child.returncode == 0
     print(flag.calls, program.calls, inherited, output)
 
+    program = Program()
+    with subprocess.Popen([program, "-c", 'test "$0" = session-argv0']) as child:
+        print("default argv", child.wait(), program.calls)
+
+    refusal = OSError("argv conversion refused")
+    class RefusingProgram:
+        calls = 0
+
+        def __fspath__(self):
+            self.calls += 1
+            if self.calls == 2:
+                raise refusal
+            return "/bin/true"
+
+    program = RefusingProgram()
+    try:
+        subprocess.Popen([program])
+    except OSError as error:
+        assert error is refusal and program.calls == 2
+    else:
+        raise AssertionError("Popen skipped a path conversion")
+
     for arg, kind in ((1 << 64, OverflowError), (1.5, TypeError)):
         try:
             os.getsid(arg)

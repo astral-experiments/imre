@@ -229,7 +229,14 @@ def current():
         MutableMapping()
     except TypeError as error:
         print(str(error))
+    from inspect import getmembers, isfunction, isroutine
+
     data = Store()
+    equality = dict(getmembers(Store, isroutine))["__eq__"]
+    assert dict(getmembers(Mapping, isroutine))["__iter__"] is Mapping.__iter__
+    assert isfunction(equality) and equality is Mapping.__eq__
+    assert data.__eq__.__func__ is equality and data.__eq__.__self__ is data
+    assert equality(data, {}) is True and equality(data, []) is NotImplemented
     shared = []
     print(data.get("missing", shared) is shared, data.setdefault("first", shared) is shared)
     view = data.keys()

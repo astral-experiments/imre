@@ -164,7 +164,13 @@ pub(in crate::objects) struct Popen {
     control: Arc<ChildControl>,
     pipes: Pipes,
     communication: communicate::Communication,
-    native_finalizer_pending: bool,
+    drop_action: DropAction,
+}
+
+enum DropAction {
+    Finalize,
+    Poll,
+    Release,
 }
 
 impl Popen {
@@ -194,30 +200,27 @@ impl Popen {
 
 impl Popen {
     /// Python calls __del__ only once, including when _active keeps self alive.
-    fn finalize(&mut self) -> bool {
-        if !self.native_finalizer_pending {
+    fn begin_finalization(&mut self) -> bool {
+        if !matches!(self.drop_action, DropAction::Finalize) {
             return false;
         }
-        self.native_finalizer_pending = false;
+        self.drop_action = DropAction::Poll;
         // The public warning is about an unobserved returncode. Even a child
         // which has already exited can still be waiting for its parent to reap it.
         if self.control.status().is_none() {
             crate::objects::warnings::unobserved_child(self.control.pid);
         }
-        !matches!(self.control.poll(), Ok(Some(_)))
+        true
     }
 }
 
 impl Drop for Popen {
     fn drop(&mut self) {
-        let live = if self.native_finalizer_pending {
-            self.finalize()
-        } else {
-            // A language finalizer may have retained and then released a live child.
-            !matches!(self.control.poll(), Ok(Some(_)))
-        };
-        if live {
-            // Internal run/call temporaries need not have a language-level owner.
+        self.begin_finalization();
+        // An internal temporary or an interrupted finalizer still owns a pending child.
+        if matches!(self.drop_action, DropAction::Poll)
+            && !matches!(self.control.poll(), Ok(Some(_)))
+        {
             active::defer_internal(self.control.clone(), std::mem::take(&mut self.pipes));
         }
     }
@@ -606,7 +609,7 @@ unsafe fn spawn(config: &LaunchConfig, mut extras: LaunchExtras<'_, '_>) -> Resu
         args,
         control: Arc::new(ChildControl::new(child)),
         communication: Default::default(),
-        native_finalizer_pending: true,
+        drop_action: DropAction::Finalize,
         poll_override: None,
     })
 }
@@ -717,12 +720,13 @@ pub unsafe extern "C" fn imre_popen_control(handle: *const Object) -> *const Chi
 pub unsafe extern "C" fn imre_child_status(control: *const ChildControl, poll: bool) -> usize {
     // SAFETY: only synchronized child state is accessed, on any caller thread.
     let control = unsafe { &*control };
-    let result = if poll {
-        control.poll()
+    // Public poll leaves returncode unset on an inconclusive waitpid error.
+    let status = if poll {
+        control.poll().unwrap_or(None)
     } else {
-        Ok(control.status())
+        control.status()
     };
-    finish(result.map(|s| s.map_or(0, ReturnCode::into_word)), 0)
+    status.map_or(0, ReturnCode::into_word)
 }
 
 /// # Safety

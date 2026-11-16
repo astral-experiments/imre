@@ -69,6 +69,25 @@ def current():
         pull(cursor)
         print(events)
 
+    cursor = map(int, "３x7")
+    print(next(cursor))
+    pull(cursor)
+    print(list(cursor))
+
+    cursor = map(int, "2x７")
+    try:
+        list(cursor)
+    except ValueError:
+        assert list(cursor) == [7]
+    else:
+        raise AssertionError("list must consume the invalid character")
+
+    class Character(str):
+        def __int__(self):
+            return 41
+
+    print(list(map(int, [Character("7")])))
+
     cursor = map(str, [1, 2, 3])
     for first in cursor:
         print(first, cursor.__next__())

@@ -1,5 +1,6 @@
-//! Base64 codecs and zlib checksums for runtime-loaded callers.
+//! Binary-to-text codecs and zlib checksums for runtime-loaded callers.
 use super::{Context, Error, Id, Result, Value};
+use crate::dynamic::memoryview::{ReadBuffer, Storage};
 
 fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
     if !decode {
@@ -15,14 +16,187 @@ fn input(ctx: &Context, value: Id, decode: bool) -> Result<&[u8]> {
             )),
         };
     }
-    ctx.native_buffer_bytes(value).map_err(|_| {
-        let name = ctx.type_name(value);
-        let name = &name[..name.floor_char_boundary(100)];
-        Error::new(
+    ctx.native_buffer_bytes(value)
+        .map_err(|_| ascii_buffer_error(ctx, value))
+}
+
+fn ascii_buffer_error(ctx: &Context, value: Id) -> Error {
+    let name = ctx.type_name(value);
+    let name = &name[..name.floor_char_boundary(100)];
+    Error::new(
+        "TypeError",
+        format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
+    )
+}
+
+fn update_crc_hqx(mut crc: u16, bytes: &[u8]) -> u16 {
+    for &byte in bytes {
+        crc ^= u16::from(byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+// Keep the mapping scratch off the stack of ordinary inputs and Python seed callbacks.
+#[cfg(target_os = "linux")]
+#[inline(never)]
+fn crc_hqx_mapped(
+    region: &super::mmap::Region,
+    mut range: std::ops::Range<usize>,
+    mut crc: u16,
+) -> Result<u16> {
+    let mut scratch = [0u8; 4096];
+    while !range.is_empty() {
+        let count = range.len().min(scratch.len());
+        let bytes = &mut scratch[..count];
+        region.read_into(range.start, bytes)?;
+        crc = update_crc_hqx(crc, bytes);
+        range.start += count;
+    }
+    Ok(crc)
+}
+
+fn crc_hqx(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
             "TypeError",
-            format!("argument should be bytes, buffer or ASCII string, not '{name}'"),
+            "binascii.crc_hqx() takes no keyword arguments",
+        ));
+    }
+    let [data, seed] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!("crc_hqx expected 2 arguments, got {}", args.len()),
+        ));
+    };
+    let crc = ctx.with_read_buffer(*data, |ctx, buffer| {
+        let seed = crate::objects::checksum_seed(&ctx.index_integer(*seed)?) as u16;
+        match buffer.storage(ctx)? {
+            Storage::Native(bytes) => Ok(update_crc_hqx(seed, bytes)),
+            #[cfg(target_os = "linux")]
+            Storage::Mapped(_, range) if range.is_empty() => Ok(seed),
+            #[cfg(target_os = "linux")]
+            Storage::Mapped(region, range) => crc_hqx_mapped(region, range, seed),
+        }
+    })?;
+    Ok(ctx.int(i64::from(crc)))
+}
+
+/// Acquire the ASCII string or contiguous buffer before calling the header flag's truth test.
+fn a2b_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(data), header] = crate::dynamic::builtins::bind_builtin_arguments(
+        "a2b_qp",
+        args,
+        kwargs,
+        ["data", "header"],
+        1,
+    )?
+    else {
+        unreachable!()
+    };
+    let decode = |ctx: &mut Context, view| {
+        let header = ctx.optional_truth(header, false)?;
+        Ok(crate::objects::decode_quoted_printable(
+            input(ctx, view, true)?,
+            header,
+        )?)
+    };
+    let bytes = if ctx.string_storage(data).is_none()
+        && let Some(method) = ctx.python_buffer_method(data, true)?
+    {
+        let view = ctx
+            .acquire_python_buffer(data, method, 0)
+            .and_then(|view| ctx.view_bytes(view).map(|_| view))
+            .map_err(|_| ascii_buffer_error(ctx, data))?;
+        ctx.with_python_buffer_export(data, view, |ctx| decode(ctx, view))?
+    } else {
+        input(ctx, data, true)?;
+        ctx.with_buffer_export(data, |ctx| decode(ctx, data))?
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+/// Hold the contiguous input buffer while converting the three flags in their declared order.
+fn b2a_qp(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let [Some(data), quotetabs, istext, header] = crate::dynamic::builtins::bind_builtin_arguments(
+        "b2a_qp",
+        args,
+        kwargs,
+        ["data", "quotetabs", "istext", "header"],
+        1,
+    )?
+    else {
+        unreachable!()
+    };
+    let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
+        let quotetabs = ctx.optional_truth(quotetabs, false)?;
+        let istext = ctx.optional_truth(istext, true)?;
+        let header = ctx.optional_truth(header, false)?;
+        let storage = buffer.storage(ctx)?;
+        crate::objects::encode_quoted_printable(
+            &storage.read(0..storage.len())?,
+            quotetabs,
+            istext,
+            header,
         )
-    })
+        .map_err(Into::into)
+    })?;
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+fn a2b_uu(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let data = crate::dynamic::builtins::one_positional_arg("binascii.a2b_uu", args, kwargs)?;
+    let bytes = if ctx.string_storage(data).is_some() {
+        crate::objects::decode_uu(input(ctx, data, true)?)?
+    } else {
+        // Only acquisition errors take the ASCII converter's TypeError.
+        let decode = |ctx: &Context, buffer: ReadBuffer| -> Result<_> {
+            let storage = buffer.storage(ctx)?;
+            let bytes = storage.read(0..storage.len())?;
+            Ok(crate::objects::decode_uu(&bytes)?)
+        };
+        ctx.with_read_buffer(data, |ctx, buffer| Ok(decode(ctx, buffer)))
+            .map_err(|_| ascii_buffer_error(ctx, data))??
+    };
+    Ok(ctx.alloc(Value::Bytes(bytes)))
+}
+
+fn b2a_uu(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    if args.len() + kwargs.len() <= 2 && args.len() != 1 {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "b2a_uu() takes exactly 1 positional argument ({} given)",
+                args.len()
+            ),
+        ));
+    }
+    let [Some(data), backtick] = crate::dynamic::builtins::bind_builtin_arguments(
+        "b2a_uu",
+        args,
+        kwargs,
+        ["", "backtick"],
+        0,
+    )?
+    else {
+        unreachable!()
+    };
+    let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
+        let backtick = ctx.optional_truth(backtick, false)?;
+        let storage = buffer.storage(ctx)?;
+        if storage.len() > 45 {
+            return Err(Error::new("binascii.Error", "At most 45 bytes at once"));
+        }
+        let bytes = storage.read(0..storage.len())?;
+        Ok(crate::objects::encode_uu(&bytes, backtick)?)
+    })?;
+    Ok(ctx.alloc(Value::Bytes(bytes)))
 }
 
 /// Leave subclass operations, unfamiliar alphabets and custom truth tests to the Python helper.
@@ -105,16 +279,14 @@ pub(super) fn encode85(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) 
 
 /// Encode a contiguous buffer as uppercase hex, as in binascii.hexlify(s).upper().
 pub(super) fn b16encode(ctx: &mut Context, data: Id) -> Result<Id> {
-    let hex = if let Some(method) = ctx.python_buffer_method(data, true)? {
+    let encoded = if let Some(method) = ctx.python_buffer_method(data, true)? {
         // binascii.hexlify requests PyBUF_SIMPLE from Python buffer exporters.
         ctx.with_contiguous_python_buffer(data, method, 0, |ctx, view| {
-            Ok(crate::objects::hash_hex(ctx.view_bytes(view)?)?)
+            Ok(crate::objects::uppercase_hex_bytes(ctx.view_bytes(view)?)?)
         })?
     } else {
-        crate::objects::hash_hex(input(ctx, data, false)?)?
+        crate::objects::uppercase_hex_bytes(input(ctx, data, false)?)?
     };
-    let mut encoded = hex.into_string().into_bytes();
-    encoded.make_ascii_uppercase();
     Ok(ctx.alloc(Value::Bytes(encoded)))
 }
 
@@ -124,6 +296,45 @@ pub(super) fn call(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
+    if name == "a2b_uu" {
+        return a2b_uu(ctx, args, kwargs);
+    }
+    if name == "b2a_uu" {
+        return b2a_uu(ctx, args, kwargs);
+    }
+    if name == "crc_hqx" {
+        return crc_hqx(ctx, args, kwargs);
+    }
+    if name == "a2b_qp" {
+        return a2b_qp(ctx, args, kwargs);
+    }
+    if name == "b2a_qp" {
+        return b2a_qp(ctx, args, kwargs);
+    }
+    if matches!(name, "hexlify" | "b2a_hex") {
+        let [Some(data), sep, group] = crate::dynamic::builtins::bind_builtin_arguments(
+            name,
+            args,
+            kwargs,
+            ["data", "sep", "bytes_per_sep"],
+            1,
+        )?
+        else {
+            unreachable!()
+        };
+        let bytes = ctx.with_read_buffer(data, |ctx, buffer| {
+            let group = crate::dynamic::builtins::hex_group(ctx, group)?;
+            let sep = sep
+                .map(|sep| crate::dynamic::builtins::hex_separator(ctx, sep, false))
+                .transpose()?;
+            Ok(crate::objects::hex_with_separator(
+                buffer.bytes(ctx)?,
+                sep,
+                group,
+            )?)
+        })?;
+        return Ok(ctx.alloc(Value::Bytes(bytes)));
+    }
     if matches!(name, "a2b_hex" | "unhexlify") {
         if !kwargs.is_empty() {
             return Err(Error::new(

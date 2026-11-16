@@ -19,17 +19,16 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
-            None,
-            |checker, _, input| input.value(checker),
+            &mut |checker, _, input| input.value(checker),
         )?;
         let arg = |i: usize| args.values[args.order[i]].clone();
         let fd_op = |op, ty, args| Expr {
             ty,
-            kind: ExprKind::Builtin(Builtin::Process(ProcessOperation::Fd(op)), args),
+            kind: ExprKind::Builtin(Builtin::process(ProcessOperation::Fd(op)), args),
         };
         let mut descriptor = |value| {
             let value = self.index_word(value, &call.func, false)?;
-            Ok::<_, String>(scope.hold(self, fd_op(TransferFd, Type::Int, vec![value])))
+            Ok::<_, Failure>(scope.hold(self, fd_op(TransferFd, Type::Int, vec![value])))
         };
         let src = descriptor(arg(0))?;
         let dst = descriptor(arg(1))?;

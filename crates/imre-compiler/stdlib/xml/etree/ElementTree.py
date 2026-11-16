@@ -100,6 +100,7 @@ import collections
 import collections.abc
 import contextlib
 import weakref
+from types import MethodType as _MethodType
 
 from . import ElementPath
 
@@ -393,8 +394,45 @@ class Element:
             tag = None
         if tag is None or self.tag == tag:
             yield self
-        for e in self._children:
-            yield from e.iter(tag)
+        # A custom tag may run Python code on every wildcard comparison.
+        if tag is not None and type(tag) is not str:
+            for child in self._children:
+                yield from child.iter(tag)
+            return
+
+        # Only suspended parents need a stack entry. Keep the active parent
+        # alive while advancing its iterator, even if the tree is mutated.
+        parent = self
+        children = iter(self._children)
+        stack = []
+        while True:
+            child = next(children, _ITER_END)
+            if child is _ITER_END:
+                if not stack:
+                    return
+                parent, children = stack.pop()
+                continue
+            if type(child) is not _Element_Py:
+                yield from child.iter(tag)
+                continue
+            method = child.iter
+            if (type(method) is _MethodType and method.__self__ is child
+                    and method.__func__ is _element_iter):
+                del method
+                if tag is None or child.tag == tag:
+                    yield child
+                descendants = child._children
+                if type(descendants) is not list or descendants:
+                    stack.append((parent, children))
+                    parent = child
+                    children = iter(descendants)
+                del descendants
+            else:
+                # A descriptor can return a temporary callable. Drop its last
+                # local reference before suspending on the iterator it returns.
+                stack.append(method)
+                del method
+                yield from stack.pop()(tag)
 
     def itertext(self):
         """Create text iterator.
@@ -414,6 +452,10 @@ class Element:
             t = e.tail
             if t:
                 yield t
+
+
+_element_iter = Element.iter
+_ITER_END = object()
 
 
 def SubElement(parent, tag, attrib={}, **extra):

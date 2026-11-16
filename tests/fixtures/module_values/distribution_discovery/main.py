@@ -56,8 +56,12 @@ try:
 finally:
     sys.meta_path = original_meta_path
 
+query = DistributionFinder.Context(name='sample-pkg')
+found = MetadataPathFinder.find_distributions(query)
+query.name = 'absent'
 later = Distribution.discover(name='sample-pkg')
 sys.path = ['second'] + sys.path[1:]
+assert next(found).version == '5.1'
 assert next(later).version == '7.9'
 
 info = Path('second/sample_pkg-0.dist-info')

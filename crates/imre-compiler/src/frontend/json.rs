@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ir::{JsonDefault, JsonField, JsonRecordSchema};
+use ruff_python_ast::UnaryOp;
 
 /// Folds successive literal subscripts into one traversal. The keys have no
 /// evaluation effects; the first failing lookup still determines the exception.
@@ -94,7 +95,7 @@ pub(super) fn compare(
     } else {
         let parsed = |ty| matches!(ty, Type::JsonRoot | Type::JsonObject | Type::JsonValue);
         if !parsed(left.ty) || !parsed(right.ty) {
-            return Err(invalid());
+            return Err(invalid().classify(Kind::ScopedObject));
         }
         Expr {
             ty: Type::Bool,
@@ -104,10 +105,7 @@ pub(super) fn compare(
     Ok(if *op == ast::CmpOp::Eq {
         result
     } else {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(result)),
-        }
+        Expr::not(result)
     })
 }
 
@@ -187,10 +185,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive calls through a JSON decoder are unsupported",
-                ),
                 function: ir::Function {
                     params: (0..locals.len()).collect(),
                     locals,
@@ -335,7 +329,7 @@ impl Checker<'_> {
     /// is always a table rather than an arbitrary JSON value.
     pub(super) fn toml_decode(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
         self.typed_decode(call, true)
-            .map_err(|message| message.replace("JSON", "TOML"))
+            .map_err(|message| message.map_message(|text| text.replace("JSON", "TOML")))
     }
 
     /// The schema is a static type expression; no runtime type object is created.
@@ -397,7 +391,7 @@ impl Checker<'_> {
             )
         };
         if matches!(expression, ast::Expr::Name(_) | ast::Expr::Attribute(_)) {
-            if !self.static_schema_name(expression) {
+            if !self.has_static_namespace_root(expression) {
                 return Err(invalid());
             }
             if let Some(class) = self.class_reference(expression) {
@@ -414,7 +408,7 @@ impl Checker<'_> {
             },
             ast::Expr::NoneLiteral(_) => Ok(Type::None),
             ast::Expr::Subscript(value)
-                if self.static_schema_name(&value.value)
+                if self.has_static_namespace_root(&value.value)
                     && self.class_reference(&value.value).is_none() =>
             {
                 match &*value.value {
@@ -446,7 +440,7 @@ impl Checker<'_> {
                                 .elts
                                 .iter()
                                 .map(|value| self.json_schema(value))
-                                .collect::<Result<Vec<_>, _>>()?
+                                .collect::<std::result::Result<Vec<_>, _>>()?
                         } else {
                             vec![self.json_schema(&value.slice)?]
                         };
@@ -465,17 +459,6 @@ impl Checker<'_> {
             }
             _ => Err(invalid()),
         }
-    }
-
-    /// Checks the lexical root before resolving a static namespace path.
-    fn static_schema_name(&self, expression: &ast::Expr) -> bool {
-        let mut root = expression;
-        while let ast::Expr::Attribute(attribute) = root {
-            root = &attribute.value;
-        }
-        matches!(root, ast::Expr::Name(name)
-            if !self.names.contains_key(name.id.as_str())
-                && !self.comprehension_targets.contains(name.id.as_str()))
     }
 
     /// Check an encoding operand using the same schema and display rules for
@@ -603,7 +586,7 @@ impl Checker<'_> {
                             .elts
                             .iter()
                             .map(|item| self.expr(item))
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         Expr {
                             ty: self.types.tuple(values.iter().map(|v| v.ty).collect()),
                             kind: ExprKind::Tuple(values),
@@ -625,7 +608,7 @@ impl Checker<'_> {
                     Type::Str | Type::StrLiteral(_) => Self::string_value(value),
                     Type::Bool if value.ty == Type::Bool => Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                     },
                     _ => self.coerce(value, optional_int, &keyword.value)?,
                 }
@@ -704,7 +687,7 @@ fn needs_document(display: &ast::Expr) -> bool {
     }
 }
 
-fn check_standard_encoding(ty: Type, types: &Types) -> Result<(), &'static str> {
+fn check_standard_encoding(ty: Type, types: &Types) -> std::result::Result<(), &'static str> {
     if let Some(child) = types.payload(ty).or_else(|| types.element(ty)) {
         return check_standard_encoding(child, types);
     }
@@ -744,25 +727,14 @@ pub(super) fn schemas(
     graph: &SourceGraph,
     classes: &ClassInfo,
     types: &Types,
-    functions: &[ir::Function],
-    entry: &ir::Function,
-) -> Result<Vec<JsonRecordSchema>, String> {
-    let mut decoded = Vec::new();
-    let mut encoded = Vec::new();
-    for function in functions.iter().chain([entry]) {
-        ir::walk_expressions(&function.body, &mut |value| match value.kind {
-            ExprKind::Builtin(Builtin::JsonDecode(ty) | Builtin::TomlDecode(ty), _) => {
-                decoded.push(ty);
-            }
-            ExprKind::Builtin(Builtin::JsonEncode(ty), _) => encoded.push(ty),
-            _ => {}
-        });
-    }
+    decoded: &[Type],
+    encoded: &[Type],
+) -> std::result::Result<Vec<JsonRecordSchema>, String> {
     let mut decode_pending = Vec::new();
     let mut encode_pending = Vec::new();
     for (roots, pending) in [
-        (&decoded, &mut decode_pending),
-        (&encoded, &mut encode_pending),
+        (decoded, &mut decode_pending),
+        (encoded, &mut encode_pending),
     ] {
         for &ty in roots {
             check_type(ty, types, pending).map_err(str::to_owned)?;
@@ -808,7 +780,7 @@ pub(super) fn schemas(
         if declaration.generated_initializer && classes.methods[class].contains_key("__post_init__")
         {
             return Err(module.error(
-                &declaration.node,
+                declaration.node.as_ref(),
                 "typed record decoding requires an initializer without __post_init__",
             ));
         }
@@ -831,14 +803,16 @@ pub(super) fn schemas(
         let mut values = HashMap::new();
         for statement in &initializer.body {
             match statement {
-                ast::Stmt::Assign(assignment) if assignment.targets.len() == 1 => {
-                    let ast::Expr::Attribute(target) = &assignment.targets[0] else {
+                _ if let Some(([target], value)) =
+                    crate::classes::initializer_assignment(initializer, statement) =>
+                {
+                    let ast::Expr::Attribute(target) = target else {
                         return Err(module.error(
                             statement,
                             "JSON constructors require individual self.field assignments",
                         ));
                     };
-                    values.insert(target.attr.as_str(), &*assignment.value);
+                    values.insert(target.attr.as_str(), value);
                 }
                 ast::Stmt::Pass(_) => {}
                 ast::Stmt::Expr(value) if matches!(&*value.value, ast::Expr::StringLiteral(_)) => {}
@@ -884,7 +858,11 @@ pub(super) fn schemas(
     Ok(schemas)
 }
 
-fn check_type(ty: Type, types: &Types, pending: &mut Vec<usize>) -> Result<(), &'static str> {
+fn check_type(
+    ty: Type,
+    types: &Types,
+    pending: &mut Vec<usize>,
+) -> std::result::Result<(), &'static str> {
     if types.is_default_list_dict(ty) || types.is_counter(ty) || types.is_ordered_dict(ty) {
         return Err("JSON schemas require ordinary dictionaries");
     }
@@ -939,7 +917,7 @@ fn is_none_default(value: &Expr) -> bool {
     }
 }
 
-fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
+fn scalar_default(value: &Expr) -> std::result::Result<JsonDefault, &'static str> {
     Ok(match &value.kind {
         ExprKind::Int(value) => JsonDefault::Int(value.clone()),
         ExprKind::Float(value) if value.is_finite() => JsonDefault::Float(*value),
@@ -948,7 +926,7 @@ fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
         ExprKind::None => JsonDefault::None,
         ExprKind::List(values) if values.is_empty() => JsonDefault::EmptyList,
         ExprKind::Present(value) | ExprKind::Absent(value) => return scalar_default(value),
-        ExprKind::Negate(value) => match &value.kind {
+        ExprKind::Unary(UnaryOp::USub, value) => match &value.kind {
             ExprKind::Int(value) => JsonDefault::Int(format!("-{value}")),
             ExprKind::Float(value) if value.is_finite() => JsonDefault::Float(-value),
             _ => return Err("JSON defaults require finite scalar literals"),
@@ -961,8 +939,62 @@ fn scalar_default(value: &Expr) -> Result<JsonDefault, &'static str> {
 mod tests {
     use super::*;
 
-    fn lower(source: &str) -> Result<ir::Module, String> {
+    fn lower(source: &str) -> std::result::Result<ir::Module, String> {
         super::super::lower(&SourceGraph::single(source)?)
+    }
+
+    #[test]
+    fn nullable_json_roots_and_fields_project_null_once() {
+        for (lookup, path_bytes) in [("", 0), (r#"["version"]"#, 11)] {
+            let source = format!(
+                r#"import json
+
+
+def f(text: str, flag: bool) -> bool:
+    value = json.loads(text){lookup} if flag else None
+    return value is None
+
+
+print(f(input(), input() == "take"))
+"#
+            );
+            let llvm = crate::compile(&source, &crate::CompileOptions::default()).unwrap();
+            assert_eq!(llvm.matches("call ptr @imre_json_loads(").count(), 1);
+            let mut selects = llvm
+                .lines()
+                .filter(|line| line.contains("call i64 @imre_json_select("));
+            let selector = selects.next().unwrap();
+            assert!(selector.contains(&format!("i64 {path_bytes}, i32 256,")));
+            assert!(selects.next().is_none());
+        }
+    }
+
+    #[test]
+    fn mixed_comparisons_keep_the_following_constructor_check() {
+        let source = r#"
+import json
+from dataclasses import dataclass
+
+@dataclass
+class Package:
+    name: str
+
+def collect(text: str) -> list[Package]:
+    data = json.loads(text)
+    members = set(data["members"])
+    packages = []
+    for item in data["packages"]:
+        if item["id"] not in members:
+            continue
+        if item.get("publish") == []:
+            continue
+        packages.append(Package(name=17))
+    return packages
+"#;
+        let error = lower(source)
+            .err()
+            .expect("invalid package name was accepted");
+        assert!(error.contains("expected str, got int"), "{error}");
     }
 
     #[test]

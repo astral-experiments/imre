@@ -3,108 +3,288 @@
 /// CPython 3.14.5's pyc magic number followed by CRLF in little-endian wire order.
 pub const PYC_MAGIC_NUMBER_TOKEN: u32 = 3627 | ((b'\r' as u32) << 16) | ((b'\n' as u32) << 24);
 
+/// Default wire format shared by Python 3.14 marshal writers and the module export.
+pub const MARSHAL_VERSION: i32 = 5;
+
+/// Native archives in import order. The first filename carries the wheel ABI tag.
+pub const NATIVE_ARCHIVE_EXTENSIONS: [&str; 2] = ["imre1.a", "imre.a"];
+
+/// Python language version used by the compiler and the runtime import machinery.
+pub const PYTHON_VERSION: ruff_python_ast::PythonVersion = ruff_python_ast::PythonVersion::PY314;
+
+/// Filesystem module suffixes in discovery order; match compound suffixes before ".so".
+pub fn module_suffixes() -> [String; 7] {
+    let version = PYTHON_VERSION;
+    let abi = if cfg!(target_os = "macos") {
+        "darwin".to_owned()
+    } else {
+        let libc = if cfg!(target_env = "musl") {
+            "musl"
+        } else {
+            "gnu"
+        };
+        format!("{}-linux-{libc}", std::env::consts::ARCH)
+    };
+    let tagged = format!(".cpython-{}{}-{abi}.so", version.major, version.minor);
+    let [versioned, legacy] = NATIVE_ARCHIVE_EXTENSIONS.map(|ext| format!(".{ext}"));
+    [
+        tagged,
+        ".abi3.so".into(),
+        versioned,
+        legacy,
+        ".so".into(),
+        ".py".into(),
+        ".pyc".into(),
+    ]
+}
+
+/// Unicode Character Database version shipped with the target CPython 3.14 release.
+pub const UNICODE_DATA_VERSION: &str = "16.0.0";
+
+pub mod comprehension;
+#[cfg(target_os = "linux")]
+pub mod epoll;
 pub mod exceptions;
+pub mod executable;
+pub mod forward_refs;
+pub mod indentation;
 pub mod layout;
+pub mod lzma;
+pub mod numbers;
+pub mod posixpath;
 pub mod providers;
 pub mod python_nodes;
+pub mod source_arguments;
+pub mod source_encoding;
 pub mod startup;
 pub mod strings;
+mod thread_entry;
+pub use thread_entry::{ThreadEntry, captured_thread_locks, thread_entry};
 mod type_aliases;
 pub mod zlib;
-pub use type_aliases::{generic_class_arguments_error, type_alias_error};
+pub use type_aliases::annotation_scope_error as type_alias_error;
+pub use type_aliases::{TypeParameterField, annotation_scope_error, generic_class_arguments_error};
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use ruff_python_ast::name::Name;
+use ruff_python_ast::visitor::Visitor;
 use ruff_python_ast::visitor::transformer::{self, Transformer};
 use ruff_python_ast::{self as ast, Identifier};
 use ruff_python_stdlib::identifiers::is_mangled_private;
-use ruff_text_size::{Ranged, TextSize};
+use ruff_text_size::{Ranged, TextRange, TextSize};
 
-/// Wildcard imports can only publish names in a module body, including its conditional suites.
-pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<ruff_text_size::TextRange> {
-    #[derive(Default)]
-    struct Scopes {
-        nested: bool,
-        invalid: Option<ruff_text_size::TextRange>,
+/// Interactive input accepts one compound statement or one logical line of simple statements.
+pub fn check_single_input(
+    body: &[ast::Stmt],
+    tokens: &ast::token::Tokens,
+) -> Result<(), &'static str> {
+    use ast::token::TokenKind::{Dedent, Newline};
+
+    let Some(first) = body.first() else {
+        return Err("invalid syntax");
+    };
+    let mut trailing = tokens
+        .iter()
+        .skip_while(|token| token.start() < first.end());
+    if ast::helpers::is_compound_statement(first) {
+        // An indented suite ends in DEDENT. An inline suite needs a real closing newline.
+        if body.len() != 1
+            || !trailing.any(|token| {
+                token.kind() == Dedent || (token.kind() == Newline && !token.range().is_empty())
+            })
+        {
+            return Err("invalid syntax");
+        }
+    } else if let Some(last) = body.last()
+        && trailing
+            .take_while(|token| token.start() < last.start())
+            .any(|token| token.kind() == Newline)
+    {
+        return Err("multiple statements found while compiling a single statement");
     }
-    impl<'a> ast::visitor::Visitor<'a> for Scopes {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            if self.invalid.is_some() {
-                return;
-            }
-            if self.nested
-                && let ast::Stmt::ImportFrom(import) = stmt
-                && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
-            {
-                self.invalid = Some(alias.range());
-                return;
-            }
-            let outer = self.nested;
-            self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
+    Ok(())
+}
+
+/// The written targets and right-hand side of an assignment that stores a value.
+pub fn assignment_parts(statement: &ast::Stmt) -> Option<(&[ast::Expr], &ast::Expr)> {
+    match statement {
+        ast::Stmt::Assign(assign) => Some((&assign.targets, &assign.value)),
+        ast::Stmt::AnnAssign(assign) => Some((
+            std::slice::from_ref(assign.target.as_ref()),
+            assign.value.as_deref()?,
+        )),
+        _ => None,
+    }
+}
+
+/// A valueless parenthesized name in an annotation neither binds nor reads the name.
+pub fn annotation_visits_target(assignment: &ast::StmtAnnAssign) -> bool {
+    assignment.simple || assignment.value.is_some() || !assignment.target.is_name_expr()
+}
+
+pub fn parameter_defaults(parameters: &ast::Parameters) -> impl Iterator<Item = &ast::Expr> {
+    parameters
+        .iter_non_variadic_params()
+        .filter_map(|parameter| parameter.default.as_deref())
+}
+
+/// Visit the defaults evaluated when the enclosing scope creates a lambda.
+pub fn visit_lambda_defaults<'a>(visitor: &mut impl Visitor<'a>, lambda: &'a ast::ExprLambda) {
+    if let Some(parameters) = &lambda.parameters {
+        visitor.visit_parameters(parameters);
+    }
+}
+
+pub fn decorator_expressions(decorators: &[ast::Decorator]) -> impl Iterator<Item = &ast::Expr> {
+    decorators.iter().map(|decorator| &decorator.expression)
+}
+
+/// Expressions evaluated in the enclosing scope when a function is defined, in order.
+pub fn function_definition_expressions(
+    function: &ast::StmtFunctionDef,
+) -> impl Iterator<Item = &ast::Expr> {
+    decorator_expressions(&function.decorator_list).chain(parameter_defaults(&function.parameters))
+}
+
+/// Positional and starred operands are evaluated before keyword operands.
+pub fn evaluated_arguments(args: &ast::Arguments) -> impl Iterator<Item = ast::ArgOrKeyword<'_>> {
+    args.args
+        .iter()
+        .map(ast::ArgOrKeyword::Arg)
+        .chain(args.keywords.iter().map(ast::ArgOrKeyword::Keyword))
+}
+
+/// The value to evaluate and whether Python expands it into positional or keyword arguments.
+pub fn call_operands(args: &ast::Arguments) -> impl Iterator<Item = (&ast::Expr, bool)> {
+    evaluated_arguments(args).map(|arg| match arg {
+        ast::ArgOrKeyword::Arg(ast::Expr::Starred(star)) => (star.value.as_ref(), true),
+        ast::ArgOrKeyword::Keyword(keyword) => (&keyword.value, keyword.arg.is_none()),
+        _ => (arg.value(), false),
+    })
+}
+
+/// Values supplied to the call, including the operands of argument expansion.
+pub fn argument_values(args: &ast::Arguments) -> impl Iterator<Item = &ast::Expr> {
+    call_operands(args).map(|(value, _)| value)
+}
+
+/// Generic class arguments run in the type-parameter scope. Decorators always run outside it.
+pub fn class_definition_expressions(class: &ast::StmtClassDef) -> impl Iterator<Item = &ast::Expr> {
+    let arguments = class
+        .arguments
+        .as_deref()
+        .filter(|_| class.type_params.is_none());
+    decorator_expressions(&class.decorator_list)
+        .chain(arguments.into_iter().flat_map(argument_values))
+}
+
+/// Diagnose the positional-only range constructor before converting any bounds.
+pub fn range_constructor_error(positional: usize, keywords: bool) -> Option<String> {
+    if keywords {
+        Some("range() takes no keyword arguments".into())
+    } else {
+        match positional {
+            0 => Some("range expected at least 1 argument, got 0".into()),
+            1..=3 => None,
+            n => Some(format!("range expected at most 3 arguments, got {n}")),
+        }
+    }
+}
+
+/// Context.run takes its callable positionally and forwards the remaining arguments.
+pub fn context_run_arguments<T>(positional: &[T]) -> Result<(&T, &[T]), &'static str> {
+    positional
+        .split_first()
+        .ok_or("run() missing 1 required positional argument")
+}
+
+#[derive(Default)]
+struct ScopedImports<'a> {
+    bindings: Option<&'a mut BTreeSet<String>>,
+    nested: bool,
+    check_nested: bool,
+    invalid: Option<TextRange>,
+}
+
+impl<'a> ast::visitor::Visitor<'a> for ScopedImports<'_> {
+    fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
+        if self.invalid.is_some() {
+            return;
+        }
+        if self.nested
+            && let ast::Stmt::ImportFrom(import) = stmt
+            && let Some(alias) = import.names.iter().find(|alias| alias.name.as_str() == "*")
+        {
+            self.invalid = Some(alias.range());
+            return;
+        }
+        let outer = self.nested;
+        self.nested |= matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_));
+        if !self.nested || self.check_nested {
             stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
                 ast::visitor::walk_stmt(self, stmt)
             });
-            self.nested = outer;
         }
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
+        self.nested = outer;
     }
-    let mut scopes = Scopes::default();
+
+    fn visit_alias(&mut self, alias: &'a ast::Alias) {
+        if !self.nested
+            && let Some(bindings) = &mut self.bindings
+        {
+            let name = alias.asname.as_ref().map_or_else(
+                || alias.name.as_str().split('.').next().unwrap(),
+                |asname| asname.as_str(),
+            );
+            bindings.insert(name.to_owned());
+        }
+    }
+
+    fn visit_expr(&mut self, _: &'a ast::Expr) {}
+}
+
+/// Validate wildcard imports and optionally collect the names bound in the module.
+pub fn check_import_scopes(
+    body: &[ast::Stmt],
+    bindings: Option<&mut BTreeSet<String>>,
+) -> Option<TextRange> {
     use ast::visitor::Visitor;
-    scopes.visit_body(body);
-    scopes.invalid
+    let mut imports = ScopedImports {
+        bindings,
+        check_nested: true,
+        ..Default::default()
+    };
+    imports.visit_body(body);
+    imports.invalid
+}
+
+/// Wildcard imports can only publish names in a module body.
+pub fn misplaced_star_import(body: &[ast::Stmt]) -> Option<TextRange> {
+    check_import_scopes(body, None)
+}
+
+/// Names imported by the module scope disable method binding even after reassignment.
+pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
+    use ast::visitor::Visitor;
+    let mut names = BTreeSet::new();
+    ScopedImports {
+        bindings: Some(&mut names),
+        ..Default::default()
+    }
+    .visit_body(body);
+    names
 }
 
 /// A display of literal values is held by the code's constant table in CPython.
-pub fn literal_tuple_element(expr: &ast::Expr) -> bool {
-    match expr {
-        ast::Expr::NoneLiteral(_)
-        | ast::Expr::EllipsisLiteral(_)
-        | ast::Expr::BooleanLiteral(_)
-        | ast::Expr::NumberLiteral(_)
-        | ast::Expr::StringLiteral(_)
-        | ast::Expr::BytesLiteral(_) => true,
-        ast::Expr::Tuple(node) => node.elts.iter().all(literal_tuple_element),
-        _ => false,
-    }
-}
+pub use ruff_python_ast::helpers::is_constant as literal_tuple_element;
 
 pub mod annotations;
 pub mod async_generators;
 pub mod class_attributes;
 pub mod class_cell;
 pub mod code_flags;
-
-/// Names imported by the module scope disable method binding even after reassignment.
-pub fn module_imports(body: &[ast::Stmt]) -> BTreeSet<String> {
-    use ast::visitor::{Visitor, walk_stmt};
-
-    struct Imports(BTreeSet<String>);
-    impl<'a> Visitor<'a> for Imports {
-        fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
-            let names = match stmt {
-                ast::Stmt::Import(node) => &node.names,
-                ast::Stmt::ImportFrom(node) => &node.names,
-                ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_) => return,
-                _ => return walk_stmt(self, stmt),
-            };
-            for alias in names {
-                let name = alias.asname.as_ref().map_or_else(
-                    || alias.name.as_str().split('.').next().unwrap(),
-                    |asname| asname.as_str(),
-                );
-                self.0.insert(name.to_owned());
-            }
-        }
-
-        fn visit_expr(&mut self, _: &'a ast::Expr) {}
-    }
-
-    let mut imports = Imports(BTreeSet::new());
-    imports.visit_body(body);
-    imports.0
-}
 
 /// Return the attribute for calls where CPython defers a method descriptor's receiver check.
 pub fn direct_method<'a>(
@@ -118,12 +298,40 @@ pub fn direct_method<'a>(
     let args = &call.arguments;
     // CPython's method call path is limited to fewer than 30 stack entries.
     (args.args.len() + args.keywords.len() + usize::from(!args.keywords.is_empty()) < 30
-        && !args.args.iter().any(|arg| matches!(arg, ast::Expr::Starred(_)))
-        && args.keywords.iter().all(|arg| arg.arg.is_some())
         && !matches!(field.value.as_ref(), ast::Expr::Name(name) if imports.contains(
             spellings.and_then(|names| names.original.get(&name.start())).unwrap_or(&name.id).as_str()
-        )))
+        ))
+        && !args.args.iter().any(ast::Expr::is_starred_expr)
+        && args.keywords.iter().all(|arg| arg.arg.is_some()))
     .then_some(field)
+}
+
+/// CPython omits the caret for the whole call in these assignment and return statements.
+pub fn unhighlighted_call(stmt: &ast::Stmt) -> Option<ruff_text_size::TextRange> {
+    match stmt {
+        ast::Stmt::Assign(v)
+            if matches!(v.targets.as_slice(), [ast::Expr::Name(_)])
+                && matches!(&*v.value, ast::Expr::Call(_)) =>
+        {
+            Some(v.value.range())
+        }
+        ast::Stmt::Return(v) => v.value.as_deref().and_then(|e| match e {
+            ast::Expr::Call(c) if matches!(&*c.func, ast::Expr::Name(_)) => Some(e.range()),
+            _ => None,
+        }),
+        _ => None,
+    }
+}
+
+/// Locate the delimiter after a call target or subscription receiver on a traceback line.
+pub fn traceback_delimiter(
+    source: &[u8],
+    prefix_end: usize,
+    end: usize,
+    opener: u8,
+) -> Option<usize> {
+    let suffix = source.get(prefix_end..end)?;
+    Some(prefix_end + suffix.iter().position(|&b| b == opener)?)
 }
 
 /// Python locates attribute loads and optimized method calls at the attribute name.
@@ -185,22 +393,22 @@ pub fn repeated_keyword(node: ast::AnyNodeRef<'_>) -> Option<&ast::Keyword> {
 pub struct Names {
     pub string_annotations: bool,
     pub duplicate_type_parameter: Option<Identifier>,
+    pub nonlocal_in_generic_class: bool,
+    /// The mangler changed at least one identifier in the syntax tree.
+    pub rewritten: bool,
     original: HashMap<TextSize, Name>,
-    owners: HashMap<TextSize, Name>,
     import_roots: HashSet<TextSize>,
 }
 
 impl Names {
-    /// Return the class owning the lexical names in a deferred generator suite.
-    pub fn suite_owner(&self, start: TextSize) -> Option<&str> {
-        self.owners.get(&start).map(Name::as_str)
-    }
-
     /// A private definition keeps its source name for introspection.
     pub fn definition<'a>(&'a self, name: &'a Identifier) -> &'a str {
-        self.original
-            .get(&name.start())
-            .map_or(name.as_str(), Name::as_str)
+        self.source_name(name.start(), name.as_str())
+    }
+
+    /// Return the original spelling of a potentially mangled name.
+    pub fn source_name<'a>(&'a self, start: TextSize, binding: &'a str) -> &'a str {
+        self.original.get(&start).map_or(binding, Name::as_str)
     }
 
     /// A dotted import binds the top-level module under a possibly private name.
@@ -216,11 +424,35 @@ pub fn future_annotations(body: &[ast::Stmt]) -> bool {
 
 /// Whether the module imports a given compiler feature from __future__.
 pub fn future_import(body: &[ast::Stmt], feature: &str) -> bool {
-    body.iter().any(|s| {
-        matches!(s, ast::Stmt::ImportFrom(i) if i.level == 0
-            && i.module.as_deref() == Some("__future__")
-            && i.names.iter().any(|n| n.name.as_str() == feature))
-    })
+    future_features(body).any(|name| name == feature)
+}
+
+/// Return the code flags declared in the module's leading future imports.
+pub fn future_flags(body: &[ast::Stmt]) -> u32 {
+    let mut flags = 0;
+    for name in future_features(body) {
+        flags |= match name {
+            "annotations" => code_flags::FUTURE_ANNOTATIONS,
+            "barry_as_FLUFL" => code_flags::FUTURE_BARRY_AS_BDFL,
+            _ => 0,
+        };
+    }
+    flags
+}
+
+/// Future directives form one contiguous prefix after the optional module docstring.
+fn future_features(body: &[ast::Stmt]) -> impl Iterator<Item = &str> {
+    ast::helpers::body_without_leading_docstring(body)
+        .iter()
+        .map_while(future_statement)
+        .flat_map(|import| import.names.iter().map(|alias| alias.name.as_str()))
+}
+
+fn future_statement(stmt: &ast::Stmt) -> Option<&ast::StmtImportFrom> {
+    let ast::Stmt::ImportFrom(import) = stmt else {
+        return None;
+    };
+    (import.level == 0 && import.module.as_deref() == Some("__future__")).then_some(import)
 }
 
 pub fn lower(body: &mut [ast::Stmt]) -> Names {
@@ -238,6 +470,7 @@ pub fn lower_in(body: &mut [ast::Stmt], owner: &str, string_annotations: bool) -
         names: &names,
         string_annotations,
         only_parameters: None,
+        in_generic_class: false,
     }
     .visit_body(body);
     names.into_inner()
@@ -248,6 +481,13 @@ struct Mangler<'a> {
     names: &'a RefCell<Names>,
     string_annotations: bool,
     only_parameters: Option<&'a HashSet<Name>>,
+    in_generic_class: bool,
+}
+
+fn private_name(owner: &str, name: &str) -> Option<Name> {
+    let owner = owner.trim_start_matches('_');
+    (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
+        .then(|| Name::new(format!("_{owner}{name}")))
 }
 
 impl Mangler<'_> {
@@ -258,9 +498,7 @@ impl Mangler<'_> {
         {
             return None;
         }
-        let owner = self.owner.trim_start_matches('_');
-        (is_mangled_private(name) && !name.contains('.') && !owner.is_empty())
-            .then(|| Name::new(format!("_{owner}{name}")))
+        private_name(self.owner, name).inspect(|_| self.names.borrow_mut().rewritten = true)
     }
 
     fn rename(&self, name: &mut Name) {
@@ -312,6 +550,7 @@ impl Transformer for Mangler<'_> {
                 let body = Mangler {
                     owner: owner.as_str(),
                     only_parameters: None,
+                    in_generic_class: self.in_generic_class || class.type_params.is_some(),
                     ..*self
                 };
                 if let Some(params) = &mut class.type_params {
@@ -334,26 +573,26 @@ impl Transformer for Mangler<'_> {
                 return;
             }
             ast::Stmt::FunctionDef(function) => {
-                if !self.owner.is_empty()
-                    && let Some(first) = function.body.first()
-                {
-                    self.names
-                        .borrow_mut()
-                        .owners
-                        .insert(first.start(), Name::new(self.owner));
-                }
                 self.definition(&mut function.name);
                 if let Some(params) = &mut function.type_params {
                     self.type_parameter_bindings(params);
                 }
             }
 
+            ast::Stmt::TypeAlias(alias) => {
+                if let Some(params) = &mut alias.type_params {
+                    self.type_parameter_bindings(params);
+                }
+            }
             ast::Stmt::Global(global) => {
                 for name in &mut global.names {
                     self.rename(&mut name.id);
                 }
             }
             ast::Stmt::Nonlocal(nonlocal) => {
+                if self.in_generic_class {
+                    self.names.borrow_mut().nonlocal_in_generic_class = true;
+                }
                 for name in &mut nonlocal.names {
                     self.rename(&mut name.id);
                 }
@@ -370,14 +609,6 @@ impl Transformer for Mangler<'_> {
 
     fn visit_expr(&self, expr: &mut ast::Expr) {
         match expr {
-            ast::Expr::Lambda(lambda)
-                if !self.owner.is_empty() && matches!(*lambda.body, ast::Expr::Yield(_)) =>
-            {
-                self.names
-                    .borrow_mut()
-                    .owners
-                    .insert(lambda.body.start(), Name::new(self.owner));
-            }
             ast::Expr::Name(name) => self.remember(name.start(), &mut name.id),
             ast::Expr::Attribute(attr) => self.definition(&mut attr.attr),
             _ => {}
@@ -396,6 +627,19 @@ impl Transformer for Mangler<'_> {
     fn visit_parameter(&self, parameter: &mut ast::Parameter) {
         self.rename(&mut parameter.name.id);
         transformer::walk_parameter(self, parameter);
+    }
+
+    fn visit_pattern(&self, pattern: &mut ast::Pattern) {
+        let binding = match pattern {
+            ast::Pattern::MatchAs(p) => p.name.as_mut(),
+            ast::Pattern::MatchStar(p) => p.name.as_mut(),
+            ast::Pattern::MatchMapping(p) => p.rest.as_mut(),
+            _ => None,
+        };
+        if let Some(name) = binding {
+            self.definition(name);
+        }
+        transformer::walk_pattern(self, pattern);
     }
 
     fn visit_except_handler(&self, handler: &mut ast::ExceptHandler) {

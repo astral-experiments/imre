@@ -11,11 +11,14 @@ import operator
 import os
 import posixpath
 import sys
+from _imre_posixpath import normalized_parts as _native_parts, string_args as _string_args
 from errno import *
 from glob import _StringGlobber, _no_recurse_symlinks
 from itertools import chain
 from stat import S_ISDIR, S_ISREG, S_ISSOCK, S_ISBLK, S_ISCHR, S_ISFIFO
 from _collections_abc import Sequence
+
+_path_namespace = globals()
 
 try:
     import pwd
@@ -44,6 +47,7 @@ class UnsupportedOperation(NotImplementedError):
     """An exception that is raised when an unsupported operation is attempted.
     """
     pass
+
 
 
 class _PathParents(Sequence):
@@ -133,6 +137,10 @@ class PurePath:
         return object.__new__(cls)
 
     def __init__(self, *args):
+        paths = _string_args(args, _path_namespace)
+        if paths is not None:
+            self._raw_paths = paths
+            return
         paths = []
         for arg in args:
             if isinstance(arg, PurePath):
@@ -295,7 +303,10 @@ class PurePath:
             elif len(drv_parts) == 6:
                 # e.g. //?/unc/server/share
                 root = sep
-        return drv, root, [x for x in rel.split(sep) if x and x != '.']
+        parts = _native_parts(rel, sep)
+        if parts is None:
+            parts = [x for x in rel.split(sep) if x and x != '.']
+        return drv, root, parts
 
     @classmethod
     def _parse_pattern(cls, pattern):
@@ -314,7 +325,9 @@ class PurePath:
         altsep = cls.parser.altsep
         if altsep:
             rel = rel.replace(altsep, sep)
-        parts = [x for x in rel.split(sep) if x and x != '.']
+        parts = _native_parts(rel, sep)
+        if parts is None:
+            parts = [x for x in rel.split(sep) if x and x != '.']
         if not parts:
             raise ValueError(f"Unacceptable pattern: {str(pattern)!r}")
         elif rel.endswith(sep):

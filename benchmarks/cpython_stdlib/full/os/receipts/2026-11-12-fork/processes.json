@@ -1,0 +1,3102 @@
+{
+  "occurrence": {
+    "date": "2026-11-12",
+    "family": "os",
+    "canonical_id": "test.test_os.ForkTests.test_fork",
+    "occurrence": 1,
+    "os_family_ordinal": 119,
+    "frozen_stock": "addSuccess",
+    "previous_any_launcher_credit": 0,
+    "selection": "named unittest method",
+    "measured_imre": "4f0c9a277620c5364204ad2544770389f8d31f67",
+    "corroborated_imre": "fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af",
+    "cpython": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "test_os_git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5",
+    "original_method_sha256": "881b0673612d02929ea4c0cfee62e65be612663d8216f7236e665df8e6021887",
+    "child_program_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+    "stock_disposition": "addSuccess",
+    "stock_outer_pid": 24119,
+    "stock_launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "stock_isolated_pid": 24143,
+    "stock_isolated_child_pid": 24146,
+    "stock_isolated_image": "CPython 3.14.5",
+    "stock_isolated_elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "stock_malloc_debug_pid": 24152,
+    "stock_malloc_debug_child_pid": 24191,
+    "stock_malloc_debug_image": "CPython 3.14.5",
+    "stock_malloc_debug_elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "O0_disposition": "addSuccess",
+    "O0_outer_pid": 27617,
+    "O0_launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+    "O0_isolated_pid": 28136,
+    "O0_isolated_child_pid": 28245,
+    "O0_isolated_image": "O0",
+    "O0_isolated_elf_sha256": "1b16e3d58bdf5bd83e8991a0134e2ce38b77e93f8516cfd42faf730521155530",
+    "O0_malloc_debug_pid": 28246,
+    "O0_malloc_debug_child_pid": 28347,
+    "O0_malloc_debug_image": "O0",
+    "O0_malloc_debug_elf_sha256": "e120109e4b2bc01190ff5998690d6536306903d912fca58f8f5b9337d8b8efcb",
+    "O3_disposition": "addSuccess",
+    "O3_outer_pid": 28884,
+    "O3_launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+    "O3_isolated_pid": 29006,
+    "O3_isolated_child_pid": 29040,
+    "O3_isolated_image": "O3",
+    "O3_isolated_elf_sha256": "a643a1c13870ba364d957d69f3a676d89b80e203737d4d57ed8e1b137ea7b057",
+    "O3_malloc_debug_pid": 29041,
+    "O3_malloc_debug_child_pid": 29052,
+    "O3_malloc_debug_image": "O3",
+    "O3_malloc_debug_elf_sha256": "ab8d359516d25bb2c0beb4605f16b13793befc9493856c6b59fad61900b6c2db",
+    "os_pairs_before": 469,
+    "os_pairs_after": 470,
+    "os_corpus": 579,
+    "frozen_pairs_before": 467,
+    "frozen_pairs_after": 468,
+    "frozen_stock_passes": 486,
+    "separate_stock_passes": 488,
+    "separate_stock_corpus": 579,
+    "additive_pairs": 1,
+    "additive_frozen_stock_pairs": 1
+  },
+  "sdk_at_7081": {
+    "O0": {
+      "source": "4f0c9a277620c5364204ad2544770389f8d31f67",
+      "tree": "af6b55c8e99f99518c30e0c8f56313d0252dbdca",
+      "default_native_opt": 0,
+      "compiler": "/workspace/os-strict/7081-sdk/O0/imre",
+      "compiled_stdlib_sha256": "b413663d331938ba7d43165547cfcadca790c5a154071dd3660e845cefd45f70",
+      "compiler_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+      "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+      "O0_providers_sha256": "c73b8caa7f1b2278cd7e5107bba7d8efd11a06373d3bb3e73ef209ea225415b3",
+      "O3_providers_sha256": "8da0380bf0a367948bc5c6254481b5ca07772659e56eb24c977ac294318912cd",
+      "sdk_files_sha256": "2745fdc5beaf5f3ca8fc0a633f2b39da0cd4c8dc6a1baeea7e9acf5b8c5468bd",
+      "fixture_count": 654,
+      "stager_sha256": "ca3b2b8f9494f822ab7e1af506b7bd7d437c1529a0d4562657a5194b90ded28c",
+      "verified_staging_root": "/workspace/os-strict/7081-sdk/stage/Lib",
+      "external_tools_archive": "ae7e1a216200ae14942b78b0b8f15618fa03b30e5e9720dc8784aa42ff9e2c6c",
+      "source_git_status": ""
+    },
+    "O3": {
+      "source": "4f0c9a277620c5364204ad2544770389f8d31f67",
+      "tree": "af6b55c8e99f99518c30e0c8f56313d0252dbdca",
+      "default_native_opt": 3,
+      "compiler": "/workspace/os-strict/7081-sdk/O3/imre",
+      "compiled_stdlib_sha256": "b413663d331938ba7d43165547cfcadca790c5a154071dd3660e845cefd45f70",
+      "compiler_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+      "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+      "O0_providers_sha256": "8260eead3b9ec8aeab1abf8c30e11078c4cd66a1ca22c6405cab2cded54605a3",
+      "O3_providers_sha256": "f135114b4ddfc287d76d2dde32189c155719bdcee90f150c092f36b193f33a83",
+      "sdk_files_sha256": "eec8b213e8d4bd16a42314f723472917ce1f079e3e868f46ab5042f386682e26",
+      "fixture_count": 654,
+      "stager_sha256": "ca3b2b8f9494f822ab7e1af506b7bd7d437c1529a0d4562657a5194b90ded28c",
+      "verified_staging_root": "/workspace/os-strict/7081-sdk/stage/Lib",
+      "external_tools_archive": "ae7e1a216200ae14942b78b0b8f15618fa03b30e5e9720dc8784aa42ff9e2c6c",
+      "source_git_status": ""
+    }
+  },
+  "strict_runs": {
+    "7040": {
+      "stock": {
+        "product": "fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af",
+        "tier": "stock",
+        "runner": [
+          "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7040/stock/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7040/stock/tmp",
+          "PYTHONPATH": "/workspace/os-stage/Lib"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "22931",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "input_files": {
+          "/workspace/os-stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 1.928s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "2f7ecfe716c410ec1323edee4c2d4181e1bfcbb1c33f7e295796ca801d4e4dd0"
+        },
+        "observer_receipt_sha256": "51d3fb05b74487b2cbc40b164b6ebde3931cc227b1d9db68e6ba4f8075d67e30",
+        "fixture_syscalls": [
+          "1794442792.436095 symlink(\"/workspace/os-strict/traces/7040/stock/cwd/@test_22937_tmp\\303\\246\", \"/workspace/os-strict/traces/7040/stock/cwd/@test_22937_tmp\\303\\246can_symlink\") = 0",
+          "1794442792.436413 unlink(\"/workspace/os-strict/traces/7040/stock/cwd/@test_22937_tmp\\303\\246can_symlink\") = 0",
+          "1794442792.445014 openat(AT_FDCWD</workspace/os-strict/traces/7040/stock/cwd>, \"@test_22937_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 4</workspace/os-strict/traces/7040/stock/cwd/@test_22937_tmp\\303\\246>",
+          "1794442792.445244 unlink(\"@test_22937_tmp\\303\\246\") = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 22937,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 22937,
+              "time_ns": 1794442791756269946,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            }
+          },
+          "probe": {
+            "pid": 22945,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 22945,
+              "time_ns": 1794442792451419494,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            }
+          },
+          "isolated": {
+            "pid": 22946,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 22946,
+              "time_ns": 1794442792500937688,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "terminal_pid": 22970,
+            "terminal_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "terminal_syscalls": [
+              "1794442793.457932 exit_group(0)         = ?",
+              "1794442793.458203 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 22970,
+              "time_ns": 1794442793389055590,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "fork": "1794442793.382597 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f2e12a48a50) = 22970",
+            "wait": "1794442793.539901 wait4(22970, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 22970",
+            "outer_wait": "1794442793.639569 wait4(22946, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 22946",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/stock/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 22984,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 22984,
+              "time_ns": 1794442793646940312,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "terminal_pid": 22985,
+            "terminal_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "terminal_syscalls": [
+              "1794442794.254921 exit_group(0)         = ?",
+              "1794442794.255715 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 22985,
+              "time_ns": 1794442794159710141,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "fork": "1794442794.150484 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fbce29f8a50) = 22985",
+            "wait": "1794442794.311846 wait4(22985, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 22985",
+            "outer_wait": "1794442794.376708 wait4(22984, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 22984",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/stock/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        }
+      },
+      "O0": {
+        "product": "fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af",
+        "tier": "O0",
+        "runner": [
+          "/workspace/os-strict/packaging/sdk/imre",
+          "--include-module",
+          "test.test_os",
+          "-B",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7040/O0/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7040/O0/tmp",
+          "PYTHONPATH": "/workspace/os-stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-strict/packaging/sdk/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O0/cache"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "26115",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc",
+        "input_files": {
+          "/workspace/os-stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 34.435s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "043b7d1ab971eef9275327fd8dceb5a538fcad16183e12b13260b2647c0b090f"
+        },
+        "observer_receipt_sha256": "db06d73b249dfc706654e2ceaa05fd9146045b713a706921f666f5240b65a0aa",
+        "fixture_syscalls": [
+          "1794443418.661092 symlinkat(\"/workspace/os-strict/traces/7040/O0/cwd/@test_26121_tmp\\303\\246\", AT_FDCWD</workspace/os-strict/traces/7040/O0/cwd>, \"/workspace/os-strict/traces/7040/O0/cwd/@test_26121_tmp\\303\\246can_symlink\") = 0",
+          "1794443418.661314 unlinkat(AT_FDCWD</workspace/os-strict/traces/7040/O0/cwd>, \"/workspace/os-strict/traces/7040/O0/cwd/@test_26121_tmp\\303\\246can_symlink\", 0) = 0",
+          "1794443418.687522 openat(AT_FDCWD</workspace/os-strict/traces/7040/O0/cwd>, \"@test_26121_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 3</workspace/os-strict/traces/7040/O0/cwd/@test_26121_tmp\\303\\246>",
+          "1794443418.687750 unlinkat(AT_FDCWD</workspace/os-strict/traces/7040/O0/cwd>, \"@test_26121_tmp\\303\\246\", 0) = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 26121,
+            "launcher_path": "/workspace/os-strict/packaging/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/packaging/sdk/imre",
+              "--include-module",
+              "test.test_os",
+              "-B",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc",
+            "executed_path": "/workspace/os-strict/traces/7040/O0/tmp/.tmpkVTm5f/.imre-exec-fd-4",
+            "executed_argv": [
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "852405b6e9edfc633ad97eb22f4609bc3439b5a2e90eaaaa86384ca62496b0bb",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 26121,
+              "time_ns": 1794443379236842642,
+              "proc_exe": "/workspace/os-strict/packaging/sdk/imre",
+              "opened_fd_target": "/workspace/os-strict/packaging/sdk/imre",
+              "device": 27,
+              "inode": 926011,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-strict/packaging/sdk/imre",
+                "--include-module",
+                "test.test_os",
+                "-B",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc"
+            },
+            "clang": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-0.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-1.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-2.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-3.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-4.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-5.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-6.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-7.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-8.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-9.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-10.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-11.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-12.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-13.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpaosuRB/unit-14.o",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/packaging/sdk/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpkVTm5f/program"
+            ],
+            "lld": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "3c892d291103ce0c55921d2f2b593a7118fce2e13640e41c5f04147dd928cf5b",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+          },
+          "probe": {
+            "pid": 26293,
+            "launcher_path": "/workspace/os-strict/packaging/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/packaging/sdk/imre",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc",
+            "executed_path": "/workspace/os-strict/traces/7040/O0/tmp/.tmpZnhe8c/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "da25d05a00cfcf05e401ac38135039bc75c4bdae14c3a9bd3c2c3d737aa3740a",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 26293,
+              "time_ns": 1794443418791899353,
+              "proc_exe": "/workspace/os-strict/packaging/sdk/imre",
+              "opened_fd_target": "/workspace/os-strict/packaging/sdk/imre",
+              "device": 27,
+              "inode": 926011,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-strict/packaging/sdk/imre",
+                "-E",
+                "-c",
+                "import sys; sys.exit(0)"
+              ],
+              "elf_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc"
+            },
+            "clang": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-RUmFgo/unit-0.o",
+              "/workspace/os-strict/packaging/sdk/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7040/O0/cache/v1/compile-RUmFgo/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-RUmFgo/program"
+            ],
+            "lld": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": null,
+            "provider_sha256": null,
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+          },
+          "isolated": {
+            "pid": 26307,
+            "launcher_path": "/workspace/os-strict/packaging/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/packaging/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc",
+            "executed_path": "/workspace/os-strict/traces/7040/O0/tmp/.tmpbRZg55/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "b42a007146fc98feb0d54712c4e8548badac00572f98d153e67f4966bcbf4d35",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 26307,
+              "time_ns": 1794443421563012974,
+              "proc_exe": "/workspace/os-strict/packaging/sdk/imre",
+              "opened_fd_target": "/workspace/os-strict/packaging/sdk/imre",
+              "device": 27,
+              "inode": 926011,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-strict/packaging/sdk/imre",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc"
+            },
+            "clang": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-0.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-1.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-2.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-3.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-4.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-5.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-6.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-7.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-8.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-9.o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/unit-10.o",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/packaging/sdk/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O0/cache/v1/compile-5p87al/program"
+            ],
+            "lld": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "3c892d291103ce0c55921d2f2b593a7118fce2e13640e41c5f04147dd928cf5b",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e",
+            "terminal_pid": 26440,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443437.917411 exit_group(0)         = ?",
+              "1794443437.918342 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 26440,
+              "time_ns": 1794443437878522402,
+              "proc_exe": "/workspace/os-strict/traces/7040/O0/tmp/.tmpbRZg55/.imre-exec-fd-5 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7040/O0/tmp/.tmpbRZg55/.imre-exec-fd-5 (deleted)",
+              "device": 27,
+              "inode": 926289,
+              "bytes": 94520104,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "b42a007146fc98feb0d54712c4e8548badac00572f98d153e67f4966bcbf4d35"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7040/O0/tmp/.tmpbRZg55/.imre-exec-fd-5",
+            "fork": "1794443437.872643 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7feb37f928d0) = 26440",
+            "wait": "1794443437.953728 wait4(26440, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 26440",
+            "outer_wait": "1794443438.049068 wait4(26307, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 26307",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/O0/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/packaging/sdk/imre",
+              "IMREFLAGS": "--opt-level 0",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O0/cache",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 26441,
+            "launcher_path": "/workspace/os-strict/packaging/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/packaging/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc",
+            "executed_path": "/workspace/os-strict/traces/7040/O0/tmp/.tmphBW2yQ/.imre-exec-fd-4",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "997b6f76b955ca01523fdd0c8f730300e11dd44baf6aa2043ebfc4417fa97423",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 26441,
+              "time_ns": 1794443438151466752,
+              "proc_exe": "/workspace/os-strict/packaging/sdk/imre",
+              "opened_fd_target": "/workspace/os-strict/packaging/sdk/imre",
+              "device": 27,
+              "inode": 926011,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-strict/packaging/sdk/imre",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "ecd7b65891bbda3e93bf884d7cf568e479eb118f79978c3bef995b3f01494bcc"
+            },
+            "clang": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-0.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-1.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-2.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-3.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-4.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-5.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-6.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-7.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-8.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-9.o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmpPRw7gF/unit-10.o",
+              "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/packaging/sdk/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O0/tmp/.tmphBW2yQ/program"
+            ],
+            "lld": "/workspace/os-strict/packaging/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/packaging/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "3c892d291103ce0c55921d2f2b593a7118fce2e13640e41c5f04147dd928cf5b",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e",
+            "terminal_pid": 26510,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443453.075952 exit_group(0)         = ?",
+              "1794443453.077024 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 26510,
+              "time_ns": 1794443453014008840,
+              "proc_exe": "/workspace/os-strict/traces/7040/O0/tmp/.tmphBW2yQ/.imre-exec-fd-4 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7040/O0/tmp/.tmphBW2yQ/.imre-exec-fd-4 (deleted)",
+              "device": 27,
+              "inode": 926317,
+              "bytes": 94520040,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "997b6f76b955ca01523fdd0c8f730300e11dd44baf6aa2043ebfc4417fa97423"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7040/O0/tmp/.tmphBW2yQ/.imre-exec-fd-4",
+            "fork": "1794443453.010196 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f76131828d0) = 26510",
+            "wait": "1794443453.082631 wait4(26510, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 26510",
+            "outer_wait": "1794443453.119428 wait4(26441, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 26441",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/O0/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/packaging/sdk/imre",
+              "IMREFLAGS": "--opt-level 0",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O0/cache",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        },
+        "linked_object_audit": {
+          "linked_unit_count": 38,
+          "rebuilt_count": 23,
+          "same_lane_cache_reuse_count": 15
+        }
+      },
+      "O3": {
+        "product": "fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af",
+        "tier": "O3",
+        "runner": [
+          "/workspace/os-fork-prefix/sdk/imre",
+          "--include-module",
+          "test.test_os",
+          "-B",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7040/O3/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7040/O3/tmp",
+          "PYTHONPATH": "/workspace/os-stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-fork-prefix/sdk/imre",
+          "IMREFLAGS": "--opt-level 3",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O3/cache"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "22938",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+        "input_files": {
+          "/workspace/os-stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 99.531s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "6bae18152514d414da0f1e4b39d568e6002af624c9a2ad7548d4607ee2c3ae0c"
+        },
+        "observer_receipt_sha256": "d7adba9420f5aea7197c4618c0f2404d9b000336b176239d62cd8f3fc68e0517",
+        "fixture_syscalls": [
+          "1794442884.630955 symlinkat(\"/workspace/os-strict/traces/7040/O3/cwd/@test_22944_tmp\\303\\246\", AT_FDCWD</workspace/os-strict/traces/7040/O3/cwd>, \"/workspace/os-strict/traces/7040/O3/cwd/@test_22944_tmp\\303\\246can_symlink\") = 0",
+          "1794442884.631142 unlinkat(AT_FDCWD</workspace/os-strict/traces/7040/O3/cwd>, \"/workspace/os-strict/traces/7040/O3/cwd/@test_22944_tmp\\303\\246can_symlink\", 0) = 0",
+          "1794442884.727788 openat(AT_FDCWD</workspace/os-strict/traces/7040/O3/cwd>, \"@test_22944_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 3</workspace/os-strict/traces/7040/O3/cwd/@test_22944_tmp\\303\\246>",
+          "1794442884.728094 unlinkat(AT_FDCWD</workspace/os-strict/traces/7040/O3/cwd>, \"@test_22944_tmp\\303\\246\", 0) = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 22944,
+            "launcher_path": "/workspace/os-fork-prefix/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "--include-module",
+              "test.test_os",
+              "-B",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+            "executed_path": "/workspace/os-strict/traces/7040/O3/tmp/.tmpbAm4QN/.imre-exec-fd-4",
+            "executed_argv": [
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "f05e3b751d373da77b34ca1e3d0f7327ca767effca3eb04226960961d305c7de",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 22944,
+              "time_ns": 1794442792422790067,
+              "proc_exe": "/workspace/os-fork-prefix/sdk/imre",
+              "opened_fd_target": "/workspace/os-fork-prefix/sdk/imre",
+              "device": 27,
+              "inode": 656156,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-fork-prefix/sdk/imre",
+                "--include-module",
+                "test.test_os",
+                "-B",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14"
+            },
+            "clang": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-0.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-1.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-2.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-3.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-4.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-5.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-6.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-7.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-8.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-9.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-10.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-11.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-12.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-13.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpb10N12/unit-14.o",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpbAm4QN/program"
+            ],
+            "lld": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "1fde854204f55e10f695fd747c1d093b453e789c1860512d59e0acfe510644ee",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+          },
+          "probe": {
+            "pid": 23791,
+            "launcher_path": "/workspace/os-fork-prefix/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+            "executed_path": "/workspace/os-strict/traces/7040/O3/tmp/.tmp5NF4oH/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "ac24423e9bb59a3bc5103525f9500122975175a38882b5d58dc99fa9d8e04e43",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 23791,
+              "time_ns": 1794442885018083128,
+              "proc_exe": "/workspace/os-fork-prefix/sdk/imre",
+              "opened_fd_target": "/workspace/os-fork-prefix/sdk/imre",
+              "device": 27,
+              "inode": 656156,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-fork-prefix/sdk/imre",
+                "-E",
+                "-c",
+                "import sys; sys.exit(0)"
+              ],
+              "elf_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14"
+            },
+            "clang": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-0aILl8/unit-0.o",
+              "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7040/O3/cache/v1/compile-0aILl8/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-0aILl8/program"
+            ],
+            "lld": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": null,
+            "provider_sha256": null,
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+          },
+          "isolated": {
+            "pid": 23820,
+            "launcher_path": "/workspace/os-fork-prefix/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+            "executed_path": "/workspace/os-strict/traces/7040/O3/tmp/.tmpwbt6B7/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "7f0e728d25590edc71ea49736a87beeedead30656eba90959973d193e9b1adc1",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 23820,
+              "time_ns": 1794442888520023780,
+              "proc_exe": "/workspace/os-fork-prefix/sdk/imre",
+              "opened_fd_target": "/workspace/os-fork-prefix/sdk/imre",
+              "device": 27,
+              "inode": 656156,
+              "bytes": 63900840,
+              "proc_cmdline": [],
+              "elf_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14"
+            },
+            "clang": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-0.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-1.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-2.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-3.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-4.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-5.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-6.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-7.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-8.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-9.o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/unit-10.o",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O3/cache/v1/compile-yoAfWb/program"
+            ],
+            "lld": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "1fde854204f55e10f695fd747c1d093b453e789c1860512d59e0acfe510644ee",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e",
+            "terminal_pid": 24369,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794442954.434259 exit_group(0)         = ?",
+              "1794442954.435018 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 24369,
+              "time_ns": 1794442954286551501,
+              "proc_exe": "/workspace/os-strict/traces/7040/O3/tmp/.tmpwbt6B7/.imre-exec-fd-5 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7040/O3/tmp/.tmpwbt6B7/.imre-exec-fd-5 (deleted)",
+              "device": 27,
+              "inode": 926011,
+              "bytes": 72221160,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "7f0e728d25590edc71ea49736a87beeedead30656eba90959973d193e9b1adc1"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7040/O3/tmp/.tmpwbt6B7/.imre-exec-fd-5",
+            "fork": "1794442954.268027 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f702cdae8d0) = 24369",
+            "wait": "1794442954.441943 wait4(24369, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 24369",
+            "outer_wait": "1794442954.557557 wait4(23820, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 23820",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/O3/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-fork-prefix/sdk/imre",
+              "IMREFLAGS": "--opt-level 3",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O3/cache",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 24370,
+            "launcher_path": "/workspace/os-fork-prefix/sdk/imre",
+            "launcher_argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+            "executed_path": "/workspace/os-strict/traces/7040/O3/tmp/.tmpS4Dak7/.imre-exec-fd-4",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "42c53367f3657f660fa965904ba101d146dfd5202d54e260032497721096919e",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 24370,
+              "time_ns": 1794442955734867446,
+              "proc_exe": "/workspace/os-fork-prefix/sdk/imre",
+              "opened_fd_target": "/workspace/os-fork-prefix/sdk/imre",
+              "device": 27,
+              "inode": 656156,
+              "bytes": 63900840,
+              "proc_cmdline": [
+                "/workspace/os-fork-prefix/sdk/imre",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14"
+            },
+            "clang": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "-L",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+              "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-0.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-1.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-2.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-3.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-4.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-5.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-6.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-7.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-8.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-9.o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpmWVMAU/unit-10.o",
+              "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7040/O3/tmp/.tmpS4Dak7/program"
+            ],
+            "lld": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "1fde854204f55e10f695fd747c1d093b453e789c1860512d59e0acfe510644ee",
+            "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e",
+            "terminal_pid": 24543,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794442983.560560 exit_group(0)         = ?",
+              "1794442983.572318 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 24543,
+              "time_ns": 1794442983379074774,
+              "proc_exe": "/workspace/os-strict/traces/7040/O3/tmp/.tmpS4Dak7/.imre-exec-fd-4 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7040/O3/tmp/.tmpS4Dak7/.imre-exec-fd-4 (deleted)",
+              "device": 27,
+              "inode": 926046,
+              "bytes": 72221096,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "42c53367f3657f660fa965904ba101d146dfd5202d54e260032497721096919e"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7040/O3/tmp/.tmpS4Dak7/.imre-exec-fd-4",
+            "fork": "1794442983.356354 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f21cf5968d0) = 24543",
+            "wait": "1794442983.717974 wait4(24543, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 24543",
+            "outer_wait": "1794442984.011522 wait4(24370, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 24370",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7040/O3/tmp",
+              "PYTHONPATH": "/workspace/os-stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-fork-prefix/sdk/imre",
+              "IMREFLAGS": "--opt-level 3",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7040/O3/cache",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        },
+        "linked_object_audit": {
+          "linked_unit_count": 38,
+          "rebuilt_count": 23,
+          "same_lane_cache_reuse_count": 15
+        }
+      }
+    },
+    "7081": {
+      "stock": {
+        "product": "4f0c9a277620c5364204ad2544770389f8d31f67",
+        "tier": "stock",
+        "runner": [
+          "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7081/stock/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7081/stock/tmp",
+          "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "24108",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "input_files": {
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 4.622s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "2f3960ee3cc1b656bea23a311bfd7102f7160a90daf1b92e5b8e3328325ffd2e"
+        },
+        "observer_receipt_sha256": "20db166a4c929ad123cbf237b10ead88fa5b805ff774b45b246eb329e5f2a803",
+        "fixture_syscalls": [
+          "1794442915.342209 symlink(\"/workspace/os-strict/traces/7081/stock/cwd/@test_24119_tmp\\303\\246\", \"/workspace/os-strict/traces/7081/stock/cwd/@test_24119_tmp\\303\\246can_symlink\") = 0",
+          "1794442915.342312 unlink(\"/workspace/os-strict/traces/7081/stock/cwd/@test_24119_tmp\\303\\246can_symlink\") = 0",
+          "1794442915.343429 openat(AT_FDCWD</workspace/os-strict/traces/7081/stock/cwd>, \"@test_24119_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 4</workspace/os-strict/traces/7081/stock/cwd/@test_24119_tmp\\303\\246>",
+          "1794442915.343641 unlink(\"@test_24119_tmp\\303\\246\") = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 24119,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 24119,
+              "time_ns": 1794442914139149090,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            }
+          },
+          "probe": {
+            "pid": 24142,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 24142,
+              "time_ns": 1794442915352116152,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            }
+          },
+          "isolated": {
+            "pid": 24143,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 24143,
+              "time_ns": 1794442915448147395,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "terminal_pid": 24146,
+            "terminal_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "terminal_syscalls": [
+              "1794442916.038169 exit_group(0)         = ?",
+              "1794442916.038734 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 24146,
+              "time_ns": 1794442915924055241,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "fork": "1794442915.749276 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f59c2cbaa50) = 24146",
+            "wait": "1794442916.047049 wait4(24146, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 24146",
+            "outer_wait": "1794442916.140287 wait4(24143, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 24143",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/stock/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 24152,
+            "launcher_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "launcher_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "executed_path": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "executed_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+            "effective_llvm_opt": null,
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 24152,
+              "time_ns": 1794442916150721142,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "terminal_pid": 24191,
+            "terminal_argv": [
+              "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "terminal_syscalls": [
+              "1794442919.561125 exit_group(0)         = ?",
+              "1794442919.564919 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 24191,
+              "time_ns": 1794442919284988198,
+              "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "opened_fd_target": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+              "device": 27,
+              "inode": 525104,
+              "bytes": 32359056,
+              "proc_cmdline": [
+                "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+            },
+            "proc_exe": "/workspace/os-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+            "fork": "1794442919.275369 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7fb93f378a50) = 24191",
+            "wait": "1794442919.629480 wait4(24191, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 24191",
+            "outer_wait": "1794442919.954821 wait4(24152, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 24152",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/stock/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        }
+      },
+      "O0": {
+        "product": "4f0c9a277620c5364204ad2544770389f8d31f67",
+        "tier": "O0",
+        "runner": [
+          "/workspace/os-strict/7081-sdk/O0/imre",
+          "--include-module",
+          "test.test_os",
+          "-B",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7081/O0/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7081/O0/tmp",
+          "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O0/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O0/cache"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "27599",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+        "input_files": {
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 44.115s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "4e20678d96d090db7dc1ca2d98664e6699b26ff1ffe89b499b71b9ca247fcab2"
+        },
+        "observer_receipt_sha256": "aff0c3eb3f14202868ef53c634d98669170af7c074e283b71fdd1b6103d3ac1c",
+        "fixture_syscalls": [
+          "1794443819.438849 symlinkat(\"/workspace/os-strict/traces/7081/O0/cwd/@test_27617_tmp\\303\\246\", AT_FDCWD</workspace/os-strict/traces/7081/O0/cwd>, \"/workspace/os-strict/traces/7081/O0/cwd/@test_27617_tmp\\303\\246can_symlink\") = 0",
+          "1794443819.448682 unlinkat(AT_FDCWD</workspace/os-strict/traces/7081/O0/cwd>, \"/workspace/os-strict/traces/7081/O0/cwd/@test_27617_tmp\\303\\246can_symlink\", 0) = 0",
+          "1794443819.955541 openat(AT_FDCWD</workspace/os-strict/traces/7081/O0/cwd>, \"@test_27617_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 3</workspace/os-strict/traces/7081/O0/cwd/@test_27617_tmp\\303\\246>",
+          "1794443819.956456 unlinkat(AT_FDCWD</workspace/os-strict/traces/7081/O0/cwd>, \"@test_27617_tmp\\303\\246\", 0) = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 27617,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O0/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre",
+              "--include-module",
+              "test.test_os",
+              "-B",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+            "executed_path": "/workspace/os-strict/traces/7081/O0/tmp/.tmpCbaiIo/.imre-exec-fd-4",
+            "executed_argv": [
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "3569cd7b49b61187338452c16c2b044772462d41902875da1d54a47f575362a4",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 27617,
+              "time_ns": 1794443735332005096,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O0/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O0/imre",
+              "device": 27,
+              "inode": 1048603,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O0/imre",
+                "--include-module",
+                "test.test_os",
+                "-B",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-0.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-1.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-2.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-3.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-4.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-5.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-6.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-7.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-8.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-9.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-10.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-11.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-12.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-13.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmp7mCSOJ/unit-14.o",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/7081-sdk/O0/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpCbaiIo/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "c73b8caa7f1b2278cd7e5107bba7d8efd11a06373d3bb3e73ef209ea225415b3",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba"
+          },
+          "probe": {
+            "pid": 28101,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O0/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+            "executed_path": "/workspace/os-strict/traces/7081/O0/tmp/.tmpSAPHoJ/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "abc482e486da5b75c7cd620b2492e06de89cab4529974317e08ec885f490481f",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 28101,
+              "time_ns": 1794443821171063596,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O0/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O0/imre",
+              "device": 27,
+              "inode": 1048603,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O0/imre",
+                "-E",
+                "-c",
+                "import sys; sys.exit(0)"
+              ],
+              "elf_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-gDzAUn/unit-0.o",
+              "/workspace/os-strict/7081-sdk/O0/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7081/O0/cache/v1/compile-gDzAUn/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-gDzAUn/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": null,
+            "provider_sha256": null,
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba"
+          },
+          "isolated": {
+            "pid": 28136,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O0/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+            "executed_path": "/workspace/os-strict/traces/7081/O0/tmp/.tmpybfAPx/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "1b16e3d58bdf5bd83e8991a0134e2ce38b77e93f8516cfd42faf730521155530",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 28136,
+              "time_ns": 1794443829464135714,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O0/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O0/imre",
+              "device": 27,
+              "inode": 1048603,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O0/imre",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-0.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-1.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-2.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-3.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-4.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-5.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-6.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-7.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-8.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-9.o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/unit-10.o",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/7081-sdk/O0/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O0/cache/v1/compile-ILMDYS/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "c73b8caa7f1b2278cd7e5107bba7d8efd11a06373d3bb3e73ef209ea225415b3",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+            "terminal_pid": 28245,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443848.970893 exit_group(0)         = ?",
+              "1794443848.971456 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 28245,
+              "time_ns": 1794443848936091744,
+              "proc_exe": "/workspace/os-strict/traces/7081/O0/tmp/.tmpybfAPx/.imre-exec-fd-5 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7081/O0/tmp/.tmpybfAPx/.imre-exec-fd-5 (deleted)",
+              "device": 27,
+              "inode": 1051442,
+              "bytes": 94515936,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "1b16e3d58bdf5bd83e8991a0134e2ce38b77e93f8516cfd42faf730521155530"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7081/O0/tmp/.tmpybfAPx/.imre-exec-fd-5",
+            "fork": "1794443848.924354 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f1a714018d0) = 28245",
+            "wait": "1794443849.016070 wait4(28245, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 28245",
+            "outer_wait": "1794443849.069594 wait4(28136, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 28136",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/O0/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O0/imre",
+              "IMREFLAGS": "--opt-level 0",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O0/cache",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 28246,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O0/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4",
+            "executed_path": "/workspace/os-strict/traces/7081/O0/tmp/.tmpaNtBnM/.imre-exec-fd-4",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "e120109e4b2bc01190ff5998690d6536306903d912fca58f8f5b9337d8b8efcb",
+            "effective_llvm_opt": "O0",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 28246,
+              "time_ns": 1794443849611711583,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O0/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O0/imre",
+              "device": 27,
+              "inode": 1048603,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O0/imre",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "fad1fa56483cb41f316542044931868499686acc9b6bcbf7b910f6ec2e136ef4"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O0"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+              "-O0",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-0.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-1.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-2.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-3.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-4.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-5.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-6.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-7.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-8.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-9.o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpptfn9e/unit-10.o",
+              "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+              "/workspace/os-strict/7081-sdk/O0/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O0/tmp/.tmpaNtBnM/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O0/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+            "provider_sha256": "c73b8caa7f1b2278cd7e5107bba7d8efd11a06373d3bb3e73ef209ea225415b3",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+            "terminal_pid": 28347,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443864.842346 exit_group(0)         = ?",
+              "1794443864.843729 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 28347,
+              "time_ns": 1794443864758022050,
+              "proc_exe": "/workspace/os-strict/traces/7081/O0/tmp/.tmpaNtBnM/.imre-exec-fd-4 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7081/O0/tmp/.tmpaNtBnM/.imre-exec-fd-4 (deleted)",
+              "device": 27,
+              "inode": 1051480,
+              "bytes": 94516000,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "e120109e4b2bc01190ff5998690d6536306903d912fca58f8f5b9337d8b8efcb"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7081/O0/tmp/.tmpaNtBnM/.imre-exec-fd-4",
+            "fork": "1794443864.753099 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f4d9e9bc8d0) = 28347",
+            "wait": "1794443864.915966 wait4(28347, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 28347",
+            "outer_wait": "1794443865.018660 wait4(28246, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 28246",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/O0/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O0/imre",
+              "IMREFLAGS": "--opt-level 0",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O0/cache",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        },
+        "linked_object_audit": {
+          "linked_unit_count": 38,
+          "rebuilt_count": 23,
+          "same_lane_cache_reuse_count": 15
+        }
+      },
+      "O3": {
+        "product": "4f0c9a277620c5364204ad2544770389f8d31f67",
+        "tier": "O3",
+        "runner": [
+          "/workspace/os-strict/7081-sdk/O3/imre",
+          "--include-module",
+          "test.test_os",
+          "-B",
+          "/workspace/os-evidence/named_method.py",
+          "test.test_os.ForkTests.test_fork"
+        ],
+        "cwd": "/workspace/os-strict/traces/7081/O3/cwd",
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-strict/traces/7081/O3/tmp",
+          "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O3/imre",
+          "IMREFLAGS": "--opt-level 3",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O3/cache"
+        },
+        "uid": 1000,
+        "euid": 1000,
+        "flags": {
+          "NSpid": "28878",
+          "CapEff": "0000000000000000",
+          "NoNewPrivs": "0",
+          "Seccomp": "0"
+        },
+        "runner_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+        "launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+        "input_files": {
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/test_os.py": {
+            "sha256": "c9be9407fb40107940a25b6d781fd3b07c92338369959e15e9e12d1def1afc9c",
+            "git_blob": "555c85f4857c2d7e69dda2f390847c7f02123cb5"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/__init__.py": {
+            "sha256": "ab77f9f5d2a4cd07f21550980fc84a224553a8d7c7ffdda409ebd7f3ee1941c4",
+            "git_blob": "6635ec3474e12ec6a2f684a1a93b6ec08df49a37"
+          },
+          "/workspace/os-strict/7081-sdk/stage/Lib/test/support/script_helper.py": {
+            "sha256": "d94c1502c2b7a3f1e57deb1c8913e1890049c73979261f205fc2f7e96fc03677",
+            "git_blob": "46ce950433ddf64726630e2e6ef679d8eefab116"
+          },
+          "/workspace/os-evidence/named_method.py": {
+            "sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "git_blob": "d682dc407bbac68ae4f65fdc9f7edda47601111b"
+          }
+        },
+        "stderr": [
+          "START test.test_os.ForkTests.test_fork",
+          "PASS test.test_os.ForkTests.test_fork",
+          ".STOP test.test_os.ForkTests.test_fork",
+          "",
+          "----------------------------------------------------------------------",
+          "Ran 1 test in 13.198s",
+          "",
+          "OK"
+        ],
+        "stream_sha256": {
+          "stdin": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr": "aa751dd58f4e4f364479002f09deeab4c7839d407310f4833949f2a249e2f2a4"
+        },
+        "observer_receipt_sha256": "3b92847c3a955c7eb79c358367ea6e4e891195a5d3c109757a27c88561b2dc3c",
+        "fixture_syscalls": [
+          "1794443971.922619 symlinkat(\"/workspace/os-strict/traces/7081/O3/cwd/@test_28884_tmp\\303\\246\", AT_FDCWD</workspace/os-strict/traces/7081/O3/cwd>, \"/workspace/os-strict/traces/7081/O3/cwd/@test_28884_tmp\\303\\246can_symlink\") = 0",
+          "1794443971.923091 unlinkat(AT_FDCWD</workspace/os-strict/traces/7081/O3/cwd>, \"/workspace/os-strict/traces/7081/O3/cwd/@test_28884_tmp\\303\\246can_symlink\", 0) = 0",
+          "1794443971.944752 openat(AT_FDCWD</workspace/os-strict/traces/7081/O3/cwd>, \"@test_28884_tmp\\303\\246\", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 3</workspace/os-strict/traces/7081/O3/cwd/@test_28884_tmp\\303\\246>",
+          "1794443971.945271 unlinkat(AT_FDCWD</workspace/os-strict/traces/7081/O3/cwd>, \"@test_28884_tmp\\303\\246\", 0) = 0"
+        ],
+        "final_test_cwd": [],
+        "processes": {
+          "outer": {
+            "pid": 28884,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O3/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre",
+              "--include-module",
+              "test.test_os",
+              "-B",
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+            "executed_path": "/workspace/os-strict/traces/7081/O3/tmp/.tmprOLxN9/.imre-exec-fd-4",
+            "executed_argv": [
+              "/workspace/os-evidence/named_method.py",
+              "test.test_os.ForkTests.test_fork"
+            ],
+            "elf_sha256": "c582615760e18d4c3b2818879716d948bc2b05674723d0e2282c6c51fa42dc00",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "2270b045b60657be305b4c01b2615c67956d8990ca9a1b0b785b71fb89da0793",
+            "launcher_live_elf": {
+              "pid": 28884,
+              "time_ns": 1794443952393098190,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O3/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O3/imre",
+              "device": 27,
+              "inode": 1049852,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O3/imre",
+                "--include-module",
+                "test.test_os",
+                "-B",
+                "/workspace/os-evidence/named_method.py",
+                "test.test_os.ForkTests.test_fork"
+              ],
+              "elf_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-0.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-1.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-2.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-3.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-4.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-5.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-6.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-7.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-8.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-9.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-10.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-11.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-12.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-13.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpSH8cAt/unit-14.o",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-strict/7081-sdk/O3/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmprOLxN9/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "f135114b4ddfc287d76d2dde32189c155719bdcee90f150c092f36b193f33a83",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba"
+          },
+          "probe": {
+            "pid": 28993,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O3/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre",
+              "-E",
+              "-c",
+              "import sys; sys.exit(0)"
+            ],
+            "launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+            "executed_path": "/workspace/os-strict/traces/7081/O3/tmp/.tmpJ0jzm9/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "614f0c6fcf610ad8c3e653310f00f67ed416e80ea323354513c853f4304a9424",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "695930da890fb8cceb16dee0fa9f4e5de9309d8c4366900fc9a89d42ca1198df",
+            "launcher_live_elf": {
+              "pid": 28993,
+              "time_ns": 1794443972009921092,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O3/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O3/imre",
+              "device": 27,
+              "inode": 1049852,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O3/imre",
+                "-E",
+                "-c",
+                "import sys; sys.exit(0)"
+              ],
+              "elf_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-1ZmOH8/unit-0.o",
+              "/workspace/os-strict/7081-sdk/O3/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7081/O3/cache/v1/compile-1ZmOH8/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-1ZmOH8/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": null,
+            "provider_sha256": null,
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba"
+          },
+          "isolated": {
+            "pid": 29006,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O3/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+            "executed_path": "/workspace/os-strict/traces/7081/O3/tmp/.tmp28tdh5/.imre-exec-fd-5",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "a643a1c13870ba364d957d69f3a676d89b80e203737d4d57ed8e1b137ea7b057",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 29006,
+              "time_ns": 1794443972814442381,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O3/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O3/imre",
+              "device": 27,
+              "inode": 1049852,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O3/imre",
+                "-X",
+                "faulthandler",
+                "-I",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-0.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-1.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-2.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-3.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-4.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-5.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-6.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-7.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-8.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-9.o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/unit-10.o",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-strict/7081-sdk/O3/libimre_runtime.a",
+              "-Xlinker",
+              "--dependency-file=/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/link.d",
+              "-Wl,--trace",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O3/cache/v1/compile-Co3CEs/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "f135114b4ddfc287d76d2dde32189c155719bdcee90f150c092f36b193f33a83",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+            "terminal_pid": 29040,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443980.712144 exit_group(0)         = ?",
+              "1794443980.712594 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 29040,
+              "time_ns": 1794443980696369330,
+              "proc_exe": "/workspace/os-strict/traces/7081/O3/tmp/.tmp28tdh5/.imre-exec-fd-5 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7081/O3/tmp/.tmp28tdh5/.imre-exec-fd-5 (deleted)",
+              "device": 27,
+              "inode": 1051642,
+              "bytes": 72215200,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "a643a1c13870ba364d957d69f3a676d89b80e203737d4d57ed8e1b137ea7b057"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7081/O3/tmp/.tmp28tdh5/.imre-exec-fd-5",
+            "fork": "1794443980.692742 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f3a167e48d0) = 29040",
+            "wait": "1794443980.724677 wait4(29040, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 29040",
+            "outer_wait": "1794443980.740586 wait4(29006, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 29006",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/O3/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O3/imre",
+              "IMREFLAGS": "--opt-level 3",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O3/cache",
+              "TERM": ""
+            }
+          },
+          "malloc_debug": {
+            "pid": 29041,
+            "launcher_path": "/workspace/os-strict/7081-sdk/O3/imre",
+            "launcher_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "launcher_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863",
+            "executed_path": "/workspace/os-strict/traces/7081/O3/tmp/.tmpAtxlPD/.imre-exec-fd-4",
+            "executed_argv": [
+              "-c"
+            ],
+            "elf_sha256": "ab8d359516d25bb2c0beb4605f16b13793befc9493856c6b59fad61900b6c2db",
+            "effective_llvm_opt": "O3",
+            "source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+            "launcher_live_elf": {
+              "pid": 29041,
+              "time_ns": 1794443980863065929,
+              "proc_exe": "/workspace/os-strict/7081-sdk/O3/imre",
+              "opened_fd_target": "/workspace/os-strict/7081-sdk/O3/imre",
+              "device": 27,
+              "inode": 1049852,
+              "bytes": 63862184,
+              "proc_cmdline": [
+                "/workspace/os-strict/7081-sdk/O3/imre",
+                "-X",
+                "faulthandler",
+                "-c",
+                "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+              ],
+              "elf_sha256": "0946375ae50cdfb8f85c4b53a9687530003c0613c43fa412cba70a64734e4863"
+            },
+            "clang": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+            "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+            "clang_compile_flags": [
+              "-O3"
+            ],
+            "clang_link_argv": [
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/clang",
+              "--no-default-config",
+              "-B",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "-L",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/link",
+              "--ld-path=/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+              "-O3",
+              "-Wno-override-module",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-0.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-1.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-2.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-3.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-4.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-5.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-6.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-7.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-8.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-9.o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpOgUpoa/unit-10.o",
+              "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+              "/workspace/os-strict/7081-sdk/O3/libimre_runtime.a",
+              "-ldl",
+              "-lpthread",
+              "-lm",
+              "-lrt",
+              "-lutil",
+              "-Wl,--gc-sections",
+              "-Wl,-z,relro,-z,now",
+              "-o",
+              "/workspace/os-strict/traces/7081/O3/tmp/.tmpAtxlPD/program"
+            ],
+            "lld": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/bin/ld.lld",
+            "lld_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade",
+            "provider": "/workspace/os-strict/7081-sdk/O3/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+            "provider_sha256": "f135114b4ddfc287d76d2dde32189c155719bdcee90f150c092f36b193f33a83",
+            "runtime_sha256": "6da7a838ee1fe2eb61b16a838345f6397ff4798a254abf472ea4ffae5b883cba",
+            "terminal_pid": 29052,
+            "terminal_argv": [
+              "-c"
+            ],
+            "terminal_syscalls": [
+              "1794443985.120225 exit_group(0)         = ?",
+              "1794443985.121220 +++ exited with 0 +++"
+            ],
+            "terminal_direct_capture": {
+              "pid": 29052,
+              "time_ns": 1794443985098458765,
+              "proc_exe": "/workspace/os-strict/traces/7081/O3/tmp/.tmpAtxlPD/.imre-exec-fd-4 (deleted)",
+              "opened_fd_target": "/workspace/os-strict/traces/7081/O3/tmp/.tmpAtxlPD/.imre-exec-fd-4 (deleted)",
+              "device": 27,
+              "inode": 1051668,
+              "bytes": 72215264,
+              "proc_cmdline": [
+                "-c"
+              ],
+              "elf_sha256": "ab8d359516d25bb2c0beb4605f16b13793befc9493856c6b59fad61900b6c2db"
+            },
+            "proc_exe": "/workspace/os-strict/traces/7081/O3/tmp/.tmpAtxlPD/.imre-exec-fd-4",
+            "fork": "1794443985.096473 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f97c0c0f8d0) = 29052",
+            "wait": "1794443985.128909 wait4(29052, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 29052",
+            "outer_wait": "1794443985.147934 wait4(29041, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 29041",
+            "launcher_environment": {
+              "HOME": "/home/agent",
+              "LANG": "C.UTF-8",
+              "USER": "agent",
+              "LC_CTYPE": "C.UTF-8",
+              "LC_ALL": "C.UTF-8",
+              "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+              "TMPDIR": "/workspace/os-strict/traces/7081/O3/tmp",
+              "PYTHONPATH": "/workspace/os-strict/7081-sdk/stage/Lib",
+              "IMRE_PYTHON": "/workspace/os-strict/7081-sdk/O3/imre",
+              "IMREFLAGS": "--opt-level 3",
+              "PYTHON_COLORS": "0",
+              "NO_COLOR": "1",
+              "PYTHONDONTWRITEBYTECODE": "1",
+              "IMRE_CACHE_DIR": "/workspace/os-strict/traces/7081/O3/cache",
+              "TERM": "",
+              "PYTHONMALLOC": "malloc_debug"
+            }
+          }
+        },
+        "linked_object_audit": {
+          "linked_unit_count": 38,
+          "rebuilt_count": 23,
+          "same_lane_cache_reuse_count": 15
+        }
+      }
+    }
+  },
+  "earlier_7040_mixed_outer_O0": {
+    "credit": 0,
+    "reason": "The SDK compiled the -I helper at its default O3.",
+    "source": "fd31e5b88d8bf60b1eb95b79f1e691f4fb18a8af",
+    "evidence_sha256": "661b6a624110fbe2a418be6911b456e087831f0807c5455731fabc14ca669352",
+    "helpers": [
+      {
+        "parent_tier": "O0",
+        "mode": "isolated",
+        "runner_pid": 19534,
+        "helper_pid": 19620,
+        "terminal_pid": 19702,
+        "helper_execs": [
+          {
+            "path": "/workspace/os-fork-prefix/sdk/imre",
+            "argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-I",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "trace": "O0/syscall.19620",
+            "line": 1,
+            "time": "1794438243.690574"
+          },
+          {
+            "path": "/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/.imre-exec-fd-5",
+            "argv": [
+              "-c"
+            ],
+            "trace": "O0/syscall.19620",
+            "line": 4410,
+            "time": "1794438246.846926"
+          }
+        ],
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-fork-provenance/traces/O0/tmp",
+          "PYTHONPATH": "/workspace/os-stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-fork-prefix/sdk/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TERM": ""
+        },
+        "command_source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+        "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+        "terminal_image_path": "/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/.imre-exec-fd-5",
+        "terminal_argv": [
+          "-c"
+        ],
+        "terminal_exec_count": 0,
+        "terminal_inheritance": "fork copied the helper's current process image and argv",
+        "creation": "1794438247.210182 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f1e2403b8d0) = 19702",
+        "terminal_trace": [
+          "1794438247.228591 exit_group(0)         = ?",
+          "1794438247.228987 +++ exited with 0 +++"
+        ],
+        "wait": "1794438247.242234 wait4(19702, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 19702",
+        "wait_for_helper": "1794438247.261419 wait4(19620, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 19620",
+        "helper_trace_sha256": "f6368690a775f6c986cd6c79b461f0980c02194ee7496a56ed95de68303ca761",
+        "terminal_trace_sha256": "ec198e7370b7684df0a1b3c05413dbad4d482cd6e802a5c4abe2847bd0189b1f",
+        "image_origin": "Imre-linked Linux native executable",
+        "final_image_rename": {
+          "trace": "O0/syscall.19620",
+          "line": 4408,
+          "syscall": "1794438246.844074 rename(\"/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/program\", \"/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/.imre-exec-fd-5\") = 0"
+        },
+        "image_sha256": "7f0e728d25590edc71ea49736a87beeedead30656eba90959973d193e9b1adc1",
+        "image_sha256_basis": "hash of retained content-keyed cache object materialized to program; executed temporary inode not separately hashed",
+        "cache_move": {
+          "trace": "O0/syscall.19620",
+          "line": 1358,
+          "syscall": "1794438246.647273 rename(\"/home/agent/.cache/imre/v1/compile-nzl3d8/program\", \"/home/agent/.cache/imre/v1/c09bcd256efd6c5988758c99953b240612980b2be80e1dfa79d558c7b4d8e514\") = 0"
+        },
+        "cache_executable_content_key_blake3": "c09bcd256efd6c5988758c99953b240612980b2be80e1dfa79d558c7b4d8e514",
+        "cache_object": "/home/agent/.cache/imre/v1/c09bcd256efd6c5988758c99953b240612980b2be80e1dfa79d558c7b4d8e514",
+        "materialized_program": {
+          "trace": "O0/syscall.19620",
+          "line": 674,
+          "syscall": "1794438246.449576 renameat(AT_FDCWD</workspace/os-fork-provenance/traces/O0/cwd>, \"/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/.tmpIeWjC9\", AT_FDCWD</workspace/os-fork-provenance/traces/O0/cwd>, \"/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/program\") = 0"
+        },
+        "temporary_name_unlinked": {
+          "trace": "O0/syscall.19683",
+          "line": 1,
+          "syscall": "1794438246.861281 unlink(\"/workspace/os-fork-provenance/traces/O0/tmp/.tmpBG1IWJ/.imre-exec-fd-5\") = 0"
+        },
+        "effective_native_opt": "O3",
+        "build": {
+          "clang": {
+            "pid": 19631,
+            "exec": {
+              "path": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "argv": [
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+                "--no-default-config",
+                "-B",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "-L",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+                "-O3",
+                "-Wno-override-module",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-0.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-1.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-2.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-3.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-4.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-5.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-6.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-7.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-8.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-9.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-10.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+                "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+                "-Xlinker",
+                "--dependency-file=/home/agent/.cache/imre/v1/compile-nzl3d8/link.d",
+                "-Wl,--trace",
+                "-ldl",
+                "-lpthread",
+                "-lm",
+                "-lrt",
+                "-lutil",
+                "-Wl,--gc-sections",
+                "-Wl,-z,relro,-z,now",
+                "-o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/program"
+              ],
+              "trace": "O0/syscall.19631",
+              "line": 1,
+              "time": "1794438245.417237"
+            },
+            "binary_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+          },
+          "ld.lld": {
+            "pid": 19632,
+            "exec": {
+              "path": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "argv": [
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+                "--hash-style=gnu",
+                "--build-id",
+                "--eh-frame-hdr",
+                "-m",
+                "elf_x86_64",
+                "-pie",
+                "-dynamic-linker",
+                "/lib64/ld-linux-x86-64.so.2",
+                "-o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/program",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/Scrt1.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crti.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtbeginS.o",
+                "-L/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "-L/usr/lib/gcc/x86_64-linux-gnu/14",
+                "-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib64",
+                "-L/lib/x86_64-linux-gnu",
+                "-L/lib/../lib64",
+                "-L/usr/lib/x86_64-linux-gnu",
+                "-L/usr/lib/../lib64",
+                "-L/lib",
+                "-L/usr/lib",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-0.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-1.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-2.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-3.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-4.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-5.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-6.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-7.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-8.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-9.o",
+                "/home/agent/.cache/imre/v1/compile-nzl3d8/unit-10.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+                "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+                "--dependency-file=/home/agent/.cache/imre/v1/compile-nzl3d8/link.d",
+                "--trace",
+                "-ldl",
+                "-lpthread",
+                "-lm",
+                "-lrt",
+                "-lutil",
+                "--gc-sections",
+                "-z",
+                "relro",
+                "-z",
+                "now",
+                "-lgcc",
+                "--as-needed",
+                "-lgcc_s",
+                "--no-as-needed",
+                "-lc",
+                "-lgcc",
+                "--as-needed",
+                "-lgcc_s",
+                "--no-as-needed",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtendS.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtn.o"
+              ],
+              "trace": "O0/syscall.19632",
+              "line": 1,
+              "time": "1794438245.437886"
+            },
+            "binary_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade"
+          }
+        },
+        "provider_archive": "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O3/providers.a",
+        "provider_sha256": "1fde854204f55e10f695fd747c1d093b453e789c1860512d59e0acfe510644ee",
+        "runtime_archive": "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+        "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+      },
+      {
+        "parent_tier": "O0",
+        "mode": "malloc_debug",
+        "runner_pid": 19534,
+        "helper_pid": 19703,
+        "terminal_pid": 19745,
+        "helper_execs": [
+          {
+            "path": "/workspace/os-fork-prefix/sdk/imre",
+            "argv": [
+              "/workspace/os-fork-prefix/sdk/imre",
+              "-X",
+              "faulthandler",
+              "-c",
+              "if 1:\n            import os\n            from test import support\n            pid = os.fork()\n            if pid != 0:\n                support.wait_process(pid, exitcode=0)\n        "
+            ],
+            "trace": "O0/syscall.19703",
+            "line": 1,
+            "time": "1794438247.356902"
+          },
+          {
+            "path": "/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/.imre-exec-fd-4",
+            "argv": [
+              "-c"
+            ],
+            "trace": "O0/syscall.19703",
+            "line": 8827,
+            "time": "1794438250.170687"
+          }
+        ],
+        "environment": {
+          "HOME": "/home/agent",
+          "LANG": "C.UTF-8",
+          "USER": "agent",
+          "LC_CTYPE": "C.UTF-8",
+          "LC_ALL": "C.UTF-8",
+          "PATH": "/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+          "TMPDIR": "/workspace/os-fork-provenance/traces/O0/tmp",
+          "PYTHONPATH": "/workspace/os-stage/Lib",
+          "IMRE_PYTHON": "/workspace/os-fork-prefix/sdk/imre",
+          "IMREFLAGS": "--opt-level 0",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "TERM": "",
+          "PYTHONMALLOC": "malloc_debug"
+        },
+        "command_source_sha256": "7b18c8e2102a68696e497dd537d5055c14af4d9c4bbef2de05ec2c89ce8a2169",
+        "launcher_sha256": "2a36c5c961468b5f7bc599c7a94f64f14ac74fbd7138c488eb170de2129a9d14",
+        "terminal_image_path": "/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/.imre-exec-fd-4",
+        "terminal_argv": [
+          "-c"
+        ],
+        "terminal_exec_count": 0,
+        "terminal_inheritance": "fork copied the helper's current process image and argv",
+        "creation": "1794438250.624549 clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0x7f7dd2aa58d0) = 19745",
+        "terminal_trace": [
+          "1794438250.645163 exit_group(0)         = ?",
+          "1794438250.645859 +++ exited with 0 +++"
+        ],
+        "wait": "1794438250.656885 wait4(19745, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 19745",
+        "wait_for_helper": "1794438250.682031 wait4(19703, [{WIFEXITED(s) && WEXITSTATUS(s) == 0}], WNOHANG, NULL) = 19703",
+        "helper_trace_sha256": "6e4a45f98e1aa49d4dcb1f5f070bcc93629c44369746ea1c6e65ad5db1b41bf3",
+        "terminal_trace_sha256": "ef3efb1a7b06ca31792f23f1ac3399d5c47d98e00dd2334e0f4dd6ab4cc95c8f",
+        "image_origin": "Imre-linked Linux native executable",
+        "final_image_rename": {
+          "trace": "O0/syscall.19703",
+          "line": 8825,
+          "syscall": "1794438250.167408 rename(\"/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/program\", \"/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/.imre-exec-fd-4\") = 0"
+        },
+        "image_sha256": null,
+        "image_sha256_basis": "temporary image unlinked; file contents not retained",
+        "temporary_name_unlinked": {
+          "trace": "O0/syscall.19744",
+          "line": 1,
+          "syscall": "1794438250.180416 unlink(\"/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/.imre-exec-fd-4\") = 0"
+        },
+        "effective_native_opt": "O0",
+        "build": {
+          "ld.lld": {
+            "pid": 19736,
+            "exec": {
+              "path": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+              "argv": [
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+                "--hash-style=gnu",
+                "--build-id",
+                "--eh-frame-hdr",
+                "-m",
+                "elf_x86_64",
+                "-pie",
+                "-dynamic-linker",
+                "/lib64/ld-linux-x86-64.so.2",
+                "-o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/program",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/Scrt1.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crti.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtbeginS.o",
+                "-L/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "-L/usr/lib/gcc/x86_64-linux-gnu/14",
+                "-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib64",
+                "-L/lib/x86_64-linux-gnu",
+                "-L/lib/../lib64",
+                "-L/usr/lib/x86_64-linux-gnu",
+                "-L/usr/lib/../lib64",
+                "-L/lib",
+                "-L/usr/lib",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-0.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-1.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-2.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-3.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-4.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-5.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-6.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-7.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-8.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-9.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-10.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+                "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+                "-ldl",
+                "-lpthread",
+                "-lm",
+                "-lrt",
+                "-lutil",
+                "--gc-sections",
+                "-z",
+                "relro",
+                "-z",
+                "now",
+                "-lgcc",
+                "--as-needed",
+                "-lgcc_s",
+                "--no-as-needed",
+                "-lc",
+                "-lgcc",
+                "--as-needed",
+                "-lgcc_s",
+                "--no-as-needed",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtendS.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link/crtn.o"
+              ],
+              "trace": "O0/syscall.19736",
+              "line": 1,
+              "time": "1794438249.463021"
+            },
+            "binary_sha256": "7ad9a0e8fe6d0e79b71172d731e33872c0274e49fceb7b516d774876d5a58ade"
+          },
+          "clang": {
+            "pid": 19735,
+            "exec": {
+              "path": "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+              "argv": [
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/bin/clang",
+                "--no-default-config",
+                "-B",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "-L",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/link",
+                "--ld-path=/workspace/os-fork-prefix/sdk/imre-toolchain/bin/ld.lld",
+                "-O0",
+                "-Wno-override-module",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-0.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-1.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-2.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-3.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-4.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-5.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-6.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-7.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-8.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-9.o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmp88HdfD/unit-10.o",
+                "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+                "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+                "-ldl",
+                "-lpthread",
+                "-lm",
+                "-lrt",
+                "-lutil",
+                "-Wl,--gc-sections",
+                "-Wl,-z,relro,-z,now",
+                "-o",
+                "/workspace/os-fork-provenance/traces/O0/tmp/.tmpwidnlF/program"
+              ],
+              "trace": "O0/syscall.19735",
+              "line": 1,
+              "time": "1794438249.435245"
+            },
+            "binary_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45"
+          }
+        },
+        "provider_archive": "/workspace/os-fork-prefix/sdk/imre-toolchain/lib/imre-stdlib/O0/providers.a",
+        "provider_sha256": "3c892d291103ce0c55921d2f2b593a7118fce2e13640e41c5f04147dd928cf5b",
+        "runtime_archive": "/workspace/os-fork-prefix/sdk/libimre_runtime.a",
+        "runtime_sha256": "e9de7030d1b7f5b2159adf379cf3340098bf20656ef1608c7acdea22d6d0958e"
+      }
+    ]
+  }
+}

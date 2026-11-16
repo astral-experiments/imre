@@ -140,7 +140,7 @@ impl Checker<'_> {
         name: &str,
         positional: Vec<T>,
         named: Vec<(String, T)>,
-    ) -> Result<Bound<T>, BindFailure> {
+    ) -> std::result::Result<Bound<T>, BindFailure> {
         let supplied = positional.len();
         let mut names = HashMap::new();
         let mut tail = Vec::new();
@@ -453,10 +453,7 @@ impl Checker<'_> {
             ty: self.types.tuple(args.iter().map(|arg| arg.ty).collect()),
             kind: ExprKind::Tuple(args),
         };
-        let args = Expr {
-            ty: Type::ObjectValue,
-            kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![tuple]),
-        };
+        let args = tuple.into_object_value();
         let hidden = decl.exception_argument_slot();
         let mut fields = Vec::new();
         for (i, field) in decl.fields.iter().enumerate() {
@@ -471,18 +468,11 @@ impl Checker<'_> {
                     "forwarding exception did not initialize a declared field",
                 )
             })?;
-            fields.push(if value.ty == Type::ObjectValue {
-                value
-            } else {
-                Expr {
-                    ty: Type::ObjectValue,
-                    kind: ExprKind::Builtin(Builtin::BoxValue, vec![value]),
-                }
-            });
+            fields.push(value.into_object_value());
         }
         let record = scope.finish(Expr {
             ty: Type::Class(class),
-            kind: ExprKind::Builtin(Builtin::ExceptionRecordFields, fields),
+            kind: ExprKind::Builtin(Builtin::RecordFromFields, fields),
         });
         Ok(self.wrap_exception_record(class, record))
     }

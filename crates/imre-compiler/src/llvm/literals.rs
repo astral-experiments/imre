@@ -11,6 +11,9 @@ fn lazy_constructor(ty: Type) -> Option<&'static str> {
 }
 
 fn immutable_literal(value: &Expr) -> bool {
+    if value.uses_python_unary_protocol() {
+        return false;
+    }
     match &value.kind {
         ExprKind::Int(_)
         | ExprKind::Float(_)
@@ -18,10 +21,9 @@ fn immutable_literal(value: &Expr) -> bool {
         | ExprKind::None
         | ExprKind::Str(_)
         | ExprKind::Bytes(_) => true,
-        ExprKind::Negate(inner)
-        | ExprKind::Not(inner)
-        | ExprKind::Present(inner)
-        | ExprKind::Absent(inner) => immutable_literal(inner),
+        ExprKind::Unary(_, inner) | ExprKind::Present(inner) | ExprKind::Absent(inner) => {
+            immutable_literal(inner)
+        }
         ExprKind::Binary(_, left, right)
             if matches!(
                 value.ty,
@@ -64,7 +66,7 @@ impl Emitter<'_, '_> {
     }
 
     /// Loads the pool's reference, materializing lazy literals on first use.
-    fn literal_root(&mut self, contents: &[u8], ty: Type) -> Value {
+    pub(super) fn literal_root(&mut self, contents: &[u8], ty: Type) -> Value {
         let id = self.intern_literal(contents, ty);
         let name = self.output.literal_ref(id);
         let repr = ty.llvm();
@@ -90,7 +92,7 @@ impl Emitter<'_, '_> {
             Type::Str => &mut self.string_literals,
             Type::Bytes => &mut self.bytes_literals,
             Type::Int => &mut self.integer_literals,
-            Type::RegexPattern => &mut self.regex_literals,
+            Type::RegexPattern | Type::RegexBytesPattern => &mut self.regex_literals,
             _ => unreachable!("unsupported pooled literal type"),
         };
         if let Some(&id) = pool.get(contents) {
@@ -158,13 +160,7 @@ impl Emitter<'_, '_> {
 
     /// Construct a new owner, even when all field values are literals.
     pub(super) fn record_from_fields(&mut self, ty: Type, values: &[Expr]) -> Value {
-        let object = self.record(ty);
-        for (field, value) in values.iter().enumerate() {
-            let value = self.operand(value);
-            self.set_field(&object, field, &value.value);
-            self.release_operand(&value);
-        }
-        object
+        self.native_sequence(ty, values, true)
     }
 
     /// Main releases the literal roots after locals/globals on either exit.

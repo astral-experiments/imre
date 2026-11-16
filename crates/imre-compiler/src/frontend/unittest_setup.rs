@@ -119,7 +119,7 @@ pub(super) fn slots(
     types: &Types,
     classes: &mut Classes,
     fields: &mut [Vec<Type>],
-) -> Result<Slots, String> {
+) -> std::result::Result<Slots, String> {
     let mut slots = vec![HashMap::new(); fields.len()];
     let Some(case) = classes.definitions.iter().position(|c| {
         let m = &graph.modules[c.definition.module];
@@ -289,9 +289,11 @@ pub(super) fn slots(
             for &id in group {
                 let c = &mut classes.definitions[id];
                 for (method, origin) in c.methods.iter_mut().zip(&c.method_origins) {
-                    crate::classes::mangle_fields(&owners[classes.ids[origin]], method, |key| {
-                        private.contains(key)
-                    });
+                    crate::classes::mangle_fields(
+                        &owners[classes.ids[origin]],
+                        method.function.make_mut(),
+                        |key| private.contains(key),
+                    );
                 }
             }
         }
@@ -331,7 +333,7 @@ impl Checker<'_> {
                     checker.coerce(default, field.ty, attribute)?,
                 ));
             }
-            Ok(Statement::Raise(Some(Expr {
+            Ok(Statement::raise(Expr {
                 ty: Type::Exception,
                 kind: ExprKind::Exception {
                     kind: exception_kind("AttributeError").unwrap(),
@@ -340,7 +342,7 @@ impl Checker<'_> {
                         definition.name
                     )))),
                 },
-            })))
+            }))
         };
         let mut missing = absent(self, class)?;
         for child in self.classes.concrete_layouts(class) {
@@ -396,8 +398,8 @@ impl Checker<'_> {
             body: vec![
                 Statement::Assign(rhs, value),
                 Statement::Assign(object, receiver),
-                Statement::SetField(self.local(object), field.value, self.local(rhs)),
-                Statement::SetField(self.local(object), field.ready, Expr::boolean(true)),
+                Statement::set_field(self.local(object), field.value, self.local(rhs)),
+                Statement::set_field(self.local(object), field.ready, Expr::boolean(true)),
             ],
             clear: vec![rhs, object],
         })

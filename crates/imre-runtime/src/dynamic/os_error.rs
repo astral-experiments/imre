@@ -5,14 +5,15 @@ use super::operators::append_rendered_text as append;
 use super::value::{Error, Id, NONE, Result, Value};
 use super::{Context, copy_ids};
 use crate::objects::exceptions::OsErrorArgs;
-use crate::shared::Shared;
+use std::sync::OnceLock;
+use triomphe::Arc;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(super) enum Args {
     Native {
         source: OsErrorArgs,
         // Cache the four boxed fields while keeping the original native diagnostic intact.
-        fields: std::cell::Cell<Option<Id>>,
+        fields: OnceLock<Id>,
     },
     Python(Fields),
 }
@@ -54,14 +55,16 @@ impl Fields {
 }
 
 impl Args {
-    pub(super) fn new(value: Self) -> Result<Shared<Self>> {
-        Shared::try_new(value).map_err(|_| Error::new("MemoryError", ""))
+    pub(super) fn new(value: Self) -> Result<Arc<Self>> {
+        Arc::try_new(value).map_err(|_| Error::new("MemoryError", ""))
     }
 
     pub(super) fn roots(&self) -> impl Iterator<Item = Id> {
         let fields = match self {
             Self::Native { fields, .. } => {
-                return [fields.get(), None, None, None].into_iter().flatten();
+                return [fields.get().copied(), None, None, None]
+                    .into_iter()
+                    .flatten();
             }
             Self::Python(fields) => *fields,
         };
@@ -211,11 +214,7 @@ impl Context {
 
     /// Render Python-owned fields only when printing an uncaught exception.
     pub(super) fn report_os_error(&mut self, error: Error) {
-        let current = error
-            .trace
-            .as_ref()
-            .and_then(|trace| trace.instance)
-            .filter(|&id| matches!(self.heap.get(id), Value::Raised(_)));
+        let current = error.instance();
         let (id, mut traced) = match current {
             Some(id) => (id, Some(error)),
             None => (self.raised_instance(error), None),
@@ -247,7 +246,7 @@ impl Context {
     /// Test the stored OSError errno without invoking a Python attribute hook.
     pub(super) fn has_errno(&self, error: &Error, errno: i32) -> bool {
         let errno = i64::from(errno);
-        match error.os_args.as_deref() {
+        match error.owner(&self.heap).os_args.as_deref() {
             Some(Args::Native { source, .. }) => source.errno == errno,
             Some(Args::Python(fields)) => fields.errno.is_some_and(|id| {
                 matches!(self.heap.get(id), Value::Int(value) if value.to_i64() == Some(errno))
@@ -256,8 +255,15 @@ impl Context {
         }
     }
 
+    /// Match a failed open of this exact filesystem argument before a Python frame handled it.
+    pub(super) fn missing_open_path(&self, error: &Error, path: Id) -> bool {
+        error.trace.is_none()
+            && matches!(error.os_args.as_deref(), Some(Args::Python(fields)) if fields.filename == Some(path))
+            && self.has_errno(error, libc::ENOENT)
+    }
+
     pub(super) fn is_os_error(&self, error: &Error) -> bool {
-        if error.os_args.is_some() {
+        if error.owner(&self.heap).os_args.is_some() {
             return true;
         }
         match error.class() {
@@ -272,18 +278,6 @@ impl Context {
                 })
                 .is_some(),
             None => builtins::exception_subclass(&error.kind, "OSError") == Some(true),
-        }
-    }
-
-    /// Keep the Python pathname for a native open error with exactly one filename.
-    pub(super) fn with_open_filename(&mut self, error: Error, filename: Id) -> Result<Error> {
-        match error.os_args.as_deref() {
-            Some(Args::Native { source, .. })
-                if matches!(source.text_paths.as_ref(), Some([Some(_), None])) =>
-            {
-                self.with_errno_filename(error, filename)
-            }
-            _ => Ok(error),
         }
     }
 
@@ -316,13 +310,9 @@ impl Context {
         Ok(error)
     }
 
-    fn native_os_fields(
-        &mut self,
-        source: &OsErrorArgs,
-        saved: &std::cell::Cell<Option<Id>>,
-    ) -> Result<Fields> {
+    fn native_os_fields(&mut self, source: &OsErrorArgs, saved: &OnceLock<Id>) -> Result<Fields> {
         let tuple = match saved.get() {
-            Some(tuple) => tuple,
+            Some(&tuple) => tuple,
             None => {
                 let errno = self.int(source.errno);
                 let mut string = |value: &str| -> Result<Id> {
@@ -343,8 +333,7 @@ impl Context {
                     .transpose()?
                     .unwrap_or(NONE);
                 let tuple = self.alloc(Value::Tuple(copy_ids(&[errno, message, first, second])?));
-                saved.set(Some(tuple));
-                tuple
+                *saved.get_or_init(|| tuple)
             }
         };
         let Value::Tuple(values) = self.heap.get(tuple) else {
@@ -581,5 +570,46 @@ impl Context {
         let value = result?;
         self.heap.keep(value);
         Ok(Some(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_argument_owner_retains_the_same_fields_across_threads() {
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let mark = ctx.heap.temporary_mark();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml/child");
+        let error = Error::from(crate::objects::open_file(path, 0).unwrap_err());
+        let args = error.os_args.as_ref().unwrap().clone();
+        let instance = ctx.raised_instance(error);
+        let (published, resumed) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            resumed.recv().unwrap();
+            let tuple = args.roots().next().unwrap();
+            (args, tuple)
+        });
+
+        let filename = ctx.os_attribute(instance, "filename").unwrap().unwrap();
+        ctx.heap.release_temporaries_since(mark);
+        ctx.heap.keep(instance);
+        ctx.collect_generation(2).unwrap();
+        published.send(()).unwrap();
+        let (args, tuple) = worker.join().unwrap();
+        let Value::Tuple(fields) = ctx.heap.get(tuple) else {
+            panic!("expected cached OSError fields");
+        };
+        assert_eq!(fields[2], filename);
+        assert_eq!(ctx.str_value(filename).unwrap(), path);
+        assert_eq!(
+            ctx.os_attribute(instance, "filename").unwrap(),
+            Some(filename)
+        );
+
+        ctx.heap.release_temporaries_since(mark);
+        ctx.collect_generation(2).unwrap();
+        assert!(args.is_unique());
     }
 }

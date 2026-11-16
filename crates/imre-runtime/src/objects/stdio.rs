@@ -59,14 +59,14 @@ pub extern "C" fn imre_sys_stdout() -> *const Object {
 }
 
 /// # Safety
-/// A nonzero optional word is a rooted native file, and name is a rooted string.
+/// A nonzero optional word points to a rooted Object, and name is a rooted string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_text_optional_receiver(
     word: usize,
     name: *const super::Str,
 ) -> *const Object {
     if word != 0 {
-        // SAFETY: checked optional TextIO stores the file handle directly.
+        // SAFETY: an optional Object stores its rooted handle directly.
         ObjectOwner::into_raw(unsafe { ObjectOwner::acquire_word(word) })
     } else {
         // SAFETY: the caller roots the attribute's name for the diagnostic.
@@ -117,6 +117,101 @@ fn target() -> Option<Binding> {
     }
 }
 
+/// Checked code reads the process decoder and can retain native text files as
+/// output bindings. Arbitrary Python stream objects belong to the boxed evaluator.
+enum InputStream {
+    ProcessInput,
+    Output(ObjectOwner),
+}
+
+struct NativeInput;
+
+impl crate::input::Backend for NativeInput {
+    type Stream = InputStream;
+    type Prompt = crate::StrOwner;
+    type Line = String;
+    type Error = Error;
+
+    fn stream(&mut self, name: crate::input::StreamName) -> Result<Self::Stream, Error> {
+        use crate::input::StreamName;
+        Ok(match name {
+            StreamName::Stdin => InputStream::ProcessInput,
+            StreamName::Stdout => match binding() {
+                Binding::Original => InputStream::Output(original(false)),
+                Binding::File(file) => InputStream::Output(file),
+                Binding::None | Binding::Missing => {
+                    return Err(Error::new(Kind::RuntimeError, "lost sys.stdout"));
+                }
+            },
+            StreamName::Stderr => InputStream::Output(original(true)),
+        })
+    }
+
+    fn flush_ignoring_errors(&mut self, stream: &InputStream) {
+        let InputStream::Output(file) = stream else {
+            unreachable!("input flushes only its output streams");
+        };
+        // SAFETY: the captured native text file stays owned across this call.
+        let _ = unsafe { file.0.with_mut(|storage| storage.file_mut().flush()) };
+    }
+
+    fn write_prompt(&mut self, stream: &InputStream, prompt: crate::StrOwner) -> Result<(), Error> {
+        let InputStream::Output(file) = stream else {
+            unreachable!("input writes its prompt to stdout");
+        };
+        // SAFETY: the destination and the exact native string are owned.
+        unsafe {
+            file.0
+                .with_mut(|s| s.file_mut().write_with(&prompt, || Ok(prompt.clone())))
+        }
+    }
+
+    fn read_line(&mut self, stream: &InputStream) -> Result<String, Error> {
+        debug_assert!(matches!(stream, InputStream::ProcessInput));
+        crate::sys::read_input_line()
+    }
+
+    fn last_unit(&self, line: &String) -> Result<Option<u32>, Error> {
+        Ok(line.as_bytes().last().copied().map(u32::from))
+    }
+
+    fn trim_linefeed(&mut self, mut line: String) -> Result<String, Error> {
+        line.pop();
+        Ok(line)
+    }
+
+    fn eof(&self) -> Error {
+        Error::new(Kind::EOFError, "EOF when reading a line")
+    }
+}
+
+pub(crate) fn input(prompt: Option<crate::StrOwner>) -> Result<String, Error> {
+    crate::input::read(&mut NativeInput, prompt)
+}
+
+/// A typed input call can run an ordinary checked __str__ between selection
+/// and writing. Only stdout can be rebound in this representation; the process
+/// input decoder and the permanently owned original stderr stay in place.
+pub(crate) fn select_input_output() -> Result<ObjectOwner, Error> {
+    let streams = crate::input::prepare(&mut NativeInput, None)?;
+    let InputStream::Output(file) = streams.stdout else {
+        unreachable!("stdout is a native text file");
+    };
+    Ok(file)
+}
+
+pub(crate) fn input_with_output(
+    file: ObjectOwner,
+    prompt: crate::StrOwner,
+) -> Result<String, Error> {
+    crate::input::finish(
+        &mut NativeInput,
+        &InputStream::ProcessInput,
+        &InputStream::Output(file),
+        Some(prompt),
+    )
+}
+
 /// Print to the current binding, retaining a direct string for encoding errors.
 pub(crate) fn write_line(
     text: &str,
@@ -131,6 +226,109 @@ pub(crate) fn write_line(
         Some(Binding::None) => Ok(()),
         Some(Binding::Missing) => Err(Error::new(Kind::RuntimeError, "lost sys.stdout")),
         Some(Binding::Original) => unreachable!(),
+    }
+}
+
+fn write_piece(
+    stream: Option<&ObjectOwner>,
+    text: &str,
+    owner: Option<&crate::StrOwner>,
+) -> crate::Result<()> {
+    let input = || {
+        owner
+            .cloned()
+            .map_or_else(|| crate::sys::error_text(text), Ok)
+    };
+    match stream {
+        None => crate::sys::write_stdout_with(text, false, input),
+        Some(file) => {
+            // SAFETY: the caller pins this native text file throughout the write.
+            unsafe { file.0.with_mut(|s| s.file_mut().write_with(text, input)) }
+        }
+    }
+}
+
+/// Print already-evaluated values to a single destination, committing each piece before
+/// formatting the next value so conversion and encoding failures preserve earlier writes.
+///
+/// # Safety
+/// Both arrays cover `count` elements. Each word is rooted and matches the non-nullable kind at its index.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_print_scalars(kinds: *const u8, words: *const usize, count: usize) {
+    let stream = match binding() {
+        Binding::Original => original(false),
+        Binding::File(stream) => stream,
+        Binding::None => return,
+        Binding::Missing => return Error::new(Kind::RuntimeError, "lost sys.stdout").raise(),
+    };
+    // SAFETY: the generated caller provides the checked kinds and words in argument order.
+    let (kinds, words) = unsafe {
+        (
+            std::slice::from_raw_parts(kinds, count),
+            std::slice::from_raw_parts(words, count),
+        )
+    };
+    let write =
+        |text: &str, owner: Option<&crate::StrOwner>| write_piece(Some(&stream), text, owner);
+    let result = (|| {
+        let mut wide_digits = String::new();
+        for (i, (&kind, &word)) in kinds.iter().zip(words).enumerate() {
+            if i > 0 {
+                write(" ", None)?;
+            }
+            // SAFETY: the caller roots the argument until the write returns.
+            let (kind, word) = unsafe {
+                super::boxed_values::concrete(super::words::WordKind::new(kind.into()), word)
+            };
+            let mut digits = itoa::Buffer::new();
+            let ascii = match kind.raw() {
+                0 => Some("None"),
+                1 => Some(if word == 0 { "False" } else { "True" }),
+                2 => {
+                    // SAFETY: the checked caller roots this integer for the duration of the write.
+                    if let Some(value) = unsafe { crate::Int::borrow(word) }.as_small() {
+                        Some(digits.format(value))
+                    } else {
+                        wide_digits.clear();
+                        // SAFETY: the checked integer remains rooted while its digits are written.
+                        // This formatter also enforces the active integer string conversion limit.
+                        if unsafe { super::values::write_int_repr(&mut wide_digits, word) }.is_err()
+                        {
+                            if super::exceptions::imre_error_pending() != 0 {
+                                return Ok(());
+                            }
+                            return Err(Error::allocation());
+                        }
+                        Some(wide_digits.as_str())
+                    }
+                }
+                _ => None,
+            };
+            let borrowed;
+            let formatted;
+            let (text, owner): (&str, Option<&crate::StrOwner>) = if let Some(text) = ascii {
+                (text, None)
+            } else if kind.raw() == 3 {
+                // SAFETY: the argument pins the string until the write finishes. An
+                // encoding error acquires its own reference through write_piece.
+                borrowed = std::mem::ManuallyDrop::new(unsafe {
+                    crate::StrOwner::from_raw(word as *const crate::Str)
+                });
+                (&borrowed, Some(&borrowed))
+            } else {
+                formatted = match super::boxed_values::word_text(kind, word, false) {
+                    Ok(text) => text,
+                    Err(_) if super::exceptions::imre_error_pending() != 0 => return Ok(()),
+                    Err(_) => return Err(Error::allocation()),
+                };
+                (&formatted, Some(&formatted))
+            };
+            write(text, owner)?;
+        }
+        write("\n", None)
+    })();
+    if let Err(error) = result {
+        error.raise();
     }
 }
 
@@ -150,20 +348,8 @@ pub(super) fn display(mut render: impl FnMut() -> Option<crate::StrOwner>) -> bo
             .clone()
             .or_else(|| ORIGINAL.with(|slot| slot.get().cloned()))
     };
-    let write = |text: &str, owner: Option<&crate::StrOwner>| {
-        let input = || {
-            owner
-                .cloned()
-                .map_or_else(|| crate::sys::error_text(text), Ok)
-        };
-        match pinned() {
-            None => crate::sys::write_stdout_with(text, false, input),
-            Some(file) => {
-                // SAFETY: the local owner pins the file across this native write.
-                unsafe { file.0.with_mut(|s| s.file_mut().write_with(text, input)) }
-            }
-        }
-    };
+    let write =
+        |text: &str, owner: Option<&crate::StrOwner>| write_piece(pinned().as_ref(), text, owner);
     let escape = match render() {
         Some(text) => match write(&text, Some(&text)) {
             Ok(()) => false,

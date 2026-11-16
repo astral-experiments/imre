@@ -102,7 +102,10 @@ def build_library(work, source, imre, runtime, clang, level):
                     "-o", work / "calls"], check=True, cwd=work, timeout=120)
     # Link the unmodified emitted LLVM as a library so the unchanged test
     # and the compiled calls share an fd table. No CPython API is linked.
-    subprocess.run([clang, "-O" + str(level), "-fPIC", "-shared", llvm, runtime,
+    # ctypes only needs the generated main. Hide archive symbols so ELF section
+    # GC can discard unused runtime code that requires static TLS at dlopen.
+    link_flags = ["-Wl,--exclude-libs,ALL,--gc-sections"] if sys.platform == "linux" else []
+    subprocess.run([clang, "-O" + str(level), "-fPIC", "-shared", *link_flags, llvm, runtime,
                     "-ldl", "-lpthread", "-lm", "-o", library], check=True, cwd=work, timeout=120)
     return library
 

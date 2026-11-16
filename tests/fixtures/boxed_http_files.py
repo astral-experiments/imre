@@ -4,8 +4,11 @@ import sys
 from collections import UserString
 from contextlib import redirect_stderr
 from io import StringIO
+from socketserver import ThreadingMixIn
 
 server = importlib.import_module(sys.argv[1])
+assert server.ThreadingHTTPServer.__bases__ == (ThreadingMixIn, server.HTTPServer)
+assert server.ThreadingHTTPServer.daemon_threads is True
 
 class Handler(server.SimpleHTTPRequestHandler):
     def log_message(self, *args):

@@ -43,3 +43,8 @@ for item in optional:
         print("none")
     else:
         print(item)
+
+first = [1]
+second = ["two"]
+for label, row_value in ((0, first), ("right", second)):
+    print(label, row_value is first, row_value is second)

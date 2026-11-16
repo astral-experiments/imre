@@ -58,6 +58,30 @@ def current():
         except AttributeError as exc:
             print(exc.args)
 
+    def replacement():
+        pass
+
+    replacement.__isabstractmethod__ = True
+
+    class ReplacesSetter:
+        @property
+        def __isabstractmethod__(self):
+            probe.__init__(None, replacement)
+            return False
+
+    probe = property(ReplacesSetter())
+    assert property.__isabstractmethod__.__get__(probe) and probe.fset is replacement
+
+    class RenamingProperty(property):
+        def __init__(self, fget, fset=None, fdel=None, doc=None):
+            super().__init__(fget, fset, fdel, doc)
+            if fset is not None:
+                source_property.__name__ = "renamed"
+
+    source_property = RenamingProperty(Cell.first.fget)
+    source_property.__name__ = "original"
+    assert source_property.setter(Cell.value.fset).__name__ == "renamed"
+
     class Wrong:
         field = copy.setter(5)
 
@@ -89,6 +113,10 @@ def current():
 
     class Sub(Parent):
         pass
+
+    blank = Sub.__new__(Sub, Cell.first.fget)
+    assert blank.__new__ is Sub.__new__ is property.__new__
+    assert type(blank) is Sub and blank.fget is None and not hasattr(blank, "accessor")
 
     class Owner:
         saved = 5
@@ -137,6 +165,20 @@ def current():
     assert original.fdel is None and type(replaced) is Sub
     assert replaced.fget is original.fget and replaced.fset is original.fset
     assert replaced is not original and replaced.fdel is discard
+
+    def read(owner):
+        "replacement doc"
+        return owner
+
+    class Alias:
+        field = replaced.getter(read)
+
+    field = Alias.field
+    assert type(field) is Sub and field.fget is field.accessor is read
+    assert field.__name__ == "field" and replaced.__name__ == "replaced"
+    assert field.fset is replaced.fset and field.fdel is discard
+    assert field.__doc__ == "replacement doc" and Alias().field.__class__ is Alias
+    assert property.getter(field, None).fget is read
     assert replaced.deleter(None).fdel is discard
     managed = Managed()
     managed.replaced = 8

@@ -91,6 +91,34 @@ impl<T, K> Ring<T, K> {
         Ok(removed)
     }
 
+    /// Insert at a clipped offset without evicting an item from a full ring.
+    pub(crate) fn insert(&mut self, index: &Int, item: T) -> Result<(), Error> {
+        let index = crate::signed_index(index).ok_or_else(|| {
+            Error::new(
+                Kind::OverflowError,
+                "Python int too large to convert to C ssize_t",
+            )
+        })?;
+        let length = self.items.len();
+        if self.maxlen == Some(length) {
+            return Err(Error::new(
+                Kind::IndexError,
+                "deque already at its maximum size",
+            ));
+        }
+        let position = if index < 0 {
+            length.saturating_add_signed(index)
+        } else {
+            length.min(index as usize)
+        };
+        self.items
+            .try_reserve(1)
+            .map_err(|_| Error::new(Kind::MemoryError, ""))?;
+        self.items.insert(position, item);
+        self.state = self.state.wrapping_add(1);
+        Ok(())
+    }
+
     pub(crate) fn pop(&mut self, left: bool) -> Result<T, Error> {
         let item = if left {
             self.items.pop_front()
@@ -518,7 +546,7 @@ pub unsafe extern "C" fn imre_deque_maxlen(value: *const Object) -> usize {
 pub(super) struct DequeIterator {
     owner: crate::ObjectOwner,
     state: usize,
-    remaining: usize,
+    pub(super) remaining: usize,
     reverse: bool,
 }
 

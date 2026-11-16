@@ -15,8 +15,6 @@ use super::{Bytes, Int, List, Object, Storage, Str, fail, object};
 
 const GENERATED_EQ: u32 = 1;
 const GENERATED_REPR: u32 = 2;
-const HAS_REPR_TEXT: u32 = 1 << 4;
-const REPR_TEXT_FIELD: u32 = 1 << 2;
 const TUPLE: u32 = 1;
 const MODULE_SPEC: u32 = 2;
 
@@ -466,19 +464,14 @@ impl ReprTarget for ReprWriter<'_> {
     }
 }
 
-/// Returns one owned Python representation, borrowing every input until the
-/// string is complete. Compiler validation excludes resource representations.
+/// Return one owned representation, dispatching Python repr on concrete members.
 ///
 /// # Safety
-/// `word` uses `kind` and roots an initialized acyclic value throughout the call.
+/// The caller roots the initialized value with its exact storage kind throughout the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_value_repr(word: usize, kind: u32) -> *const Str {
-    let mut output = String::new();
-    // SAFETY: the caller supplies the exact checked representation and root.
-    let result = unsafe { try_write_repr(&mut ReprWriter(&mut output), word, WordKind::new(kind)) };
-    super::exceptions::finish_display(
-        result.and_then(|()| super::exceptions::rendered(output.into())),
-    )
+    // SAFETY: the checked caller supplies the rooted value and its representation.
+    unsafe { super::boxed_values::checked_text(WordKind::new(kind), word, true) }
 }
 
 /// # Safety
@@ -489,7 +482,7 @@ pub(super) unsafe fn try_write_repr(
     kind: WordKind,
 ) -> std::fmt::Result {
     // SAFETY: the caller supplies a rooted value with its concrete kind.
-    unsafe { write_repr_with(output, word, kind, true) }
+    unsafe { write_repr_with(output, word, kind, true, false) }
 }
 
 /// # Safety
@@ -500,7 +493,20 @@ pub(super) unsafe fn try_write_unchecked_repr(
     kind: WordKind,
 ) -> std::fmt::Result {
     // SAFETY: the caller roots the value under its concrete kind.
-    unsafe { write_repr_with(output, word, kind, false) }
+    unsafe { write_repr_with(output, word, kind, false, false) }
+}
+
+/// Exception display retains its argument before any checked Python formatter runs.
+///
+/// # Safety
+/// The caller roots the word and releases all mutable storage borrows before entry.
+pub(super) unsafe fn try_write_argument_repr(
+    output: &mut ReprWriter<'_>,
+    word: usize,
+    kind: WordKind,
+) -> std::fmt::Result {
+    // SAFETY: the caller keeps the value alive across its repr callback.
+    unsafe { write_repr_with(output, word, kind, true, true) }
 }
 
 type ReprStack = smallvec::SmallVec<[ReprTask; 4]>;
@@ -558,6 +564,7 @@ unsafe fn write_repr_with(
     word: usize,
     kind: WordKind,
     mut check_digits: bool,
+    argument: bool,
 ) -> std::fmt::Result {
     let mut pending = ReprStack::new();
     let mut callback_roots = std::collections::HashMap::new();
@@ -577,7 +584,14 @@ unsafe fn write_repr_with(
             match task {
                 ReprTask::Word(word, kind) => match kind.raw() & !NULLABLE {
                     5 if word != 0 => Some(ReprTask::Object(word as *const Object, 0)),
-                    6 if word != 0 => Some(ReprTask::Record(word as *const usize, 0, 0)),
+                    6 if word != 0 => {
+                        let payload = word as *const usize;
+                        if argument && let Some(method) = descriptor(payload).repr_method() {
+                            Some(ReprTask::Display(kind.acquire(word), Some(method)))
+                        } else {
+                            Some(ReprTask::Record(payload, 0, 0))
+                        }
+                    }
                     9 if word != 0 => {
                         let (member, kind) = super::unions::member(word);
                         Some(ReprTask::Word(member, kind))
@@ -589,6 +603,10 @@ unsafe fn write_repr_with(
                 },
                 ReprTask::Object(owner, position) => {
                     object(owner).0.with(|storage| match storage {
+                        Storage::RegexBytesMatch(matched) => {
+                            matched.write_repr(output)?;
+                            Ok(None)
+                        }
                         Storage::RegexMatch(matched) => {
                             matched.write_repr(output)?;
                             Ok(None)
@@ -622,7 +640,10 @@ unsafe fn write_repr_with(
                             }
                             Ok(None)
                         }
-                        Storage::Exception(_) => Ok(Some(ReprTask::Exception(owner))),
+                        Storage::Exception(_) => Ok(Some(ReprTask::Display(
+                            WordKind::new(5).acquire(owner as usize),
+                            None,
+                        ))),
                         Storage::SourceModule { name, filename } => {
                             output.write_str("<module ")?;
                             super::exceptions::write_quoted_repr(name, output)?;
@@ -657,6 +678,10 @@ unsafe fn write_repr_with(
                             } else {
                                 "<class 'selectors.PollSelector'>"
                             })?;
+                            Ok(None)
+                        }
+                        Storage::Accumulate(_) | Storage::IntegerAccumulate(_) => {
+                            write!(output, "<itertools.accumulate object at {owner:p}>")?;
                             Ok(None)
                         }
                         Storage::IteratorAdapter(adapter) => {
@@ -703,17 +728,22 @@ unsafe fn write_repr_with(
                                 error.raise();
                                 std::fmt::Error
                             })?;
-                            if position == 0 && sequence.mock_call_list.get()
-                                && write_mock_history(output, &values.values, values.kind)?
-                            {
-                                return Ok(None);
-                            }
                             if position == 0 {
+                                if sequence.mock_call_list.get() {
+                                    pending.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                                    pending.push(ReprTask::WrapList(owner, output.0.len(), Vec::new()));
+                                }
                                 output.write_char('[')?;
                             }
                             for (index, &value) in values.values.iter().enumerate().skip(position) {
                                 if index != 0 {
                                     output.write_str(", ")?;
+                                    if let Some(ReprTask::WrapList(list, _, spaces)) = pending.last_mut()
+                                        && *list == owner
+                                    {
+                                        spaces.try_reserve(1).map_err(|_| std::fmt::Error)?;
+                                        spaces.push(output.0.len() - 1);
+                                    }
                                 }
                                 if value != 0 && matches!(values.kind.raw() & !NULLABLE, 5 | 6 | 9)
                                 {
@@ -834,12 +864,30 @@ unsafe fn write_repr_with(
                         None
                     }
                 }
+                ReprTask::WrapList(_, start, spaces) => {
+                    if !spaces.is_empty() && output.0[start..].chars().take(81).count() > 80 {
+                        let mut wrapped = String::new();
+                        wrapped
+                            .try_reserve(output.0.len() - start + spaces.len())
+                            .map_err(|_| std::fmt::Error)?;
+                        let mut previous = start;
+                        for space in spaces {
+                            wrapped.push_str(&output.0[previous..space]);
+                            wrapped.push('\n');
+                            previous = space;
+                        }
+                        wrapped.push_str(&output.0[previous..]);
+                        output.0.truncate(start);
+                        output.write_str(&wrapped)?;
+                    }
+                    None
+                }
                 ReprTask::ContextEnd(tail, outer_check_digits) => {
                     check_digits = outer_check_digits;
                     tail.write(output)?;
                     None
                 }
-                ReprTask::Exception(owner) => {
+                ReprTask::Display(receiver, method) => {
                     // A custom repr can remove its own reference or a pending container.
                     // Retain the cursors outside every StorageCell borrow. Formatting
                     // ordinary values needs no extra owners.
@@ -852,18 +900,13 @@ unsafe fn write_repr_with(
                             }
                         }
                     }
-                    let exception: crate::ObjectOwner =
-                        crate::ObjectOwner::acquire_word(owner as usize);
-                    let text = super::exceptions::imre_exception_repr(crate::ObjectOwner::as_ptr(
-                        &exception,
-                    ));
-                    if text.is_null() {
-                        return Err(std::fmt::Error);
-                    }
-                    let text = StrOwner::from_raw(text);
-                    if super::exceptions::imre_error_pending() != 0 {
-                        return Err(std::fmt::Error);
-                    }
+                    let text = match method {
+                        Some(method) => method.call(receiver),
+                        None => {
+                            super::exceptions::imre_exception_repr(receiver.word as *const Object)
+                        }
+                    };
+                    let text = super::exceptions::display_result(text)?;
                     output.write_str(&text)?;
                     None
                 }
@@ -891,13 +934,14 @@ unsafe fn write_repr_with(
 }
 
 enum ReprTask {
+    WrapList(*const Object, usize, Vec<usize>),
     Leave(ReprGuard),
     DequeMembers(super::deque::Deque, usize),
     Context(super::contextvars::ReprView),
     ContextEnd(super::contextvars::ReprEnd, bool),
     Word(usize, WordKind),
     Object(*const Object, usize),
-    Exception(*const Object),
+    Display(OwnedWord, Option<super::records::TextMethod>),
     Record(*const usize, usize, usize),
     KeySeparator,
 }
@@ -941,14 +985,14 @@ impl ReprTask {
 
     fn root(&self) -> Option<(usize, WordKind)> {
         match *self {
-            Self::ContextEnd(_, _) => None,
+            Self::ContextEnd(_, _) | Self::WrapList(..) => None,
             Self::Context(ref view) => view.owner().map(|owner| (owner as usize, WordKind::new(5))),
             Self::Word(word, kind) => Some((word, kind)),
-            Self::Object(owner, _) | Self::Exception(owner) => {
-                Some((owner as usize, WordKind::new(5)))
-            }
+            Self::Object(owner, _) => Some((owner as usize, WordKind::new(5))),
             Self::Record(record, _, _) => Some((record as usize, WordKind::new(6))),
-            Self::Leave(_) | Self::KeySeparator | Self::DequeMembers(..) => None,
+            Self::Display(..) | Self::Leave(_) | Self::KeySeparator | Self::DequeMembers(..) => {
+                None
+            }
         }
     }
 }
@@ -983,16 +1027,24 @@ fn format_entry(
 pub(super) unsafe fn write_int_repr(output: &mut impl Write, word: usize) -> std::fmt::Result {
     // SAFETY: the caller roots the integer for this borrow.
     let value = unsafe { Int::borrow(word) };
+    write_integer(output, &value, true)
+}
+
+fn write_integer(output: &mut impl Write, value: &Int, check_digits: bool) -> std::fmt::Result {
     if let Some(small) = value.as_small() {
-        write!(output, "{small}")
-    } else {
-        let value = value.big();
-        if let Err(error) = crate::integer_text::check_decimal(&value) {
-            error.raise();
-            return Err(std::fmt::Error);
-        }
-        write!(output, "{value}")
+        return output.write_str(itoa::Buffer::new().format(small));
     }
+    if value.is_prefix()
+        && let Some(result) = crate::prefix_words::write_short_decimal(value, output, check_digits)
+    {
+        return result;
+    }
+    let value = value.big();
+    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
+        error.raise();
+        return Err(std::fmt::Error);
+    }
+    write!(output, "{value}")
 }
 
 /// # Safety
@@ -1017,7 +1069,7 @@ unsafe fn write_scalar(
             14 => super::typing::write_repr(output, word)?,
             13 => {
                 let (member, value) = super::annotations::member(word);
-                write_repr_with(output, value, member, false)?;
+                write_repr_with(output, value, member, false, false)?;
             }
             11 => write!(output, "<class '{}'>", *(word as *const Str))?,
             1 => {
@@ -1025,17 +1077,7 @@ unsafe fn write_scalar(
                 output.write_str(if value == 0 { "False" } else { "True" })?;
             }
             2 => {
-                let value = Int::borrow(word);
-                if let Some(value) = value.as_small() {
-                    output.write_str(itoa::Buffer::new().format(value))?;
-                } else {
-                    let value = value.big();
-                    if check_digits && let Err(error) = crate::integer_text::check_decimal(&value) {
-                        error.raise();
-                        return Err(std::fmt::Error);
-                    }
-                    write!(output, "{value}")?;
-                }
+                write_integer(output, &Int::borrow(word), check_digits)?;
             }
             3 => super::exceptions::write_quoted_repr(&*(word as *const Str), output)?,
             4 => (&*(word as *const List))
@@ -1071,67 +1113,6 @@ unsafe fn text<'a>(pointer: *const u8, length: usize) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(pointer, length)) }
 }
 
-/// Borrows the cached display field while the caller roots the initialized record.
-unsafe fn record_repr_text<'a>(
-    payload: *const usize,
-    layout: &super::records::RecordDescriptor,
-) -> Option<&'a str> {
-    let semantics = layout.class_semantics()?;
-    if semantics.flags & HAS_REPR_TEXT == 0 {
-        return None;
-    }
-    // SAFETY: the compiler emits one flag and kind for each physical word.
-    // Reading the string borrows the record's owner without consuming a reference.
-    unsafe {
-        for index in 0..layout.length {
-            if (*semantics.fields.add(index)).flags & REPR_TEXT_FIELD != 0 {
-                let kind = WordKind::new(*layout.kinds.add(index));
-                if kind.raw() != 3 {
-                    return None;
-                }
-                let word = kind.read_record_field(payload.add(index));
-                return (word as *const Str).as_ref().map(Str::as_str);
-            }
-        }
-    }
-    None
-}
-
-/// Writes a marked call history with its own 80-character wrapping.
-unsafe fn write_mock_history(
-    output: &mut ReprWriter<'_>,
-    words: &[usize],
-    kind: WordKind,
-) -> Result<bool, std::fmt::Error> {
-    if kind.raw() != 6 {
-        return Ok(false);
-    }
-    let calls = words.iter().map(|&word| {
-        let payload = word as *const usize;
-        if payload.is_null() {
-            return None;
-        }
-        // SAFETY: the sequence roots each record, and neither pass invokes Python.
-        unsafe { record_repr_text(payload, descriptor(payload)) }
-    });
-    let punctuation = 2usize.saturating_add(words.len().saturating_sub(1).saturating_mul(2));
-    let Some(width) = calls.clone().try_fold(punctuation, |width, call| {
-        Some(width.saturating_add(call?.chars().take(81usize.saturating_sub(width)).count()))
-    }) else {
-        return Ok(false);
-    };
-    let separator = if width > 80 { ",\n " } else { ", " };
-    output.write_char('[')?;
-    for (index, call) in calls.enumerate() {
-        if index != 0 {
-            output.write_str(separator)?;
-        }
-        output.write_str(call.expect("validated immutable call text"))?;
-    }
-    output.write_char(']')?;
-    Ok(true)
-}
-
 /// Format an instance without calling its Python display methods.
 ///
 /// # Safety
@@ -1141,21 +1122,35 @@ pub unsafe extern "C" fn imre_record_default_repr(payload: *const usize) -> *con
     // SAFETY: source instances have an immutable concrete layout and qualified name.
     let semantics = unsafe { descriptor(payload).semantics.as_ref() }
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
+    // SAFETY: the receiver is rooted and its descriptor supplies the concrete class name.
+    unsafe {
+        imre_object_base_repr(
+            payload.cast(),
+            semantics.qualified_name,
+            semantics.qualified_name_len,
+        )
+    }
+}
+
+/// Display a fixed Python object with its concrete class, bypassing its display overrides.
+///
+/// # Safety
+/// The receiver is a rooted Python allocation. The name is its concrete class's valid
+/// qualified UTF-8 name and is readable for `length` bytes throughout the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_object_base_repr(
+    receiver: *const std::ffi::c_void,
+    name: *const u8,
+    length: usize,
+) -> *const Str {
+    // SAFETY: the compiler or record descriptor supplies this immutable class name.
+    let name = unsafe { text(name, length) };
+    let repr = super::base_object_repr(name, receiver.addr() as u64);
     let mut output = String::new();
-    let result = write_default_record_repr(&mut ReprWriter(&mut output), payload, semantics);
+    let result = write!(ReprWriter(&mut output), "{repr}");
     super::exceptions::finish_display(
         result.and_then(|()| super::exceptions::rendered(output.into())),
     )
-}
-
-fn write_default_record_repr(
-    output: &mut ReprWriter<'_>,
-    payload: *const usize,
-    semantics: &super::records::RecordSemantics,
-) -> std::fmt::Result {
-    // SAFETY: the compiler emits immutable UTF-8 identifiers for public record layouts.
-    let name = unsafe { text(semantics.qualified_name, semantics.qualified_name_len) };
-    write!(output, "<{name} object at {payload:p}>")
 }
 
 unsafe fn fields_repr(
@@ -1172,12 +1167,13 @@ unsafe fn fields_repr(
         .unwrap_or_else(|| fail("SystemError", "internal records have no representation"));
     // SAFETY: checked descriptors contain valid names, flags, and field arrays.
     unsafe {
-        if let Some(rendered) = record_repr_text(payload, layout) {
-            output.write_str(rendered)?;
-            return Ok(None);
-        }
         if semantics.kind != TUPLE && semantics.flags & GENERATED_REPR == 0 {
-            write_default_record_repr(output, payload, semantics)?;
+            let name = text(semantics.qualified_name, semantics.qualified_name_len);
+            write!(
+                output,
+                "{}",
+                super::base_object_repr(name, payload.addr() as u64)
+            )?;
             return Ok(None);
         }
         let plain_tuple = semantics.kind == TUPLE && semantics.name.is_null();

@@ -1,12 +1,34 @@
+import errno
+import io
 import os
 import signal
 import subprocess
 import tempfile
 
 
+def inherited_readline(directory):
+    class Plain(io.FileIO):
+        pass
+
+    class Upper(Plain):
+        def read(self, size):
+            calls.append(size)
+            return super().read(size).upper()
+
+    path = os.path.join(directory, "message")
+    with open(path, "wb") as out:
+        out.write(b"ok\n")
+    calls = []
+    with Plain(path) as stream:
+        assert stream.readline() == b"ok\n"
+    with Upper(path) as stream:
+        assert stream.readline() == b"OK\n"
+    assert calls == [1, 1, 1]
+
+
 def exchange(directory, bufsize, raising, both_pipes=False):
     # The child's final write depends on the Python handler, while the parent is reading to EOF.
-    gate = os.path.join(directory, str(bufsize) + ("-both" if both_pipes else ""))
+    gate = os.path.join(directory, f"{bufsize}-{raising}-{both_pipes}")
     command = """
         printf abc
         read start || exit 41
@@ -47,6 +69,9 @@ def exchange(directory, bufsize, raising, both_pipes=False):
                 seen.append(signum)
                 if raising:
                     raise ValueError("pipe interrupted")
+                if bufsize == 0:
+                    stream.read = lambda size: b"\n"
+                    raise InterruptedError(errno.EINTR, "retry with the new read")
 
             previous = signal.signal(signal.SIGUSR1, handler)
             try:
@@ -66,6 +91,8 @@ def exchange(directory, bufsize, raising, both_pipes=False):
                         assert child.communicate(timeout=8) == (b"stdout", b"bcdone")
                     else:
                         assert child.communicate() == (None, b"done")
+                elif bufsize == 0:
+                    assert stream.readline() == b"bc\n"
                 else:
                     assert child.communicate() == (b"bcdone", None)
                 assert child.wait(timeout=1) == 0 and child.returncode == 0 and seen == [signal.SIGUSR1]
@@ -77,8 +104,32 @@ def exchange(directory, bufsize, raising, both_pipes=False):
 
 
 def current():
+    with subprocess.Popen(["/bin/printf", "abcdMORE"], stdout=subprocess.PIPE, bufsize=4) as child:
+        reader = child.stdout
+        assert reader.read(1) == b"a"
+        raw = reader.raw
+        refused = OSError("refused raw read")
+        sizes = []
+
+        def veto(window):
+            sizes.append(len(window))
+            raise refused
+
+        raw.readinto = veto
+        target = bytearray(b"????????")
+        try:
+            reader.readinto(target)
+        except OSError as error:
+            assert error is refused
+        else:
+            raise AssertionError("buffer ignored raw.readinto")
+        assert sizes == [5] and target == b"bcd?????"
+        assert raw.read(4) == b"MORE"
+
     with tempfile.TemporaryDirectory() as directory:
+        inherited_readline(directory)
         exchange(directory, -1, False)
+        exchange(directory, 0, False)
         exchange(directory, 0, True)
         exchange(directory, 0, True, both_pipes=True)
     return 42

@@ -394,3 +394,54 @@ ref = attach_payload(error)
 assert ref() is not None
 error.__cause__ = None
 assert ref() is None
+
+
+from traceback import format_tb
+
+last_frame, = format_tb(saved, limit=-1)
+assert "in total" in last_frame
+assert "return data['values']" in last_frame
+assert format_tb(saved, limit=0) == []
+
+
+def report_pull(items):
+    try:
+        for item in (
+            items
+        ):
+            print("pulled", item)
+    except Exception as error:
+        print(type(error).__name__, error.__traceback__.tb_lineno)
+
+
+report_pull(map(int, ("7", "bad")))
+
+
+def report_display(items):
+    try:
+        return tuple(
+            [*items, 1]
+        )
+    except Exception as error:
+        print(error.__traceback__.tb_lineno)
+
+
+report_display(map(int, ("7", "bad")))
+
+
+released = []
+
+
+class MissingKey:
+    def __del__(self):
+        released.append((sys.exception(), globals().get("caught", "missing")))
+
+
+try:
+    raise OSError("enclosing")
+except OSError as outer:
+    try:
+        {}[MissingKey()]
+    except KeyError as caught:
+        pass
+    assert released == [(outer, None)]

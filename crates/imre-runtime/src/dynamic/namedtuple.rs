@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use super::{Context, Error, Id, NONE, Result, TRUE, Value, builtins};
+use super::{Context, Error, Id, NONE, Result, Value, builtins};
 use ruff_python_stdlib::{identifiers::is_identifier, keyword::is_keyword};
 
 pub(super) const GETTER: &str = "collections._tuplegetter";
@@ -112,7 +112,9 @@ pub(super) fn doc_method(
             return Err(Error::new("TypeError", message));
         }
     }
-    if let Value::SlotMember { owner, name: field } = *ctx.heap.get(member)
+    if let Value::SlotMember {
+        owner, name: field, ..
+    } = *ctx.heap.get(member)
         && kwargs.is_empty()
     {
         return match (name, rest) {
@@ -183,7 +185,7 @@ pub(super) fn doc_method(
 }
 
 /// Bind read-only tuple positions in a new class namespace.
-pub(super) fn bind_fields(ctx: &mut Context, scope: Id, names: &[String]) {
+fn bind_fields(ctx: &mut Context, scope: Id, names: &[String]) {
     for (index, field) in names.iter().enumerate() {
         let doc = ctx.text(format!("Alias for field number {index}"));
         let getter = ctx.alloc(Value::TupleGetter {
@@ -295,19 +297,7 @@ pub(super) fn getter_method(
     }
 }
 
-/// Consume the complete iterable before inspecting its length, including errors from its iterator.
-fn collect(ctx: &mut Context, source: Id) -> Result<Vec<Id>> {
-    let iterator = ctx.iterator(source)?;
-    ctx.heap.keep(iterator);
-    let mut items = Vec::new();
-    while let Some(item) = ctx.next_item(iterator)? {
-        ctx.heap.keep(item);
-        items.push(item);
-    }
-    Ok(items)
-}
-
-pub(super) fn string(ctx: &mut Context, object: Id) -> Result<String> {
+fn string(ctx: &mut Context, object: Id) -> Result<String> {
     let constructor = ctx.builtin("str");
     let value = ctx.call(constructor, vec![object], Vec::new())?;
     Ok(ctx.str_value(value)?.to_owned())
@@ -330,7 +320,7 @@ fn validate(name: &str) -> Result<()> {
 }
 
 /// Validate the type and field names after any requested renaming.
-pub(super) fn validate_fields(typename: &str, names: &[String], rename: bool) -> Result<()> {
+fn validate_fields(typename: &str, names: &[String], rename: bool) -> Result<()> {
     validate(typename)?;
     for name in names {
         validate(name)?;
@@ -399,7 +389,7 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     validate_fields(&typename, &names, rename)?;
     let has_defaults = defaults.is_some_and(|id| id != NONE);
     let defaults = match defaults {
-        Some(id) if id != NONE => collect(ctx, id)?,
+        Some(id) if id != NONE => ctx.collect_iterable_items(id)?,
         _ => Vec::new(),
     };
     if defaults.len() > names.len() {
@@ -416,18 +406,22 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     ctx.heap.keep(scope);
     let name = ctx.text(&typename);
     ctx.bind(scope, "__qualname__", name);
-    ctx.bind(scope, "__module__", module);
-    let fields = bind_field_metadata(ctx, scope, &names, &defaults);
-    bind_fields(ctx, scope, &names);
-    bind_repr(ctx, scope, name, fields)?;
-    bind_replace(ctx, scope, name, fields)?;
-    let slots = ctx.alloc(Value::Tuple(Vec::new()));
-    ctx.bind(scope, "__slots__", slots);
-    let doc = ctx.text(format!("{typename}({})", names.join(", ")));
-    ctx.bind(scope, "__doc__", doc);
-    bind_make(ctx, scope, name, fields)?;
+    let (fields, signature) = bind_field_metadata(ctx, scope, &typename, &names, &defaults)?;
     let defaults = has_defaults.then(|| ctx.alloc(Value::Tuple(defaults)));
-    bind_new(ctx, scope, &typename, &names, defaults)?;
+    bind_new(ctx, scope, &typename, &names, fields, defaults, signature)?;
+    bind_make(ctx, scope, name, fields)?;
+    bind_replace(ctx, scope, name, fields)?;
+    bind_repr(ctx, scope, name, fields)?;
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
+    let methods = ctx.call(factory, vec![name], Vec::new())?;
+    ctx.heap.keep(methods);
+    let methods = ctx.unpack_items(methods, 2, None)?;
+    ctx.bind(scope, "_asdict", methods[0]);
+    ctx.bind(scope, "__getnewargs__", methods[1]);
+    ctx.bind(scope, "__match_args__", fields);
+    bind_fields(ctx, scope, &names);
+    ctx.bind(scope, "__module__", module);
     let tuple = ctx.builtin("tuple");
     ctx.enable_class_annotation_provider(scope);
     let class = ctx.allocate_class(typename, scope, vec![tuple])?;
@@ -441,76 +435,14 @@ pub(super) fn factory(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     Ok(class)
 }
 
-/// Publish the field order and trailing defaults used by the generated constructor.
-pub(super) fn bind_field_metadata(
-    ctx: &mut Context,
-    scope: Id,
-    names: &[String],
-    defaults: &[Id],
-) -> Id {
-    let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
-    let offset = field_ids.len() - defaults.len();
-    let field_defaults = ctx.dict(
-        field_ids[offset..]
-            .iter()
-            .zip(defaults)
-            .map(|(&k, &v)| (k, v))
-            .collect(),
-    );
-    ctx.bind(scope, "_field_defaults", field_defaults);
-    let fields = ctx.alloc(Value::Tuple(field_ids));
-    ctx.bind(scope, "_fields", fields);
-    if ctx.scope_name(scope, "__match_args__").is_none() {
-        ctx.bind(scope, "__match_args__", fields);
-    }
-    fields
-}
-
-/// Format the actual tuple payload against the declared field names.
-pub(super) fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
-    let module = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
-    let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "__repr__", repr);
-    Ok(())
-}
-
-/// Install both replacement names as aliases of the same generated function.
-pub(super) fn bind_replace(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
-    let collections = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
-    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "_replace", replace);
-    ctx.bind(scope, "__replace__", replace);
-    Ok(())
-}
-
-/// Install the class method that builds an instance from an iterable.
-pub(super) fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
-    let collections = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
-    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
-    ctx.bind(scope, "_make", make);
-    Ok(())
-}
-
-/// Assemble constructor source and documentation without aborting on an oversized field list.
-fn text_parts(parts: &[&str]) -> Result<String> {
-    let mut output = String::new();
-    for part in parts {
-        super::operators::append_rendered_text(&mut output, part)?;
-    }
-    Ok(output)
-}
-
-/// Give the generated function the declared parameter names and ordinary Python argument binding.
-pub(super) fn bind_new(
+/// Publish the metadata shared by functional and class-based named tuples.
+fn bind_field_metadata(
     ctx: &mut Context,
     scope: Id,
     typename: &str,
     names: &[String],
-    defaults: Option<Id>,
-) -> Result<Id> {
+    defaults: &[Id],
+) -> Result<(Id, Id)> {
     let mut fields = String::new();
     for name in names {
         if !fields.is_empty() {
@@ -521,6 +453,160 @@ pub(super) fn bind_new(
     if names.len() == 1 {
         super::operators::append_rendered_text(&mut fields, ",")?;
     }
+    let doc = ctx.text(text_parts(&[typename, "(", &fields, ")"])?);
+    ctx.bind(scope, "__doc__", doc);
+    let slots = ctx.alloc(Value::Tuple(Vec::new()));
+    ctx.bind(scope, "__slots__", slots);
+    let field_ids: Vec<_> = names.iter().map(|n| ctx.text(n)).collect();
+    let offset = field_ids.len() - defaults.len();
+    let field_defaults = field_ids[offset..]
+        .iter()
+        .zip(defaults)
+        .map(|(&k, &v)| (k, v))
+        .collect();
+    let fields = ctx.alloc(Value::Tuple(field_ids));
+    ctx.bind(scope, "_fields", fields);
+    let field_defaults = ctx.dict(field_defaults);
+    ctx.bind(scope, "_field_defaults", field_defaults);
+    Ok((fields, doc))
+}
+
+/// Format the actual tuple payload against the declared field names.
+fn bind_repr(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let module = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(module, "_namedtuple_repr")?;
+    let repr = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "__repr__", repr);
+    Ok(())
+}
+
+/// Install both replacement names as aliases of the same generated function.
+fn bind_replace(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_replace")?;
+    let replace = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "__replace__", replace);
+    ctx.bind(scope, "_replace", replace);
+    Ok(())
+}
+
+/// Install the class method that builds an instance from an iterable.
+fn bind_make(ctx: &mut Context, scope: Id, name: Id, fields: Id) -> Result<()> {
+    let collections = ctx.module("collections")?;
+    let factory = ctx.lookup_attr(collections, "_namedtuple_make")?;
+    let make = ctx.call(factory, vec![name, fields], Vec::new())?;
+    ctx.bind(scope, "_make", make);
+    Ok(())
+}
+
+/// Assemble names and documentation without aborting on an oversized field list.
+fn text_parts(parts: &[&str]) -> Result<String> {
+    let mut output = String::new();
+    for part in parts {
+        super::operators::append_rendered_text(&mut output, part)?;
+    }
+    Ok(output)
+}
+
+/// Parameter symbols follow Python identifier normalization, while field attributes keep their spelling.
+fn constructor_parameters(
+    ctx: &mut Context,
+    names: &[String],
+    fields: Id,
+    filename: Id,
+) -> Result<(Id, Id)> {
+    let mut varnames = Vec::new();
+    varnames
+        .try_reserve_exact(names.len().saturating_add(1))
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    varnames.push(ctx.heap.code_name("_cls"));
+    for (index, name) in names.iter().enumerate() {
+        let symbol = match crate::objects::normalize_unicode("NFKC", name)? {
+            Some(normalized) if normalized.as_str() != name => {
+                // A parameter used as an expression must remain a name after normalization.
+                let symbol = normalized.as_str();
+                if matches!(symbol, "True" | "False" | "None") {
+                    return Err(Error::new(
+                        "ValueError",
+                        format!("identifier field can't represent '{symbol}' constant"),
+                    ));
+                }
+                ctx.heap.code_name(symbol)
+            }
+            _ => {
+                let Value::Tuple(fields) = ctx.heap.get(fields) else {
+                    unreachable!("validated namedtuple fields")
+                };
+                fields[index]
+            }
+        };
+        varnames.push(symbol);
+    }
+    let positional = varnames
+        .iter()
+        .map(|&symbol| ctx.str_value(symbol))
+        .collect::<Result<Vec<_>>>()?;
+    let mut seen = HashSet::new();
+    seen.try_reserve(positional.len())
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    seen.insert("_cls");
+    // The first user parameter starts at byte 13 in CPython's one-line lambda.
+    let mut offset = 13;
+    for (name, symbol) in names.iter().zip(&positional[1..]) {
+        if !seen.insert(*symbol) {
+            let range = |n: usize| {
+                ruff_text_size::TextSize::try_from(n).map_err(|_| Error::new("MemoryError", ""))
+            };
+            let span = ruff_text_size::TextRange::new(range(offset)?, range(offset + name.len())?);
+            return Err(ctx.located_syntax_error(
+                &format!("duplicate argument '{symbol}' in function definition"),
+                super::source_code::SyntaxSpan::InFields(span),
+                filename,
+                &[0],
+            )?);
+        }
+        offset += name.len() + 2;
+    }
+    let parameters = serde_json::json!({
+        "positional": positional,
+        "scope_complete": true,
+        "scope_locals_complete": true,
+        "code_flags": imre_ast::code_flags::OPTIMIZED | imre_ast::code_flags::NEWLOCALS,
+    });
+    Ok((
+        ctx.text(parameters.to_string()),
+        ctx.alloc(Value::Tuple(varnames)),
+    ))
+}
+
+/// Invoke the allocator from this particular function's globals using its bound positional frame.
+pub(super) fn construct(ctx: &mut Context, scope: Id) -> Result<Id> {
+    let signature = ctx.parsed_parameters(ctx.heap.current_code())?;
+    let allocate = ctx.lookup(scope, "_tuple_new")?;
+    ctx.heap.keep(allocate);
+    let cls = ctx.lookup(scope, "_cls")?;
+    let mut fields = Vec::new();
+    fields
+        .try_reserve_exact(signature.positional.len() - 1)
+        .map_err(|_| Error::new("MemoryError", ""))?;
+    for name in &signature.positional[1..] {
+        fields.push(ctx.lookup(scope, name)?);
+    }
+    let fields = ctx.alloc(Value::Tuple(fields));
+    ctx.call_in_scope(scope, allocate, vec![cls, fields], Vec::new())
+        .and_then(|value| ctx.check_call_return(value))
+}
+
+/// Bind the shared constructor code with this definition's signature, globals and defaults.
+fn bind_new(
+    ctx: &mut Context,
+    scope: Id,
+    typename: &str,
+    names: &[String],
+    field_ids: Id,
+    defaults: Option<Id>,
+    signature: Id,
+) -> Result<()> {
     let new = ctx.builtin("tuple.__new__");
     let allocate = ctx.text("_tuple_new");
     let module = ctx.text("__name__");
@@ -532,51 +618,33 @@ pub(super) fn bind_new(
         (module, module_name),
         (builtins, empty),
     ]);
-    let source = ctx.text(text_parts(&[
-        "def __new__(_cls, ",
-        &fields,
-        "):\n    return _tuple_new(_cls, (",
-        &fields,
-        "))",
-    ])?);
-    ctx.exec_source(source, globals, None, None)?;
-    let new = ctx
-        .dict_named_item(globals, "__new__")
-        .expect("generated function");
-    ctx.heap.keep(new);
-    let key = ctx.text("__new__");
-    ctx.delete_item(globals, key)?;
-    let Value::Function { code, .. } = *ctx.heap.get(new) else {
-        unreachable!()
-    };
+    let filename = ctx.text("<string>");
+    let (parameters, varnames) = constructor_parameters(ctx, names, field_ids, filename)?;
     let lambda = ctx.text("<lambda>");
-    let Value::Code(code) = ctx.heap.get_mut(code) else {
-        unreachable!()
+    let code = ctx.prelinked_code(
+        super::value::Body::Native(super::ffi::namedtuple_constructor, NONE),
+        ctx.root_scope(scope),
+        lambda,
+        parameters,
+        (lambda, NONE),
+        (filename, 1),
+    );
+    let Value::Code(metadata) = ctx.heap.get_mut(code) else {
+        unreachable!("prelinked code")
     };
-    code.name = lambda;
-    code.qualname = lambda;
+    metadata.varnames = varnames;
+    metadata.cellvars = super::value::EMPTY_TUPLE;
+    let name = ctx.text("__new__");
+    let new = ctx.construct_function(&[code, globals, name, defaults.unwrap_or(NONE)], &[])?;
+    ctx.heap.keep(new);
     let qualname = ctx.text(text_parts(&[typename, ".__new__"])?);
     let doc = ctx.text(text_parts(&[
         "Create new instance of ",
-        typename,
-        "(",
-        &fields,
-        ")",
+        ctx.str_value(signature)?,
     ])?);
     ctx.set_attr(new, "__qualname__", qualname)?;
     ctx.set_attr(new, "__doc__", doc)?;
-    if let Some(defaults) = defaults {
-        ctx.set_attr(new, "__defaults__", defaults)?;
-    }
     let descriptor = super::method_decorator::static_method(ctx, new)?;
     ctx.bind(scope, "__new__", descriptor);
-    let collections = ctx.module("collections")?;
-    let factory = ctx.lookup_attr(collections, "_namedtuple_getnewargs")?;
-    let name = ctx.text(typename);
-    let methods = ctx.call(factory, vec![name, TRUE], Vec::new())?;
-    ctx.heap.keep(methods);
-    let methods = ctx.unpack_items(methods, 2, None)?;
-    ctx.bind(scope, "__getnewargs__", methods[0]);
-    ctx.bind(scope, "_asdict", methods[1]);
-    Ok(new)
+    Ok(())
 }

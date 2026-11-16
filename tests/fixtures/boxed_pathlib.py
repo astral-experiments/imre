@@ -33,6 +33,67 @@ def current():
     assert bytes(PurePosixPath("a/b")) == b"a/b"
     assert bytes(PureWindowsPath("a/b")) == b"a\\b"
 
+    assert PurePosixPath("a//./b/../c").parts == ("a", "b", "..", "c")
+    assert PureWindowsPath(r"C:\a\.\b\..").parts == ("C:\\", "a", "b", "..")
+    assert PurePosixPath("α/\udcff/./β").parts == ("α", "\udcff", "β")
+
+    class Spelling(str):
+        def split(self, separator):
+            assert separator == "|"
+            return ["", ".", "custom", ".."]
+
+    class Parser:
+        sep = "|"
+        altsep = None
+
+        @staticmethod
+        def splitroot(path):
+            return "", "", Spelling(path)
+
+    reads = []
+
+    class PathFunctions:
+        @property
+        def fspath(self):
+            reads.append("fspath")
+            return os.fspath
+
+    original_os = pathlib.os
+    try:
+        pathlib.os = PathFunctions()
+        raw = PurePosixPath("first", "second")
+        copied = PurePosixPath(raw)
+        empty = PurePosixPath()
+    finally:
+        pathlib.os = original_os
+    assert reads == ["fspath", "fspath"]
+    assert raw.parts == copied.parts == ("first", "second")
+    assert not empty.parts
+
+    checks = []
+
+    class PathMeta(type):
+        def __instancecheck__(cls, value):
+            checks.append(value)
+            return False
+
+    class PathMarker(metaclass=PathMeta):
+        pass
+
+    original_type = pathlib.PurePath
+    try:
+        pathlib.PurePath = PathMarker
+        assert PurePosixPath("one", "two")._raw_paths == ["one", "two"]
+    finally:
+        pathlib.PurePath = original_type
+    assert checks == ["one", "two"]
+
+    class CustomPath(PurePosixPath):
+        parser = Parser
+
+    assert CustomPath("original").parts == ("custom", "..")
+    assert CustomPath._parse_pattern("original") == ["custom", ".."]
+
     path = PurePosixPath("parent")
     assert not path.joinpath("child").is_absolute()
     assert path.joinpath("/child").is_absolute()

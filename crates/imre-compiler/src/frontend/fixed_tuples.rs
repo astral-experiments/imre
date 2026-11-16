@@ -3,6 +3,8 @@
 //! admitted; a resize, aliasing call or rebinding loses the proof.
 
 use super::*;
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 #[derive(Clone, Copy)]
 pub(super) struct Guard {
@@ -31,6 +33,20 @@ impl Checker<'_> {
             if !matches!(ty, Type::Str | Type::Int | Type::Bool | Type::Bytes)
                 || !fields.iter().all(|&field| field == ty)
             {
+                if (key.ty == Type::PythonObject || fields.contains(&Type::PythonObject))
+                    && (self.placement_only
+                        || self
+                            .unrepresented
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(Failure::is_object))
+                {
+                    return Ok(registered::values::comparison(
+                        comparison,
+                        vec![key, tuple],
+                        None,
+                    ));
+                }
                 return Err(error(
                     self.source,
                     comparison,
@@ -56,7 +72,7 @@ impl Checker<'_> {
                         },
                         self.local(key_slot),
                     ],
-                    vec![Compare::Equal],
+                    vec![CmpOp::Eq],
                 ),
             })
             .collect::<Vec<_>>();
@@ -69,10 +85,7 @@ impl Checker<'_> {
             },
         };
         let value = if comparison.ops[0] == ast::CmpOp::NotIn {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(contains)),
-            }
+            Expr::not(contains)
         } else {
             contains
         };
@@ -196,7 +209,7 @@ impl Checker<'_> {
             .map(|index| Expr {
                 ty: element,
                 kind: ExprKind::Builtin(
-                    Builtin::ListGet,
+                    Builtin::ListGet(None),
                     vec![self.local(slot), Expr::integer(index)],
                 ),
             })
@@ -209,14 +222,14 @@ impl Checker<'_> {
 }
 
 pub(super) fn preserves(guard: Guard, statements: &[Statement]) -> bool {
-    if !matches!(statements, [Statement::SetItem(receiver, _, _)] if matches!(receiver.kind, ExprKind::Local(slot) if slot == guard.slot))
+    if !matches!(statements, [Statement::SetItem(_, receiver, _, _)] if matches!(receiver.kind, ExprKind::Local(slot) if slot == guard.slot))
     {
         return false;
     }
     let mut pure = true;
     ir::walk_expressions(statements, &mut |expr| {
         pure &= match &expr.kind {
-            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::None | ExprKind::Local(_) | ExprKind::Binary(..) | ExprKind::Negate(_) => true,
+            ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::Str(_) | ExprKind::Bytes(_) | ExprKind::None | ExprKind::Local(_) | ExprKind::Binary(..) | ExprKind::Unary(UnaryOp::USub, _) => true,
             ExprKind::Builtin(b,args) => b.contract(args).preserves_list_storage(),
             ExprKind::Scope { body, clear, .. } => !clear.contains(&guard.slot)
                 && body.iter().all(|s| matches!(s, Statement::Assign(slot, _) | Statement::Clear(slot) if *slot != guard.slot)),

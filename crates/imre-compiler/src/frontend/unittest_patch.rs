@@ -88,11 +88,7 @@ impl Checker<'_> {
                     self.coerce(
                         Expr {
                             ty: dict,
-                            kind: ExprKind::Dict {
-                                key: Type::Str,
-                                value: Type::Str,
-                                entries,
-                            },
+                            kind: ExprKind::dict_pairs(entries),
                         },
                         optional,
                         arg,
@@ -125,11 +121,7 @@ impl Checker<'_> {
             self.coerce(
                 Expr {
                     ty: dict,
-                    kind: ExprKind::Dict {
-                        key: Type::Str,
-                        value: Type::Str,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
                 optional,
                 call,
@@ -138,11 +130,7 @@ impl Checker<'_> {
         let reset = slots[2].map_or(Expr::boolean(false), |slot| self.local(slot));
         let kwargs = Expr {
             ty: dict,
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: Type::Str,
-                entries: extras,
-            },
+            kind: ExprKind::dict_pairs(extras),
         };
         self.calls.insert(sig.id);
         let result = Expr {
@@ -170,14 +158,13 @@ impl Checker<'_> {
 
     /// A dictionary patch returns the original mapping itself, and restores its
     /// entire snapshot, including keys inserted or deleted by the protected body.
-    pub(super) fn mock_dictionary_scope(
+    pub(super) fn mock_dictionary_context<'s>(
         &mut self,
+        out: &'s mut Vec<Statement>,
         item: &ast::WithItem,
-        remaining: &[ast::WithItem],
-        suite: &[ast::Stmt],
         class: usize,
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<&'s mut Vec<Statement>, String> {
         let saved = self.hidden(manager.ty);
         let (enter_id, enter_ty) = {
             let sig = &self.classes.methods[class]["_enter"];
@@ -194,26 +181,18 @@ impl Checker<'_> {
         let entered = self.hidden(enter_ty);
         let mut protected = Vec::new();
         if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(target, self.local(entered))?);
+            self.assign(target, self.local(entered), Some(&mut protected))?;
         }
-        let (nested, falls) = self.with_items(remaining, suite)?;
-        protected.extend(nested);
-        let guard = Statement::Try {
-            body: protected,
-            handlers: Vec::new(),
-            orelse: Vec::new(),
-            finalbody: vec![restore],
-        };
-        Ok((
-            vec![Statement::Scope {
-                body: vec![
-                    Statement::Assign(saved, manager),
-                    Statement::Assign(entered, value),
-                    guard,
-                ],
-                clear: vec![saved, entered],
-            }],
-            falls,
+        Ok(contexts::enter_native(
+            out,
+            vec![
+                Statement::Assign(saved, manager),
+                Statement::Assign(entered, value),
+            ],
+            protected,
+            Vec::new(),
+            restore,
+            vec![saved, entered],
         ))
     }
 }

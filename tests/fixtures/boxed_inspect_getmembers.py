@@ -1,4 +1,4 @@
-from inspect import Attribute, classify_class_attrs, getmembers, getmembers_static
+from inspect import Attribute, classify_class_attrs, getclasstree, getmembers, getmembers_static
 
 
 class Members:
@@ -34,6 +34,7 @@ def current():
     else:
         raise AssertionError("predicate exception was swallowed")
     classify_inherited()
+    class_tree()
 
 
 def classify_inherited():
@@ -55,6 +56,28 @@ def classify_inherited():
         assert row.kind == kind and row.defining_class is owner
         assert row.object is owner.__dict__[name]
     assert not reads
+
+
+def class_tree():
+    class Left:
+        pass
+
+    class Right:
+        pass
+
+    class Both(Left, Right):
+        pass
+
+    classes = [Right, Both, Left, Both]
+    leaf = (Both, (Left, Right))
+    assert getclasstree(classes) == [
+        (object, ()),
+        [(Left, (object,)), [leaf], (Right, (object,)), [leaf]],
+    ]
+    assert getclasstree(classes, unique=True) == [
+        (object, ()),
+        [(Left, (object,)), [leaf], (Right, (object,))],
+    ]
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import collections
 from collections import UserDict, UserList, UserString
 from collections.abc import Mapping
+from types import MappingProxyType
 
 
 class Default(UserDict):
@@ -37,6 +38,14 @@ def current():
     assert MappingItems(key=1) == {"custom": 1}
     assert UserDict({"custom": 1}) == MappingItems(key=1)
     assert Mapping.__eq__(d, object()) is NotImplemented and UserDict.__hash__ is None
+    weights = UserDict(a=3, b=0)
+    counts = collections.Counter(weights)
+    assert dict(counts) == {"a": 3, "b": 0}
+    counts.update(MappingProxyType(weights))
+    assert counts["a"] == 6
+    counts.subtract(UserDict(a=5, b=2))
+    assert dict(counts) == {"a": 1, "b": -2}
+
     items = ListChild("ab")
     assert items[1:] == ["b"] and type(items[1:]) is ListChild
     text = UserString("ééé")

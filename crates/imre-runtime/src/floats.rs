@@ -16,6 +16,7 @@ use num_traits::{FromPrimitive, Signed, ToPrimitive, Zero};
 
 use super::{Bytes, Error, Int, Kind, Result, Str, finish, output_text};
 use crate::integer_text::decimal_digit;
+use crate::objects::exceptions::string_repr;
 
 /// Returns a nullable-word owner. Bare float storage never calls this helper.
 #[unsafe(no_mangle)]
@@ -61,34 +62,7 @@ pub extern "C" fn imre_print_float(value: f64) {
     output_text(&render(value));
 }
 
-/// Ryu chooses shortest digits with ties to even; Rust's formatter, currently
-/// used by Ruff for finite values, instead prints 900719925474099.25 as a final
-/// `.3` where Python chooses `.2`. Keep Ruff's nonfinite spelling and adapt Ryu's
-/// finite exponent notation: Python switches at 1e-5 and always writes its sign
-/// and at least two exponent digits.
-pub(crate) fn render(value: f64) -> Str {
-    if !value.is_finite() {
-        return ruff_python_literal::float::to_string(value).into();
-    }
-    let mut buffer = ryu::Buffer::new();
-    let raw = buffer.format_finite(value);
-    if let Some((significand, exponent)) = raw.split_once('e') {
-        let exponent = exponent.parse::<i32>().unwrap();
-        return compact_str::format_compact!("{significand}e{exponent:+03}");
-    }
-    let unsigned = raw.strip_prefix('-').unwrap_or(raw);
-    if let Some(digits) = unsigned.strip_prefix("0.0000") {
-        let mut result = Str::new(if value.is_sign_negative() { "-" } else { "" });
-        result.push(char::from(digits.as_bytes()[0]));
-        if digits.len() > 1 {
-            result.push('.');
-            result.push_str(&digits[1..]);
-        }
-        result.push_str("e-05");
-        return result;
-    }
-    raw.into()
-}
+pub(crate) use imre_ast::numbers::float_repr as render;
 
 /// # Safety
 /// `value` is a rooted canonical Int handle.
@@ -99,13 +73,10 @@ pub unsafe extern "C" fn imre_int_float(value: usize) -> f64 {
     crate::finish(int_to_float(&value), 0.0)
 }
 
-pub(super) fn int_to_float(value: &Int) -> Result<f64> {
-    if let Some(value) = value.as_small() {
-        return Ok(value as f64);
-    }
-    let value = value.big();
-    let mut digits = value.magnitude().iter_u64_digits().rev();
-    let magnitude = match digits.len() {
+/// Round an unsigned integer magnitude to binary64, returning infinity on overflow.
+fn magnitude_to_float(magnitude: &num_bigint::BigUint) -> f64 {
+    let mut digits = magnitude.iter_u64_digits().rev();
+    match digits.len() {
         0 | 1 => digits.next().unwrap_or(0) as f64,
         2..=16 => {
             let high = u128::from(digits.next().unwrap());
@@ -118,7 +89,15 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
         }
         // More than 1024 magnitude bits always exceed the finite binary64 range.
         _ => f64::INFINITY,
-    };
+    }
+}
+
+pub(super) fn int_to_float(value: &Int) -> Result<f64> {
+    if let Some(value) = value.as_small() {
+        return Ok(value as f64);
+    }
+    let value = value.big();
+    let magnitude = magnitude_to_float(value.magnitude());
     if magnitude.is_infinite() {
         Err(Error::new(
             Kind::OverflowError,
@@ -131,6 +110,144 @@ pub(super) fn int_to_float(value: &Int) -> Result<f64> {
             magnitude
         })
     }
+}
+
+/// Compute a logarithm from the stored integer, retaining its exponent on float overflow.
+pub(crate) fn int_logarithm(integer: &Int, log: fn(f64) -> f64) -> Result<f64> {
+    let domain_error = || Error::new(Kind::ValueError, "expected a positive input");
+    if let Some(small) = integer.as_small() {
+        return if small > 0 {
+            Ok(log(small as f64))
+        } else {
+            Err(domain_error())
+        };
+    }
+    let n = integer.big();
+    if n.sign() != num_bigint::Sign::Plus {
+        return Err(domain_error());
+    }
+    let magnitude = n.magnitude();
+    let x = magnitude_to_float(magnitude);
+    if x.is_finite() {
+        return Ok(log(x));
+    }
+    // CPython's loghelper uses a rounded mantissa and a separate exponent
+    // on overflow. Keep one sticky bit so the cast rounds ties correctly.
+    let mut exponent = magnitude.bits();
+    let shift = exponent - u64::from(u64::BITS);
+    let mut digits = magnitude.iter_u64_digits().rev();
+    let prefix = (u128::from(digits.next().unwrap()) << 64) | u128::from(digits.next().unwrap());
+    let high = ((prefix << prefix.leading_zeros()) >> 64) as u64;
+    // Lower digits can affect rounding only at a midpoint in the high word.
+    let halfway = 1_u64 << (u64::BITS - f64::MANTISSA_DIGITS - 1);
+    let sticky = high & (2 * halfway - 1) == halfway && magnitude.trailing_zeros().unwrap() < shift;
+    let mut mantissa = (high | u64::from(sticky)) as f64 * 2.0_f64.powi(-64);
+    if mantissa == 1.0 {
+        mantissa = 0.5;
+        exponent += 1;
+    }
+    Ok(log(mantissa) + log(2.0) * exponent as f64)
+}
+
+pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
+    if x <= 0.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected a positive input, got {}", render(x)),
+        ));
+    }
+    Ok(log(x))
+}
+
+/// C-style remainder retains the dividend's sign, including exact zero.
+pub(crate) fn fmod(dividend: f64, divisor: f64) -> Result<f64> {
+    let remainder = dividend % divisor;
+    if remainder.is_nan() && !dividend.is_nan() && !divisor.is_nan() {
+        return Err(Error::new(Kind::ValueError, "math domain error"));
+    }
+    Ok(remainder)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_fmod(dividend: f64, divisor: f64) -> f64 {
+    finish(fmod(dividend, divisor), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_degrees(value: f64) -> f64 {
+    value.to_degrees()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_radians(value: f64) -> f64 {
+    value.to_radians()
+}
+
+pub(crate) fn log1p(value: f64) -> Result<f64> {
+    if value <= -1.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!("expected argument value > -1, got {}", render(value)),
+        ));
+    }
+    // Some platform log1p implementations lose the sign of zero.
+    Ok(if value == 0.0 { value } else { value.ln_1p() })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log1p(value: f64) -> f64 {
+    finish(log1p(value), 0.0)
+}
+
+/// CPython returns the input NaN, including its signaling bit and payload.
+pub(crate) fn log10(x: f64) -> f64 {
+    if x.is_nan() { x } else { x.log10() }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log10(value: f64) -> f64 {
+    finish(float_logarithm(value, log10), 0.0)
+}
+
+/// # Safety
+/// `value` is a rooted canonical Int handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_int_log10(value: usize) -> f64 {
+    // SAFETY: the caller keeps the integer rooted during the call.
+    let value = unsafe { Int::borrow(value) };
+    finish(int_logarithm(&value, log10), 0.0)
+}
+
+/// Validate the common domain of asin and acos, allowing NaN through to libm.
+fn asin_acos_argument(value: f64) -> Result<f64> {
+    if value.abs() > 1.0 {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!(
+                "expected a number in range from -1 up to 1, got {}",
+                render(value)
+            ),
+        ));
+    }
+    Ok(value)
+}
+
+pub(crate) fn acos(value: f64) -> Result<f64> {
+    asin_acos_argument(value).map(f64::acos)
+}
+
+pub(crate) fn asin(value: f64) -> Result<f64> {
+    asin_acos_argument(value).map(f64::asin)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_acos(value: f64) -> f64 {
+    finish(acos(value), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_asin(value: f64) -> f64 {
+    finish(asin(value), 0.0)
 }
 
 #[unsafe(no_mangle)]
@@ -235,16 +352,25 @@ pub(crate) fn parse(source: &str) -> Option<f64> {
         .flatten()
 }
 
+pub(crate) const INVALID_STRING_PREFIX: &str = "could not convert string to float: ";
+
+/// Parse an exact Python string, preserving its original spelling on failure.
+pub(crate) fn parse_str(value: &str) -> Result<f64> {
+    parse(value).ok_or_else(|| {
+        Error::new(
+            Kind::ValueError,
+            format!("{INVALID_STRING_PREFIX}{}", string_repr(value)),
+        )
+    })
+}
+
 /// # Safety
 /// `value` is a rooted string handle.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_float_parse(value: *const Str) -> f64 {
     // SAFETY: the caller keeps this immutable string alive.
-    finish(
-        parse(unsafe { &*value })
-            .ok_or_else(|| Error::new(Kind::ValueError, "could not convert string to float")),
-        0.0,
-    )
+    let value = unsafe { &*value };
+    finish(parse_str(value), 0.0)
 }
 
 /// Apply the float grammar to ASCII buffer contents.

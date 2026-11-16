@@ -89,6 +89,30 @@ def async_generator_syntax():
 
 
 def syntax_members():
+    for prefix in ("\t", "\t\\\n\t"):
+        try:
+            compile("if True:\n    pass\n" + prefix + "\\ppass\n", "bad_join.py", "exec")
+        except SyntaxError as error:
+            assert type(error) is SyntaxError
+        else:
+            raise AssertionError("invalid line continuation was accepted")
+
+    # Unexpected indentation can still produce an ordinary parser error after a leading join.
+    try:
+        compile("if True:\n    pass\n\t\\\npass\n", "bad_join.py", "exec")
+    except SyntaxError:
+        pass
+    else:
+        raise AssertionError("unexpected indentation was accepted")
+
+    try:
+        compile("if True:\n    pass\n\tpass\0", "bad_join.py", "exec")
+    except SyntaxError as error:
+        assert type(error) is SyntaxError
+        assert error.args == ("source code string cannot contain null bytes",)
+    else:
+        raise AssertionError("source with a NUL was accepted")
+
     try:
         compile(b"# coding: unknown-encoding\n", "dir/one.py", "exec")
     except SyntaxError as error:
@@ -309,7 +333,8 @@ def source_annotated_targets():
         return value
 
     class Box:
-        pass
+        def __repr__(self):
+            raise AssertionError("an annotation operand reached the display hook")
 
     target = Box()
     items = {}
@@ -321,6 +346,23 @@ class C:
     assert events == ["value", "object", "item", "items", "key"]
     assert target.value == 3 and items == {"x": 4}
     assert not namespace["C"].__annotations__
+
+    for future in ("", "from __future__ import annotations\n"):
+        events.clear()
+        exec(future + """mark("module", target).missing: unknown()
+class C:
+    mark("class", target)[mark("lo", 1):mark("hi", 4):mark("step", 2), mark("key", 3)]: unknown()
+def annotate():
+    (target): unknown()
+    mark("function", target).missing: unknown()
+annotate()
+""", namespace)
+        assert events == ["module", "class", "lo", "hi", "step", "key", "function"]
+        assert not hasattr(target, "missing") and not namespace["C"].__annotations__
+
+    events.clear()
+    exec(compile("mark('single', target).missing: unknown()", "<single>", "single"), namespace)
+    assert events == ["single"]
 
 
 def source_generic_functions():
@@ -375,6 +417,162 @@ class Lazy(Base):
     assert lazy.method.__annotations__ == {"x": bytes, "y": private, "z": bool}
     instance = lazy()
     assert instance.method(None, None, None) == (instance, private)
+
+
+def conditional_class_annotations():
+    seen = []
+    ns = {"seen": seen}
+    exec("""def record(value):
+    seen.append(value)
+    return value
+
+def factory(flag):
+    class Fields:
+        first: int
+        def active():
+            nonlocal __conditional_annotations__
+            return __conditional_annotations__
+        def identity():
+            return __class__, __conditional_annotations__
+        if flag:
+            value: record(Alias)
+        else:
+            value: record(Missing)
+        for i in range(2):
+            repeated: record(bytes)
+        last: int
+        Alias = float
+    return Fields
+""", ns)
+    cls = ns["factory"](True)
+    provider = cls.__annotate__
+    assert seen == [] and "__conditional_annotations__" not in vars(cls)
+    assert provider.__code__.co_freevars == ("__classdict__", "__conditional_annotations__")
+    assert cls.active() is provider.__closure__[1].cell_contents
+    assert cls.active() == {0, 2}
+    assert cls.identity.__code__.co_freevars == ("__class__", "__conditional_annotations__")
+    assert cls.identity.__closure__[0].cell_contents is cls
+    assert cls.identity.__closure__[1] is provider.__closure__[1]
+    assert cls.identity() == (cls, cls.active())
+    cls.Alias = bool
+    assert list(cls.__annotations__.items()) == [
+        ("first", int), ("value", bool), ("repeated", bytes), ("last", int),
+    ]
+    assert seen == [bool, bytes]
+    other = ns["factory"](False)
+    assert other.active() == {1, 2} and cls.active() == {0, 2}
+    try:
+        other.__annotations__
+    except NameError as exc:
+        assert exc.name == "Missing"
+    else:
+        raise AssertionError("active unresolved annotation was skipped")
+
+    exec("""class Shadow:
+    __conditional_annotations__ = "class binding"
+    if len:
+        x: __conditional_annotations__
+        x: record(__conditional_annotations__)
+""", ns)
+    assert ns["Shadow"].__annotations__ == {"x": "class binding"}
+    assert seen == [bool, bytes, "class binding"]
+    ns["__conditional_annotations__"] = "global binding"
+    exec("""class Outside:
+    global __conditional_annotations__
+    if len:
+        x: __conditional_annotations__
+""", ns)
+    assert ns["Outside"].__annotations__ == {"x": "global binding"}
+
+    shadow = ns["Shadow"]
+    del shadow.__conditional_annotations__
+    assert shadow.__annotate__(1) == {"x": "global binding"}
+    del ns["__conditional_annotations__"]
+    try:
+        shadow.__annotate__(1)
+    except NameError as exc:
+        assert exc.name == "__conditional_annotations__"
+    else:
+        raise AssertionError("a deleted class binding exposed the compiler's cell")
+    exec("""def inside():
+    __conditional_annotations__ = "outer lexical binding"
+    class Lexical:
+        if len:
+            x: __conditional_annotations__
+    return Lexical
+
+class WithParameter:
+    def read[__conditional_annotations__](value: __conditional_annotations__):
+        return __conditional_annotations__
+    def owner[__class__](value: __class__):
+        return __class__, __conditional_annotations__
+""", ns)
+    assert ns["inside"]().__annotations__ == {"x": {0}}
+    read = ns["WithParameter"].read
+    parameter, = read.__type_params__
+    assert read(None) is parameter and read.__annotations__["value"] is parameter
+    owner = ns["WithParameter"].owner
+    parameter, = owner.__type_params__
+    assert owner(None) == (parameter, set()) and owner.__annotations__["value"] is parameter
+
+    exec("""class Target: pass
+class Outer:
+    items = [0]
+    try:
+        inside: int
+    finally:
+        Target.value: Missing = 3
+        items[0]: Missing = 4
+        (plain): Missing = 5
+        class Inner:
+            if len:
+                nested: str
+        def local():
+            local_only: Missing
+""", ns)
+    outer = ns["Outer"]
+    assert (ns["Target"].value, outer.items, outer.plain) == (3, [4], 5)
+    assert outer.__annotations__ == {"inside": int}
+    assert outer.Inner.__annotations__ == {"nested": str}
+    exec("""from __future__ import annotations
+class Postponed:
+    try:
+        pass
+    finally:
+        if len:
+            x: Missing
+""", ns)
+    assert ns["Postponed"].__annotations__ == {"x": "Missing"}
+
+    exec("""def try_fields(failures):
+    class Fields:
+        for fail in failures:
+            try:
+                try:
+                    body: record("body")
+                    if fail:
+                        raise ValueError
+                except ValueError:
+                    handled: record("handled")
+                    raise RuntimeError
+                else:
+                    success: record("success")
+                finally:
+                    cleanup: record("cleanup")
+            except RuntimeError:
+                escaped: record("escaped")
+    return Fields
+""", ns)
+    for failures, expected in [
+        ((False,), ["body", "success", "cleanup"]),
+        ((True,), ["body", "handled", "cleanup", "escaped"]),
+        ((True, False, True, False), ["body", "success", "handled", "cleanup", "cleanup", "escaped"]),
+    ]:
+        seen.clear()
+        fields = ns["try_fields"](failures)
+        assert seen == []
+        assert list(fields.__annotations__) == list(dict.fromkeys(expected))
+        assert seen == expected
 
 
 def module_annotations():
@@ -688,6 +886,12 @@ def source_match():
     exec("""
 def choose(value, guard):
     match observe(value):
+        case True:
+            return "true"
+        case False:
+            return "false"
+        case None:
+            return "none"
         case Labels.first if observe(guard):
             return "first"
         case str():
@@ -703,6 +907,173 @@ def choose(value, guard):
     assert choose(5, False) == "other"
     assert calls == ["hit", True, "hit", False, 5]
     assert choose(ValueError("matched"), False) == "exception"
+    assert choose(True, False) == "true"
+    assert choose(False, False) == "false"
+    assert choose(None, False) == "none"
+    assert choose(1, False) == choose(0, False) == "other"
+
+    exec("""
+def nested(value):
+    def captured():
+        return item, pair
+    match value:
+        case (("tag", item) as pair, True) if observe(item):
+            return "guard passed"
+        case (_, _):
+            return captured()
+    return None
+
+class Private:
+    def unpack(self, value):
+        match value:
+            case (__item,):
+                return __item
+""", scope)
+    exec("""
+def pick(value, allow):
+    a = b = "before"
+    match value:
+        case (tuple() | list()) as items if not items:
+            return items
+        case [a, b, 0] | [b, a, 1] if allow:
+            return a, b
+    return b, a
+""", scope)
+    pick = scope["pick"]
+    assert pick([], False) == [] and pick((), False) == ()
+    assert pick([1, 2, 1], True) == (2, 1)
+    assert pick([1, 2, 1], False) == (1, 2)
+    assert pick([1, 2, 2], True) == ("before", "before")
+    assert scope["Private"]().unpack((42,)) == 42
+    nested = scope["nested"]
+
+    class Logged(list):
+        def __len__(self):
+            calls.append("len")
+            return super().__len__()
+
+        def __iter__(self):
+            calls.append("iter")
+            return super().__iter__()
+
+    calls.clear()
+    pair = ("tag", 0)
+    item, alias = nested(Logged([pair, True]))
+    assert item == 0 and alias is pair
+    assert calls == ["len", "iter", 0, "len"]
+    assert nested((("tag", 1), True)) == "guard passed"
+    assert nested("ab") is None and nested(b"ab") is None
+
+    class Indexed(Logged):
+        def __getitem__(self, index):
+            calls.append(index)
+            return super().__getitem__(index)
+
+    scope["seq"] = Indexed(("crates", "sample", "resources", "fixture"))
+    calls.clear()
+    exec("match seq:\n    case ['crates', _, 'resources', *_]: matched = True", scope)
+    assert scope.pop("matched") and calls == ["len", 0, 2]
+    calls.clear()
+    exec("match seq:\n    case [first, *_, last]: result = first, last", scope)
+    assert scope["result"] == ("crates", "fixture") and calls == ["len", 0, "len", 3]
+    calls.clear()
+    exec("match seq:\n    case [*_]: pass", scope)
+    assert calls == []
+    exec("match seq:\n    case [first, *middle, last]: result = middle", scope)
+    assert scope["result"] == ["sample", "resources"] and calls == ["len", "iter"]
+
+    class Broken(list):
+        def __iter__(self):
+            raise ValueError("iterator failed")
+
+    assert nested(Broken([pair])) is None
+    try:
+        nested(Broken([pair, True]))
+    except ValueError as error:
+        assert str(error) == "iterator failed"
+    else:
+        raise AssertionError("sequence iteration error was suppressed")
+
+    class Dropped:
+        def __del__(self):
+            calls.append("dropped")
+
+    class Compare:
+        def __eq__(self, other):
+            import gc
+            gc.collect()
+            calls.append("compared")
+            return True
+
+    class FreshPair(list):
+        def __iter__(self):
+            return iter((Dropped(), Compare()))
+
+    scope["fresh"] = FreshPair([0, 1])
+    for target, expected in (("_", ["dropped", "compared"]), ("saved", ["compared"])):
+        calls.clear()
+        exec("match fresh:\n    case (" + target + ", 1): matched = True", scope)
+        assert scope.pop("matched") and calls == expected
+    assert isinstance(scope["saved"], Dropped)
+    scope.update(Dropped=Dropped, Compare=Compare)
+    calls.clear()
+    exec("match (Dropped(), Compare()):\n    case (_, 1): pass", scope)
+    assert calls == ["dropped", "compared"]
+
+    class Token:
+        def __init__(self, name):
+            self.name = name
+
+        def __del__(self):
+            calls.append(self.name)
+
+    class Trial(list):
+        def __iter__(self):
+            calls.append("unpack")
+            return iter((Token("a"), Token("b"), 2, Token("later")))
+
+    scope["trial"] = Trial([0] * 4)
+    for pattern, attempts in (("[a, b, 0, c] | [b, a, 1, c]", 2), ("[a, b, (0 | 1), c]", 1)):
+        calls.clear()
+        exec("match trial:\n    case " + pattern + ": pass", scope)
+        assert calls == ["unpack", "later", "a", "b"] * attempts
+
+    class Compared(Dropped):
+        def __eq__(self, other):
+            return calls
+
+    scope.update(Compared=Compared, events=calls)
+    calls.clear()
+    exec("match [Compared()]:\n    case [1] if events: matched = True\n    case _: matched = False", scope)
+    assert scope.pop("matched") and calls == ["dropped"]
+
+    class Private:
+        def pick(self, value):
+            match value:
+                case [*__parts] | {"key": _, **__parts} | __parts:
+                    return __parts
+
+    picker = Private()
+    assert picker.pick([1]) == [1]
+    assert picker.pick({"key": 1, "value": 2}) == {"value": 2}
+    assert picker.pick(3) == 3
+
+    for pattern, text, start, end, location_arg in (
+        ("[a] | [b]", "alternative patterns bind different names", 10, 19, True),
+        ("_ | 0", "wildcard makes remaining patterns unreachable", 10, 11, True),
+        ("[a, a]", "multiple assignments to name 'a' in pattern", 14, 15, True),
+        ("[a, *a]", "multiple assignments to name 'a' in pattern", 14, 16, True),
+        ("[a, a, *a, *b]", "multiple starred names in sequence pattern", 10, 24, True),
+        ("[*a, *__debug__]", "cannot assign to __debug__", 15, 25, False),
+    ):
+        try:
+            compile("match value:\n    case " + pattern + ": pass", "<match>", "exec")
+        except SyntaxError as error:
+            location = ("<match>", 2, start, None, 2, end)
+            assert error.msg == text and (error.offset, error.end_offset) == (start, end)
+            assert error.args == ((text, location) if location_arg else (text,))
+        else:
+            raise AssertionError("invalid sequence pattern accepted")
 
 
 def source_genexpr():
@@ -908,6 +1279,27 @@ def source_eval():
 
 
 def exec_caller_namespaces():
+    def store():
+        global exec_probe
+        exec_probe = abs(-7)
+        return exec_probe
+
+    supplied = {"__builtins__": {"abs": lambda value: 2 * value}}
+    separate = {"exec_probe": "local"}
+    assert exec(store.__code__, supplied, separate) is None
+    assert eval(store.__code__, supplied, separate) == -14
+    assert (supplied["exec_probe"], separate["exec_probe"]) == (-14, "local")
+
+    def required(arg):
+        return arg
+
+    try:
+        exec(required.__code__, supplied)
+    except TypeError as exc:
+        assert str(exc) == "required() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("exec supplied a missing argument")
+
     seen = []
     value = 7
     execute = exec
@@ -924,6 +1316,40 @@ def exec_caller_namespaces():
     assert exec(compile("40 + 2", "caller", "eval"), {}, separate) is None
     exec("result = n", globals={"n": 8}, locals=separate, closure=None)
     assert separate == {"result": 8}
+
+    def update():
+        nonlocal value
+        value = abs(value)
+
+    other = 11
+
+    def alternate():
+        return other
+
+    namespace = {"abs": lambda n: n * 2}
+    result = exec(update.__code__, namespace, closure=alternate.__closure__)
+    assert result is None
+    assert (value, other) == (7, 22)
+
+    def needs(arg):
+        return value + arg
+
+    try:
+        exec(needs.__code__, namespace, closure=needs.__closure__)
+    except TypeError as exc:
+        assert str(exc) == "needs() missing 1 required positional argument: 'arg'"
+    else:
+        raise AssertionError("missing argument accepted")
+
+    outer = {"__doc__": "outer"}
+    exec(
+        '"""  Measure time.\n\tRead the clock.\n"""\n'
+        'before = __doc__\n__doc__ = "updated"',
+        outer,
+        separate,
+    )
+    assert separate["before"] == "Measure time.\nRead the clock.\n"
+    assert separate["__doc__"] == "updated" and outer["__doc__"] == "outer"
 
 
 def source_set_displays():
@@ -1174,6 +1600,7 @@ def current():
     source_annotations()
     source_annotated_targets()
     module_annotations()
+    conditional_class_annotations()
     source_genexpr()
     source_listcomp()
     source_setcomp()

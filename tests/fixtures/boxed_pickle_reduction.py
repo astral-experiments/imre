@@ -3,6 +3,7 @@ import builtins
 import codecs
 import copyreg
 import pickle
+from operator import methodcaller
 from collections import namedtuple
 from typing import ParamSpec
 
@@ -145,6 +146,15 @@ def check_method_descriptors():
         wrapper.__reduce_ex__ = lambda protocol: (int, (protocol,))
         for dumps in (pickle.dumps, pickle._dumps):
             assert pickle.loads(dumps(wrapper, 4)) == 4
+
+
+def check_method_wrapper_reduction():
+    caller = methodcaller("format", title="ok")
+    wrapper = caller.__call__
+    descriptor = type(wrapper).__reduce__
+    for reconstruct, (receiver, name) in (descriptor(wrapper), wrapper.__reduce_ex__(5)):
+        assert reconstruct is getattr and receiver is caller and name is methodcaller.__call__.__name__
+    assert pickle.loads(pickle.dumps(wrapper))("result: {title}") == "result: ok"
 
 
 def check_python_method_reduction():
@@ -717,12 +727,35 @@ def check_list_items(protocol):
             raise AssertionError("accepted noniterator list items")
 
 
+def check_socket_reduction():
+    import _socket
+    import socket
+
+    for factory, legacy, binary in (
+        (_socket.socket, "cannot pickle 'socket' object", "cannot pickle '_socket.socket' object"),
+        (socket.socket, "'socket' object cannot be interpreted as an integer", "cannot pickle 'socket' object"),
+    ):
+        sock = factory()
+        try:
+            for protocol, expected in ((0, legacy), (5, binary)):
+                try:
+                    pickle.dumps(sock, protocol)
+                except TypeError as error:
+                    assert str(error) == expected
+                else:
+                    raise AssertionError("pickled a live socket")
+        finally:
+            sock.close()
+
+
 def produce():
+    check_socket_reduction()
     for record in (RecordFamily.Record, FactoryRecord):
         check_namedtuple_reducer(record)
     check_object_reducer()
     check_builtin_method_reduction()
     check_python_method_reduction()
+    check_method_wrapper_reduction()
     check_method_descriptors()
     assert _codecs.encode is codecs.encode and codecs.encode.__module__ == "_codecs"
     for protocol in range(pickle.HIGHEST_PROTOCOL + 1):
@@ -730,6 +763,7 @@ def produce():
         check_global_names(protocol)
         check_registered_reducer(protocol)
         check_reduction_state(protocol)
+        check_exception_state(protocol)
         check_list_items(protocol)
         check_floats(protocol)
         for result in (11, (int,), (11, ()), (int, 11)):
@@ -777,3 +811,51 @@ def check_reduction_state(protocol):
     assert restored.state is state and restored.restorations == 1
     assert state["owner"] is restored and state["links"] is restored.links
     assert restored.links["owner"] is restored
+
+
+class JobError(Exception):
+    @property
+    def payload(self):
+        return self._payload
+
+    @payload.setter
+    def payload(self, value):
+        self._payload = value
+
+
+def check_exception_state(protocol):
+    error = JobError("retry")
+    assert error.__reduce__() == (JobError, error.args)
+    error.__dict__["payload"] = [error]
+    restored = pickle.loads(pickle.dumps(error, protocol))
+    assert type(restored) is JobError and restored.args == ("retry",)
+    assert restored.payload[0] is restored
+
+    missing = ModuleNotFoundError("not here")
+    assert missing.__reduce__() == (ModuleNotFoundError, ("not here",))
+    state = missing.__dict__
+    state["name"] = "shadowed"
+    assert missing.__reduce__()[2] is state
+    missing.name = None
+    missing.name_from = "member"
+    missing.path = ["origin"]
+    copied = missing.__reduce__()[2]
+    assert copied == {"name": None, "name_from": "member", "path": ["origin"]}
+    assert copied is not state and copied["path"] is missing.path
+    assert state == {"name": "shadowed"}
+    restored = pickle.loads(pickle.dumps(missing, protocol))
+    assert type(restored) is (ImportError if protocol < 3 else ModuleNotFoundError)
+    assert restored.name is None and restored.path == ["origin"] and restored.name_from == "member"
+    del missing.name
+    del missing.path
+    del missing.name_from
+    assert missing.__reduce__()[2] is state
+
+    try:
+        from sys import missing_pickle_fixture_member
+    except ImportError as error:
+        assert error.__reduce__()[2] == {
+            "name": "sys", "path": None, "name_from": "missing_pickle_fixture_member"
+        }
+    else:
+        raise AssertionError("imported a missing member")

@@ -1,6 +1,6 @@
 import os
 import tempfile
-from importlib import abc, machinery, util
+from importlib import _bootstrap_external, abc, machinery, util
 
 
 with tempfile.TemporaryDirectory() as root:
@@ -8,6 +8,21 @@ with tempfile.TemporaryDirectory() as root:
     loader = machinery.SourcelessFileLoader("sample", path)
     assert isinstance(loader, abc.FileLoader)
     assert loader.get_source("sample") is None
+
+    class DataPath:
+        def __str__(self):
+            return path
+
+        def __fspath__(self):
+            raise AssertionError("code loaders read the string spelling")
+
+    with open(path, "wb") as stream:
+        stream.write(b"passive data")
+    assert loader.get_data(DataPath()) == b"passive data"
+
+    hook = machinery.FileFinder.path_hook(*_bootstrap_external._get_supported_file_loaders())
+    found = hook(root).find_spec("sample")
+    assert found.origin == path and type(found.loader) is type(loader)
 
     for data, error, message in (
         (b"bad!", ImportError, "bad magic number in 'sample': b'bad!'"),

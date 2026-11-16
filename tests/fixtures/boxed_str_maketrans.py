@@ -13,6 +13,47 @@ def current():
     table[97] = "new"
     print(original["a"], original[97], "a".translate(table))
 
+    print("a\x00\x01!".translate(["expanded", None]))
+
+    class Missing(dict):
+        def __missing__(self, ordinal):
+            return "[" + chr(ordinal) + "]"
+
+    assert "é!".translate(Missing({ord("!"): None})) == "[é]"
+
+    comparisons = []
+
+    class ReplaceKey:
+        def __hash__(self):
+            return ord("é")
+
+        def __eq__(self, key):
+            comparisons.append(key)
+            aliases.clear()
+            aliases[key] = "!"
+            return True
+
+    aliases = {ord("a"): "A", ReplaceKey(): "stale"}
+    assert "aéa".translate(aliases) == "A!a"
+    assert comparisons == [ord("é")]
+
+    error = RuntimeError("translation stopped")
+    calls = []
+
+    class Ordinals:
+        def __getitem__(self, ordinal):
+            calls.append(ordinal)
+            if ordinal == ord("a"):
+                return "AA"
+            if ordinal == ord("b"):
+                raise IndexError(ordinal)
+            raise error
+
+    try:
+        "abc".translate(Ordinals())
+    except RuntimeError as raised:
+        print(calls, raised is error)
+
     marker = []
     table = "".maketrans({Text("é"): marker, True: "one"})
     print(table[233] is marker, list(table)[1] is True, "x".translate(table))

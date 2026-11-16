@@ -2,6 +2,24 @@
 
 use super::*;
 
+pub(super) enum ExpansionSource {
+    Value(Expr),
+    Iteration(Iteration),
+}
+
+impl ExpansionSource {
+    pub(super) fn into_iteration(
+        self,
+        checker: &mut Checker<'_>,
+        source: &ast::Expr,
+    ) -> Result<Iteration, String> {
+        match self {
+            Self::Value(value) => checker.iteration_value(value, false, source),
+            Self::Iteration(input) => Ok(input),
+        }
+    }
+}
+
 impl Checker<'_> {
     /// Capture keyword values before constructing their dictionary. A later
     /// argument may mutate a previously captured value or raise an exception.
@@ -49,11 +67,7 @@ impl Checker<'_> {
             .collect::<Result<Vec<_>, String>>()?;
         Ok(scope.finish(Expr {
             ty: self.types.dict(Type::Str, value),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         }))
     }
 
@@ -91,8 +105,23 @@ impl Checker<'_> {
             }
             return Ok(self.environ_copy(bytes));
         }
-        if let Some(zip) = self.dict_from_zip(call)? {
-            return Ok(zip);
+        // A two-column zip supplies its own key and value types before the
+        // constructor's result is checked against any enclosing annotation.
+        if call.arguments.keywords.is_empty()
+            && let [source @ ast::Expr::Call(zip)] = call.arguments.args.as_ref()
+            && zip.arguments.args.len() == 2
+            && self.unshadowed_builtin(&zip.func, "zip")
+        {
+            let input = self.iteration_input(source, None, None)?;
+            let input = self.prepare_iteration(input, source, false)?;
+            let pair =
+                if self.registered.is_some() && self.locals[input.value] == Type::PythonObject {
+                    (Type::PythonObject, Type::PythonObject)
+                } else {
+                    self.dictionary_pair_types(&input, source)?
+                };
+            self.check_dictionary_key(pair.0, call)?;
+            return self.collect_dictionary_pairs(call, call.range(), input, pair, pair);
         }
         let mut scope = calls::ArgumentScope::default();
         let mut sources = Vec::new();
@@ -117,7 +146,19 @@ impl Checker<'_> {
                     }
                 } else {
                     let pair = shape.map(|(k, v)| self.types.tuple(vec![k, v]));
-                    self.expansion_input(source, pair)?
+                    match self.expansion_source(source, pair)? {
+                        ExpansionSource::Value(value)
+                        | ExpansionSource::Iteration(Iteration::Container {
+                            iterable: value,
+                            items: false,
+                            start: None,
+                        }) if value.ty == Type::PythonObject
+                            && self.unshadowed_builtin(&call.func, "dict") =>
+                        {
+                            return self.bind_registered_builtin_call(call, "dict", vec![value]);
+                        }
+                        input => input.into_iteration(self, source)?,
+                    }
                 };
                 let Iteration::Container {
                     ref iterable,
@@ -159,16 +200,22 @@ impl Checker<'_> {
                 "an empty dictionary requires a concrete dict[K, V] context",
             )
         })?;
+        Ok(self.plain_dictionary(scope, (key, value), sources))
+    }
+
+    /// Copy the stored entries into a new plain dictionary, independent of the source's class.
+    pub(super) fn plain_dictionary(
+        &mut self,
+        mut scope: calls::ArgumentScope,
+        (key, value): (Type, Type),
+        mut sources: Vec<Expr>,
+    ) -> Expr {
         let empty = Expr {
             ty: self.types.dict(key, value),
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         if sources.is_empty() {
-            return Ok(empty);
+            return empty;
         }
         let target = scope.hold(self, empty);
         sources.insert(0, target.clone());
@@ -179,7 +226,22 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(Builtin::DictUpdate, sources),
             },
         );
-        Ok(scope.finish(target))
+        scope.finish(target)
+    }
+
+    fn dictionary_pair_types(
+        &self,
+        input: &pipelines::Prepared,
+        site: &impl Ranged,
+    ) -> Result<(Type, Type), String> {
+        match self.types.fields(self.locals[input.value]).as_deref() {
+            Some(&[key, value]) => Ok((key, value)),
+            _ => Err(error(
+                self.source,
+                site,
+                "dict requires an iterable of key/value pairs",
+            )),
+        }
     }
 
     /// A generator acquires its outer iterator on creation. Its first item,
@@ -191,24 +253,28 @@ impl Checker<'_> {
         input: Iteration,
         shape: Option<(Type, Type)>,
     ) -> Result<Expr, String> {
-        let mut input = self.prepare_iteration(input, source, false)?;
+        let input = self.prepare_iteration(input, source, false)?;
         self.hint_empty_iteration(&input, shape.map(|(k, v)| self.types.tuple(vec![k, v])));
-        let pair = self.types.fields(self.locals[input.value]);
-        let Some(&[key, value]) = pair.as_deref() else {
-            return Err(error(
-                self.source,
-                source,
-                "dict requires an iterable of key/value pairs",
-            ));
-        };
-        let (key_type, value_type) = shape.unwrap_or((key, value));
-        if !self.types.hashable_key(key_type) {
+        let pair = self.dictionary_pair_types(&input, source)?;
+        let result = shape.unwrap_or(pair);
+        if !self.types.hashable_key(result.0) {
             return Err(error(
                 self.source,
                 source,
                 "dict requires supported immutable keys",
             ));
         }
+        self.collect_dictionary_pairs(call, source.range(), input, pair, result)
+    }
+
+    fn collect_dictionary_pairs(
+        &mut self,
+        call: &ast::ExprCall,
+        site: TextRange,
+        mut input: pipelines::Prepared,
+        (key, value): (Type, Type),
+        (key_type, value_type): (Type, Type),
+    ) -> Result<Expr, String> {
         let ty = self.types.dict(key_type, value_type);
         let target = self.hidden(ty);
         let mut clear = vec![target];
@@ -225,21 +291,20 @@ impl Checker<'_> {
             target,
             Expr {
                 ty,
-                kind: ExprKind::Dict {
-                    key: key_type,
-                    value: value_type,
-                    entries: Vec::new(),
-                },
+                kind: ExprKind::Dict(Vec::new()),
             },
         ));
-        let mut body = self.expand_items(Iteration::Prepared(input), source, |c, item| {
+        let mut body = self.expand_items(Iteration::Prepared(input), &site, |c, item| {
+            if item.ty == Type::PythonObject {
+                return Ok(vec![c.store_object_pair(target, item, site)]);
+            }
             let key = c.coerce(
                 Expr {
                     ty: key,
                     kind: ExprKind::Field(Box::new(item.clone()), 0),
                 },
                 key_type,
-                source,
+                &site,
             )?;
             let value = c.coerce(
                 Expr {
@@ -247,9 +312,9 @@ impl Checker<'_> {
                     kind: ExprKind::Field(Box::new(item), 1),
                 },
                 value_type,
-                source,
+                &site,
             )?;
-            Ok(vec![Statement::SetItem(c.local(target), key, value)])
+            Ok(vec![Statement::assign_item(c.local(target), key, value)])
         })?;
         if let Some(owner) = keywords {
             body.push(Statement::Expr(Expr {
@@ -335,7 +400,10 @@ impl Checker<'_> {
                     "a tuple display with runtime width cannot guarantee a fixed layout",
                 ));
             }
-            return self.runtime_tuple_display(tuple);
+            return self.collect_tuple(tuple.elts.iter().map(|entry| {
+                let spread = entry.as_starred_expr().map(|star| star.value.as_ref());
+                (entry, spread)
+            }));
         }
         let mut scope = calls::ArgumentScope::default();
         let mut values = Vec::new();
@@ -385,7 +453,7 @@ impl Checker<'_> {
                         Expr {
                             ty: element.unwrap(),
                             kind: ExprKind::Builtin(
-                                Builtin::ListGet,
+                                Builtin::ListGet(None),
                                 vec![source.clone(), Expr::integer(i)],
                             ),
                         }
@@ -417,8 +485,12 @@ impl Checker<'_> {
         }))
     }
 
-    /// Capture each spread completely before evaluating the next expression.
-    fn runtime_tuple_display(&mut self, tuple: &ast::ExprTuple) -> Result<Expr, String> {
+    /// Capture each spread completely before evaluating the next entry. The entry
+    /// retains its own diagnostic span when the iterable is inside a starred display.
+    pub(super) fn collect_tuple<'a>(
+        &mut self,
+        entries: impl IntoIterator<Item = (&'a ast::Expr, Option<&'a ast::Expr>)>,
+    ) -> Result<Expr, String> {
         let buffer = self.hidden(Type::TupleBuffer);
         let mut body = vec![Statement::Assign(
             buffer,
@@ -437,9 +509,9 @@ impl Checker<'_> {
                 ),
             })
         };
-        for entry in &tuple.elts {
-            if let ast::Expr::Starred(star) = entry {
-                let input = self.expansion_input(&star.value, None)?;
+        for (entry, spread) in entries {
+            if let Some(source) = spread {
+                let input = self.expansion_input(source, None)?;
                 if let Iteration::Container { iterable, .. } = &input {
                     let scalar = match iterable.ty {
                         Type::Int => Some("int"),
@@ -450,7 +522,7 @@ impl Checker<'_> {
                     };
                     if let Some(name) = scalar {
                         self.graph
-                            .checked_non_iterable_spread(self.module, star.value.range());
+                            .checked_non_iterable_spread(self.module, source.range());
                         let exception = Expr {
                             ty: Type::Exception,
                             kind: ExprKind::Exception {
@@ -491,49 +563,6 @@ impl Checker<'_> {
                     kind: ExprKind::Builtin(Builtin::TupleBufferFinish, vec![self.local(buffer)]),
                 }),
                 clear: vec![buffer],
-            },
-        })
-    }
-
-    /// The right operand may mutate or rebind the left before either list is copied.
-    pub(super) fn concat_lists(
-        &mut self,
-        left: Expr,
-        right: Expr,
-        node: &impl Ranged,
-    ) -> Result<Expr, String> {
-        let ty = left.ty;
-        let left_slot = self.hidden(ty);
-        let right_slot = self.hidden(ty);
-        let result = self.hidden(ty);
-        let mut body = vec![
-            Statement::Assign(left_slot, left),
-            Statement::Assign(right_slot, right),
-            Statement::Assign(
-                result,
-                Expr {
-                    ty,
-                    kind: ExprKind::List(Vec::new()),
-                },
-            ),
-        ];
-        let mut element = self.types.element(ty);
-        for slot in [left_slot, right_slot] {
-            let input = Iteration::Container {
-                iterable: self.local(slot),
-                items: false,
-                start: None,
-            };
-            body.extend(self.expand_items(input, node, |checker, value| {
-                checker.expansion_insert(result, &mut element, value, false, node)
-            })?);
-        }
-        Ok(Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear: vec![result, right_slot, left_slot],
             },
         })
     }
@@ -607,26 +636,56 @@ impl Checker<'_> {
     pub(super) fn extend_list(
         &mut self,
         receiver: Expr,
-        source: &ast::Expr,
-        node: &impl Ranged,
+        method: &ast::ExprAttribute,
+        node: &ast::ExprCall,
         append: Builtin,
     ) -> Result<Expr, String> {
+        self.keep_module_list_layout(&receiver);
+        let source = &node.arguments.args[0];
         let element = self.types.element(receiver.ty).unwrap();
-        let mut input = self.expansion_input(source, Some(element))?;
+        let mut input = match self.expansion_source(source, Some(element))? {
+            ExpansionSource::Value(value)
+            | ExpansionSource::Iteration(Iteration::Container {
+                iterable: value,
+                items: false,
+                start: None,
+            }) if self.checked_call_contracts
+                && (value.ty == receiver.ty || value.ty == Type::PythonObject)
+                && matches!(append, Builtin::Append) =>
+            {
+                self.frame_arguments = FrameArguments::Python;
+                let value = self.graph.modules[self.module]
+                    .registered_values()
+                    .operands(self.source, self.graph.python_optimization())
+                    .located(source, value);
+                return Ok(registered::values::bound_call(
+                    node,
+                    registered::values::method_target(method),
+                    receiver,
+                    vec![value],
+                ));
+            }
+            input => input.into_iteration(self, source)?,
+        };
         if let Iteration::Container {
-            iterable,
+            mut iterable,
             items: false,
             start: None,
-        } = &mut input
+        } = input
         {
             if matches!(append, Builtin::Append)
                 && matches!(iterable.ty, Type::ListInt | Type::List(_))
             {
-                return self.extend_exact_list(receiver, iterable.clone(), node);
+                return self.extend_exact_list(receiver, iterable, node);
             }
             if iterable.ty == receiver.ty {
-                *iterable = self.list_snapshot(iterable.clone());
+                iterable = self.list_snapshot(iterable);
             }
+            input = Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            };
         }
         let destination = self.hidden(receiver.ty);
         let mut body = vec![Statement::Assign(destination, receiver)];
@@ -767,27 +826,35 @@ impl Checker<'_> {
         expression: &ast::Expr,
         element: Option<Type>,
     ) -> Result<Iteration, String> {
+        self.expansion_source(expression, element)?
+            .into_iteration(self, expression)
+    }
+
+    pub(super) fn expansion_source(
+        &mut self,
+        expression: &ast::Expr,
+        element: Option<Type>,
+    ) -> Result<ExpansionSource, String> {
         if let Some(input) = self.pipeline_input(expression, element, None)? {
             if let Iteration::Prepared(prepared) = &input {
                 self.hint_empty_iteration(prepared, element);
             }
-            return Ok(input);
+            return Ok(ExpansionSource::Iteration(input));
         }
         if let ast::Expr::Call(call) = expression {
             if self.resolve(&call.func).is_some() {
-                return Ok(Iteration::Container {
+                return Ok(ExpansionSource::Iteration(Iteration::Container {
                     iterable: self.expr(expression)?,
                     items: false,
                     start: None,
-                });
+                }));
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
-                return self.iteration_input(expression, None);
+                return self
+                    .iteration_input(expression, None, None)
+                    .map(ExpansionSource::Iteration);
             }
-            if let ast::Expr::Attribute(attribute) = &*call.func
-                && attribute.attr.as_str() == "items"
-                && self.class_reference(&attribute.value).is_none()
-            {
+            if let Some(method) = self.items_method(call) {
                 let fields =
                     element.and_then(|ty| self.types.fields(self.types.payload(ty).unwrap_or(ty)));
                 let hint = fields.as_deref().and_then(|fields| match fields {
@@ -796,36 +863,73 @@ impl Checker<'_> {
                     }
                     _ => None,
                 });
-                let iterable = self.boolean_operand(&attribute.value, hint)?;
-                if let Type::Class(class) = iterable.ty {
-                    let iterable = self.iteration_method_call(call, attribute, class, iterable)?;
-                    return self.iteration_value(iterable, false, call);
-                }
-                let iterable = if matches!(iterable.ty, Type::Document(_)) {
-                    self.document_map(iterable)
-                } else {
-                    iterable
-                };
-                if self.types.mapping(iterable.ty).is_none() {
-                    return Err(error(
-                        self.source,
-                        call,
-                        "items() requires a concrete dictionary",
-                    ));
-                }
-                if !call.arguments.args.is_empty() || !call.arguments.keywords.is_empty() {
-                    return Err(error(self.source, call, "dict.items() takes no arguments"));
-                }
-                return Ok(Iteration::Container {
-                    iterable,
-                    items: true,
-                    start: None,
+                let receiver = self.boolean_operand(&method.value, hint)?;
+                return self.items_source(call, method, receiver)?.ok_or_else(|| {
+                    error(self.source, call, "items() requires a concrete dictionary")
                 });
             }
         }
         let hint = element.and_then(|element| self.expansion_hint(expression, element));
-        let iterable = self.iteration_expression(expression, hint)?;
-        self.iteration_value(iterable, false, expression)
+        self.iteration_expression(expression, hint)
+            .map(ExpansionSource::Value)
+    }
+
+    fn items_method<'a>(&self, call: &'a ast::ExprCall) -> Option<&'a ast::ExprAttribute> {
+        let method = call.func.as_attribute_expr()?;
+        (method.attr.as_str() == "items" && self.class_reference(&method.value).is_none())
+            .then_some(method)
+    }
+
+    /// A mapping supplies its key/value cursor directly. An override returns an ordinary
+    /// value, which belongs to its consumer (including the mapping form of dict(value)).
+    fn items_source(
+        &mut self,
+        call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
+        receiver: Expr,
+    ) -> Result<Option<ExpansionSource>, String> {
+        let source = if receiver.ty == Type::PythonObject
+            || (receiver.ty == Type::JsonObject && call.arguments.is_empty())
+        {
+            ExpansionSource::Value(self.call_object_method(call, method, receiver)?)
+        } else if let Type::Class(class) = receiver.ty {
+            ExpansionSource::Value(self.iteration_method_call(call, method, class, receiver)?)
+        } else if self.dict_or_record(receiver.ty).is_some() {
+            ExpansionSource::Iteration(Iteration::Prepared(
+                self.dict_or_record_items(receiver, method, call)?,
+            ))
+        } else {
+            let iterable = if matches!(receiver.ty, Type::Document(_)) {
+                self.document_map(receiver)
+            } else {
+                receiver
+            };
+            if self.types.mapping(iterable.ty).is_none() {
+                return Ok(None);
+            }
+            if !call.arguments.is_empty() {
+                return Err(error(self.source, call, "dict.items() takes no arguments"));
+            }
+            ExpansionSource::Iteration(Iteration::Container {
+                iterable,
+                items: true,
+                start: None,
+            })
+        };
+        Ok(Some(source))
+    }
+
+    pub(super) fn iteration_source(&mut self, expression: &ast::Expr) -> Result<Iteration, String> {
+        if let ast::Expr::Call(call) = expression
+            && let Some(method) = self.items_method(call)
+        {
+            let receiver = self.expr(&method.value)?;
+            if let Some(source) = self.items_source(call, method, receiver)? {
+                return source.into_iteration(self, expression);
+            }
+        }
+        let value = self.iteration_expression(expression, None)?;
+        self.iteration_value(self.json_iteration(value), false, expression)
     }
 
     /// Fixed tuples copy directly from rooted fields. Other sources share the
@@ -882,14 +986,18 @@ impl Checker<'_> {
             ctx: ast::ExprContext::Store,
         });
         let (body, _) =
-            self.lower_iteration_after(&target, input, &[], before_iteration, |checker| {
+            self.lower_iteration_after(&target, input, &[], before_iteration, |checker, body| {
                 let slot = checker.names[&name];
-                let mut body = consume(checker, checker.local(slot))?;
+                let statements = consume(checker, checker.local(slot))?;
+                if statements.is_empty() && checker.discarded_function_body() {
+                    return Ok(false);
+                }
+                statements::append_block(body, statements);
                 // Builtin consumers release each yielded item before requesting
                 // the next one. Keeping this private target alive could alter
                 // file finalization or make an iterator's tuple cache shared.
                 body.push(Statement::Clear(slot));
-                Ok(body)
+                Ok(true)
             })?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {
@@ -921,6 +1029,9 @@ impl Checker<'_> {
         } else {
             self.types.list(ty)
         };
+        if self.discarded_function_body() {
+            return Ok(Vec::new());
+        }
         Ok(vec![Statement::Expr(Expr {
             ty: Type::None,
             kind: ExprKind::Builtin(
@@ -1034,15 +1145,8 @@ impl Checker<'_> {
                 value: Some(value),
                 ready,
             },
-            Statement::If(
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(self.local(ready))),
-                },
-                vec![Statement::Exhaust],
-                Vec::new(),
-            ),
-            Statement::SetItem(self.local(result), self.local(key), value_expr),
+            pipelines::Prepared::exhaust_if_empty(self.local(ready)),
+            Statement::assign_item(self.local(result), self.local(key), value_expr),
             Statement::Clear(key),
             Statement::Clear(value),
         ];
@@ -1083,11 +1187,7 @@ impl Checker<'_> {
         let result = self.hidden(ty);
         let init = Expr {
             ty,
-            kind: ExprKind::Dict {
-                key,
-                value,
-                entries: Vec::new(),
-            },
+            kind: ExprKind::Dict(Vec::new()),
         };
         Ok(Expr {
             ty,
@@ -1126,7 +1226,6 @@ impl Checker<'_> {
                         "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
-                let captured = self.hidden(key_expr.ty);
                 let value = if let Some((_, value_type)) = types {
                     self.expr_expected(&item.value, value_type)?
                 } else {
@@ -1134,13 +1233,12 @@ impl Checker<'_> {
                 };
                 let (key_type, value_type) = *types.get_or_insert((key_expr.ty, value.ty));
                 self.locals[result] = self.types.dict(key_type, value_type);
-                body.push(Statement::Scope {
-                    body: vec![
-                        Statement::Assign(captured, key_expr),
-                        Statement::SetItem(self.local(result), self.local(captured), value),
-                    ],
-                    clear: vec![captured],
-                });
+                body.push(Statement::SetItem(
+                    ir::ItemOrder::Display,
+                    self.local(result),
+                    key_expr,
+                    value,
+                ));
             } else {
                 let hint = types.map(|(key, value)| self.types.dict(key, value));
                 let value = self.boolean_operand(&item.value, hint)?;
@@ -1164,11 +1262,7 @@ impl Checker<'_> {
                 result,
                 Expr {
                     ty,
-                    kind: ExprKind::Dict {
-                        key,
-                        value,
-                        entries: Vec::new(),
-                    },
+                    kind: ExprKind::Dict(Vec::new()),
                 },
             ),
         );

@@ -42,6 +42,11 @@ def affixes():
             return self.value
 
     large = 10 ** 100
+    ascii_word = Text("abc")
+    assert ascii_word.startswith(("bc", "\ud800"), 1, large)
+    assert ascii_word.endswith("b", -large, -1)
+    assert ascii_word.startswith("", 3) and not ascii_word.startswith("", large)
+    assert not ascii_word.endswith("", 2, 1)
     assert word.startswith("é", Bound(-large), Bound(large))
     assert seen == [-large, large]
     assert not word.endswith("", large, None)

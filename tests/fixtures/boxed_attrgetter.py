@@ -34,6 +34,18 @@ def current():
     print(repr(attrgetter("request.value")))
     print(repr(attrgetter("request", "replace")))
 
+    # The same getter preserves an undotted argument but rejoins dotted paths.
+    name = "".join(("request", "_to_copy"))
+    getter = attrgetter(name, "request.value", ".")
+    constructor, args = getter.__reduce__()
+    _, again = attrgetter.__reduce__(getter)
+    assert constructor is attrgetter and args == (name, "request.value", ".")
+    assert args[0] is again[0] and args[1] is not again[1] and args[2] is not again[2]
+    ctx.request = Request(11)
+    ctx.request_to_copy = 7
+    setattr(ctx, "", ctx)
+    assert constructor(*args)(ctx) == (7, 11, ctx)
+
     for call in (
         lambda: attrgetter(),
         lambda: attrgetter("request", 2),

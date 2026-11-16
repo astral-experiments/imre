@@ -1,7 +1,251 @@
 //! Runtime-loaded Python sockets share descriptor ownership and syscalls with typed sockets.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod message;
 use super::{Context, Error, Id, NONE, Result, Value, argument, option};
+use crate::dynamic::calls::RegisteredCall;
+use crate::dynamic::value::NativeModuleState;
 use crate::objects::socket as native;
 use std::time::Duration;
+
+/// Native socket operations published as descriptors on the shared socket layout.
+pub(in super::super) const CLASS_METHODS: &[&str] = &[
+    "__del__",
+    "__init__",
+    "_accept",
+    "_sendfile_owner",
+    "_sendfile_write",
+    "_check_sendfile_owner",
+    #[cfg(target_os = "linux")]
+    "_sendfile_block",
+    "bind",
+    "close",
+    "connect",
+    "connect_ex",
+    "detach",
+    "fileno",
+    "getblocking",
+    "getpeername",
+    "getsockname",
+    "getsockopt",
+    "gettimeout",
+    "listen",
+    "recv",
+    "recv_into",
+    "recvfrom",
+    "recvfrom_into",
+    "send",
+    "sendall",
+    "sendto",
+    "setblocking",
+    "setsockopt",
+    "settimeout",
+    "shutdown",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "sendmsg",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "recvmsg",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "recvmsg_into",
+];
+
+pub(in crate::dynamic) const CLASS: &str = "_socket.socket";
+
+/// Each extension module owns its type, whose descriptors keep their declaring class.
+fn socket_class(ctx: &mut Context, module: Id, scope: Id) -> Result<Id> {
+    let fields = ctx.scope("_socket", Some(scope));
+    let module_name = ctx.text("_socket");
+    let qualname = ctx.text("socket");
+    ctx.bind(fields, "__module__", module_name);
+    ctx.bind(fields, "__qualname__", qualname);
+    let object = ctx.builtin("object");
+    let owner = ctx.allocate_class("socket".into(), fields, vec![object])?;
+    let Value::Class { heap_type, .. } = ctx.heap.get_mut(owner) else {
+        unreachable!()
+    };
+    *heap_type = Some(CLASS);
+    let Value::Scope(frame) = ctx.heap.get_mut(fields) else {
+        unreachable!()
+    };
+    let namespace = frame.class_namespace.as_mut().unwrap();
+    namespace.slot_names = Some([].into());
+    namespace.immutable_type = true;
+    namespace.subclassable_heap_type = true;
+    namespace.defining_module = Some(module);
+    for &name in CLASS_METHODS
+        .iter()
+        .chain(["__new__", "family", "type", "proto", "timeout"].iter())
+    {
+        let method = ctx.alloc(Value::HeapTypeMethod {
+            owner,
+            name,
+            slot_wrapper: matches!(name, "__init__" | "__del__"),
+        });
+        let member = match name {
+            "__new__" => ctx.alloc(Value::Method {
+                callable: method,
+                receiver: owner,
+                explicit: false,
+            }),
+            "family" | "type" | "proto" | "timeout" => ctx.alloc(Value::GetSetDescriptor {
+                owner: CLASS,
+                name,
+                get: method,
+                set: None,
+            }),
+            _ => method,
+        };
+        ctx.bind(fields, name, member);
+    }
+    Ok(owner)
+}
+
+pub(in crate::dynamic) fn prepare_descriptor(
+    ctx: &mut Context,
+    owner: Id,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<RegisteredCall> {
+    let receiver = argument(args, 0)?;
+    if name == "__new__" {
+        let class = argument(args, 1)?;
+        if receiver != owner || !ctx.direct_subclass(class, owner) {
+            return Err(ctx.invalid_new_subtype(CLASS, class));
+        }
+        let handle = native::uninitialized()?;
+        if class == owner {
+            return Ok(RegisteredCall::Returned(
+                ctx.alloc(Value::Socket { class, handle }),
+            ));
+        }
+        let instance = ctx.instance(class, None);
+        let Value::Instance { socket, .. } = ctx.heap.get_mut(instance) else {
+            unreachable!()
+        };
+        *socket = Some(handle);
+        return Ok(RegisteredCall::Returned(instance));
+    }
+    ctx.check_heap_method_receiver(owner, name, receiver)?;
+    if name == "__init__" {
+        return initialize(ctx, args, kwargs).map(RegisteredCall::Returned);
+    }
+    let Some(socket) = ctx.heap.get(receiver).socket_handle() else {
+        if CLASS_METHODS.contains(&name) {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "descriptor '{name}' for '_socket.socket' objects doesn't apply to a '{}' object",
+                    ctx.type_name(receiver)
+                ),
+            ));
+        }
+        return Err(Error::new("TypeError", "expected a socket"));
+    };
+    let args = &args[1..];
+    if name == "_accept" {
+        if !kwargs.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                "socket._accept() takes no keyword arguments",
+            ));
+        }
+        if !args.is_empty() {
+            return Err(Error::new(
+                "TypeError",
+                format!("socket._accept() takes no arguments ({} given)", args.len()),
+            ));
+        }
+        return Ok(RegisteredCall::Accept(receiver));
+    }
+    if name == "recv" {
+        check_args(name, args, kwargs, 2, &[])?;
+        let size = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
+            .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
+        let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
+        return Ok(RegisteredCall::Recv(Recv {
+            receiver,
+            size,
+            flags,
+        }));
+    }
+    let socket = socket.clone();
+    call_method(ctx, name, receiver, socket, args, kwargs).map(RegisteredCall::Returned)
+}
+
+/// The registered caller keeps the receiver live, including during size conversion and signal handlers.
+fn registered_socket(ctx: &Context, receiver: Id) -> &crate::ObjectOwner {
+    ctx.heap
+        .get(receiver)
+        .socket_handle()
+        .expect("registered socket receiver")
+}
+
+/// Accept on the owned listener, then publish the descriptor and peer in the resumed frame.
+///
+/// # Safety
+/// The registered caller owns the context through signal dispatch and return.
+pub(in crate::dynamic) unsafe fn accept(receiver: Id, context: *mut Context) -> Result<Id> {
+    use std::os::fd::{AsRawFd, IntoRawFd};
+
+    // SAFETY: the registered caller roots the listener through each attempt.
+    let accepted = unsafe { registered_read(receiver, context, native::accept_once) }?;
+    let (child, peer) = accepted.into_parts()?;
+    // SAFETY: the wait and any signal callbacks have finished.
+    let ctx = unsafe { &mut *context };
+    let peer = pack_socket_name(ctx, peer)?;
+    let fd = ctx.int(i64::from(child.as_raw_fd()));
+    let result = ctx.alloc(Value::Tuple(vec![fd, peer]));
+    let _ = child.into_raw_fd();
+    Ok(result)
+}
+
+/// Park for each poll and read, resolving the descriptor again after callbacks.
+///
+/// # Safety
+/// The registered caller roots the socket and owns the context through signal dispatch.
+unsafe fn registered_read<T: Send>(
+    receiver: Id,
+    context: *mut Context,
+    mut read: impl FnMut(std::os::fd::RawFd) -> std::io::Result<T> + Send,
+) -> Result<T> {
+    use crate::dynamic::value::ParkedExecution;
+
+    native::read_socket(
+        // SAFETY: the caller roots the receiver. Resolve it only while this execution is active.
+        || native::read_state(registered_socket(unsafe { &*context }, receiver)),
+        &mut (),
+        // SAFETY: each native wait has returned to the interrupted execution before delivery.
+        |()| unsafe { Context::dispatch_pending_signals(context) },
+        // SAFETY: only the fd and its original deadline enter the native poll.
+        |(), fd, deadline| unsafe {
+            ParkedExecution::wait(context, || {
+                native::poll_interruptible(fd, libc::POLLIN, Some(deadline))
+            })
+        },
+        // SAFETY: the read uses the fd and its native operands while the caller is parked.
+        |(), fd| unsafe { ParkedExecution::wait(context, || read(fd)) },
+    )
+}
+
+/// The requesting frame roots the socket across the wait and any signal callbacks.
+pub(in crate::dynamic) struct Recv {
+    receiver: Id,
+    size: usize,
+    flags: i32,
+}
+
+impl Recv {
+    /// # Safety
+    /// The registered caller owns the context on this thread through signal dispatch and return.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        let bytes = native::recv_bytes(self.size, self.flags, |read| {
+            // SAFETY: the registered frame roots the receiver. The read owns its private buffer.
+            unsafe { registered_read(self.receiver, context, read) }
+        })?;
+        // SAFETY: the native wait and its signal callbacks have returned.
+        Ok(unsafe { (&mut *context).alloc(Value::Bytes(bytes)) })
+    }
+}
 
 const CONSTANTS: &[(&str, i32)] = &[
     ("AF_INET", libc::AF_INET),
@@ -23,8 +267,12 @@ const CONSTANTS: &[(&str, i32)] = &[
 
 // socket.py imports these constants once, so deletion must not fall back to a native value.
 const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("AI_CANONNAME", libc::AI_CANONNAME),
     ("AI_NUMERICHOST", libc::AI_NUMERICHOST),
     ("AI_NUMERICSERV", libc::AI_NUMERICSERV),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("AI_V4MAPPED", libc::AI_V4MAPPED),
     ("EAI_SERVICE", libc::EAI_SERVICE),
     ("EAI_NODATA", libc::EAI_NODATA),
     ("EAI_NONAME", libc::EAI_NONAME),
@@ -50,15 +298,30 @@ const IMPORTED_CONSTANTS: &[(&str, i32)] = &[
     #[cfg(target_os = "macos")]
     ("MSG_EOF", libc::MSG_EOF),
     ("SOL_TCP", libc::IPPROTO_TCP),
+    #[cfg(target_os = "linux")]
+    ("TCP_QUICKACK", libc::TCP_QUICKACK),
     ("NI_DGRAM", libc::NI_DGRAM),
     ("NI_NAMEREQD", libc::NI_NAMEREQD),
     ("NI_NOFQDN", libc::NI_NOFQDN),
     ("NI_NUMERICHOST", libc::NI_NUMERICHOST),
     ("NI_NUMERICSERV", libc::NI_NUMERICSERV),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_RECVHOPLIMIT", libc::IPV6_RECVHOPLIMIT),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_HOPLIMIT", libc::IPV6_HOPLIMIT),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_RECVTCLASS", libc::IPV6_RECVTCLASS),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("IPV6_TCLASS", libc::IPV6_TCLASS),
+    #[cfg(target_os = "linux")]
+    ("IPPROTO_UDPLITE", libc::IPPROTO_UDPLITE),
     ("IPPROTO_UDP", libc::IPPROTO_UDP),
     ("SOL_SOCKET", libc::SOL_SOCKET),
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    ("SCM_RIGHTS", libc::SCM_RIGHTS),
     ("SO_TYPE", libc::SO_TYPE),
     ("SO_ERROR", libc::SO_ERROR),
+    ("SO_LINGER", libc::SO_LINGER),
     ("SO_REUSEADDR", libc::SO_REUSEADDR),
     ("SO_REUSEPORT", libc::SO_REUSEPORT),
     ("SOCK_DGRAM", libc::SOCK_DGRAM),
@@ -85,8 +348,16 @@ const RESOLVER_NAMES: &[&str] = &[
     "if_indextoname",
 ];
 
-const IMPORTED_FUNCTIONS: &[&str] = &[
+pub(in super::super) const IMPORTED_FUNCTIONS: &[&str] = &[
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "CMSG_LEN",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "CMSG_SPACE",
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    "gethostbyname_ex",
     "getdefaulttimeout",
+    #[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+    "getprotobyname",
     "htonl",
     "htons",
     "ntohl",
@@ -99,7 +370,11 @@ const IMPORTED_FUNCTIONS: &[&str] = &[
 ];
 
 /// Seed the low-level module once so normal module assignment and deletion remain observable.
-pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) -> Result<()> {
+pub(in super::super) fn install_lowlevel_socket(
+    ctx: &mut Context,
+    module: Id,
+    scope: Id,
+) -> Result<()> {
     for &(name, value) in CONSTANTS.iter().chain(IMPORTED_CONSTANTS) {
         let value = ctx.int(i64::from(value));
         ctx.bind(scope, name, value);
@@ -112,15 +387,25 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
         let function = ctx.builtin(&format!("_socket.{name}"));
         ctx.bind(scope, name, function);
     }
-    let pair = ctx.builtin("_socket.socketpair");
-    ctx.bind(scope, "socketpair", pair);
     let resolver = ctx.builtin("_socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", resolver);
-    let socket_type = attribute(ctx, "socket")?;
+    let socket_type = socket_class(ctx, module, scope)?;
+    ctx.bind(scope, "socket", socket_type);
     ctx.bind(scope, "SocketType", socket_type);
+    let Value::Module { module_state, .. } = ctx.heap.get_mut(module) else {
+        unreachable!()
+    };
+    *module_state = Some(NativeModuleState::SocketType(socket_type));
+    let callable = ctx.builtin("_socket.socketpair");
+    let pair = ctx.alloc(Value::Method {
+        callable,
+        receiver: module,
+        explicit: false,
+    });
+    ctx.bind(scope, "socketpair", pair);
     let timeout = ctx.builtin("TimeoutError");
     ctx.bind(scope, "timeout", timeout);
-    for name in ["has_ipv6", "socket", "close", "error"] {
+    for name in ["has_ipv6", "close", "error"] {
         let value = attribute(ctx, name)?;
         ctx.bind(scope, name, value);
     }
@@ -131,6 +416,10 @@ pub(in super::super) fn install_lowlevel_socket(ctx: &mut Context, scope: Id) ->
 pub(in super::super) fn import_socket_constants(ctx: &mut Context, scope: Id) -> Result<()> {
     let low = ctx.module("_socket")?;
     ctx.bind(scope, "_socket", low);
+    for &(name, host) in imre_ast::providers::SOCKET_LOOPBACK_HOSTS {
+        let value = ctx.text(host);
+        ctx.bind(scope, name, value);
+    }
     let getaddrinfo = ctx.builtin("socket.getaddrinfo");
     ctx.bind(scope, "getaddrinfo", getaddrinfo);
     for name in IMPORTED_CONSTANTS
@@ -205,7 +494,10 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
         // IPv6 is compiled in on the supported Linux and macOS targets, independently of
         // whether a particular process can create or bind an IPv6 socket.
         "has_ipv6" => Ok(super::TRUE),
-        "socket" => Ok(ctx.builtin("socket.socket")),
+        "socket" => {
+            let module = ctx.module("_socket")?;
+            ctx.lookup_attr(module, "socket")
+        }
         "close" => Ok(ctx.builtin("_socket.close")),
         "getfqdn" => Ok(ctx.alloc(Value::Native("socket.getfqdn".into()))),
         "error" => Ok(ctx.builtin("OSError")),
@@ -216,25 +508,7 @@ pub(super) fn attribute(ctx: &mut Context, name: &str) -> Result<Id> {
     }
 }
 
-fn buffered_socket_writer(ctx: &mut Context, raw: Id, size: Id) -> Result<Id> {
-    let zero = ctx.int(0);
-    let size = if size == NONE { ctx.int(-1) } else { size };
-    let negative = ctx.binary("<", size, zero)?;
-    let io = ctx.module("io")?;
-    let size = if ctx.truth(negative)? {
-        ctx.lookup_attr(io, "DEFAULT_BUFFER_SIZE")?
-    } else {
-        size
-    };
-    let unbuffered = ctx.binary("==", size, zero)?;
-    if ctx.truth(unbuffered)? {
-        return Ok(raw);
-    }
-    let writer = ctx.lookup_attr(io, "BufferedWriter")?;
-    ctx.call(writer, vec![raw, size], Vec::new())
-}
-
-fn integer(ctx: &Context, id: Id) -> Result<i32> {
+pub(super) fn integer(ctx: &Context, id: Id) -> Result<i32> {
     i32::try_from(ctx.as_integer(id)?)
         .map_err(|_| Error::new("OverflowError", "Python int too large to convert to C int"))
 }
@@ -356,16 +630,12 @@ fn internet_address(
     // Convert in CPython's argument order; __index__ may run arbitrary code.
     let host = match ctx.heap.get(ctx.scalar_value(fields[0])) {
         Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(fields[0])?.to_vec(),
-        Value::Str(_) | Value::SurrogateStr(_) => {
-            let text = ctx.str_value(fields[0])?;
-            if ipv6 && !text.is_ascii() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "IPv6 Unicode host names require IDNA encoding",
-                ));
-            }
-            text.as_bytes().to_vec()
-        }
+        Value::Str(_) | Value::SurrogateStr(_) => match ctx.heap.get(fields[0]) {
+            // CPython's sockaddr converter sends compact ASCII strings directly to libc.
+            Value::Str(text) if text.is_ascii() => text.as_bytes().to_vec(),
+            _ => idna_host(ctx, fields[0])
+                .map_err(|_| Error::new("TypeError", "encoding of hostname failed"))?,
+        },
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -423,6 +693,13 @@ fn unsigned_mask(value: crate::Int) -> u32 {
         .expect("masked uint32")
 }
 
+/// Encode the original Python string through the same text codec as str.encode.
+fn idna_host(ctx: &mut Context, host: Id) -> Result<Vec<u8>> {
+    let encoding = ctx.text("idna");
+    let encoded = super::codecs::encode_text_object(ctx, host, Some(encoding), None)?;
+    Ok(ctx.bytes_like(encoded)?.to_vec())
+}
+
 /// PyArg's "et" conversion IDNA-encodes str and treats bytes/bytearray as already encoded.
 fn host_argument(
     ctx: &mut Context,
@@ -433,44 +710,7 @@ fn host_argument(
     let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
     let bytes = match ctx.heap.get(ctx.scalar_value(arg)) {
         Value::Bytes(_) | Value::ByteArray(_) => ctx.bytes_like(arg)?.to_vec(),
-        Value::Str(_) | Value::SurrogateStr(_) => {
-            let host = ctx.str_value(arg)?;
-            if !host.is_ascii() {
-                return Err(Error::new(
-                    "NotImplementedError",
-                    "Unicode host names require IDNA encoding",
-                ));
-            }
-            // Match the ASCII fast path in encodings.idna; the final label may be empty.
-            let empty = if host.starts_with('.') {
-                Some(0)
-            } else {
-                host.find("..").map(|i| i + 1)
-            };
-            if let Some(i) = empty {
-                return Err(ctx.string_encoding_error(
-                    arg,
-                    "idna",
-                    "label empty",
-                    u32::from(b'.'),
-                    i..i + 1,
-                ));
-            }
-            let mut offset = 0;
-            for label in host.split('.') {
-                if label.len() >= 64 {
-                    return Err(ctx.string_encoding_error(
-                        arg,
-                        "idna",
-                        "label too long",
-                        0,
-                        offset..offset + label.len(),
-                    ));
-                }
-                offset += label.len() + 1;
-            }
-            host.as_bytes().to_vec()
-        }
+        Value::Str(_) | Value::SurrogateStr(_) => idna_host(ctx, arg)?,
         _ => {
             return Err(Error::new(
                 "TypeError",
@@ -617,27 +857,43 @@ fn public_getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
 }
 
 pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [host, service, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
+    let [host_arg, service_arg, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
     let family = ctx.index_c_int(family)?;
     let ty = ctx.index_c_int(ty)?;
     let protocol = ctx.index_c_int(protocol)?;
     let flags = ctx.index_c_int(flags)?;
-    let host = match ctx.heap.get(ctx.scalar_value(host)) {
+    let host = match ctx.heap.get(ctx.scalar_value(host_arg)) {
         Value::None => None,
         Value::Bytes(bytes) => Some(bytes.clone()),
-        _ => Some(ctx.str_value(host)?.as_bytes().to_vec()),
+        Value::Str(_) | Value::SurrogateStr(_) => Some(idna_host(ctx, host_arg)?),
+        _ => {
+            return Err(Error::new(
+                "TypeError",
+                "getaddrinfo() argument 1 must be string or None",
+            ));
+        }
     };
-    let service = if let Some(index) = ctx.index_value(service)? {
+    let service = if let Some(index) = ctx.index_value(service_arg)? {
         Some(index.to_string().into_bytes())
     } else {
-        match ctx.heap.get(ctx.scalar_value(service)) {
+        match ctx.heap.get(ctx.scalar_value(service_arg)) {
             Value::None => None,
             Value::Bytes(bytes) => Some(bytes.clone()),
             Value::Str(s) => Some(s.as_bytes().to_vec()),
-            Value::SurrogateStr(_) => Some(ctx.encode_utf8_codepoints(service, false, "strict")?),
+            Value::SurrogateStr(_) => {
+                Some(ctx.encode_utf8_codepoints(service_arg, false, "strict")?)
+            }
             _ => return Err(Error::new("OSError", "Int or String expected")),
         }
     };
+    let family_arg = ctx.int(i64::from(family));
+    let type_arg = ctx.int(i64::from(ty));
+    let protocol_arg = ctx.int(i64::from(protocol));
+    super::audit::event(
+        ctx,
+        "socket.getaddrinfo",
+        &[host_arg, service_arg, family_arg, type_arg, protocol_arg],
+    )?;
     // CPython passes the NUL-terminated host and service buffers to libc.
     fn c_string_prefix(value: &[u8]) -> &[u8] {
         value.split(|&byte| byte == 0).next().unwrap_or_default()
@@ -675,12 +931,10 @@ fn text_argument(
         } else {
             ctx.type_name(value)
         };
+        let ty = &ty[..ty.floor_char_boundary(50)];
         let message = match index {
             Some(index) => format!("{name}() argument {index} must be str, not {ty}"),
-            None => {
-                let ty = &ty[..ty.floor_char_boundary(50)];
-                format!("{name}() argument must be str, not {ty}")
-            }
+            None => format!("{name}() argument must be str, not {ty}"),
         };
         Error::new("TypeError", message)
     })?;
@@ -689,6 +943,33 @@ fn text_argument(
         _ => std::ffi::CString::new(ctx.encode_utf8_codepoints(value, false, "strict")?),
     };
     text.map_err(|_| Error::new("ValueError", "embedded null character"))
+}
+
+/// Look up a protocol number in the platform's protocol database.
+#[cfg(any(all(target_os = "linux", target_env = "gnu"), target_os = "macos"))]
+pub(super) fn getprotobyname(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "getprotobyname() takes no keyword arguments",
+        ));
+    }
+    let [name] = args else {
+        return Err(Error::new(
+            "TypeError",
+            format!(
+                "getprotobyname() takes exactly 1 argument ({} given)",
+                args.len()
+            ),
+        ));
+    };
+    let name = text_argument(ctx, "getprotobyname", Some(1), *name)?;
+    let number = native::protocol_by_name(&name)?;
+    Ok(ctx.int(i64::from(number)))
 }
 
 /// Convert an unsigned Python index between host and network byte order.
@@ -958,7 +1239,19 @@ fn getnameinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Resul
     Ok(ctx.alloc(Value::Tuple(vec![host, service])))
 }
 
-fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) fn cmsg_size(
+    ctx: &mut Context,
+    name: &str,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+    let size = native::message::control_size(receive_size(ctx, arg)?, name == "CMSG_SPACE")?;
+    Ok(ctx.int(size as i64))
+}
+
+pub(super) fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
     crate::signed_index(&ctx.index_integer(value)?).ok_or_else(|| {
         Error::new(
             "OverflowError",
@@ -967,14 +1260,35 @@ fn receive_size(ctx: &mut Context, value: Id) -> Result<isize> {
     })
 }
 
-fn recvfrom_into(
+/// Recreate any pointers into the Python heap after a returning signal handler.
+fn retry<T>(
     ctx: &mut Context,
+    socket: &crate::objects::Object,
+    mut attempt: impl FnMut(&mut Context, Option<native::Deadline>) -> Result<T>,
+) -> Result<T> {
+    let until = native::deadline(socket);
+    loop {
+        match attempt(ctx, until) {
+            Err(err) if ctx.has_errno(&err, libc::EINTR) => {
+                ctx.dispatch_signals()?;
+                if until.is_some_and(|end| end.remaining().is_zero()) {
+                    return Err(Error::new("TimeoutError", "timed out"));
+                }
+            }
+            result => return result,
+        }
+    }
+}
+
+fn receive_into(
+    ctx: &mut Context,
+    method: &str,
     socket: &crate::objects::Object,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     const FIELDS: [&str; 3] = ["buffer", "nbytes", "flags"];
-    let required = super::required_args("recvfrom_into", args, kwargs, &FIELDS)?;
+    let required = super::required_args(method, args, kwargs, &FIELDS)?;
     let buffer = required(0)?;
     let optional = |index: usize| {
         args.get(index).copied().or_else(|| {
@@ -986,7 +1300,7 @@ fn recvfrom_into(
     };
     let (count, peer) = ctx.with_writable_byte_span(
         buffer,
-        "recvfrom_into() argument 1",
+        &format!("{method}() argument 1"),
         |ctx, storage, span| {
             let nbytes = optional(1)
                 .map(|value| receive_size(ctx, value))
@@ -998,30 +1312,122 @@ fn recvfrom_into(
                 .unwrap_or(0);
             // PyArg converts its recognized inputs before diagnosing leftover keywords.
             if !kwargs.is_empty() {
-                super::super::builtins::bind_builtin_arguments(
-                    "recvfrom_into",
-                    args,
-                    kwargs,
-                    FIELDS,
-                    1,
-                )?;
+                super::super::builtins::bind_builtin_arguments(method, args, kwargs, FIELDS, 1)?;
             }
-            let nbytes = usize::try_from(nbytes)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom_into"))?;
-            let bytes = &mut ctx.writable_storage_bytes(storage)?[span];
-            let size = if nbytes == 0 { bytes.len() } else { nbytes };
-            let target = bytes.get_mut(..size).ok_or_else(|| {
-                Error::new(
-                    "ValueError",
-                    "nbytes is greater than the length of the buffer",
-                )
+            let nbytes = usize::try_from(nbytes).map_err(|_| {
+                Error::new("ValueError", format!("negative buffersize in {method}"))
             })?;
-            Ok(native::recv_from_into(socket, target, flags)?)
+            let size = if nbytes == 0 { span.len() } else { nbytes };
+            if size > span.len() {
+                let message = if method == "recv_into" {
+                    "buffer too small for requested bytes"
+                } else {
+                    "nbytes is greater than the length of the buffer"
+                };
+                return Err(Error::new("ValueError", message));
+            }
+            let range = span.start..span.start + size;
+            let with_address = method == "recvfrom_into";
+            // A zero-length recvfrom still consumes a datagram and returns its address.
+            if receive_buffer(ctx, storage, range.clone())?.is_empty() && !with_address {
+                return Ok((0, None));
+            }
+            let (count, address) = native::read_socket(
+                || native::read_state(socket),
+                ctx,
+                Context::dispatch_signals,
+                |_, raw, end| Ok(native::poll_interruptible(raw, libc::POLLIN, Some(end))),
+                |ctx, raw| {
+                    let target = receive_buffer(ctx, storage, range.clone())?;
+                    Ok(if with_address {
+                        native::receive_from_once(raw, target, flags)
+                            .map(|(count, addr, len)| (count, Some((addr, len))))
+                    } else {
+                        native::recv_into_once(raw, target, flags).map(|count| (count, None))
+                    })
+                },
+            )?;
+            let peer = address
+                .map(|(addr, len)| native::unpack_socket_name(&addr, len))
+                .transpose()?;
+            Ok((count, peer))
         },
     )?;
     let count = ctx.int(count as i64);
+    let Some(peer) = peer else {
+        return Ok(count);
+    };
     let peer = pack_socket_name(ctx, peer)?;
     Ok(ctx.alloc(Value::Tuple(vec![count, peer])))
+}
+
+fn receive_buffer(
+    ctx: &mut Context,
+    storage: Id,
+    range: std::ops::Range<usize>,
+) -> Result<&mut [u8]> {
+    ctx.writable_storage_bytes(storage)?
+        .get_mut(range)
+        .ok_or_else(|| Error::new("BufferError", "underlying buffer has changed size"))
+}
+
+fn setsockopt(
+    ctx: &mut Context,
+    socket: &crate::objects::Object,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    use native::SocketOption;
+
+    if !kwargs.is_empty() {
+        return Err(Error::new(
+            "TypeError",
+            "socket.setsockopt() takes no keyword arguments",
+        ));
+    }
+    let wrong_count = || {
+        Error::new(
+            "TypeError",
+            format!(
+                "setsockopt() takes exactly 3 arguments ({} given)",
+                args.len()
+            ),
+        )
+    };
+    if let &[level, name, value, length] = args {
+        // A failed four-argument parse falls through to CPython's three-argument buffer form.
+        let level = ctx.index_c_int(level).map_err(|_| wrong_count())?;
+        let name = ctx.index_c_int(name).map_err(|_| wrong_count())?;
+        if value != NONE {
+            return Err(wrong_count());
+        }
+        let length = unsigned_mask(ctx.index_integer(length).map_err(|_| wrong_count())?);
+        native::set_option(native::fd(socket), level, name, SocketOption::Null(length))?;
+        return Ok(NONE);
+    }
+    let &[level, name, value] = args else {
+        return Err(wrong_count());
+    };
+    let option =
+        |ctx: &mut Context| -> Result<_> { Ok((ctx.index_c_int(level)?, ctx.index_c_int(name)?)) };
+    // PyArg tries "iii" before "iiy*". Converting level and name again on the
+    // buffer path is observable when either implements __index__.
+    let integers = option(ctx).and_then(|(level, name)| Ok((level, name, ctx.index_c_int(value)?)));
+    if let Ok((level, name, flag)) = integers {
+        native::set_option(native::fd(socket), level, name, SocketOption::Integer(flag))?;
+    } else {
+        let (level, name) = option(ctx)?;
+        ctx.with_read_buffer(value, |ctx, buffer| {
+            let bytes = buffer.bytes(ctx)?;
+            Ok(native::set_option(
+                native::fd(socket),
+                level,
+                name,
+                SocketOption::Buffer(bytes),
+            )?)
+        })?;
+    }
+    Ok(NONE)
 }
 
 fn getsockopt(
@@ -1096,18 +1502,29 @@ pub(super) fn setdefaulttimeout(
     let value =
         super::super::builtins::one_positional_arg("_socket.setdefaulttimeout", args, kwargs)?;
     let timeout = parse_socket_timeout(ctx, value)?;
-    *ctx.socket_default_timeout.lock().unwrap() = timeout;
+    *ctx.interpreter.socket_default_timeout.lock().unwrap() = timeout;
     Ok(NONE)
 }
 
 /// Apply the current default to a new endpoint unless its type requested nonblocking I/O.
-fn new_socket(ctx: &mut Context, socket: crate::ObjectOwner) -> Result<Id> {
-    if native::get_timeout(&socket).is_none()
-        && let Some(timeout) = *ctx.socket_default_timeout.lock().unwrap()
+fn apply_default_timeout(ctx: &Context, socket: &crate::objects::Object) -> Result<()> {
+    if native::get_timeout(socket).is_none()
+        && let Some(timeout) = *ctx.interpreter.socket_default_timeout.lock().unwrap()
+        && let Err(error) = native::set_timeout(socket, Some(timeout))
     {
-        native::set_timeout(&socket, Some(timeout))?;
+        // The initializer has already adopted the fd. Its receiver may outlive this error.
+        native::discard_fd(socket);
+        return Err(error.into());
     }
-    Ok(ctx.alloc(Value::Socket(socket)))
+    Ok(())
+}
+
+fn new_socket(ctx: &mut Context, class: Id, socket: crate::ObjectOwner) -> Result<Id> {
+    apply_default_timeout(ctx, &socket)?;
+    ctx.heap.alloc_descriptor_owner(Value::Socket {
+        class,
+        handle: socket,
+    })
 }
 
 pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -1119,6 +1536,16 @@ pub(super) fn close(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
 }
 
 pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let Some((&module, args)) = args.split_first() else {
+        return Err(Error::new("TypeError", "socketpair requires its module"));
+    };
+    let Value::Module {
+        module_state: Some(NativeModuleState::SocketType(class)),
+        ..
+    } = *ctx.heap.get(module)
+    else {
+        return Err(Error::new("TypeError", "socketpair requires its module"));
+    };
     check_args("socketpair", args, kwargs, 3, &[])?;
     let mut values = [libc::AF_UNIX, libc::SOCK_STREAM, 0];
     for (value, &arg) in values.iter_mut().zip(args) {
@@ -1126,8 +1553,8 @@ pub(super) fn socketpair(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]
     }
     let [family, kind, proto] = values;
     let (left, right) = native::socketpair(family, kind, proto)?;
-    let left = new_socket(ctx, left)?;
-    let right = new_socket(ctx, right)?;
+    let left = new_socket(ctx, class, left)?;
+    let right = new_socket(ctx, class, right)?;
     Ok(ctx.alloc(Value::Tuple(vec![left, right])))
 }
 
@@ -1139,7 +1566,25 @@ pub(super) fn endpoint_method(
     args: &[Id],
 ) -> Result<Id> {
     match method {
-        "fileno" => Ok(ctx.int(i64::from(native::fd(socket)))),
+        "setblocking" => {
+            native::set_blocking_mode(socket, ctx.truth(argument(args, 0)?)?)?;
+            Ok(NONE)
+        }
+        "gettimeout" => Ok(native::get_timeout(socket).map_or(NONE, |duration| {
+            ctx.alloc(Value::Float(duration.as_secs_f64()))
+        })),
+        "settimeout" => {
+            let value = argument(args, 0)?;
+            let timeout = parse_socket_timeout(ctx, value)?;
+            native::set_timeout(socket, timeout)?;
+            Ok(NONE)
+        }
+        "getblocking" => Ok(if native::imre_socket_getblocking(socket) {
+            super::TRUE
+        } else {
+            super::FALSE
+        }),
+        "fileno" => Ok(ctx.int(i64::from(native::fileno(socket)?))),
         "listen" => {
             let backlog = match args {
                 [value] => ctx.index_c_int(*value)?,
@@ -1148,17 +1593,58 @@ pub(super) fn endpoint_method(
             native::listen(socket, backlog)?;
             Ok(NONE)
         }
-        "accept" => {
-            let (child, peer) = native::accept(socket)?;
-            let peer = pack_socket_name(ctx, peer)?;
-            let child = new_socket(ctx, child)?;
-            Ok(ctx.alloc(Value::Tuple(vec![child, peer])))
-        }
         "getsockname" | "getpeername" => {
             pack_socket_name(ctx, native::socket_name(socket, method == "getpeername")?)
         }
         _ => unreachable!(),
     }
+}
+
+fn sendfile_write_for(ctx: &Context, receiver: Id) -> Option<(native::SendfileIdentity, Id)> {
+    ctx.sendfile_writes
+        .iter()
+        .find_map(|&(target, identity, session)| {
+            (target == receiver).then_some((identity, session))
+        })
+}
+
+fn changed_transport() -> Error {
+    crate::objects::errno_error(std::io::Error::from_raw_os_error(libc::EBADF)).into()
+}
+
+fn active_sendfile_owner(ctx: &Context, receiver: Id) -> Result<Option<native::SendfileIdentity>> {
+    match sendfile_write_for(ctx, receiver) {
+        Some((identity, NONE)) => Ok(Some(identity)),
+        Some(_) => Err(changed_transport()),
+        None => Ok(None),
+    }
+}
+
+pub(super) fn check_tls_sendfile_owner(
+    ctx: &Context,
+    receiver: Id,
+    handle: Id,
+    socket: &crate::objects::Object,
+) -> Result<()> {
+    if let Some((identity, session)) = sendfile_write_for(ctx, receiver) {
+        if handle != session {
+            return Err(changed_transport());
+        }
+        native::check_sendfile_owner(socket, native::fd(socket), &identity)?;
+    }
+    Ok(())
+}
+
+fn sendfile_identity(ctx: &Context, id: Id) -> Result<native::SendfileIdentity> {
+    if id == NONE {
+        return Ok(Default::default());
+    }
+    if let Value::Bytes(bytes) = ctx.heap.get(id)
+        && let Ok(identity) = bytes.as_slice().try_into()
+    {
+        return Ok(identity);
+    }
+    Err(Error::new("TypeError", "invalid socket transfer identity"))
 }
 
 pub(super) fn call(
@@ -1168,70 +1654,48 @@ pub(super) fn call(
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
     match name {
-        "socket" => {
-            let keys = ["family", "type", "proto", "fileno"];
-            check_args(name, args, kwargs, keys.len(), &keys)?;
-            // Bind like the public Python constructor before invoking any __index__ methods.
-            let mut values = [None; 4];
-            for (i, key) in keys.iter().enumerate() {
-                values[i] = option(args, i, kwargs, key).map_err(|_| {
-                    Error::new(
-                        "TypeError",
-                        format!("socket.__init__() got multiple values for argument '{key}'"),
-                    )
-                })?;
-            }
-            let [family, kind, proto, fileno] = values;
-            let mut number = |value: Option<Id>| {
-                value
-                    .map(|v| ctx.index_c_int(v))
-                    .transpose()
-                    .map(|v| v.unwrap_or(-1))
-            };
-            let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
-            let handle = match fileno {
-                None | Some(NONE) => native::open(family, kind, proto)?,
-                Some(value) => native::adopt(ctx.index_c_long(value)? as i32, family, kind, proto)?,
-            };
-            return new_socket(ctx, handle);
-        }
         "if_nameindex" => {
             check_args(name, args, kwargs, 0, &[])?;
-            return if_nameindex(ctx);
+            if_nameindex(ctx)
         }
         "if_nametoindex" => {
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-            return if_nametoindex(ctx, arg);
+            if_nametoindex(ctx, arg)
         }
         "if_indextoname" => {
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
-            return if_indextoname(ctx, arg);
+            if_indextoname(ctx, arg)
         }
-        "getaddrinfo" => return public_getaddrinfo(ctx, args, kwargs),
-        "getnameinfo" => return getnameinfo(ctx, args, kwargs),
-        "getservbyname" | "getservbyport" => return lookup_service(ctx, name, args, kwargs),
+        "getaddrinfo" => public_getaddrinfo(ctx, args, kwargs),
+        "getnameinfo" => getnameinfo(ctx, args, kwargs),
+        "getservbyname" | "getservbyport" => lookup_service(ctx, name, args, kwargs),
         "gethostname" => {
             check_args(name, args, kwargs, 0, &[])?;
             super::audit::event(ctx, "socket.gethostname", args)?;
             let raw = native::hostname()?;
             let codec = crate::objects::Codec::lookup(crate::sys::filesystem_encoding()?.as_str())?;
-            return Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?));
+            Ok(ctx.text_codepoints(codec.decode_filesystem(&raw)?))
         }
         "gethostbyname" => {
             let host = host_argument(ctx, name, args, kwargs)?;
             super::audit::event(ctx, "socket.gethostbyname", args)?;
-            return Ok(ctx.text(native::hostbyname(&host)?.to_string()));
+            Ok(ctx.text(native::hostbyname(&host)?.to_string()))
         }
-        "gethostbyaddr" => {
+        "gethostbyaddr" | "gethostbyname_ex" => {
             let host = host_argument(ctx, name, args, kwargs)?;
-            super::audit::event(ctx, "socket.gethostbyaddr", args)?;
-            let entry = native::hostbyaddr(&host)?;
+            let entry = if name == "gethostbyaddr" {
+                super::audit::event(ctx, "socket.gethostbyaddr", args)?;
+                native::hostbyaddr(&host)?
+            } else {
+                super::audit::event(ctx, "socket.gethostbyname", args)?;
+                native::hostbyname_ex(&host)?
+            };
             let name = ctx.text(entry.name);
             let aliases = entry.aliases.into_iter().map(|s| ctx.text(s)).collect();
             let aliases = ctx.alloc(Value::List(aliases));
             let addresses = entry.addresses.into_iter().map(|s| ctx.text(s)).collect();
             let addresses = ctx.alloc(Value::List(addresses));
-            return Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])));
+            Ok(ctx.alloc(Value::Tuple(vec![name, aliases, addresses])))
         }
         "getfqdn" => {
             check_args(name, args, kwargs, 1, &["name"])?;
@@ -1239,27 +1703,170 @@ pub(super) fn call(
                 .map(|v| ctx.str_value(v))
                 .transpose()?
                 .unwrap_or("");
-            return Ok(ctx.text(native::fqdn(host)?));
+            let name = ctx.text(native::fqdn_name(host)?);
+            let lookup = (|| {
+                let host = host_argument(ctx, "gethostbyaddr", &[name], &[])?;
+                super::audit::event(ctx, "socket.gethostbyaddr", &[name])?;
+                Ok(native::fqdn(&host)?)
+            })();
+            match lookup {
+                Ok(result) => Ok(ctx.text(result)),
+                Err(error) if ctx.is_builtin_error(&error, "OSError") => Ok(name),
+                Err(error) => Err(error),
+            }
+        }
+        _ => Err(Error::new(
+            "TypeError",
+            format!("'{name}' is not a socket operation"),
+        )),
+    }
+}
+
+/// Initialize the native endpoint selected by the class call or explicit __init__.
+fn initialize(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+    let (&obj, args) = args
+        .split_first()
+        .ok_or_else(|| Error::new("TypeError", "missing socket receiver"))?;
+    let socket = ctx
+        .heap
+        .get(obj)
+        .socket_handle()
+        .cloned()
+        .ok_or_else(|| Error::new("TypeError", "expected a socket"))?;
+    let keys = ["family", "type", "proto", "fileno"];
+    check_args("socket.__init__", args, kwargs, keys.len(), &keys)?;
+    // Bind like the public Python constructor before invoking any __index__ methods.
+    let mut values = [None; 4];
+    for (i, key) in keys.iter().enumerate() {
+        values[i] = option(args, i, kwargs, key).map_err(|_| {
+            Error::new(
+                "TypeError",
+                format!("socket.__init__() got multiple values for argument '{key}'"),
+            )
+        })?;
+    }
+    let [family, kind, proto, fileno] = values;
+    let mut number = |value: Option<Id>| {
+        value
+            .map(|v| ctx.index_c_int(v))
+            .transpose()
+            .map(|v| v.unwrap_or(-1))
+    };
+    let (family, kind, proto) = (number(family)?, number(kind)?, number(proto)?);
+    let event = [
+        obj,
+        ctx.int(i64::from(family)),
+        ctx.int(i64::from(kind)),
+        ctx.int(i64::from(proto)),
+    ];
+    super::audit::event(ctx, "socket.__new__", &event)?;
+    let raw = match fileno {
+        None | Some(NONE) => None,
+        Some(value) => Some(ctx.index_c_long(value)? as i32),
+    };
+    ctx.heap.track_initialized_descriptor(obj)?;
+    match raw {
+        Some(raw) => native::adopt_into(&socket, raw, family, kind, proto)?,
+        None => native::open_into(&socket, family, kind, proto)?,
+    }
+    apply_default_timeout(ctx, &socket)?;
+    Ok(NONE)
+}
+
+fn call_method(
+    ctx: &mut Context,
+    method: &str,
+    receiver: Id,
+    s: crate::ObjectOwner,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let is_message = matches!(method, "sendmsg" | "recvmsg" | "recvmsg_into");
+    match method {
+        "family" => return Ok(ctx.int(i64::from(native::family(&s)))),
+        "type" => return Ok(ctx.int(i64::from(native::kind(&s)))),
+        "proto" => return Ok(ctx.int(i64::from(native::proto(&s)))),
+        "timeout" => {
+            return Ok(
+                native::get_timeout(&s).map_or(NONE, |t| ctx.alloc(Value::Float(t.as_secs_f64())))
+            );
         }
         _ => {}
     }
-    let Some(method) = name.strip_prefix("socket.") else {
-        return Err(Error::new(
-            "TypeError",
-            format!("'{name}' is not a socket operation"),
-        ));
-    };
-    let (receiver, args) = args
-        .split_first()
-        .ok_or_else(|| Error::new("TypeError", "missing socket receiver"))?;
-    let Value::Socket(handle) = ctx.heap.get(*receiver) else {
-        return Err(Error::new("TypeError", "expected a socket"));
-    };
-    let s = handle.clone();
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if is_message {
+        return message::call(ctx, &s, receiver, method, args, kwargs);
+    }
+    if method == "_sendfile_owner" {
+        check_args(method, args, kwargs, 0, &[])?;
+        let raw = native::fd(&s);
+        if let Some((expected, _)) = sendfile_write_for(ctx, receiver) {
+            native::check_sendfile_owner(&s, raw, &expected)?;
+        }
+        return if raw < 0 {
+            Ok(NONE)
+        } else {
+            let identity = native::sendfile_identity(&s, raw)?;
+            Ok(ctx.alloc(Value::Bytes(identity.to_vec())))
+        };
+    }
+    if method == "_sendfile_write" {
+        let (owner, send, data, session) = match *args {
+            [owner, send, data] => (owner, send, data, NONE),
+            [owner, send, data, session] => (owner, send, data, session),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    "_sendfile_write requires a receiver, data and optional TLS session after its owner",
+                ));
+            }
+        };
+        check_args(method, args, kwargs, 4, &[])?;
+        if sendfile_write_for(ctx, receiver).is_some_and(|(_, active)| active != session) {
+            return Err(changed_transport());
+        }
+        let identity = sendfile_identity(ctx, owner)?;
+        native::check_sendfile_owner(&s, native::fd(&s), &identity)?;
+        ctx.sendfile_writes
+            .try_reserve(1)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        ctx.heap.keep(receiver);
+        ctx.heap.keep(session);
+        ctx.sendfile_writes.push((receiver, identity, session));
+        let result = ctx.call(send, vec![data], Vec::new());
+        ctx.sendfile_writes.pop();
+        return result;
+    }
+    if method == "_check_sendfile_owner" {
+        let owner = super::super::builtins::one_positional_arg(method, args, kwargs)?;
+        let identity = sendfile_identity(ctx, owner)?;
+        native::check_sendfile_owner(&s, native::fd(&s), &identity)?;
+        return Ok(NONE);
+    }
+    #[cfg(target_os = "linux")]
+    if method == "_sendfile_block" {
+        let [owner, file, offset, count] = *args else {
+            return Err(Error::new(
+                "TypeError",
+                "_sendfile_block requires four arguments",
+            ));
+        };
+        check_args(method, args, kwargs, 4, &[])?;
+        active_sendfile_owner(ctx, receiver)?;
+        let identity = sendfile_identity(ctx, owner)?;
+        return super::os::sendfile_to(
+            ctx,
+            || native::sendfile_destination(&s, &identity),
+            file,
+            offset,
+            count,
+        );
+    }
     if matches!(method, "connect" | "connect_ex") {
-        let peer = super::super::builtins::one_positional_arg(name, args, kwargs)?;
+        let peer = super::super::builtins::one_positional_arg(method, args, kwargs)?;
         let addr = address(ctx, native::family(&s), peer, method)?;
-        super::audit::event(ctx, "socket.connect", &[*receiver, peer])?;
+        super::audit::event(ctx, "socket.connect", &[receiver, peer])?;
         let result = native::connect(&s, &addr, || ctx.dispatch_signals())?;
         if method == "connect" {
             result.map_err(crate::objects::errno_error)?;
@@ -1278,193 +1885,93 @@ pub(super) fn call(
     if method == "getsockopt" {
         return getsockopt(ctx, &s, args, kwargs);
     }
-    if method == "recvfrom_into" {
-        return recvfrom_into(ctx, &s, args, kwargs);
+    if method == "setsockopt" {
+        return setsockopt(ctx, &s, args, kwargs);
     }
-    if method == "makefile" {
-        check_args(
-            method,
-            args,
-            kwargs,
-            2,
-            &["mode", "buffering", "encoding", "errors", "newline"],
-        )?;
-        let mode = option(args, 0, kwargs, "mode")?.unwrap_or_else(|| ctx.text("r"));
-        let storage = ctx
-            .string_storage(mode)
-            .ok_or_else(|| Error::new("TypeError", "expected str"))?;
-        let text = match ctx.heap.get(storage) {
-            Value::Str(text) if text.bytes().all(|c| matches!(c, b'r' | b'w' | b'b')) => text,
-            _ => {
-                return Err(Error::new(
-                    "ValueError",
-                    format!("invalid mode {} (only r, w, b allowed)", ctx.repr(mode)),
-                ));
-            }
-        };
-        let binary = text.contains('b');
-        let write = text.contains('w');
-        let read = text.contains('r') || !write;
-        let buffering = option(args, 1, kwargs, "buffering")?.unwrap_or(NONE);
-        let raw_file = |ctx: &mut Context| -> Result<Id> {
-            let module = ctx.module("socket")?;
-            let Value::Module { scope, .. } = *ctx.heap.get(module) else {
-                return Err(Error::new("TypeError", "socket must be a module"));
-            };
-            let factory = ctx.lookup(scope, "SocketIO")?;
-            let raw_mode = ctx.text(if write && read {
-                "rw"
-            } else if write {
-                "w"
-            } else {
-                "r"
-            });
-            let raw = ctx.call(factory, vec![*receiver, raw_mode], Vec::new())?;
-            native::retain_socketio(&s);
-            Ok(raw)
-        };
-        let roots = ctx.heap.temporary_mark();
-        let release_on_error = |ctx: &mut Context, error: &Error| {
-            // A replacement factory can retain the raw stream before raising.
-            ctx.heap.release_temporaries_since(roots);
-            for root in error.roots() {
-                ctx.heap.keep(root);
-            }
-            ctx.collect_unreachable();
-        };
-        if binary && write && !read {
-            let raw = raw_file(ctx)?;
-            return buffered_socket_writer(ctx, raw, buffering)
-                .inspect_err(|error| release_on_error(ctx, error));
-        }
-        let size = match buffering {
-            NONE => -1,
-            _ if binary && !write => ctx.as_integer(buffering)?,
-            _ => i64::from(integer(ctx, buffering)?),
-        };
-        if binary && !write && size > 0 {
-            let raw = raw_file(ctx)?;
-            return ctx
-                .module("io")
-                .and_then(|io| ctx.lookup_attr(io, "BufferedReader"))
-                .and_then(|reader| ctx.call(reader, vec![raw, buffering], Vec::new()))
-                .inspect_err(|error| release_on_error(ctx, error));
-        }
-        if size == 0 {
-            let raw = raw_file(ctx)?;
-            if !binary {
-                // The live factory may have retained the raw stream outside this call.
-                ctx.heap.release_temporaries_since(roots);
-                ctx.collect_unreachable();
-                return Err(Error::new(
-                    "ValueError",
-                    "unbuffered streams must be binary",
-                ));
-            }
-            return Ok(raw);
-        }
-        if write || size > 0 {
+    if method == "sendto" {
+        if !kwargs.is_empty() {
             return Err(Error::new(
-                "NotImplementedError",
-                "socket.makefile supports raw binary streams, buffered binary readers and writers, and default text readers",
+                "TypeError",
+                "sendto() takes no keyword arguments",
             ));
         }
-        let wrapper = if binary {
-            None
-        } else {
-            let io = ctx.module("io")?;
-            Some(ctx.lookup_attr(io, "TextIOWrapper")?)
+        let (data, flags, peer) = match *args {
+            [data, peer] => (data, None, peer),
+            [data, flags, peer] => (data, Some(flags), peer),
+            _ => {
+                return Err(Error::new(
+                    "TypeError",
+                    format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
+                ));
+            }
         };
-        let reader = super::ReadSource::Socket(native::SocketInput::try_new(s)?);
-        let buffer = ctx.alloc(super::BinaryFile::reader(reader, None).into_value()?);
-        let Some(cls) = wrapper else {
-            return Ok(buffer);
-        };
-        let encoding = option(&[], 0, kwargs, "encoding")?.unwrap_or(NONE);
-        let errors = option(&[], 0, kwargs, "errors")?.unwrap_or(NONE);
-        let newline = option(&[], 0, kwargs, "newline")?.unwrap_or(NONE);
-        let args = vec![buffer, encoding, errors, newline];
-        return ctx
-            .call(cls, args, Vec::new())
-            .and_then(|text| {
-                ctx.set_attr(text, "mode", mode)?;
-                Ok(text)
+        ctx.check_buffer_exporter(data)?;
+        ctx.native_buffer_bytes(data)?;
+        let count = ctx.with_buffer_export(data, |ctx| {
+            let flags = flags
+                .map(|id| ctx.index_c_int(id))
+                .transpose()?
+                .unwrap_or(0);
+            let addr = address(ctx, native::family(&s), peer, method)?;
+            super::audit::event(ctx, "socket.sendto", &[receiver, peer])?;
+            let owner = active_sendfile_owner(ctx, receiver)?;
+            retry(ctx, &s, |ctx, until| {
+                let bytes = ctx.native_buffer_bytes(data)?;
+                Ok(native::with_send_fd(&s, owner.as_ref(), |raw| {
+                    native::send_to_until(raw, bytes, flags, &addr, until)
+                        .map_err(crate::objects::errno_error)
+                })?)
             })
-            .inspect_err(|error| release_on_error(ctx, error));
+        })?;
+        return Ok(ctx.int(count as i64));
+    }
+    if matches!(method, "recv_into" | "recvfrom_into") {
+        return receive_into(ctx, method, &s, args, kwargs);
     }
     let max = match method {
         "bind" | "listen" | "setblocking" | "settimeout" | "shutdown" => 1,
-        "recv" | "recvfrom" | "send" | "sendall" => 2,
-        "setsockopt" | "__exit__" | "recv_into" | "sendto" => 3,
+        "recvfrom" | "send" | "sendall" => 2,
         _ => 0,
     };
     check_args(method, args, kwargs, max, &[])?;
     match method {
-        "__enter__" => return Ok(*receiver),
-        "__exit__" | "close" => native::close(&s)?,
-        "_decref_socketios" => native::release_socketio(&s).map_err(super::os_error)?,
-        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)))),
-        "fileno" | "listen" | "accept" | "getsockname" | "getpeername" => {
-            return endpoint_method(ctx, method, &s, args);
+        "__del__" => {
+            if native::fd(&s) >= 0 {
+                let warning = ctx.checked_format(receiver, true).and_then(|repr| {
+                    ctx.emit_builtin_warning_with_source(
+                        crate::objects::exceptions::Kind::ResourceWarning,
+                        &format!("unclosed {repr}"),
+                        1,
+                        receiver,
+                    )
+                });
+                if let Err(error) = warning {
+                    let category = ctx.builtin("Warning");
+                    if ctx.raised_error_matches(&error, category) {
+                        super::super::unraisable::report(
+                            ctx,
+                            error,
+                            true,
+                            Some(receiver),
+                            "Exception ignored while finalizing socket",
+                        );
+                    }
+                }
+                // Repr and warning hooks can close, detach or reinitialize this receiver.
+                native::discard_fd(&s);
+            }
         }
-        "dup" => return Ok(ctx.alloc(Value::Socket(native::dup(&s)?))),
-        "get_inheritable" => {
-            let enabled = crate::objects::os::INHERITABLE.enabled(native::fd(&s))?;
-            return Ok(if enabled { super::TRUE } else { super::FALSE });
+        "close" => native::close(&s)?,
+        "detach" => return Ok(ctx.int(i64::from(native::detach(&s)?))),
+        "fileno" | "listen" | "getsockname" | "getpeername" | "setblocking" | "getblocking"
+        | "gettimeout" | "settimeout" => {
+            return endpoint_method(ctx, method, &s, args);
         }
         "bind" => native::bind(
             &s,
             &address(ctx, native::family(&s), argument(args, 0)?, method)?,
         )?,
-        "setblocking" => native::set_blocking_mode(&s, ctx.as_integer(argument(args, 0)?)? != 0)?,
-        "gettimeout" => {
-            return Ok(native::get_timeout(&s).map_or(NONE, |duration| {
-                ctx.alloc(Value::Float(duration.as_secs_f64()))
-            }));
-        }
-        "settimeout" => {
-            let value = argument(args, 0)?;
-            let timeout = parse_socket_timeout(ctx, value)?;
-            native::set_timeout(&s, timeout)?;
-        }
-        "getblocking" => {
-            return Ok(if native::imre_socket_getblocking(&s) {
-                super::TRUE
-            } else {
-                super::FALSE
-            });
-        }
-        "setsockopt" => native::set_option(
-            &s,
-            integer(ctx, argument(args, 0)?)?,
-            integer(ctx, argument(args, 1)?)?,
-            integer(ctx, argument(args, 2)?)?,
-        )?,
         "shutdown" => native::shutdown(&s, integer(ctx, argument(args, 0)?)?)?,
-        "recv_into" => {
-            let buf = argument(args, 0)?;
-            let n = args
-                .get(1)
-                .map(|&id| ctx.as_integer(id))
-                .transpose()?
-                .unwrap_or(0);
-            let n = usize::try_from(n)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recv_into"))?;
-            let flags = int_option(ctx, args, kwargs, 2, "flags", 0)?;
-            let Some((storage, range)) = ctx.writable_byte_span(buf)? else {
-                return Err(Error::new(
-                    "TypeError",
-                    "recv_into() requires a writable bytes-like object",
-                ));
-            };
-            let bytes = &mut ctx.writable_storage_bytes(storage)?[range];
-            let n = if n == 0 { bytes.len() } else { n };
-            let target = bytes
-                .get_mut(..n)
-                .ok_or_else(|| Error::new("ValueError", "buffer too small for requested bytes"))?;
-            let count = native::recv_into(&s, target, flags)?;
-            return Ok(ctx.int(count as i64));
-        }
         "recvfrom" => {
             let n = receive_size(ctx, argument(args, 0)?)?;
             let flags = args
@@ -1474,55 +1981,32 @@ pub(super) fn call(
                 .unwrap_or(0);
             let size = usize::try_from(n)
                 .map_err(|_| Error::new("ValueError", "negative buffersize in recvfrom"))?;
-            let (data, peer) = native::recv_from(&s, size, flags)?;
+            let (data, peer) = native::recv_from(&s, size, flags, || ctx.dispatch_signals())?;
             let data = ctx.alloc(Value::Bytes(data));
             let peer = pack_socket_name(ctx, peer)?;
             return Ok(ctx.alloc(Value::Tuple(vec![data, peer])));
         }
-        "sendto" => {
-            let (data, flags, peer) = match *args {
-                [data, peer] => (data, None, peer),
-                [data, flags, peer] => (data, Some(flags), peer),
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("sendto() takes 2 or 3 arguments ({} given)", args.len()),
-                    ));
-                }
-            };
-            ctx.check_buffer_exporter(data)?;
-            ctx.native_buffer_bytes(data)?;
-            let count = ctx.with_buffer_export(data, |ctx| {
-                let flags = flags
-                    .map(|id| ctx.index_c_int(id))
-                    .transpose()?
-                    .unwrap_or(0);
-                let addr = address(ctx, native::family(&s), peer, method)?;
-                super::audit::event(ctx, "socket.sendto", &[*receiver, peer])?;
-                Ok(native::send_to(
-                    &s,
-                    ctx.native_buffer_bytes(data)?,
-                    flags,
-                    &addr,
-                )?)
-            })?;
-            return Ok(ctx.int(count as i64));
-        }
-        "recv" => {
-            let n = usize::try_from(ctx.as_integer(argument(args, 0)?)?)
-                .map_err(|_| Error::new("ValueError", "negative buffersize in recv"))?;
-            let bytes = native::recv(&s, n, int_option(ctx, args, kwargs, 1, "flags", 0)?)?;
-            return Ok(ctx.alloc(Value::Bytes(bytes)));
-        }
         "send" | "sendall" => {
             let data = argument(args, 0)?;
             ctx.check_buffer_exporter(data)?;
-            let bytes = ctx.native_buffer_bytes(data)?;
+            ctx.native_buffer_bytes(data)?;
             let flags = int_option(ctx, args, kwargs, 1, "flags", 0)?;
+            let owner = active_sendfile_owner(ctx, receiver)?;
             if method == "send" {
-                return Ok(ctx.int(native::send(&s, bytes, flags)? as i64));
+                let sent = ctx.with_buffer_export(data, |ctx| {
+                    retry(ctx, &s, |ctx, until| {
+                        let bytes = ctx.native_buffer_bytes(data)?;
+                        Ok(native::with_send_fd(&s, owner.as_ref(), |raw| {
+                            native::send_until(raw, bytes, flags, until)
+                                .map_err(crate::objects::errno_error)
+                        })?)
+                    })
+                })?;
+                return Ok(ctx.int(sent as i64));
             }
-            ctx.with_buffer_export(data, |ctx| send_all_exported(ctx, &s, data, flags))?;
+            ctx.with_buffer_export(data, |ctx| {
+                send_all_exported(ctx, &s, data, flags, owner.as_ref())
+            })?;
         }
         _ => {
             return Err(Error::new(
@@ -1540,10 +2024,85 @@ pub(super) fn send_all_exported(
     socket: &crate::objects::Object,
     data: Id,
     flags: i32,
+    owner: Option<&native::SendfileIdentity>,
 ) -> Result<()> {
     native::SendAll::run(socket, flags, |send| {
-        let done = send.step(ctx.native_buffer_bytes(data)?)?;
+        let bytes = ctx.native_buffer_bytes(data)?;
+        let done = native::with_send_fd(socket, owner, |raw| send.step_on(raw, bytes))?;
         ctx.dispatch_signals()?;
         Ok(done)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prepared_receive_parks_with_its_rooted_frame_operand() {
+        use std::io::Write;
+        use std::os::fd::FromRawFd;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Instant;
+
+        fn require_send(_: &impl Send) {}
+
+        let mut ctx = crate::dynamic::ffi::new_context(serde_json::json!({"paths": []}), ["imre"]);
+        let name = ctx.text("_socket");
+        let module = ctx
+            .import_module_level("_socket", name, None, None, 0)
+            .unwrap();
+        let pair = socketpair(&mut ctx, &[module], &[]).unwrap();
+        let Value::Tuple(ends) = ctx.heap.get(pair) else {
+            unreachable!()
+        };
+        let (reader, writer) = (ends[0], ends[1]);
+        let owners = |ctx: &Context| {
+            crate::ObjectOwner::strong_count(ctx.heap.get(reader).socket_handle().unwrap())
+        };
+        let recv = ctx.lookup_attr(reader, "recv").unwrap();
+        let size = ctx.int(1);
+        let original = owners(&ctx);
+        let fd = native::detach(registered_socket(&ctx, writer))
+            .ok()
+            .expect("detach socketpair peer");
+        // SAFETY: detach transferred sole ownership of this end of the socket pair.
+        let mut writer = unsafe { std::fs::File::from_raw_fd(fd) };
+        let parked = Arc::new(AtomicUsize::new(0));
+        ctx.heap.parked_count_probe = Some(Arc::clone(&parked));
+        let mut depths = Vec::new();
+        // A blocking socket waits inside recv. A socket with a timeout first waits in poll.
+        for timeout in [None, Some(Duration::from_secs(5))] {
+            assert!(native::set_timeout(registered_socket(&ctx, reader), timeout).is_ok());
+            let call = ctx
+                .prepare_call(recv, vec![size].into(), Vec::new())
+                .unwrap();
+            require_send(&call);
+            assert_eq!(owners(&ctx), original);
+            let result = std::thread::scope(|scope| {
+                let peer = scope.spawn(|| {
+                    let deadline = Instant::now() + Duration::from_secs(2);
+                    let depth = loop {
+                        let depth = parked.load(Ordering::Acquire);
+                        if depth != 0 || Instant::now() >= deadline {
+                            break depth;
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    };
+                    writer.write_all(b"x").unwrap();
+                    depth
+                });
+                // SAFETY: the registered caller roots the socket through its native wait.
+                let result = unsafe { call.run(&raw mut ctx) }.unwrap();
+                depths.push(peer.join().unwrap());
+                result
+            });
+            assert_eq!(parked.load(Ordering::Acquire), 0);
+            assert!(
+                matches!(ctx.heap.get(result), Value::Bytes(bytes) if bytes.as_slice() == b"x")
+            );
+        }
+        assert_eq!(depths, [1, 1], "blocking recv and timed poll");
+    }
 }

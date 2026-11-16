@@ -24,7 +24,7 @@ pub(super) enum ParseError {
     Usage(String),
     ContextWarnings(&'static str),
     FatalStartup(&'static str),
-    TraceDepthLimit,
+    FatalCore(&'static str),
 }
 
 impl From<String> for ParseError {
@@ -47,10 +47,15 @@ enum Input {
 
 /// The command or script ends interpreter option parsing; remaining words belong to the program.
 pub(super) fn parse(
-    mut arg: OsString,
+    first: OsString,
     args: &mut impl Iterator<Item = OsString>,
-) -> Result<Invocation, ParseError> {
+) -> Result<(Invocation, Vec<String>), ParseError> {
+    let mut include_modules = Vec::new();
+    let mut args = std::iter::once(first).chain(args);
     let mut isolated = false;
+    let mut safe_path = false;
+    let mut no_site = false;
+    let mut no_user_site = false;
     let mut ignore_environment = false;
     let mut context_option = None;
     let mut warn_default_encoding = false;
@@ -62,6 +67,11 @@ pub(super) fn parse(
     let mut xoptions = Vec::new();
     let mut faulthandler = false;
     let input = 'options: loop {
+        let arg = args.next().ok_or("expected -c and a command string")?;
+        if arg == "--include-module" {
+            include_modules.push(operand("", &mut args, "--include-module")?);
+            continue;
+        }
         if arg == "--" {
             break Input::Script(args.next().ok_or("expected a script after --")?.into());
         }
@@ -80,20 +90,23 @@ pub(super) fn parse(
                     ignore_environment = true;
                 }
                 'E' => ignore_environment = true,
+                'P' => safe_path = true,
+                'S' => no_site = true,
+                's' => no_user_site = true,
                 'O' => optimize = optimize.checked_add(1).ok_or("too many -O options")?,
                 'B' => dont_write_bytecode = true,
                 'u' => unbuffered = true,
-                'c' => break 'options Input::Command(operand(flags.as_str(), args, "-c")?),
-                'm' => break 'options Input::Module(operand(flags.as_str(), args, "-m")?),
+                'c' => break 'options Input::Command(operand(flags.as_str(), &mut args, "-c")?),
+                'm' => break 'options Input::Module(operand(flags.as_str(), &mut args, "-m")?),
                 'W' => {
-                    warnoptions.push(operand(flags.as_str(), args, "-W")?);
+                    warnoptions.push(operand(flags.as_str(), &mut args, "-W")?);
                     break;
                 }
                 'X' => {
-                    let option = operand(flags.as_str(), args, "-X")?;
+                    let option = operand(flags.as_str(), &mut args, "-X")?;
                     match option.split_once('=').unwrap_or((&option, "")) {
                         ("faulthandler", _) => faulthandler = true,
-                        ("tracemalloc", _) => {}
+                        ("tracemalloc" | "frozen_modules", _) => {}
                         ("cpu_count", _) if cfg!(target_os = "linux") => {}
                         ("context_aware_warnings", _) => {
                             context_option.get_or_insert_with(|| option.clone());
@@ -116,7 +129,6 @@ pub(super) fn parse(
                 _ => return Err(format!("unknown interpreter option: -{flag}").into()),
             }
         }
-        arg = args.next().ok_or("expected -c and a command string")?;
     };
     let utf8_mode = match utf8 {
         Some(value) => Some(value),
@@ -220,16 +232,20 @@ pub(super) fn parse(
     }
     let env_present =
         |key| !ignore_environment && env::var_os(key).is_some_and(|value| !value.is_empty());
-    let tracemalloc =
-        u16::try_from(tracemalloc).map_err(|_| startup_error(ParseError::TraceDepthLimit))?;
+    let frozen_modules = frozen_modules(&xoptions, ignore_environment).map_err(startup_error)?;
+    let tracemalloc = u16::try_from(tracemalloc).map_err(|_| startup_error(ParseError::FatalCore(
+        "Fatal Python error: init_interp_main: can't start tracemalloc\nPython runtime state: core initialized\nValueError: the number of frames must be in range [1; 65535]\n",
+    )))?;
     let flags = CommandFlags {
         isolated,
         ignore_environment,
         context_aware_warnings,
+        frozen_modules,
         cpu_count,
         optimize: optimize.max(env_flag("PYTHONOPTIMIZE")),
-        safe_path: isolated || env_present("PYTHONSAFEPATH"),
-        no_user_site: isolated || env_flag("PYTHONNOUSERSITE") != 0,
+        safe_path: safe_path || isolated || env_present("PYTHONSAFEPATH"),
+        no_user_site: no_user_site || isolated || env_flag("PYTHONNOUSERSITE") != 0,
+        no_site,
         dont_write_bytecode: dont_write_bytecode || env_flag("PYTHONDONTWRITEBYTECODE") != 0,
         unbuffered: unbuffered || env_flag("PYTHONUNBUFFERED") != 0,
         utf8_mode,
@@ -240,12 +256,13 @@ pub(super) fn parse(
         faulthandler: faulthandler || env_present("PYTHONFAULTHANDLER"),
         tracemalloc,
     };
-    let executable = env::current_exe()
-        .map_err(|e| e.to_string())?
+    let executable = env::current_exe().map_err(|e| e.to_string())?;
+    let executable = venv_launcher(&executable)
+        .unwrap_or(executable)
         .into_os_string()
         .into_string()
         .map_err(|_| "interpreter path is not UTF-8")?;
-    Ok(match input {
+    let invocation = match input {
         Input::Command(source) => Invocation::Command(PythonCommand {
             source: dedent(source),
             flags,
@@ -261,6 +278,41 @@ pub(super) fn parse(
             flags,
             executable,
         },
+    };
+    Ok((invocation, include_modules))
+}
+
+/// Retain the invocation path when a virtual environment symlinks the public launcher.
+fn venv_launcher(executable: &std::path::Path) -> Option<PathBuf> {
+    let arg = PathBuf::from(env::args_os().next()?);
+    let path = if arg.is_absolute() || arg.components().count() > 1 {
+        std::path::absolute(arg).ok()?
+    } else {
+        env::split_paths(&env::var_os("PATH")?)
+            .map(|dir| dir.join(&arg))
+            .find(|path| executable_file(path))?
+    };
+    let path = std::path::absolute(path).ok()?;
+    if path != executable
+        && imre_ast::layout::InterpreterLayout::venv_config(&path).is_some()
+        && path.canonicalize().ok()?.as_path() == executable
+    {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Match PATH lookup for an executable, including a non-executable earlier namesake.
+fn executable_file(path: &std::path::Path) -> bool {
+    path.metadata().is_ok_and(|metadata| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        metadata.is_file()
     })
 }
 
@@ -319,6 +371,39 @@ fn linux_numeric_option(value: &str, ignore_environment: bool) -> Option<&str> {
     // SAFETY: this call owns the non-null locale, and the trim above has finished using it.
     unsafe { libc::freelocale(locale) };
     (!rest.is_empty()).then_some(rest)
+}
+
+/// CPython reads the first command-line value before initializing the interpreter, then
+/// configures imports again from sys._xoptions, which retains the last value.
+fn frozen_modules(xoptions: &[String], ignore_environment: bool) -> Result<bool, ParseError> {
+    let parse = |s: &str| match s {
+        "on" | "" => Some(true),
+        "off" => Some(false),
+        _ => None,
+    };
+    let mut enabled = true;
+    if !ignore_environment
+        && let Some(value) = env::var_os("PYTHON_FROZEN_MODULES").filter(|s| !s.is_empty())
+    {
+        enabled = value.to_str().and_then(parse).ok_or(ParseError::FatalStartup(
+            "Fatal Python error: bad value for PYTHON_FROZEN_MODULES (expected \"on\" or \"off\")\nPython runtime state: preinitialized\n",
+        ))?;
+    }
+    let mut values = xoptions.iter().filter_map(|option| {
+        let (name, value) = option.split_once('=').unwrap_or((option, ""));
+        (name == "frozen_modules").then_some(value)
+    });
+    if let Some(first) = values.next() {
+        enabled = parse(first).ok_or(ParseError::FatalStartup(
+            "Fatal Python error: bad value for option -X frozen_modules (expected \"on\" or \"off\")\nPython runtime state: preinitialized\n",
+        ))?;
+    }
+    if let Some(last) = values.next_back() {
+        enabled = parse(last).ok_or(ParseError::FatalCore(
+            "Fatal Python error: bad value for option -X frozen_modules (expected \"on\" or \"off\")\nPython runtime state: core initialized\n",
+        ))?;
+    }
+    Ok(enabled)
 }
 
 /// CPython validates the environment first, then uses the first matching -X option.
@@ -380,33 +465,20 @@ fn operand(
 /// Python 3.14 removes a shared literal space/tab prefix before compiling `-c`.
 /// Lines that contain only those characters do not determine the prefix.
 fn dedent(source: String) -> String {
-    let mut margin: Option<&str> = None;
-    for line in source.split('\n') {
-        let body = line.trim_start_matches([' ', '\t']);
-        if body.is_empty() {
-            continue;
-        }
-        let indent = &line[..line.len() - body.len()];
-        let shared = margin.map_or(indent.len(), |previous| {
-            previous
-                .bytes()
-                .zip(indent.bytes())
-                .take_while(|(a, b)| a == b)
-                .count()
-        });
-        if shared == 0 {
-            return source;
-        }
-        margin = Some(&indent[..shared]);
+    let lines = source
+        .split('\n')
+        .filter(|line| !line.trim_start_matches([' ', '\t']).is_empty());
+    let margin = imre_ast::strings::common_indent(lines);
+    if margin == 0 {
+        return source;
     }
-    let Some(margin) = margin else { return source };
     let mut result = String::new();
     for (i, line) in source.split('\n').enumerate() {
         if i != 0 {
             result.push('\n');
         }
         if !line.trim_start_matches([' ', '\t']).is_empty() {
-            result.push_str(&line[margin.len()..]);
+            result.push_str(&line[margin..]);
         }
     }
     result

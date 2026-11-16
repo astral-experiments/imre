@@ -55,11 +55,28 @@ fn extensions_error<T>(kind: Kind, message: impl Into<crate::Str>, sentinel: T) 
     Error::new(kind, message).returning(sentinel)
 }
 
+#[derive(Default)]
+struct Registry {
+    // None marks an initializer on the stack. No borrow may cross a C call.
+    modules: RefCell<HashMap<usize, Option<Owned>>>,
+    finalizing: Cell<bool>,
+}
+
 thread_local! {
-    // None marks a module whose initializer is running. Never hold a RefCell
-    // borrow while C, a callable, or a module deallocator can run.
-    static MODULES: RefCell<HashMap<usize, Option<Owned>>> = RefCell::default();
-    static FINALIZING: Cell<bool> = const { Cell::new(false) };
+    static CURRENT: RefCell<Option<Rc<Registry>>> = const { RefCell::new(None) };
+}
+
+/// A checked entry borrows the enclosing interpreter when called reentrantly.
+/// Only the entry that installed a registry may clear it at shutdown.
+#[unsafe(no_mangle)]
+extern "C" fn imre_extension_enter() -> bool {
+    CURRENT.with_borrow_mut(|slot| {
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(Rc::default());
+        true
+    })
 }
 
 /// Pairs a transferred C result with the existing Imre exception channel.
@@ -90,7 +107,9 @@ unsafe fn checked_result(value: Py) -> Option<Owned> {
 }
 
 unsafe fn module(init: Init) -> Option<Owned> {
-    if FINALIZING.get() {
+    // Direct users of the checked ABI own their registry until explicit clear.
+    let registry = CURRENT.with_borrow_mut(|slot| slot.get_or_insert_with(Rc::default).clone());
+    if registry.finalizing.get() {
         return extensions_error(
             Kind::RuntimeError,
             "extension modules are shutting down",
@@ -98,14 +117,16 @@ unsafe fn module(init: Init) -> Option<Owned> {
         );
     }
     let key = init as usize;
-    if let Some(cached) = MODULES.with_borrow_mut(|modules| {
+    let cached = {
+        let mut modules = registry.modules.borrow_mut();
         if let Some(state) = modules.get(&key) {
             Some(state.clone())
         } else {
             modules.insert(key, None);
             None
         }
-    }) {
+    };
+    if let Some(cached) = cached {
         return cached.or_else(|| {
             extensions_error(
                 Kind::RuntimeError,
@@ -128,13 +149,14 @@ unsafe fn module(init: Init) -> Option<Owned> {
             )
         }
     });
-    MODULES.with_borrow_mut(|modules| {
+    {
+        let mut modules = registry.modules.borrow_mut();
         if let Some(module) = &loaded {
             modules.insert(key, Some(module.clone()));
         } else {
             modules.remove(&key);
         }
-    });
+    }
     loaded
 }
 
@@ -148,11 +170,14 @@ unsafe extern "C" fn imre_extension_import(init: Init) {
 /// release module state before the compiler tears down globals and literals.
 #[unsafe(no_mangle)]
 extern "C" fn imre_extension_clear() {
-    if FINALIZING.replace(true) {
+    let Some(registry) = CURRENT.with_borrow(Clone::clone) else {
+        return;
+    };
+    if registry.finalizing.replace(true) {
         return;
     }
     let pending = imre_error_take();
-    let modules = MODULES.with_borrow_mut(std::mem::take);
+    let modules = registry.modules.take();
     drop(modules);
     clear_tuple_cache();
     // SAFETY: take transfers one reference or null. Set acquires, and release
@@ -161,7 +186,7 @@ extern "C" fn imre_extension_clear() {
         imre_error_set(pending);
         imre_exception_release(pending);
     }
-    FINALIZING.set(false);
+    CURRENT.with_borrow_mut(Option::take);
 }
 
 #[unsafe(no_mangle)]

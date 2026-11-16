@@ -1,0 +1,654 @@
+{
+  "commit": "a97be428e771fb0dff75ae8104e3ad39e9c990e2",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_file_sha256": "648d04ce9fc9dd72d33bbffd0dd66bdd7d3e2c40aa8fee1aff3e35a6bbf39386",
+  "compiler_sha256": "42eb4263311cb2e0de02a6fc51f8b6b9d14ff16836d622fd896559f38f7e92c2",
+  "runtime_sha256": "0185bcebfe0d54ef76428e7688ef1ff7011baff2e93268e3d898e4a3bae47f97",
+  "stdlib_sha256": "8b26d7ab3be29c1d577f411324d84aa3552a6a340a73cd0235ffc0d84d0bc74d",
+  "raw_archive_sha256": "239224b5a2d328eb6616ffcc5b63827696ddaf20d2bdcb04360055933580ffae",
+  "routes": {
+    "8074-shipping-file-O0": {
+      "pid": 1265165,
+      "exit": 1,
+      "executable": {
+        "sha256": "42eb4263311cb2e0de02a6fc51f8b6b9d14ff16836d622fd896559f38f7e92c2",
+        "bytes": 240586312
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 170,
+        "sha256": "92218b6c4381bb48078ddc77840e384060660756e9f827bdb14e2dba14b264bf"
+      },
+      "rows": {},
+      "collectionRefusal": "/tmp/binascii8074/runs/public/file-O0/scratch/selected-source/test/test_binascii.py:8:1: Imre: module \"test.support.hypothesis_helper\" has no static binding \"hypothesis\""
+    },
+    "8074-shipping-file-O3": {
+      "pid": 1265166,
+      "exit": 1,
+      "executable": {
+        "sha256": "42eb4263311cb2e0de02a6fc51f8b6b9d14ff16836d622fd896559f38f7e92c2",
+        "bytes": 240586312
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 170,
+        "sha256": "92c19cbb7f620c934ad301d533f0fbdf49ffc82e0b5a354bc2fa539b1e219917"
+      },
+      "rows": {},
+      "collectionRefusal": "/tmp/binascii8074/runs/public/file-O3/scratch/selected-source/test/test_binascii.py:8:1: Imre: module \"test.support.hypothesis_helper\" has no static binding \"hypothesis\""
+    },
+    "8074-shipping-named-O0": {
+      "pid": 1265163,
+      "exit": 1,
+      "executable": {
+        "sha256": "fa48451ab72ac7354089dc87c90255ef889e6d77c444ddccf1a55300137bb63d",
+        "bytes": 175674896
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 22097,
+        "sha256": "825a3d7357018561f41087e5d22d989dfe4a0fb630533a5e1d97da1e3906ef98"
+      },
+      "rows": {
+        "pass": 52,
+        "skip": 17,
+        "error": 16,
+        "failure": 8
+      },
+      "collectionRefusal": null
+    },
+    "8074-shipping-named-O0-saved": {
+      "pid": 1265804,
+      "exit": 1,
+      "executable": {
+        "sha256": "fa48451ab72ac7354089dc87c90255ef889e6d77c444ddccf1a55300137bb63d",
+        "bytes": 175674896
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 20093,
+        "sha256": "78091937822ff7c4bfffa7876dc9fb885a9e5ad2be3c264d1f95927b316194b4"
+      },
+      "rows": {
+        "pass": 52,
+        "skip": 17,
+        "error": 16,
+        "failure": 8
+      },
+      "collectionRefusal": null
+    },
+    "8074-shipping-named-O3": {
+      "pid": 1265164,
+      "exit": 1,
+      "executable": {
+        "sha256": "20a4441654c9e3e083d937cda267835ee7a8a4ef247de0d2df14dca375a00b97",
+        "bytes": 153896440
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 22097,
+        "sha256": "0d051b93f5d608dbabc2f3ac075a9130c68b658bd3fcb24f620a22b4bb7e2195"
+      },
+      "rows": {
+        "pass": 52,
+        "skip": 17,
+        "error": 16,
+        "failure": 8
+      },
+      "collectionRefusal": null
+    },
+    "8074-shipping-named-O3-saved": {
+      "pid": 1268682,
+      "exit": 1,
+      "executable": {
+        "sha256": "20a4441654c9e3e083d937cda267835ee7a8a4ef247de0d2df14dca375a00b97",
+        "bytes": 153896440
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 20093,
+        "sha256": "ad9a30a923bd8488e64782c998e92cb0df16d3bb725ee60492eb724ce8956781"
+      },
+      "rows": {
+        "pass": 52,
+        "skip": 17,
+        "error": 16,
+        "failure": 8
+      },
+      "collectionRefusal": null
+    },
+    "8074-stock-file": {
+      "pid": 1265128,
+      "exit": 0,
+      "executable": {
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "bytes": null
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 8286,
+        "sha256": "57eb6366f76212102597c2e87ccdad8a89b4b30e3e4bc610139da7627f61708c"
+      },
+      "rows": {
+        "pass": 76,
+        "skip": 17
+      },
+      "collectionRefusal": null
+    },
+    "8074-stock-named": {
+      "pid": 1265129,
+      "exit": 0,
+      "executable": {
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+        "bytes": null
+      },
+      "stdout": {
+        "bytes": 0,
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "stderr": {
+        "bytes": 8286,
+        "sha256": "57eb6366f76212102597c2e87ccdad8a89b4b30e3e4bc610139da7627f61708c"
+      },
+      "rows": {
+        "pass": 76,
+        "skip": 17
+      },
+      "collectionRefusal": null
+    }
+  },
+  "changed_from_8050": [
+    "test.test_binascii.ArrayBinASCIITest.test_crc_hqx",
+    "test.test_binascii.BinASCIITest.test_crc_hqx",
+    "test.test_binascii.BytearrayBinASCIITest.test_crc_hqx",
+    "test.test_binascii.MemoryviewBinASCIITest.test_crc_hqx"
+  ],
+  "methods": [
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_base64_newline",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_b2a_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_excess_data",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64_strict_mode",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64errors",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64invalid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_base64valid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_c_contiguity",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_crc32",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_crc_hqx",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_empty_string",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_exceptions",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_functions",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_hex_separator",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_qp",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_returned_value",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_unicode_a2b",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_unicode_b2a",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.ArrayBinASCIITest.test_uu",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_base64_newline",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_b2a_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_excess_data",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64_strict_mode",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64errors",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64invalid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_base64valid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_c_contiguity",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_crc32",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_crc_hqx",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_empty_string",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_exceptions",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_functions",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_hex_separator",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_qp",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_returned_value",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_unicode_a2b",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_unicode_b2a",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.BinASCIITest.test_uu",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_base64_newline",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_b2a_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_excess_data",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64_strict_mode",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64errors",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64invalid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_base64valid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_c_contiguity",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_crc32",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_crc_hqx",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_empty_string",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_exceptions",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_functions",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_hex_separator",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_qp",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_returned_value",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_unicode_a2b",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_unicode_b2a",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.BytearrayBinASCIITest.test_uu",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.ChecksumBigBufferTestCase.test_big_buffer",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_base64_newline",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_qp_a2b_qp_round_trip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_b2a_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_excess_data",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64_strict_mode",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64errors",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64invalid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_base64valid",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_c_contiguity",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_crc32",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_crc_hqx",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_empty_string",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_exceptions",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_functions",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex_roundtrip",
+      "stock": "skip",
+      "native": "skip"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_hex_separator",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_qp",
+      "stock": "pass",
+      "native": "pass"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_returned_value",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_unicode_a2b",
+      "stock": "pass",
+      "native": "error"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_unicode_b2a",
+      "stock": "pass",
+      "native": "failure"
+    },
+    {
+      "id": "test.test_binascii.MemoryviewBinASCIITest.test_uu",
+      "stock": "pass",
+      "native": "error"
+    }
+  ]
+}

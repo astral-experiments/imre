@@ -451,15 +451,10 @@ impl Checker<'_> {
             .as_attribute_expr()
             .and_then(|a| a.value.as_name_expr())
             .map(|n| (n.id.as_str(), class));
-        let source = self
+        let def = self
             .graph
-            .modules
-            .iter()
-            .find(|m| m.bundled && m.name == "unittest")
+            .bundled_definition("unittest", "_AssertRaisesContext")
             .unwrap();
-        let Binding::Definition(def) = source.bindings["_AssertRaisesContext"] else {
-            unreachable!()
-        };
         let context = self.classes.declarations.ids[&def];
         let init = &self.classes.methods[context]["__init__"];
         let (initializer, case_type) = (init.id, init.params[1].ty);
@@ -636,7 +631,7 @@ impl Checker<'_> {
         clear: &mut Vec<usize>,
     ) -> Result<(Option<usize>, Option<&'static str>), String> {
         let value = if matches!(arg, ast::Expr::StringLiteral(_)) {
-            self.fixed_regex(arg, false)?
+            self.fixed_regex(arg, 0)?
         } else {
             self.expr(arg)?
         };
@@ -703,15 +698,10 @@ impl Checker<'_> {
     /// Raise at the Python binding or invocation boundary, after its inputs have
     /// run. A regular call also gives expression scopes a normal cleanup edge.
     fn unittest_call_type_error(&mut self, message: String) -> Statement {
-        let module = self
+        let def = self
             .graph
-            .modules
-            .iter()
-            .find(|m| m.bundled && m.name == "unittest")
+            .bundled_definition("unittest", "_raise_call_type_error")
             .unwrap();
-        let Binding::Definition(def) = module.bindings["_raise_call_type_error"] else {
-            unreachable!()
-        };
         let id = self.functions[&def].id;
         self.calls.insert(id);
         Statement::Expr(Expr {
@@ -748,6 +738,18 @@ impl Checker<'_> {
         let mut body = vec![Statement::Assign(case, receiver.clone())];
         let expected = self.unittest_expected(&args[0], &mut body, this)?;
         let mut locals = Vec::new();
+        let live_callback = |checker: &mut Self, ty| -> Result<Option<Expr>, String> {
+            if ty != Type::PythonObject {
+                return Ok(None);
+            }
+            checker.require_registered_operation(&args[1])?;
+            if let Some(result) = checker.discarded_call(Type::None) {
+                // The registered body binds the original assertion and invokes its captured callback.
+                checker.check_discarded_arguments(call, 2)?;
+                return Ok(Some(result));
+            }
+            Ok(None)
+        };
         let checked = (|| {
             let target = &args[1];
             let mut callee = target.clone();
@@ -827,6 +829,9 @@ impl Checker<'_> {
                             let root =
                                 self.unittest_argument(&attr.value, &mut body, &mut locals, false)?;
                             let slot = locals.last().unwrap().1;
+                            if let Some(result) = live_callback(self, self.locals[slot])? {
+                                return Ok(Some(result));
+                            }
                             // Sealed native methods have no property lookup or user callback.
                             if matches!(
                                 (self.locals[slot], attr.attr.as_str()),
@@ -854,7 +859,7 @@ impl Checker<'_> {
                             .get(attr.attr.as_str())
                             .is_some_and(|s| {
                                 s.method.is_some_and(|m| {
-                                    m.kind(&self.classes.declarations)
+                                    m.kind(self.classes.declarations)
                                         == crate::classes::MethodKind::Property
                                 })
                             })
@@ -889,6 +894,9 @@ impl Checker<'_> {
                     _ => {
                         callee = self.unittest_argument(target, &mut body, &mut locals, false)?;
                         let ty = self.locals[locals.last().unwrap().1];
+                        if let Some(result) = live_callback(self, ty)? {
+                            return Ok(Some(result));
+                        }
                         if let Some(name) = self.stored_assertion_name(ty) {
                             name.to_owned()
                         } else {
@@ -927,7 +935,7 @@ impl Checker<'_> {
             forwarded.args = args[2..]
                 .iter()
                 .map(|arg| self.unittest_argument(arg, &mut body, &mut locals, discarded))
-                .collect::<Result<_, _>>()?;
+                .collect::<std::result::Result<_, _>>()?;
             let mut duplicate = false;
             for kw in &mut forwarded.keywords {
                 if kw.arg.as_deref() == Some("expected_exception") {
@@ -945,7 +953,7 @@ impl Checker<'_> {
                     "assertRaises() arg 1 must be an exception type or tuple of exception types"
                 };
                 body.push(self.unittest_call_type_error(message.into()));
-                return Ok(());
+                return Ok(None);
             }
             let expected = expected.unwrap();
             let action = if let Some(message) = noncallable.or(binding_error) {
@@ -973,22 +981,17 @@ impl Checker<'_> {
                     ]),
                 ),
             });
-            if expected.kinds.is_empty() {
-                // An empty tuple never catches, unlike a bare except clause.
-                body.extend([action, failure]);
-            } else {
-                body.push(Statement::Try {
-                    body: vec![action],
-                    handlers: vec![ir::ExceptHandler {
-                        kinds: expected.kinds,
-                        name: None,
-                        body: vec![],
-                    }],
-                    orelse: vec![failure],
-                    finalbody: vec![],
-                });
-            }
-            Ok(())
+            body.push(Statement::Try {
+                body: vec![action],
+                handlers: vec![ir::ExceptHandler {
+                    matcher: crate::ir::ExceptionMatcher::Categories(expected.kinds),
+                    name: None,
+                    body: vec![],
+                }],
+                orelse: vec![failure],
+                finalbody: vec![],
+            });
+            Ok(None)
         })();
         let mut clear = vec![case];
         for (name, slot) in locals {
@@ -996,7 +999,9 @@ impl Checker<'_> {
             self.assigned.remove(&slot);
             clear.push(slot);
         }
-        checked?;
+        if let Some(result) = checked? {
+            return Ok(result);
+        }
         Ok(Expr {
             ty: Type::None,
             kind: ExprKind::Scope {
@@ -1007,40 +1012,14 @@ impl Checker<'_> {
         })
     }
 
-    /// A runner may suppress a subtest exception, so execution after the with
-    /// cannot depend on assignments made by the rest of the protected suite.
-    pub(super) fn subtest_scope(
+    /// A suppressing manager can resume after any throwing point in the protected suite.
+    fn suppressed_with_body(
         &mut self,
-        item: &ast::WithItem,
         remaining: &[ast::WithItem],
         suite: &[ast::Stmt],
-        class: usize,
-        manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
-        let saved = self.hidden(manager.ty);
-        let exc = self.hidden(Type::Exception);
-        let methods = &self.classes.methods[class];
-        let enter = methods["__enter__"].id;
-        let leave = methods["_leave"].id;
-        let handle = methods["_handle"].id;
-        self.calls.extend([enter, leave, handle]);
-        let call = |id, ty, args| Expr {
-            ty,
-            kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
-        };
-        let mut protected = Vec::new();
-        if let Some(target) = &item.optional_vars {
-            protected.push(self.assign(
-                target,
-                Expr {
-                    ty: Type::None,
-                    kind: ExprKind::None,
-                },
-            )?);
-        }
+    ) -> Result<Vec<Statement>, String> {
         let incoming = self.local_state();
-        let (nested, _) = self.with_items(remaining, suite)?;
-        protected.extend(nested);
+        let (protected, _) = self.with_items(remaining, suite, true)?;
         self.restore_state(incoming);
         if !remaining.is_empty() {
             self.narrowed = assignments::Narrowed::new();
@@ -1055,47 +1034,71 @@ impl Checker<'_> {
                 self.assigned.remove(slot);
             }
         }
+        Ok(protected)
+    }
+
+    pub(super) fn subtest_scope(
+        &mut self,
+        out: &mut Vec<Statement>,
+        item: &ast::WithItem,
+        remaining: &[ast::WithItem],
+        suite: &[ast::Stmt],
+        class: usize,
+        manager: Expr,
+    ) -> Result<(), String> {
+        let saved = self.hidden(manager.ty);
+        let exc = self.hidden(Type::Exception);
+        let methods = &self.classes.methods[class];
+        let enter = methods["__enter__"].id;
+        let leave = methods["_leave"].id;
+        let handle = methods["_handle"].id;
+        self.calls.extend([enter, leave, handle]);
+        let call = |id, ty, args| Expr {
+            ty,
+            kind: ExprKind::Call(id, ir::CallArgs::positional(args)),
+        };
+        let mut protected = Vec::new();
+        if let Some(target) = &item.optional_vars {
+            self.assign(
+                target,
+                Expr {
+                    ty: Type::None,
+                    kind: ExprKind::None,
+                },
+                Some(&mut protected),
+            )?;
+        }
+        protected.extend(self.suppressed_with_body(remaining, suite)?);
         let handled = call(handle, Type::Bool, vec![self.local(saved), self.local(exc)]);
-        Ok((
-            vec![Statement::Scope {
-                body: vec![
-                    Statement::Assign(saved, manager),
-                    Statement::Expr(call(enter, Type::None, vec![self.local(saved)])),
-                    Statement::Try {
-                        body: protected,
-                        handlers: vec![ir::ExceptHandler {
-                            kinds: vec![],
-                            name: Some(exc),
-                            body: vec![Statement::If(
-                                handled,
-                                vec![],
-                                vec![Statement::Raise(None)],
-                            )],
-                        }],
-                        orelse: vec![],
-                        finalbody: vec![Statement::Expr(call(
-                            leave,
-                            Type::None,
-                            vec![self.local(saved)],
-                        ))],
-                    },
-                ],
-                clear: vec![saved],
+        contexts::enter_native(
+            out,
+            vec![
+                Statement::Assign(saved, manager),
+                Statement::Expr(call(enter, Type::None, vec![self.local(saved)])),
+            ],
+            protected,
+            vec![ir::ExceptHandler {
+                matcher: crate::ir::ExceptionMatcher::Any,
+                name: Some(exc),
+                body: vec![Statement::If(handled, vec![], vec![Statement::Raise(None)])],
             }],
-            true,
-        ))
+            Statement::Expr(call(leave, Type::None, vec![self.local(saved)])),
+            vec![saved],
+        );
+        Ok(())
     }
 
     /// A normal exit (including return, break and continue) must raise an
     /// assertion failure. A thrown exception is suppressed only if it matches.
     pub(super) fn assert_raises_scope(
         &mut self,
+        out: &mut Vec<Statement>,
         item: &ast::WithItem,
         remaining: &[ast::WithItem],
         suite: &[ast::Stmt],
         class: usize,
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<(), String> {
         let root = self.hidden(manager.ty);
         let exceptional = self.hidden(Type::Bool);
         let mut enter = vec![
@@ -1110,27 +1113,12 @@ impl Checker<'_> {
                     "assertRaises targets must be local names",
                 ));
             }
-            enter.push(self.assign(target, self.local(root))?);
+            self.assign(target, self.local(root), Some(&mut enter))?;
         }
-        let incoming = self.local_state();
         let earlier_breaks = self.take_breaks();
-        let (protected, _) = self.with_items(remaining, suite)?;
+        let protected = self.suppressed_with_body(remaining, suite)?;
         self.take_breaks();
         self.include_breaks(earlier_breaks);
-        self.restore_state(incoming);
-        if !remaining.is_empty() {
-            self.narrowed = assignments::Narrowed::new();
-        }
-        for name in narrowing::assigned_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.narrowed.remove_mut(slot);
-            }
-        }
-        for name in narrowing::deleted_names(suite) {
-            if let Some(slot) = self.names.get(&name) {
-                self.assigned.remove(slot);
-            }
-        }
         let fields = &self.classes.declarations.definitions[class].fields;
         let index = |name| fields.iter().position(|f| f.name == name).unwrap();
         let expected = Expr {
@@ -1146,7 +1134,7 @@ impl Checker<'_> {
                 vec![self.local(exc), expected],
             ),
         };
-        let store = Statement::SetField(
+        let store = Statement::set_field(
             self.local(root),
             caught,
             self.coerce(self.local(exc), self.classes.fields[class][caught], item)?,
@@ -1166,25 +1154,21 @@ impl Checker<'_> {
             ty: Type::None,
             kind: ExprKind::Call(missing, ir::CallArgs::positional(vec![self.local(root)])),
         });
-        enter.push(Statement::Try {
-            body: protected,
-            handlers: vec![ir::ExceptHandler {
-                kinds: vec![],
+        contexts::enter_native(
+            out,
+            enter,
+            protected,
+            vec![ir::ExceptHandler {
+                matcher: crate::ir::ExceptionMatcher::Any,
                 name: Some(exc),
                 body: vec![
                     Statement::Assign(exceptional, Expr::boolean(true)),
                     Statement::If(matches, vec![store, search], vec![Statement::Raise(None)]),
                 ],
             }],
-            orelse: vec![],
-            finalbody: vec![Statement::If(self.local(exceptional), vec![], vec![fail])],
-        });
-        Ok((
-            vec![Statement::Scope {
-                body: enter,
-                clear: vec![root, exceptional],
-            }],
-            true,
-        ))
+            Statement::If(self.local(exceptional), vec![], vec![fail]),
+            vec![root, exceptional],
+        );
+        Ok(())
     }
 }

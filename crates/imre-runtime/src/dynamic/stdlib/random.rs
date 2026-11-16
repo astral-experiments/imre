@@ -112,19 +112,6 @@ pub(super) fn randint(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     Ok(ctx.alloc(Value::Int(Int::new(draw))))
 }
 
-pub(super) fn randbytes(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let [_, length] =
-        super::required_arguments("Random.randbytes", ["self", "n"], bound(args), kwargs)?;
-    // Random.randbytes calls getrandbits(n * 8) before to_bytes indexes n.
-    let eight = ctx.int(8);
-    let count = ctx.binary("*", length, eight)?;
-    let count = ctx.index_integer(count)?;
-    let draw = objects::random_bits(&count)?;
-    let draw = ctx.alloc(Value::Int(Int::new(draw)));
-    let little = ctx.text("little");
-    builtins::call(ctx, "int.to_bytes", &[draw, length, little], &[])
-}
-
 /// Select the original element through Python's length and subscription protocols.
 pub(super) fn choice(
     ctx: &mut Context,
@@ -183,7 +170,7 @@ fn cumulative_weights(ctx: &mut Context, weights: Id) -> Result<Id> {
 
 /// Run the integer-weights diagnostic with the original iteration exception active.
 fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
-    let original = ctx.raised_instance(error.clone());
+    let original = ctx.raised_instance(error);
     let previous = ctx.heap.replace_active(original);
     ctx.heap.keep(previous);
     let diagnostic = (|| -> Result<Error> {
@@ -192,8 +179,10 @@ fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
             // isinstance also recognizes an unrelated object's reported __class__.
             match ctx.lookup_attr(weights, "__class__") {
                 Ok(class) if ctx.direct_subclass(class, int) => {}
-                Ok(_) => return Ok(error),
-                Err(missing) if ctx.is_attribute_error(&missing) => return Ok(error),
+                Ok(_) => return Ok(ctx.error_from_instance(original)),
+                Err(missing) if ctx.is_attribute_error(&missing) => {
+                    return Ok(ctx.error_from_instance(original));
+                }
                 Err(failure) => return Err(failure),
             }
         }
@@ -208,39 +197,9 @@ fn weights_type_error(ctx: &mut Context, weights: Id, error: Error) -> Error {
     })();
     ctx.heap.replace_active(previous);
     diagnostic.unwrap_or_else(|mut failure| {
-        failure.context = original;
+        failure.owner_mut(&mut ctx.heap).context = original;
         failure
     })
-}
-
-/// Bisect on the original sequence, excluding its last boundary as in Random.choices.
-fn weighted_index(ctx: &mut Context, cumulative: Id, needle: Id, mut hi: i64) -> Result<i64> {
-    if let Some(kind @ ("dict" | "collections.defaultdict" | "mappingproxy")) =
-        ctx.builtin_type_name(cumulative)
-    {
-        // _bisect reads the sequence item slot, which exact native mappings do not supply.
-        return Err(Error::new("TypeError", format!("{kind} is not a sequence")));
-    }
-    if hi == -1 {
-        let length = builtins::call(ctx, "len", &[cumulative], &[])?;
-        hi = ctx.as_integer(length)?;
-    }
-    let mut lo = 0;
-    let mark = ctx.heap.temporary_mark();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        let key = ctx.int(mid);
-        let weight = ctx.get_item(cumulative, key)?;
-        ctx.heap.keep(weight);
-        let less = ctx.binary("<", needle, weight)?;
-        if ctx.truth(less)? {
-            hi = mid;
-        } else {
-            lo = mid + 1;
-        }
-        ctx.heap.release_temporaries_since(mark);
-    }
-    Ok(lo)
 }
 
 pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
@@ -252,7 +211,40 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
         bound(args),
         kwargs,
     )?;
-    let population = population.unwrap();
+    select_choices(ctx, None, population.unwrap(), weights, cumulative, k)
+}
+
+pub(super) fn instance_choices(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<Id> {
+    let [random, population, weights, cumulative, k] = super::required_arguments(
+        "random._choices",
+        ["random", "population", "weights", "cum_weights", "k"],
+        args,
+        kwargs,
+    )?;
+    select_choices(
+        ctx,
+        Some(random),
+        population,
+        Some(weights),
+        Some(cumulative),
+        Some(k),
+    )
+}
+
+/// The module draws directly from its existing shared stream. A Python method captures
+/// the instance's random callable before evaluating the population and weights.
+fn select_choices(
+    ctx: &mut Context,
+    random: Option<Id>,
+    population: Id,
+    weights: Option<Id>,
+    cumulative: Option<Id>,
+    k: Option<Id>,
+) -> Result<Id> {
     let length = builtins::call(ctx, "len", &[population], &[])?;
     let n = ctx.as_integer(length)?;
     let preparation = ctx.heap.temporary_mark();
@@ -318,21 +310,57 @@ pub(super) fn choices(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -
     let k = ctx.index_integer(k)?;
     let mut repeat = objects::Repeat::new(NONE, Some(&k))?;
     let result = ctx.alloc(Value::List(Vec::new()));
+    enum Draw {
+        Unit(f64),
+        Object(Id),
+    }
+    let bound_stream = random.and_then(|callable| instance::bound_stream(ctx, callable));
+    let scale = match (weighted, random) {
+        (Some((_, total)), _) => total,
+        (None, Some(_)) => ctx.alloc(Value::Float(n as f64)),
+        (None, None) => NONE,
+    };
+    let float_scale = match ctx.heap.get(scale) {
+        Value::Float(total) => Some(*total),
+        _ => None,
+    };
     let mark = ctx.heap.temporary_mark();
     let mut limit = ctx.heap.streaming_collection_limit();
     while repeat.next().is_some() {
-        let draw = objects::imre_random_float();
-        let index = if let Some((cumulative, total)) = weighted {
-            let draw = ctx.alloc(Value::Float(draw));
-            let needle = ctx.binary("*", draw, total)?;
-            ctx.heap.keep(needle);
-            let index = weighted_index(ctx, cumulative, needle, n - 1)?;
-            ctx.heap.release_temporaries_since(mark);
-            index
-        } else {
-            (draw * n as f64).floor() as i64
+        let draw = match (random, bound_stream) {
+            (None, _) => Draw::Unit(objects::imre_random_float()),
+            (_, Some((owner, receiver))) => {
+                ctx.check_heap_method_receiver(owner, "random", receiver)?;
+                Draw::Unit(instance::draw(ctx, receiver))
+            }
+            (Some(callable), None) => Draw::Object(ctx.call(callable, Vec::new(), Vec::new())?),
         };
-        let index = ctx.int(index);
+        let index = match (draw, weighted) {
+            (Draw::Unit(value), None) => ctx.int((value * n as f64).floor() as i64),
+            (draw, _) => {
+                let needle = match (draw, float_scale) {
+                    (Draw::Unit(value), Some(total)) => ctx.alloc(Value::Float(value * total)),
+                    (draw, _) => {
+                        let operand = match draw {
+                            Draw::Unit(value) => ctx.alloc(Value::Float(value)),
+                            Draw::Object(operand) => operand,
+                        };
+                        let product = ctx.binary("*", operand, scale)?;
+                        ctx.heap.keep_call_result(mark, product);
+                        product
+                    }
+                };
+                if let Some((cumulative, _)) = weighted {
+                    let index = super::bisect::right(ctx, cumulative, needle, n - 1)?;
+                    ctx.heap.release_temporaries_since(mark);
+                    ctx.int(index)
+                } else {
+                    let index = super::math::call(ctx, "floor", &[needle], &[])?;
+                    ctx.heap.keep_call_result(mark, index);
+                    index
+                }
+            }
+        };
         let item = ctx.get_item(population, index)?;
         append(ctx, result, item)?;
         ctx.heap.release_temporaries_since(mark);

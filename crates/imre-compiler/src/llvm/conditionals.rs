@@ -1,6 +1,8 @@
 //! Branchless absolute values for pure integer conditional-negation idioms.
 
-use crate::ir::{Compare, Expr, ExprKind, Type};
+use crate::ir::{Expr, ExprKind, Type};
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 /// Recognizes `-x if x < 0 else x` and equivalent zero comparisons. All reads
 /// must name the same exact integer local, so evaluation cannot call user code,
@@ -17,8 +19,8 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         (ExprKind::Local(slot), _) if left.ty == Type::Int && zero(right) => (
             *slot,
             match operation {
-                Compare::Less | Compare::LessEqual => true,
-                Compare::Greater | Compare::GreaterEqual => false,
+                CmpOp::Lt | CmpOp::LtE => true,
+                CmpOp::Gt | CmpOp::GtE => false,
                 _ => return None,
             },
             left,
@@ -26,8 +28,8 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         (_, ExprKind::Local(slot)) if right.ty == Type::Int && zero(left) => (
             *slot,
             match operation {
-                Compare::Greater | Compare::GreaterEqual => true,
-                Compare::Less | Compare::LessEqual => false,
+                CmpOp::Gt | CmpOp::GtE => true,
+                CmpOp::Lt | CmpOp::LtE => false,
                 _ => return None,
             },
             right,
@@ -35,7 +37,7 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
         _ => return None,
     };
     let (negated, unchanged) = if negative { (yes, no) } else { (no, yes) };
-    let ExprKind::Negate(value) = &negated.kind else {
+    let ExprKind::Unary(UnaryOp::USub, value) = &negated.kind else {
         return None;
     };
     let same = |value: &Expr| {
@@ -47,7 +49,7 @@ pub(super) fn absolute_operand<'a>(test: &'a Expr, yes: &Expr, no: &Expr) -> Opt
 }
 
 /// Returns an owned absolute value. Negating the minimum tagged-small integer
-/// promotes through the ordinary arithmetic helper; positive heap integers
+/// promotes through runtime subtraction. Positive heap integers
 /// retain their existing owner. The common path uses a select without a sign
 /// branch. For odd small words, checked `2 - value` overflows only at the minimum
 /// representation; all other positive and negative inputs share its exact result.
@@ -76,11 +78,11 @@ slow:
 
 define internal i64 @int_abs_slow(i64 %value) cold noinline {
 entry:
-  %order = call i32 @compare_int(i64 %value, i64 1)
+  %order = call i32 @imre_int_compare(i64 %value, i64 1)
   %below = icmp slt i32 %order, 0
   br i1 %below, label %negate, label %retain
 negate:
-  %positive = call i64 @int_sub(i64 1, i64 %value)
+  %positive = call i64 @imre_int_binary(i64 1, i64 %value, i32 1)
   ret i64 %positive
 retain:
   call void @retain_int_nonzero(i64 %value)
@@ -91,6 +93,17 @@ retain:
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn integer_abs_builtin_emits_its_slow_path() {
+        let output = compile(
+            "def magnitude(value: int) -> int:\n    return abs(value)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert!(output.contains("define internal i64 @int_abs("));
+        assert!(!output.contains("define internal i64 @int_sub("));
+    }
 
     #[test]
     fn checked_absolute_value_guards_heap_words_before_testing_overflow() {
@@ -115,7 +128,7 @@ mod tests {
         assert!(helper[checked..selected].contains("br i1 %overflow, label %slow, label %select"));
         assert!(helper[selected..].contains("select i1 %negative, i64 %negated, i64 %value"));
         assert!(helper.contains("call i64 @int_abs_slow(i64 %value)"));
-        assert!(!helper.contains("call i32 @compare_int("));
+        assert!(!helper.contains("call i32 @imre_int_compare("));
         let slow = output
             .split_once("define internal i64 @int_abs_slow(i64 %value) cold noinline {")
             .unwrap()
@@ -123,7 +136,8 @@ mod tests {
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(slow.contains("call i64 @int_sub(i64 1, i64 %value)"));
+        assert!(slow.contains("call i32 @imre_int_compare(i64 %value, i64 1)"));
+        assert!(slow.contains("call i64 @imre_int_binary(i64 1, i64 %value, i32 1)"));
         assert!(slow.contains("call void @retain_int_nonzero(i64 %value)"));
     }
 

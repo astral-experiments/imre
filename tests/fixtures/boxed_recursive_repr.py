@@ -60,6 +60,29 @@ def current():
     assert repr(plain) == f"<Renamed object at {id(plain):#x}>"
     assert repr(Plain) == "<class 'Renamed'>"
 
+    class Recursive:
+        pass
+
+    Recursive.__repr__ = Recursive.__str__
+    obj = Recursive()
+    for convert in (str, repr):
+        try:
+            convert(obj)
+        except RecursionError:
+            pass
+        else:
+            raise AssertionError("recursive repr slot returned")
+
+    Recursive.__repr__ = lambda self: 7
+    assert object.__str__(obj) == 7
+    for convert in (str, repr):
+        try:
+            convert(obj)
+        except TypeError as error:
+            assert str(error) == f"__{convert.__name__}__ returned non-string (type int)"
+        else:
+            raise AssertionError("non-string result accepted")
+
     class Broken:
         def __repr__(self):
             raise LookupError("rendered")

@@ -7,7 +7,7 @@ use crate::ir::ProcessOperation as Op;
 fn operation(op: Op, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
-        kind: ExprKind::Builtin(Builtin::Process(op), args),
+        kind: ExprKind::Builtin(Builtin::process(op), args),
     }
 }
 
@@ -15,25 +15,31 @@ impl Checker<'_> {
     pub(super) fn indirect_coroutine(
         &self,
         callable: Expr,
-        args: Vec<Expr>,
+        mut values: Vec<Expr>,
         returns: Type,
     ) -> Expr {
         let signature = callable.ty;
-        let mut values = Vec::with_capacity(args.len() + 1);
-        values.push(callable);
-        values.extend(args);
-        let frame = Expr {
-            ty: self.types.tuple(values.iter().map(|arg| arg.ty).collect()),
-            kind: ExprKind::Tuple(values),
-        };
-        operation(
+        values.reserve_exact(1);
+        values.insert(0, callable);
+        self.framed_call(
             Op::IndirectCoroutine {
                 signature,
                 result: self.types.awaited(returns).unwrap(),
             },
             returns,
-            vec![frame],
+            values,
         )
+    }
+
+    fn framed_call(&self, op: Op, returns: Type, fields: Vec<Expr>) -> Expr {
+        let ty = self
+            .types
+            .tuple(fields.iter().map(|field| field.ty).collect());
+        let frame = Expr {
+            ty,
+            kind: ExprKind::Tuple(fields),
+        };
+        operation(op, returns, vec![frame])
     }
 
     pub(super) fn async_gather(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -43,7 +49,7 @@ impl Checker<'_> {
                 let values = args
                     .iter()
                     .map(|arg| self.expr(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
                 let first = values.first().ok_or_else(|| {
                     error(
                         self.source,
@@ -114,28 +120,19 @@ impl Checker<'_> {
         &mut self,
         signature: &Signature,
         result: Type,
-        args: ir::CallArgs,
+        mut args: ir::CallArgs,
     ) -> Expr {
         let context = self.classes.contexts.contains(&signature.id)
             || self.classes.producer_items.contains_key(&signature.id);
         if !signature.asynchronous && !context {
+            if let ir::CallSite::Written(range, end) = args.site {
+                args.site = ir::CallSite::Fixed(self.fixed_origin(range, Some((end, b'('))));
+            }
             return Expr {
                 ty: result,
                 kind: ExprKind::Call(signature.id, args),
             };
         }
-        let slots: Vec<_> = args.values.iter().map(|arg| self.hidden(arg.ty)).collect();
-        let fields: Vec<_> = args
-            .order
-            .iter()
-            .map(|&index| self.local(slots[index]))
-            .collect();
-        let frame = Expr {
-            ty: self
-                .types
-                .tuple(fields.iter().map(|field| field.ty).collect()),
-            kind: ExprKind::Tuple(fields),
-        };
         let (ty, op) = if context {
             (
                 Type::GeneratorContext,
@@ -152,20 +149,18 @@ impl Checker<'_> {
                 },
             )
         };
-        let body = slots
-            .iter()
-            .copied()
-            .zip(args.values)
-            .map(|(slot, arg)| Statement::Assign(slot, arg))
-            .collect();
-        Expr {
-            ty,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(operation(op, ty, vec![frame])),
-                clear: slots,
-            },
+        // Initialized native locals already own their arguments. Otherwise capture
+        // every written operand before forming the private frame in parameter order.
+        let mut scope = calls::ArgumentScope::default();
+        if self.registered.is_some()
+            || !args.values.iter().all(|value| {
+                matches!(value.kind, ExprKind::Local(slot) if self.assigned.contains(&slot))
+            })
+        {
+            let values = args.values.into_iter();
+            args.values = values.map(|arg| scope.hold(self, arg)).collect();
         }
+        scope.finish(self.framed_call(op, ty, args.into_formal_order()))
     }
 
     pub(super) fn task_await(
@@ -174,13 +169,30 @@ impl Checker<'_> {
         run: bool,
         site: &impl Ranged,
     ) -> Result<Expr, String> {
-        let result = self.types.awaited(value.ty).ok_or_else(|| {
-            error(
-                self.source,
-                site,
-                "await requires a typed coroutine or task",
-            )
-        })?;
+        let python_frame = !run && self.registered_local_start.is_some();
+        let operand = if python_frame {
+            value.checked_operand_type()
+        } else {
+            value.ty
+        };
+        let result = if python_frame && operand == Type::PythonObject {
+            Type::PythonObject
+        } else {
+            self.types.awaited(operand).ok_or_else(|| {
+                error(
+                    self.source,
+                    site,
+                    "await requires a typed coroutine or task",
+                )
+            })?
+        };
+        if python_frame {
+            return Ok(registered::suspend(
+                ir::SuspendValue::Await,
+                site.range(),
+                value,
+            ));
+        }
         Ok(operation(
             if run { Op::RunLoop } else { Op::Await },
             result,
@@ -335,14 +347,14 @@ impl Checker<'_> {
             } else {
                 self.local(slot)
             };
-            entered.push(self.assign(target, value)?);
+            self.assign(target, value, Some(&mut entered))?;
         }
         let (rest, falls) = self.async_with(remaining, suite)?;
         entered.extend(rest);
         let handlers = if ty == Type::TaskGroup {
             let error = self.hidden(Type::Exception);
             vec![ir::ExceptHandler {
-                kinds: vec![0],
+                matcher: crate::ir::ExceptionMatcher::Categories(vec![0]),
                 name: Some(error),
                 body: vec![
                     Statement::Expr(operation(

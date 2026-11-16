@@ -962,6 +962,14 @@ def RebuildProxy(func, token, serializer, kwds):
 # Functions to create proxies and proxy types
 #
 
+def _proxy_method(name, attribute):
+    def method(self, /, *args, **kwds):
+        return self._callmethod(name, args, kwds)
+
+    method.__name__ = method.__qualname__ = attribute
+    return method
+
+
 def MakeProxyType(name, exposed, _cache={}):
     '''
     Return a proxy type whose methods are given by `exposed`
@@ -973,10 +981,17 @@ def MakeProxyType(name, exposed, _cache={}):
         pass
 
     dic = {}
+    if exposed:
+        dic['__builtins__'] = __builtins__
+        make_method = types.FunctionType(_proxy_method.__code__, dic)
 
-    for meth in exposed:
-        exec('''def %s(self, /, *args, **kwds):
-        return self._callmethod(%r, args, kwds)''' % (meth, meth), dic)
+        for meth in exposed:
+            if not isinstance(meth, str):
+                raise SyntaxError('invalid syntax')
+            # The definition used %s for its binding and a string literal for the call.
+            spelling = str.strip(str(meth), ' \t\f')
+            attribute = util._factory_identifier(spelling)
+            dic[attribute] = make_method(str.__str__(meth), attribute)
 
     ProxyType = type(name, (BaseProxy,), dic)
     ProxyType._exposed_ = exposed

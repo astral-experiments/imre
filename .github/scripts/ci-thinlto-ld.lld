@@ -1,4 +1,7 @@
 #!/bin/sh
-# Reuse compiled runtime bitcode across programs. Each CI worker
-# already runs its own linker, so use one backend thread per link.
-exec "$IMRE_CI_LLD" --thinlto-cache-dir="$IMRE_CI_LTO_CACHE" --thinlto-jobs=1 "$@"
+# Share the runner's CPUs among up to four concurrent suite linkers.
+jobs=$(( $(nproc) / 4 ))
+if [ "$jobs" -lt 1 ]; then
+    jobs=1
+fi
+exec "$IMRE_CI_LLD" --thinlto-cache-dir="$IMRE_CI_LTO_CACHE" --thinlto-jobs="$jobs" "$@"

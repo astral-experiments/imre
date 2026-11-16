@@ -1,5 +1,5 @@
 //! Bind binary subprocess operations to the same child and files as typed Popen.
-use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, builtins, io, os, posixpath};
+use super::{Context, Error, FALSE, Id, NONE, Result, TRUE, Value, io, os, posixpath};
 use crate::dynamic::gc_schedule::GcSettings;
 use crate::objects::{BoxedPopen, BoxedPreparation, ForkExec};
 use std::io::{PipeReader, Read};
@@ -15,13 +15,12 @@ pub(super) fn function(name: &str) -> bool {
             | "launch"
             | "reserve_handle"
             | "started"
+            | "finalized"
             | "pid"
             | "pipe"
             | "poll"
             | "wait"
             | "signal"
-            | "communicate"
-            | "close_wait"
             | "cleanup"
     )
 }
@@ -311,10 +310,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         || !default_fds
         || (streams.iter().any(|(mode, _)| *mode == 1) && bufsize.as_small() != Some(-1));
     let shell = ctx.truth(shell)?;
-    let spelling = matches!(
-        ctx.heap.get(ctx.scalar_value(args)),
-        Value::Str(_) | Value::SurrogateStr(_) | Value::Bytes(_)
-    );
+    let spelling = posixpath::spelling(ctx, args);
     let path_like = !spelling
         && (matches!(ctx.heap.get(args), Value::DirEntry(_))
             || ctx
@@ -368,7 +364,9 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         super::audit::event(ctx, "subprocess.Popen", &[program, list, cwd, env])?;
         Some(list)
     };
-    let probe = probe || audited_args.is_some();
+    // A path-like argv[0] can return different values for the dirname probe,
+    // the executable, and the argument passed to the child.
+    let probe = probe || audited_args.is_some() || !posixpath::spelling(ctx, program);
     // CPython's dirname probe can call __fspath__ before the actual executable conversion.
     let probed_directory = if probe && BoxedPopen::probes_executable() {
         let probe = posixpath::fspath(ctx, program)?;
@@ -464,7 +462,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         os::c_int(ctx, umask)?
     };
-    if preexec_fn != NONE && ctx.finalizing.load(Ordering::Acquire) {
+    if preexec_fn != NONE && ctx.interpreter.finalizing.load(Ordering::Acquire) {
         return Err(Error::new(
             "PythonFinalizationError",
             "preexec_fn not supported at interpreter shutdown",
@@ -542,8 +540,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     } else {
         os::owner_id(ctx, uid, false)? as libc::uid_t
     };
-    if has_child_settings && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None, .. })
-    {
+    if has_child_settings && !matches!(ctx.heap.get(slot), Value::ProcessHandle { child: None }) {
         return Err(Error::new(
             "TypeError",
             "expected an unused subprocess handle",
@@ -585,10 +582,7 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
         (Ok(child), Some(reader)) => {
             // No Python call or safepoint between the fork and binding its
             // sole control. A handler can now operate on the actual partial Popen.
-            let Value::ProcessHandle {
-                child: reserved, ..
-            } = ctx.heap.get_mut(slot)
-            else {
+            let Value::ProcessHandle { child: reserved } = ctx.heap.get_mut(slot) else {
                 unreachable!("validated reserved subprocess handle")
             };
             *reserved = Some(child.clone());
@@ -598,25 +592,14 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
             };
             // A child error requires a reap. A parent handler exception above instead
             // unwinds the constructor immediately, leaving normal Popen ownership.
-            if let Some(status) = child.wait_failed_exec(|| ctx.dispatch_signals())?
-                && matches!(
-                    ctx.heap.get(slot),
-                    Value::ProcessHandle {
-                        reported: false,
-                        ..
-                    }
-                )
-            {
-                let status = report_status(ctx, slot, Some(status));
+            if let Some(status) = child.wait(|| ctx.dispatch_signals())? {
+                let status = ctx.int(i64::from(status));
                 ctx.set_attr(public_owner, "returncode", status)?;
             }
             BoxedPopen::preexec_error(code)
         }
         (Ok(child), None) => {
-            return Ok(ctx.alloc(Value::ProcessHandle {
-                child: Some(child),
-                reported: false,
-            }));
+            return Ok(ctx.alloc(Value::ProcessHandle { child: Some(child) }));
         }
         (Err(failure), _) => failure,
     };
@@ -639,39 +622,6 @@ fn launch(ctx: &mut Context, values: &[Id]) -> Result<Id> {
     }
 }
 
-fn timeout(ctx: &Context, value: Id) -> Result<Option<f64>> {
-    if value == NONE {
-        return Ok(None);
-    }
-    ctx.real_component(ctx.scalar_value(value))?
-        .map(Some)
-        .ok_or_else(|| Error::new("TypeError", "expected a numeric timeout"))
-}
-
-// Python owns the mutable returncode. Keep the physical reap in ChildControl so
-// a later assignment cannot authorize signaling a PID that has been released.
-fn report_status(ctx: &mut Context, handle: Id, status: Option<i32>) -> Id {
-    let Some(code) = status else { return NONE };
-    let Value::ProcessHandle { reported, .. } = ctx.heap.get_mut(handle) else {
-        unreachable!("validated process handle")
-    };
-    // A returning signal handler can already have waited and reset returncode.
-    let code = if std::mem::replace(reported, true) {
-        0
-    } else {
-        code
-    };
-    ctx.int(i64::from(code))
-}
-
-fn communication_input(ctx: &Context, input: Id) -> Result<&[u8]> {
-    if input == NONE {
-        Ok(&[])
-    } else {
-        ctx.bytes_like(input)
-    }
-}
-
 pub(super) fn call(
     ctx: &mut Context,
     name: &str,
@@ -685,10 +635,7 @@ pub(super) fn call(
         ));
     }
     if let ("reserve_handle", []) = (name, args) {
-        return Ok(ctx.alloc(Value::ProcessHandle {
-            child: None,
-            reported: false,
-        }));
+        return Ok(ctx.alloc(Value::ProcessHandle { child: None }));
     }
     if name == "prepare" {
         return prepare(ctx, args);
@@ -728,7 +675,7 @@ pub(super) fn call(
             )),
         };
     }
-    let Value::ProcessHandle { child, reported } = ctx.heap.get(handle) else {
+    let Value::ProcessHandle { child } = ctx.heap.get(handle) else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };
     if let ("started", []) = (name, operands) {
@@ -737,44 +684,29 @@ pub(super) fn call(
     let Some(child) = child.clone() else {
         return Err(Error::new("TypeError", "expected a native process handle"));
     };
-    let reported = *reported;
     match (name, operands) {
+        ("finalized", []) => {
+            child.finalized();
+            Ok(NONE)
+        }
         ("pid", []) => Ok(ctx.int(i64::from(child.pid()))),
-        // Python asks again only after its public status was cleared. A real
-        // second wait would get ECHILD, which Popen reports as zero.
-        ("poll" | "wait", []) if reported => Ok(ctx.int(0)),
-        ("poll", []) => Ok(report_status(ctx, handle, child.poll()?)),
+        ("poll", [] | [_]) => Ok(match child.poll()? {
+            std::task::Poll::Pending => NONE,
+            std::task::Poll::Ready(Some(code)) => ctx.int(i64::from(code)),
+            std::task::Poll::Ready(None) => operands
+                .first()
+                .copied()
+                .filter(|&deadstate| deadstate != NONE)
+                .unwrap_or_else(|| ctx.int(0)),
+        }),
         ("wait", []) => {
             let code = child.wait(|| ctx.dispatch_signals())?;
-            Ok(report_status(ctx, handle, code))
+            Ok(ctx.int(i64::from(code.unwrap_or(0))))
         }
         ("signal", &[number]) => {
             // os.kill converts its signal to Py_ssize_t before narrowing for POSIX.
             let number = os::ssize_t(ctx, number)?;
             child.signal(number as libc::c_int)?;
-            Ok(NONE)
-        }
-        ("communicate", &[input, seconds, use_select]) => {
-            let seconds = timeout(ctx, seconds)?;
-            let use_select = ctx.truth(use_select)?;
-            let mut pending =
-                child.begin_communication(communication_input(ctx, input)?, seconds, use_select)?;
-            while pending.interrupted() {
-                ctx.dispatch_signals()?;
-                child.resume_communication(&mut pending, communication_input(ctx, input)?)?;
-            }
-            let exchange = child.finish_communication(pending);
-            let [stdout, stderr] = exchange
-                .streams
-                .map(|stream| stream.map_or(NONE, |data| ctx.alloc(Value::Bytes(data))));
-            Ok(ctx.alloc(Value::Tuple(vec![
-                stdout,
-                stderr,
-                builtins::boolean(exchange.timed_out),
-            ])))
-        }
-        ("close_wait", []) => {
-            child.close_wait()?;
             Ok(NONE)
         }
         _ => Err(Error::new("TypeError", "invalid native process operation")),

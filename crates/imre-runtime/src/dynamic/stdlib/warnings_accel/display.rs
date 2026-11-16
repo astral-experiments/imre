@@ -34,31 +34,30 @@ pub(super) fn source_line(ctx: &mut Context, globals: Id, lineno: i32) -> Result
         let actual = diagnostic_type_name(ctx, source);
         Error::new("TypeError", format!("must be str, not {actual}"))
     })?;
-    let points = ctx.string_codepoints(text)?;
-    // Read the requested field directly as Python code points, including lone surrogates.
-    let mut tail = points.as_ref();
-    for number in 1..=lineno {
-        if tail.is_empty() {
-            break;
-        }
-        let end = tail
-            .iter()
-            .position(|p| matches!(*p, 0x0a..=0x0d | 0x1c..=0x1e | 0x85 | 0x2028 | 0x2029))
-            .unwrap_or(tail.len());
-        if number == lineno {
-            if end == points.len() {
-                ctx.heap.keep(text);
-                return Ok(Some(text));
+    let missing = || Error::new("IndexError", "list index out of range");
+    let index = usize::try_from(i64::from(lineno) - 1).map_err(|_| missing())?;
+    match ctx.heap.get(text) {
+        Value::Str(value) => {
+            let field = crate::objects::line_field(value, index).ok_or_else(missing)?;
+            if field.len() != value.len() {
+                return Ok(Some(ctx.alloc(Value::Str(field.into()))));
             }
-            let line = tail[..end].to_vec();
-            return Ok(Some(ctx.text_codepoints(line)));
         }
-        let delimiter = &tail[end..];
-        tail = delimiter
-            .strip_prefix(&[0x0d, 0x0a])
-            .unwrap_or_else(|| delimiter.get(1..).unwrap_or_default());
+        Value::SurrogateStr(points) => {
+            let mut start = 0;
+            let field =
+                std::iter::from_fn(|| crate::objects::codepoint_line(points, &mut start, false))
+                    .nth(index)
+                    .ok_or_else(missing)?;
+            if field.len() != points.len() {
+                let field = crate::dynamic::copy_ids(field)?;
+                return Ok(Some(ctx.text_codepoints(field)));
+            }
+        }
+        _ => unreachable!("validated str storage"),
     }
-    Err(Error::new("IndexError", "list index out of range"))
+    ctx.heap.keep(text);
+    Ok(Some(text))
 }
 
 /// Dispatch through the active warnings module, including its public WarningMessage factory.

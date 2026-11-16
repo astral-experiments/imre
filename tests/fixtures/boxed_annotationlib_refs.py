@@ -6,6 +6,18 @@ from typing import evaluate_forward_ref
 
 
 def current():
+    for newline in ("\n", "\r", "\r\n"):
+        source = f"({newline}[(i := 3) for i in []]{newline})"
+        try:
+            typing._make_forward_ref(source)
+        except SyntaxError as error:
+            cause = error.__context__
+            assert cause.args == ("assignment expression cannot rebind comprehension iteration variable 'i'",)
+            assert (cause.filename, cause.lineno, cause.offset, cause.end_lineno, cause.end_offset) == (
+                "<string>", 2, 3, 2, 4
+            )
+        else:
+            raise AssertionError("expected invalid comprehension assignment")
     module = import_module("annotationlib")
     assert get_annotate is module.get_annotate_from_class_namespace
     assert get_annotate({}) is None
@@ -189,6 +201,16 @@ def current():
         field: int
 
     assert module.get_annotations(WithOwnAnnotations) == {"field": int}
+
+    def quoted(value: "mark(x)", rest: "*items"):
+        pass
+
+    seen = []
+    scope = {"mark": seen.append, "x": 14, "items": (int,)}
+    assert module.get_annotations(quoted, globals=scope, locals=scope, eval_str=True) == {
+        "value": None, "rest": int,
+    }
+    assert seen == [14]
 
     def sums(reflected: 1 + int, nested: Left + (Right + 1)):
         pass

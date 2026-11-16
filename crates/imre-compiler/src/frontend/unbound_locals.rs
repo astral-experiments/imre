@@ -3,36 +3,80 @@
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_except_handler, walk_expr, walk_stmt};
 
-/// Only ordinary one-name stores participate. Other binding forms keep the
-/// existing definite-assignment requirement; we must never miss a write or a
-/// deletion that could change the value observed by a guarded load.
-pub(super) fn candidates(
+fn nullable_return(checker: &Checker<'_>, rhs: &ast::Expr) -> Option<Type> {
+    let call = rhs.as_call_expr()?;
+    let crate::modules::Binding::Definition(id) = checker.resolve(&call.func)? else {
+        return None;
+    };
+    let ty = checker.functions.get(&id)?.returns;
+    checker.types.payload(ty).map(|_| ty)
+}
+
+/// Collect guarded local stores and the optional layouts needed by earlier assignments.
+pub(super) fn local_assignments(
+    checker: &Checker<'_>,
     statements: &[ast::Stmt],
-    interactive: bool,
-    guard_ordinary: &dyn Fn(&str) -> bool,
-) -> HashSet<String> {
-    struct Scan<'b> {
-        guard_ordinary: &'b dyn Fn(&str) -> bool,
+    function: Option<&ast::StmtFunctionDef>,
+) -> (HashSet<String>, HashMap<String, Type>) {
+    if let Some(function) = function {
+        let mut nullable = HashMap::new();
+        let plain =
+            checker
+                .graph
+                .session
+                .plain_function_stores(checker.module, function, |name, rhs| {
+                    if checker.interactive_names || checker.mapping_class_import(name) {
+                        return None;
+                    }
+                    if let Some(ty) = nullable_return(checker, rhs)
+                        && nullable
+                            .insert(name.to_owned(), ty)
+                            .is_some_and(|prior| prior != ty)
+                    {
+                        // Differing layouts follow the original visitor's assignment order.
+                        return None;
+                    }
+                    Some(())
+                });
+        if plain.is_some() {
+            return (HashSet::new(), nullable);
+        }
+    }
+
+    struct Scan<'a, 'b> {
+        checker: &'a Checker<'b>,
         inside: bool,
-        interactive: bool,
+        inside_match: bool,
         guarded: HashSet<String>,
         other: HashSet<String>,
+        nullable: HashMap<String, Type>,
     }
-    impl<'a> Visitor<'a> for Scan<'_> {
+    impl<'a> Visitor<'a> for Scan<'_, '_> {
         fn visit_stmt(&mut self, stmt: &'a ast::Stmt) {
             match stmt {
                 ast::Stmt::Assign(s) if matches!(s.targets.as_slice(), [ast::Expr::Name(_)]) => {
                     let name = &s.targets[0].as_name_expr().unwrap().id;
-                    if (self.interactive && self.inside) || (self.guard_ordinary)(name.as_str()) {
+                    if let Some(ty) = nullable_return(self.checker, &s.value) {
+                        self.nullable.insert(name.to_string(), ty);
+                    }
+                    if !self.inside_match
+                        && ((self.checker.interactive_names && self.inside)
+                            || self.checker.mapping_class_import(name.as_str()))
+                    {
                         self.guarded.insert(name.to_string());
                     }
                     self.visit_expr(&s.value);
+                }
+                _ if self.inside_match => {
+                    if !matches!(stmt, ast::Stmt::ClassDef(_) | ast::Stmt::FunctionDef(_)) {
+                        walk_stmt(self, stmt);
+                    }
                 }
                 ast::Stmt::AnnAssign(s)
                     if s.target.as_name_expr().is_some() && s.value.is_some() =>
                 {
                     let name = &s.target.as_name_expr().unwrap().id;
-                    if self.inside || (self.guard_ordinary)(name.as_str()) {
+                    if self.inside || self.checker.mapping_class_import(name.as_str()) {
                         self.guarded.insert(name.to_string());
                     }
                     self.visit_expr(s.value.as_deref().unwrap());
@@ -54,15 +98,25 @@ pub(super) fn candidates(
                 ast::Stmt::ClassDef(c) => {
                     self.other.insert(c.name.to_string());
                 }
-                // Pattern captures are identifiers, not ordinary store expressions.
-                ast::Stmt::Match(_) => self
-                    .other
-                    .extend(narrowing::assigned_names(std::slice::from_ref(stmt))),
+                ast::Stmt::Match(matched) => {
+                    self.other
+                        .extend(narrowing::assigned_names(std::slice::from_ref(stmt)));
+                    // Matches exclude their writes from the guarded locals. Their
+                    // assignments can still reserve an optional layout for an earlier store.
+                    self.inside_match = true;
+                    for case in &matched.cases {
+                        self.visit_body(&case.body);
+                    }
+                    self.inside_match = false;
+                }
                 _ => walk_stmt(self, stmt),
             }
         }
 
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
+            if self.inside_match {
+                return;
+            }
             if let ast::Expr::Name(n) = expr
                 && n.ctx != ast::ExprContext::Load
             {
@@ -73,22 +127,25 @@ pub(super) fn candidates(
 
         fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
             let ast::ExceptHandler::ExceptHandler(h) = handler;
-            if let Some(name) = &h.name {
+            if !self.inside_match
+                && let Some(name) = &h.name
+            {
                 self.other.insert(name.to_string());
             }
             walk_except_handler(self, handler);
         }
     }
     let mut scan = Scan {
-        interactive,
-        guard_ordinary,
+        checker,
         inside: false,
+        inside_match: false,
         guarded: HashSet::new(),
         other: HashSet::new(),
+        nullable: HashMap::new(),
     };
     scan.visit_body(statements);
     scan.guarded.retain(|n| !scan.other.contains(n));
-    scan.guarded
+    (scan.guarded, scan.nullable)
 }
 
 /// The flag is set after the RHS and store succeed; a failure leaves the previous
@@ -246,7 +303,7 @@ fn unbound_failure(name: &str, missing: Missing) -> Statement {
             ),
         ),
     };
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind(kind).unwrap(),
@@ -255,7 +312,7 @@ fn unbound_failure(name: &str, missing: Missing) -> Statement {
                 kind: ExprKind::Str(message),
             })),
         },
-    }))
+    })
 }
 
 impl Checker<'_> {

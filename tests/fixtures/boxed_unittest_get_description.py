@@ -47,12 +47,27 @@ def current():
         assert result.testsRun == 0 and result.durations == 3
         inits.clear()
 
+    doc_error = AttributeError("method documentation")
+
     class Case(unittest.TestCase):
         def test_failure(self):
             self.fail("failure")
 
         def test_success(self):
             pass
+
+        @property
+        def undocumented(self):
+            events.append(getattr(self, "_testMethodDoc", None))
+            return self
+
+        @property
+        def __doc__(self):
+            raise doc_error
+
+    with unittest.TestCase().assertRaises(AttributeError) as caught:
+        Case("undocumented")
+    assert caught.exception is doc_error and events[-1] == "No test"
 
     class Result(unittest.TextTestResult):
         def getDescription(self, test):

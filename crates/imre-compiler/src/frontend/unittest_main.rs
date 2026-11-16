@@ -1,5 +1,6 @@
 //! Build the native default unittest suite from resolved TestCase class identities.
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     pub(super) fn unittest_main(
@@ -59,9 +60,9 @@ impl Checker<'_> {
         let Some(Binding::Value(default)) = unit.bindings.get("defaultTestLoader") else {
             return Err(error(self.source, call, "missing unittest default loader"));
         };
-        let (slot, _) = self
+        let slot = self
             .globals
-            .get(*default)
+            .slot(*default, 0)
             .ok_or("unittest default loader is unavailable")?;
         let suite = self.unittest_suite_from_module(
             call,
@@ -437,10 +438,7 @@ impl Checker<'_> {
                     ty: Type::Bool,
                     kind: ExprKind::Builtin(Builtin::Bool, vec![self.local(names)]),
                 };
-                let empty = Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(nonempty)),
-                };
+                let empty = Expr::not(nonempty);
                 Expr {
                     ty: Type::Bool,
                     kind: ExprKind::Boolean(false, vec![contains, empty]),
@@ -533,13 +531,16 @@ impl Checker<'_> {
                 // loader. Do not silently execute one with unsupported hooks.
                 if !methods.is_empty()
                     && !checker.graph.modules[class.definition.module].is_bundled("unittest")
-                    && let Err(reason) = checker.validate_unittest_case(call, id)
+                    && let Err(failure) = checker.validate_unittest_case(call, id)
                 {
+                    let Failure::Diagnostic(reason) = failure else {
+                        return Err(failure);
+                    };
                     return checker.record_slot(
                         class_id,
                         checker.local(runner_slot),
                         "_unsupportedCase",
-                        &[unpacking::string(reason)],
+                        &[unpacking::string(reason.to_string())],
                         call,
                     );
                 }
@@ -555,14 +556,14 @@ impl Checker<'_> {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(
                             vec![method_name.clone(), unpacking::string(&method)],
-                            vec![Compare::Equal],
+                            vec![CmpOp::Eq],
                         ),
                     };
                     let explicit = Expr {
                         ty: Type::Bool,
                         kind: ExprKind::Compare(
                             vec![checker.local(description_slot), unpacking::string("")],
-                            vec![Compare::Equal],
+                            vec![CmpOp::Eq],
                         ),
                     };
                     let display = Expr {

@@ -24,6 +24,30 @@ def upstream_support_payloads() -> str:
 
 
 ACCEPTED = {
+    "builtin_scalar_class_in_handler": """
+        def observed(n: int) -> int:
+            print("receiver", n)
+            return n
+
+        try:
+            raise ValueError("sentinel")
+        except ValueError:
+            print(type(observed(7)).__qualname__)
+            print(type(True) is bool, type(1.25).__name__, type(None).__name__)
+    """,
+    "empty_exception_tuple": """
+        def select(value: int) -> int:
+            try:
+                if value:
+                    raise ValueError("raised")
+            except ():
+                return 1
+            except:
+                return 2
+            return 3
+
+        print(select(0), select(1))
+    """,
     "deep_context_default_repr": """
 from contextvars import Context, ContextVar
 n = 3000
@@ -84,14 +108,32 @@ except KeyError as error:
 """,
     "upstream_support_payloads": upstream_support_payloads(),
     "boxed_payload": (Path(__file__).parent / "fixtures/exceptions/boxed_payload.py").read_text(),
+    "retained_key_repr": (Path(__file__).parent / "fixtures/exceptions/retained_key_repr.py").read_text(),
+    "retained_field_str": (Path(__file__).parent / "fixtures/exceptions/retained_field_str.py").read_text(),
     "inherited_payload": (Path(__file__).parent / "fixtures/exceptions/inherited_payload.py").read_text(),
     "http_exception": (Path(__file__).parent / "fixtures/exceptions/http_exception.py").read_text(),
+    "property_setter": (Path(__file__).parent / "fixtures/exceptions/property_setter.py").read_text(),
     "warning_hierarchy": (Path(__file__).parent / "fixtures/exceptions/warning_hierarchy.py").read_text(),
     **{
         name: (Path(__file__).parent / f"fixtures/exceptions/{name}.py").read_text()
         for name in ("generic_args", "generic_args_processes", "generic_args_groups", "generic_args_records")
     },
     "explicit_base": (Path(__file__).parent / "fixtures/exceptions/explicit_base.py").read_text(),
+    "assertion_arguments": """
+def require(value: bool, with_message: bool) -> None:
+    if with_message:
+        assert value, ""
+    else:
+        assert value
+
+
+for with_message in (False, True):
+    try:
+        require(False, with_message)
+    except AssertionError as error:
+        print(error.args)
+""",
+    "constructor_arguments": (Path(__file__).parent / "fixtures/exceptions/constructor_arguments.py").read_text(),
     "import_error": (Path(__file__).parent / "fixtures/exceptions/import_error.py").read_text(),
     "private_forwarding_parameter_names": """
 class Problem(Exception):
@@ -1329,13 +1371,6 @@ finally:
     "writable_exception_suppression": 'error = ValueError("error")\nerror.__suppress_context__ = True',
     "exception_group": "try:\n    raise ValueError()\nexcept* ValueError:\n    pass\n",
     "dynamic_handler": "kind = ValueError\ntry:\n    pass\nexcept kind:\n    pass\n",
-    "implicit_exception_constructor_args": """
-from dataclasses import dataclass
-@dataclass
-class Payload(Exception):
-    field: str
-raise Payload("x")
-""",
     "inconsistent_exception_mro": """
 class First(Exception):
     pass
@@ -1345,14 +1380,63 @@ class Reversed(First, Second):
     pass
 raise Reversed()
 """,
-    "exception_subclass_method": """
-class WithMethod(Exception):
-    def describe(self) -> str:
-        return "extra behavior"
-""",
 }
 
 ERRORS = {
+    "implicit_exception_constructor_args": ("""
+from dataclasses import dataclass
+@dataclass
+class Payload(Exception):
+    field: str
+raise Payload("x")
+""", "Payload"),
+    "fixed_mapped_digit_traceback": (
+        """\
+def successor_sum(text: str) -> int:
+    digits = list(map(int, text))
+    return sum([digit * (digit + 1) for digit in digits])
+
+
+print(successor_sum("1x"))
+""",
+        "ValueError",
+    ),
+    "mapped_digit_traceback": (
+        (Path(__file__).parent / "fixtures/exceptions/mapped_digit_traceback.py").read_text(),
+        "ValueError",
+    ),
+    "unhandled_key_repr_globals": (
+        """\
+from dataclasses import dataclass
+
+labels = ["invoice-"]
+
+@dataclass(frozen=True)
+class Ticket:
+    number: int
+
+    def __repr__(self) -> str:
+        return labels[0] + str(self.number)
+
+ledger = {Ticket(1): "paid"}
+ledger[Ticket(2)]
+""",
+        "KeyError",
+    ),
+    "unhandled_formatter_output": (
+        """\
+class Notice(ValueError):
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+    def __str__(self) -> str:
+        print(self.detail)
+        raise ValueError("cannot display notice")
+
+raise Notice("rendering notice")
+""",
+        "Notice",
+    ),
     "unhandled_skip_class": (
         'import unittest\nraise unittest.SkipTest("skip")\n',
         "unittest.case.SkipTest",
@@ -1486,7 +1570,7 @@ def exception_report(stderr: str) -> list[str]:
     ]
 
 
-def run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+def run(command: list[str], *, timeout: int | None = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         command,
         input="",
@@ -1496,6 +1580,37 @@ def run(command: list[str], *, timeout: int = 60) -> subprocess.CompletedProcess
         timeout=timeout,
         env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1:halt_on_error=1"},
     )
+
+
+def check_stdlib_assert_import(compiler, python, flags, levels, temporary):
+    project = temporary / "stdlib_assert_import"
+    project.mkdir()
+    fixture = Path(__file__).parent / "fixtures" / "exceptions" / project.name
+    sources = [project / "main.py", project / "checks.py"]
+    for path in sources:
+        path.write_bytes((fixture / path.name).read_bytes())
+    expected = run([python, "-B", str(sources[0])])
+    assert expected.returncode == 0 and not expected.stderr, expected
+
+    binaries = []
+    for level in levels:
+        binary = project / f"saved-O{level}"
+        built = run(
+            [compiler, "build", str(sources[0]), "-o", str(binary), "--no-cache",
+             "--opt-level", level, *flags],
+            timeout=None,
+        )
+        assert built.returncode == 0, (level, built.stderr)
+        binaries.append(binary)
+
+    for path in sources:
+        path.unlink()
+    for binary in binaries:
+        actual = run([str(binary)])
+        assert (actual.returncode, actual.stdout, actual.stderr) == (
+            0, expected.stdout, "",
+        ), (binary, actual, expected)
+    return len(binaries)
 
 
 def main() -> None:
@@ -1520,13 +1635,12 @@ def main() -> None:
     passed = 0
     with tempfile.TemporaryDirectory(prefix="imre-exceptions-") as directory:
         temporary = Path(directory)
+        passed += check_stdlib_assert_import(compiler, args.python, flags, args.opt_levels, temporary)
         for name, source in REJECTED.items():
             path = temporary / f"{name}.py"
             path.write_text(dedent(source), encoding="utf-8")
             result = run([compiler, "check", str(path)])
             assert result.returncode > 0 and result.stderr, (name, result)
-            if name == "exception_subclass_method":
-                assert "exception payload needs an explicit initializer" in result.stderr, result
             if name == "separate_payload_layouts":
                 assert "multiple independent exception payload layouts" in result.stderr, result
             if name == "exception_binder_adjacent_error":
@@ -1586,6 +1700,17 @@ def main() -> None:
                     reference,
                 )
                 if category:
+                    if name == "mapped_digit_traceback":
+                        assert actual.stdout == (
+                            "callback before\ncallback caught\nidentity True True\n"
+                        )
+                    if name in {"mapped_digit_traceback", "fixed_mapped_digit_traceback"}:
+                        # Both executions use the same filename. Compare every frame in order.
+                        frames = [line for line in reference.stderr.splitlines() if line.startswith('  File "')]
+                        actual_frames = [line for line in actual.stderr.splitlines() if line.startswith('  File "')]
+                        assert len(frames) == (4 if name == "mapped_digit_traceback" else 2)
+                        assert actual_frames == frames, (actual.stderr, reference.stderr)
+                        assert actual.stderr.splitlines()[-1] == reference.stderr.splitlines()[-1]
                     if name in CHAIN_REPORTS:
                         assert actual.returncode == 1 and exception_report(
                             actual.stderr

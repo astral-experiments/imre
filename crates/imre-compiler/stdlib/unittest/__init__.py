@@ -46,6 +46,13 @@ def _inequality_message(first: str, second: str) -> str:
     return left + " != " + right
 
 
+def _safe_repr(value):
+    try:
+        return repr(value)
+    except Exception:
+        return object.__repr__(value)
+
+
 def _kept_lines(text: str) -> list[str]:
     lines: list[str] = []
     start = 0
@@ -188,12 +195,16 @@ class TestCase(_SuiteMember):
     def id(self) -> str:
         return self.__class__.__module__ + "." + self.__class__.__qualname__ + "." + self._testMethodName
 
-    def _formatMessage(self, msg: str | None, standardMsg: str) -> str:
+    def _formatMessage(self, msg, standardMsg):
+        short = not self.longMessage
         if msg is None:
             return standardMsg
-        if self.longMessage:
-            return standardMsg + " : " + msg
-        return msg or standardMsg
+        if short:
+            return msg or standardMsg
+        try:
+            return f"{standardMsg!s} : {msg!s}"
+        except UnicodeDecodeError:
+            return f"{_safe_repr(standardMsg)!s} : {_safe_repr(msg)!s}"
 
     def fail(self, msg: str | None = None) -> None:
         if msg is None:
@@ -301,11 +312,6 @@ class TestCase(_SuiteMember):
             return
         raise self.failureException(self._formatMessage(msg, difference))
 
-    def _assertBytesEqual(self, first: bytes, second: bytes, msg: str | None = None) -> None:
-        if first != second:
-            standard = _inequality_message(repr(first), repr(second))
-            raise self.failureException(self._formatMessage(msg, standard))
-
     def _assertDateEqual(self, first: date, second: date, msg: str | None = None) -> None:
         if first != second:
             standard = _inequality_message(repr(first), repr(second))
@@ -323,6 +329,8 @@ class TestCase(_SuiteMember):
         return message + "\nDiff is " + str(len(diff)) + " characters long. Set self.maxDiff to None to see it."
 
     def assertMultiLineEqual(self, first: str, second: str, msg: str | None = None) -> None:
+        self.assertIsInstance(first, str, "First argument is not a string")
+        self.assertIsInstance(second, str, "Second argument is not a string")
         if first == second:
             return
         sides = _short_reprs(repr(first), repr(second))
@@ -410,18 +418,11 @@ class TestCase(_SuiteMember):
             self._list_difference(left, right, left, right, msg)
 
     def assertDictEqual(self, d1: dict[str, str], d2: dict[str, str], msg: str | None = None) -> None:
-        if len(d1) == len(d2):
-            equal = True
-            for key in d1:
-                if key not in d2 or d1[key] != d2[key]:
-                    equal = False
-                    break
-            if equal:
-                return
-        sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
-        message = sides[0] + " != " + sides[1]
-        diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
-        self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
+        if d1 != d2:
+            sides = _short_reprs(_mapping_text(d1, False), _mapping_text(d2, False))
+            message = sides[0] + " != " + sides[1]
+            diff = list(difflib.ndiff(_mapping_text(d1, True).splitlines(), _mapping_text(d2, True).splitlines()))
+            self.fail(self._formatMessage(msg, self._truncateMessage(message, "\n" + "\n".join(diff))))
 
     def _failMembership(self, member: str, container: str, msg: str | None, expected: bool) -> None:
         detail = " not found in " if expected else " unexpectedly found in "
@@ -478,6 +479,13 @@ class TestCase(_SuiteMember):
 
     def tearDown(self) -> None:
         pass
+
+
+def _baseAssertEqual(self: TestCase, first: str | bytes, second: str | bytes, msg: str | None = None) -> None:
+    if not first == second:
+        difference = _inequality_message(_safe_repr(first), _safe_repr(second))
+        msg = self._formatMessage(msg, difference)
+        raise self.failureException(msg)
 
 
 def _validateCaseMethod(case: TestCase, methodName: str) -> None:
@@ -676,8 +684,11 @@ class TestResult:
     def addSuccess(self, test: TestCase) -> None:
         pass
 
-    def addSkip(self, test: TestCase, reason: str) -> None:
-        self.skipped.append((test, reason))
+    if TYPE_CHECKING:
+        def addSkip(self, test: TestCase, reason: str) -> None: ...
+    else:
+        def addSkip(self, test, reason):
+            self.skipped.append((test, reason))
 
     def addUnexpectedSuccess(self, test: TestCase) -> None:
         try:

@@ -39,6 +39,19 @@ def current():
     path_ref = weakref.ref(path)
     with warnings.catch_warnings(record=True) as seen:
         warnings.simplefilter("always", ResourceWarning)
+        closed = os.scandir(directory)
+        closed.close()
+        closed.close()
+        del closed
+        exhausted = os.scandir(directory)
+        for _entry in exhausted:
+            pass
+        del exhausted
+        with os.scandir(directory) as scoped:
+            next(scoped)
+        del scoped
+        gc.collect()
+        assert not seen
         iterator = os.scandir(path)
         del path
         assert path_ref() is not None

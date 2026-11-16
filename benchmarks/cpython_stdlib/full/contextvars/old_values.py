@@ -18,6 +18,21 @@ dynamic.reset(second)
 print(dynamic.get() is None)
 dynamic.reset(first)
 print(dynamic.get(None) is None)
+explicit = dynamic.set(first.old_value)
+stored = dynamic.set(None)
+saved = stored.old_value
+assert saved is Token.MISSING
+assert stored.old_value is Token.MISSING
+assert first.MISSING is stored.old_value
+dynamic.reset(stored)
+dynamic.reset(explicit)
+optional: ContextVar[object | None] = ContextVar("optional")
+optional.set(first.old_value)
+previous = optional.set(None)
+saved_optional = previous.old_value
+assert previous.old_value is Token.MISSING
+assert saved_optional is first.MISSING
+assert optional.set(None).old_value is None
 number: ContextVar[int] = ContextVar("count", default=1)
 large = 2 ** 180 + 101
 number.set(large)

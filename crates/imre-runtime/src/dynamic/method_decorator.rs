@@ -2,6 +2,29 @@
 use super::Context;
 use super::value::{Error, FALSE, Id, Result, TRUE, Value};
 
+pub(super) fn owner(name: &str) -> Option<&'static str> {
+    match name {
+        "classmethod" => Some("classmethod"),
+        "staticmethod" => Some("staticmethod"),
+        _ => None,
+    }
+}
+
+/// Return the callable and writable namespace stored on a method decorator.
+pub(super) fn fields(value: &Value) -> Option<(Id, Id)> {
+    match *value {
+        Value::ClassMethod {
+            callable,
+            dictionary,
+        }
+        | Value::StaticMethod {
+            callable,
+            dictionary,
+        } => Some((callable, dictionary)),
+        _ => None,
+    }
+}
+
 /// Copy the eagerly assigned function metadata without evaluating its annotations.
 fn copy_metadata(ctx: &mut Context, callable: Id) -> Result<Id> {
     let dictionary = ctx.dict(Vec::new());

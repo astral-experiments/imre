@@ -21,11 +21,12 @@ impl Defaults {
 pub(super) fn prepare(
     graph: &SourceGraph,
     module: ModuleId,
-    f: &mut ast::StmtFunctionDef,
+    f: &mut Cow<'_, ast::StmtFunctionDef>,
+    classes: &Classes,
 ) -> Defaults {
     Defaults {
         module,
-        forwarded: expand(graph, module, f),
+        forwarded: expand(graph, module, f, classes),
     }
 }
 
@@ -34,7 +35,7 @@ pub(super) fn prepare(
 pub(super) fn prepare_method(
     graph: &SourceGraph,
     module: ModuleId,
-    method: &mut ast::StmtFunctionDef,
+    method: &mut Cow<'_, ast::StmtFunctionDef>,
     context: records::MethodContext,
     classes: &Classes,
 ) -> (Defaults, Option<DefinitionId>) {
@@ -49,14 +50,14 @@ pub(super) fn prepare_method(
             Some(origin),
         )
     } else {
-        (prepare(graph, module, method), None)
+        (prepare(graph, module, method, classes), None)
     }
 }
 
 fn expand_initializer(
     graph: &SourceGraph,
     module: ModuleId,
-    method: &mut ast::StmtFunctionDef,
+    method: &mut Cow<'_, ast::StmtFunctionDef>,
     context: records::MethodContext,
     classes: &Classes,
 ) -> Option<DefinitionId> {
@@ -161,6 +162,7 @@ fn expand_initializer(
             ctx: ast::ExprContext::Load,
         })
     }));
+    let method = method.to_mut();
     let ast::Stmt::Expr(stmt) = &mut method.body[after_doc] else {
         unreachable!()
     };
@@ -207,21 +209,24 @@ impl<'a> Visitor<'a> for Uses<'a> {
     }
 }
 
-/// Expand a single forwarding call only when all of the callee's positional
-/// slots are supplied and every remaining keyword has an immutable default.
-/// Return the origin of the appended AST nodes so their original ranges remain valid.
-fn expand(
-    graph: &SourceGraph,
+/// The source of each forwarded default and the single pack use it replaces.
+struct Forwarding<'a> {
+    statement: usize,
+    range: ruff_text_size::TextRange,
+    origin: ModuleId,
+    options: Vec<&'a ast::ParameterWithDefault>,
+}
+
+fn forwarding<'a>(
+    graph: &'a SourceGraph,
     module: ModuleId,
-    function: &mut ast::StmtFunctionDef,
-) -> Option<(usize, ModuleId)> {
+    function: &ast::StmtFunctionDef,
+    classes: &'a Classes,
+    constructor_only: bool,
+) -> Option<Forwarding<'a>> {
     let parameters = &function.parameters;
     let keyword = parameters.kwarg.as_ref()?;
-    if function.is_async
-        || parameters.vararg.is_some()
-        || keyword.annotation.is_some()
-        || !function.decorator_list.is_empty()
-    {
+    if function.is_async || parameters.vararg.is_some() || keyword.annotation.is_some() {
         return None;
     }
     let bound: HashSet<_> = parameters
@@ -248,55 +253,105 @@ fn expand(
         };
         uses.visit_stmt(stmt);
         if let Some(ast::Expr::Call(call)) = expr
-            && let [kw] = call.arguments.keywords.as_slice()
+            && let Some((kw, written)) = call.arguments.keywords.split_last()
+            && written.iter().all(|kw| kw.arg.is_some())
             && kw.arg.is_none()
             && matches!(&kw.value, ast::Expr::Name(n) if n.id.as_str() == keyword.name.as_str())
             && !calls::starred(call)
             && let ast::Expr::Name(name) = &*call.func
             && let Some(Binding::Definition(def)) = graph.resolve(module, &call.func)
         {
-            site = Some((
-                index,
-                def,
-                name.id.as_str(),
-                call.arguments.args.len(),
-                kw.range,
-            ));
+            site = Some((index, def, name.id.as_str(), call, written, kw.range));
         }
     }
-    let (index, def, name, supplied, range) = site?;
+    let (index, def, name, call, written, range) = site?;
     if uses.reads != 1 || !uses.safe || uses.bound.contains(name) {
         return None;
     }
-    let ast::Stmt::FunctionDef(target) =
-        &graph.modules[def.module].parsed.syntax().body[def.statement]
-    else {
-        return None;
+    let (target, receiver, origin) = match &graph.modules[def.module].parsed.syntax().body
+        [def.statement]
+    {
+        ast::Stmt::FunctionDef(f) if !constructor_only && written.is_empty() => (f, 0, def.module),
+        ast::Stmt::ClassDef(_) if graph.modules[module].bundled && module == def.module => {
+            let class = &classes.definitions[*classes.ids.get(&def)?];
+            // Only an ordinary class call uses the initializer's keyword contract.
+            if class.abc
+                || class.enum_members.is_some()
+                || class.methods.iter().any(|m| m.name.as_str() == "__new__")
+            {
+                return None;
+            }
+            let init = class.initializer?;
+            (&*class.methods[init], 1, class.method_origins[init].module)
+        }
+        _ => return None,
     };
     let callee = &target.parameters;
+    let supplied = receiver + call.arguments.args.len();
     if !target.decorator_list.is_empty()
         || target.is_async
         || target.type_params.is_some()
-        || callee.kwarg.is_some()
         || callee.vararg.is_some()
-        || callee.posonlyargs.len() + callee.args.len() != supplied
+        || (receiver == 0 && supplied != callee.posonlyargs.len() + callee.args.len())
     {
         return None;
     }
-    for option in &callee.kwonlyargs {
+    let remaining = callee
+        .args
+        .get(supplied.checked_sub(callee.posonlyargs.len())?..)?;
+    let (options, origin) = if callee.kwarg.is_some() {
+        // Another wrapper can forward to the same closed constructor, even
+        // when the caller's module is checked before the implementation.
+        if receiver != 0 || !graph.modules[def.module].bundled || !callee.kwonlyargs.is_empty() {
+            return None;
+        }
+        let next = forwarding(graph, def.module, target, classes, true)?;
+        (next.options, next.origin)
+    } else {
+        let remaining = remaining.iter().chain(&callee.kwonlyargs);
+        let options = remaining
+            .filter(|p| {
+                !written
+                    .iter()
+                    .any(|kw| kw.arg.as_deref() == Some(p.name().as_str()))
+            })
+            .collect();
+        (options, origin)
+    };
+    for option in &options {
         let name = option.name().as_str();
         if name == uses.keyword
             || uses.names.contains(name)
             || option.annotation().is_some_and(|a| !scalar_annotation(a))
-            || !option.default.as_deref().is_some_and(|e| {
-                calls::scalar_literal(e, &graph.modules[def.module].source).is_ok()
-            })
+            || !option
+                .default
+                .as_deref()
+                .is_some_and(|e| calls::scalar_literal(e, &graph.modules[origin].source).is_ok())
         {
             return None;
         }
     }
-    let expanded = callee
-        .kwonlyargs
+    Some(Forwarding {
+        statement: index,
+        range,
+        origin,
+        options,
+    })
+}
+
+fn expand(
+    graph: &SourceGraph,
+    module: ModuleId,
+    function: &mut Cow<'_, ast::StmtFunctionDef>,
+    classes: &Classes,
+) -> Option<(usize, ModuleId)> {
+    let Forwarding {
+        statement: index,
+        range,
+        origin,
+        options,
+    } = forwarding(graph, module, function, classes, false)?;
+    let expanded: Vec<_> = options
         .iter()
         .map(|p| {
             let name = p.name().as_str();
@@ -313,12 +368,13 @@ fn expand(
             }
         })
         .collect();
-    let first = parameters.iter_non_variadic_params().count();
+    let first = function.parameters.iter_non_variadic_params().count();
+    let function = function.to_mut();
     function.parameters.kwarg = None;
     function
         .parameters
         .kwonlyargs
-        .extend(callee.kwonlyargs.iter().cloned());
+        .extend(options.into_iter().cloned());
     let value = match &mut function.body[index] {
         ast::Stmt::Assign(s) => &mut *s.value,
         ast::Stmt::Expr(s) => &mut *s.value,
@@ -328,8 +384,9 @@ fn expand(
     let ast::Expr::Call(call) = value else {
         unreachable!()
     };
-    call.arguments.keywords = expanded;
-    Some((first, def.module))
+    call.arguments.keywords.pop();
+    call.arguments.keywords.extend(expanded);
+    Some((first, origin))
 }
 
 fn scalar_annotation(expr: &ast::Expr) -> bool {

@@ -83,11 +83,57 @@ def cached_decoder(package):
         del cache.decode
 
 
+def pairs_hook_results():
+    import gc
+    import json
+    import sys
+    import weakref
+
+    refs = []
+    seen = []
+
+    class Child:
+        pass
+
+    def visit(pairs):
+        if pairs[0][0] == 'child':
+            child = Child()
+            refs.append(weakref.ref(child))
+            return child
+        if pairs[0][0] == 'discard':
+            assert pairs[0][1] is refs[0]()
+            return None
+        gc.collect()
+        assert refs[0]() is None
+        seen.extend(key for key, _ in pairs)
+        return [value for _, value in pairs]
+
+    result = json.loads(r'[{"discard":{"child":1}},{"a long key":1,"a long \u006bey":2}]',
+                        object_pairs_hook=visit)
+    assert result == [None, [1, 2]] and seen[0] is seen[1]
+
+    def lower_limit(pairs):
+        sys.set_int_max_str_digits(640)
+
+    limit = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(0)
+        try:
+            json.loads('[{},' + '8' * 700 + ']', object_pairs_hook=lower_limit)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('an earlier hook changed the limit for this integer')
+    finally:
+        sys.set_int_max_str_digits(limit)
+
+
 def current():
     import importlib
     import json
     import sys
 
+    pairs_hook_results()
     scanstrings()
     surrogate_documents()
     names = ('json', 'json.decoder', 'json.scanner', 'json.encoder', '_json')

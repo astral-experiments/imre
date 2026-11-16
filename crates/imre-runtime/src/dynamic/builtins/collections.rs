@@ -3,23 +3,23 @@ use super::super::value::{DictViewKind, NOT_IMPLEMENTED};
 use super::*;
 use num_traits::Signed;
 
+static SORTING_EMPTY: crate::SortMarker<Id> = crate::SortMarker(NONE);
+
+/// Clearing an already detached list leaves the active sort's marker intact.
+fn take_list_contents(items: &mut Vec<Id>) -> Vec<Id> {
+    if SORTING_EMPTY.is_untouched(items) {
+        Vec::new()
+    } else {
+        std::mem::take(items)
+    }
+}
+
 /// Clear container storage, then finalize any buffered writer whose last owner was removed.
 pub(in super::super) fn clear_container(ctx: &mut Context, receiver: Id) {
-    let owns_finalizer = |&id: &Id| ctx.heap.could_own_finalizer(id, true);
-    let released = ctx.heap.has_unbound_finalizer(NONE)
-        && match ctx.heap.get(receiver) {
-            Value::List(items) => items.iter().any(owns_finalizer),
-            Value::Dict(entries)
-            | Value::DefaultDict { entries, .. }
-            | Value::Set { entries, .. } => entries
-                .iter()
-                .any(|(key, value)| owns_finalizer(key) || owns_finalizer(value)),
-            Value::Deque(ring) => ring.items.iter().any(owns_finalizer),
-            _ => unreachable!("clearable container"),
-        };
+    let released = ctx.heap.has_unbound_finalizer(NONE) && ctx.heap.clear_owns_finalizer(receiver);
     match ctx.heap.get_mut(receiver) {
         Value::List(items) => {
-            for item in std::mem::take(items) {
+            for item in take_list_contents(items) {
                 ctx.heap.weak_edge_removed(item);
             }
         }
@@ -53,6 +53,24 @@ pub(super) fn extremum(
             "{name} expected at least 1 argument, got 0"
         )));
     };
+    if let [left, right] = *args
+        && kwargs.is_empty()
+    {
+        // Two exact numbers have no comparison callbacks or iterator state to retain.
+        let order = match (ctx.heap.get(right), ctx.heap.get(left)) {
+            (Value::Int(right), Value::Int(left)) => Some(right.cmp(left)),
+            (Value::Float(right), Value::Float(left)) => right.partial_cmp(left),
+            _ => None,
+        };
+        if let Some(order) = order {
+            let better = if name == "min" {
+                order.is_lt()
+            } else {
+                order.is_gt()
+            };
+            return Ok(if better { right } else { left });
+        }
+    }
     let [key, default] = bind_method_arguments(name, &[], kwargs, ["key", "default"], 0)?;
     let key = key.filter(|&key| key != NONE);
     if args.len() > 1 {
@@ -144,8 +162,10 @@ pub(super) fn sorted(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) ->
             args.len()
         )));
     };
-    let values = ctx.items(*iterable)?;
-    let list = ctx.alloc(Value::List(values));
+    let list = ctx.alloc(Value::List(Vec::new()));
+    let mark = ctx.heap.temporary_mark();
+    list_extend(ctx, list, *iterable)?;
+    ctx.heap.release_temporaries_since(mark);
     list_sort(ctx, list, &[], kwargs)?;
     Ok(list)
 }
@@ -159,24 +179,18 @@ fn list_sort(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, Id
     };
     let count = live.len();
     ctx.heap.reserve_temporaries(count)?;
-    ctx.sorting_lists
-        .try_reserve(1)
-        .map_err(|_| crate::Error::memory_error())?;
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
-    let mut values = std::mem::take(live);
+    let mut values = std::mem::replace(live, SORTING_EMPTY.empty());
     for &value in &values {
         ctx.heap.keep(value);
     }
-    ctx.sorting_lists.push(receiver);
     let result = sort_list_items(ctx, &mut values, key, reverse);
-    ctx.sorting_lists.pop();
     let Value::List(live) = ctx.heap.get_mut(receiver) else {
         unreachable!()
     };
-    // An append allocates storage even if the callback subsequently pops the item.
-    let modified = live.capacity() != 0;
+    let modified = !SORTING_EMPTY.is_untouched(live);
     *live = values;
     result?;
     if modified {
@@ -382,23 +396,7 @@ pub(in super::super) fn remove_dict_item_hashed(
     let Some(index) = ctx.find_dictionary_key(dict, key, hash)?.1 else {
         return Ok(None);
     };
-    Ok(Some(remove_table_entry(ctx, dict, index)?.1))
-}
-
-pub(in super::super) fn remove_table_entry(
-    ctx: &mut Context,
-    receiver: Id,
-    index: usize,
-) -> Result<(Id, Id)> {
-    let (Value::Dict(entries) | Value::DefaultDict { entries, .. } | Value::Set { entries, .. }) =
-        ctx.heap.get_mut(receiver)
-    else {
-        unreachable!("dictionary or set payload")
-    };
-    let (key, value) = entries.remove(index)?;
-    ctx.heap.weak_edge_removed(key);
-    ctx.heap.weak_edge_removed(value);
-    Ok((key, value))
+    Ok(Some(ctx.heap.remove_table_entry(dict, index)?.1))
 }
 
 pub(in super::super) fn set_member(
@@ -475,6 +473,29 @@ pub(in super::super) fn update_set(ctx: &mut Context, target: Id, source: Id) ->
     updated
 }
 
+/// Release each yielded key before requesting the next one or dropping the iterator.
+fn iterable_members_match(ctx: &mut Context, receiver: Id, other: Id, present: bool) -> Result<Id> {
+    let iterator = ctx.iterator(other)?;
+    ctx.heap.keep(iterator);
+    let mark = ctx.heap.temporary_mark();
+    let mut limit = ctx.heap.streaming_collection_limit();
+    loop {
+        ctx.collect_streaming_garbage(&mut limit);
+        let Some(item) = ctx.next_item(iterator)? else {
+            return Ok(TRUE);
+        };
+        ctx.heap.keep(item);
+        let member = match set_member(ctx, receiver, item, false) {
+            Ok(member) => member,
+            Err(error) => return ctx.release_with_result(mark, Err(error)),
+        };
+        ctx.discard_truth(mark);
+        if member != present {
+            return Ok(FALSE);
+        }
+    }
+}
+
 fn set_issubset(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> {
     let storage = ctx.scalar_value(other);
     if matches!(ctx.heap.get(storage), Value::Set { .. }) {
@@ -502,13 +523,32 @@ fn set_intersection(ctx: &mut Context, receiver: Id, operands: &[Id]) -> Result<
         } else {
             intersect_iterable(ctx, result, other)?
         };
-        let collect = ctx.heap.discard_truth_operands(roots, ctx.modules);
-        ctx.heap.keep(result);
-        if collect {
-            ctx.collect_unreachable();
-        }
+        ctx.discard_temporaries(roots, Some(result));
     }
     Ok(result)
+}
+
+/// Prove an exact string contains none of a set's single-byte string keys.
+fn disjoint_ascii_characters(ctx: &Context, receiver: Id, other: Id) -> bool {
+    let Value::Str(text) = ctx.heap.get(other) else {
+        return false;
+    };
+    let entries = ctx.stored_entries(receiver);
+    if entries.len() > 128 {
+        return false;
+    }
+    let mut members = 0_u128;
+    for &(key, _) in entries.iter() {
+        let Value::Str(character) = ctx.heap.get(key) else {
+            return false;
+        };
+        let [byte] = character.as_bytes() else {
+            return false;
+        };
+        members |= 1_u128 << byte;
+    }
+    text.bytes()
+        .all(|byte| !byte.is_ascii() || members & (1_u128 << byte) == 0)
 }
 
 /// Hash each yielded key once and stop on a match that completes the intersection.
@@ -518,6 +558,9 @@ fn intersect_iterable(ctx: &mut Context, receiver: Id, other: Id) -> Result<Id> 
         entries: Default::default(),
         frozen: matches!(ctx.heap.get(receiver), Value::Set { frozen: true, .. }),
     });
+    if disjoint_ascii_characters(ctx, receiver, other) {
+        return Ok(found);
+    }
     let iterator = ctx.iterator(other)?;
     ctx.heap.keep(iterator);
     let step = ctx.heap.temporary_mark();
@@ -637,10 +680,20 @@ pub(super) fn construct(
     {
         return Ok(*one);
     }
+    if name == "list"
+        && let [source] = args
+    {
+        if let Some(list) = ctx.list_from_int_character_map(*source) {
+            return list;
+        }
+        let list = ctx.alloc(Value::List(Vec::new()));
+        list_extend(ctx, list, *source)?;
+        return Ok(list);
+    }
     if let [source] = args
         && matches!(ctx.heap.get(*source), Value::Generator { .. })
     {
-        return ctx.collect_generator(*source, name == "tuple");
+        return ctx.collect_iterable(*source, name == "tuple");
     }
     let items = args
         .first()
@@ -737,6 +790,9 @@ pub(super) fn method(
     if matches!(
         name,
         "list.__add__"
+            | "list.__contains__"
+            | "tuple.__contains__"
+            | "list.__setitem__"
             | "list.__iadd__"
             | "list.__init__"
             | "list.__iter__"
@@ -786,18 +842,7 @@ pub(super) fn method(
             )));
         }
         let receiver = ctx.scalar_value(receiver);
-        let one_arg = || {
-            if !kwargs.is_empty() {
-                return Err(type_error(format!("{name}() takes no keyword arguments")));
-            }
-            match args {
-                [value] => Ok(*value),
-                _ => Err(type_error(format!(
-                    "{name}() takes exactly one argument ({} given)",
-                    args.len()
-                ))),
-            }
-        };
+        let one_arg = || super::one_positional_arg(name, args, kwargs);
         return match method {
             "__getitem__" => ctx.sequence_subscript(receiver, one_arg()?),
             "append" => {
@@ -887,19 +932,7 @@ pub(super) fn method(
             }
         };
     }
-    let slot = matches!(
-        name,
-        "dict.__init__"
-            | "dict.__or__"
-            | "dict.__ror__"
-            | "dict.__ior__"
-            | "dict.__eq__"
-            | "dict.__repr__"
-            | "dict.__len__"
-            | "dict.__iter__"
-            | "dict.__setitem__"
-            | "dict.__delitem__"
-    );
+    let slot = super::dict_slot(name);
     let set_method = name.split_once('.').filter(|(owner, method)| {
         *method != "__reduce__" && super::set_methods(owner).contains(method)
     });
@@ -1036,7 +1069,7 @@ pub(super) fn method(
                 let message = ctx.text("popitem(): dictionary is empty");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            let (key, value) = remove_table_entry(ctx, receiver, last)?;
+            let (key, value) = ctx.heap.remove_table_entry(receiver, last)?;
             Ok(ctx.alloc(Value::Tuple(vec![key, value])))
         }
         "dict.copy" => {
@@ -1087,10 +1120,7 @@ pub(super) fn method(
             if name == "dict.setdefault" {
                 return ctx.set_dictionary_key(receiver, args[0], default, None, false);
             }
-            let (_, index) = ctx.find_dictionary_key(receiver, args[0], None)?;
-            Ok(index.map_or(default, |i| {
-                ctx.dict_entries(receiver).expect("dictionary")[i].1
-            }))
+            Ok(ctx.dictionary_value(receiver, args[0])?.unwrap_or(default))
         }
         "dict.__len__" => {
             arity(name, args, 0, 0)?;
@@ -1169,21 +1199,7 @@ pub(super) fn method(
                     };
                 return ctx.set_members_match(source, probe, false);
             }
-            let iterator = ctx.iterator(other)?;
-            ctx.heap.keep(iterator);
-            let mark = ctx.heap.temporary_mark();
-            let mut limit = ctx.heap.streaming_collection_limit();
-            loop {
-                ctx.collect_streaming_garbage(&mut limit);
-                let Some(item) = ctx.next_item(iterator)? else {
-                    return Ok(TRUE);
-                };
-                let member = set_member(ctx, receiver, item, false)?;
-                ctx.discard_truth(mark);
-                if member {
-                    return Ok(FALSE);
-                }
-            }
+            iterable_members_match(ctx, receiver, other, false)
         }
         "set.issuperset" | "frozenset.issuperset" | "set.issubset" | "frozenset.issubset" => {
             let [source] = args else {
@@ -1199,13 +1215,7 @@ pub(super) fn method(
             if matches!(ctx.heap.get(other), Value::Set { .. }) {
                 return ctx.order_sets(">=", receiver, other);
             }
-            let iterator = ctx.iterator(*source)?;
-            while let Some(item) = ctx.next_item(iterator)? {
-                if !set_member(ctx, receiver, item, false)? {
-                    return Ok(FALSE);
-                }
-            }
-            Ok(TRUE)
+            iterable_members_match(ctx, receiver, *source, true)
         }
         "set.intersection" | "frozenset.intersection" => set_intersection(ctx, receiver, args),
         "set.difference" | "frozenset.difference" => ctx.set_difference(receiver, args),
@@ -1262,7 +1272,7 @@ pub(super) fn method(
                 let message = ctx.text("pop from an empty set");
                 return Err(ctx.lookup_error("KeyError", message));
             };
-            Ok(remove_table_entry(ctx, receiver, last)?.0)
+            Ok(ctx.heap.remove_table_entry(receiver, last)?.0)
         }
         "set.discard" | "set.remove" => {
             let key = super::one_positional_arg(name, args, kwargs)?;
@@ -1289,7 +1299,7 @@ pub(super) fn method(
                 Err(error) => return Err(error),
             };
             if let Some(index) = index {
-                remove_table_entry(ctx, receiver, index)?;
+                ctx.heap.remove_table_entry(receiver, index)?;
             } else if name == "set.remove" {
                 return Err(ctx.lookup_error("KeyError", key));
             }
@@ -1372,22 +1382,14 @@ fn find_sequence_item(
     needle: Id,
     positions: std::ops::Range<i64>,
 ) -> Result<Option<i64>> {
+    let mark = ctx.heap.temporary_mark();
     for i in positions {
         let Some((_, Some(item))) = ctx.sequence_at(receiver, i as usize) else {
             break;
         };
-        if item != needle {
-            let mark = ctx.heap.temporary_mark();
-            ctx.heap.keep(item);
-            let matched = ctx
-                .binary("==", item, needle)
-                .and_then(|equal| ctx.truth(equal));
-            ctx.heap.release_temporaries_since(mark);
-            if !matched? {
-                continue;
-            }
+        if ctx.sequence_item_matches(item, needle, mark)? {
+            return Ok(Some(i));
         }
-        return Ok(Some(i));
     }
     Ok(None)
 }
@@ -1419,25 +1421,19 @@ pub(in crate::dynamic) fn list_extend(ctx: &mut Context, receiver: Id, source: I
                 .try_reserve(hint)
                 .map_err(|_| Error::new("MemoryError", ""))?;
         }
-        while let Some(item) = ctx.next_item(iterator)? {
-            let items = list_items_mut(ctx, receiver)?;
-            items
-                .try_reserve(1)
-                .map_err(|_| Error::new("MemoryError", ""))?;
-            items.push(item);
-        }
+        ctx.extend_list_from_iterator(receiver, iterator)?;
     }
     Ok(())
 }
 
 /// Call a builtin slot on the receiver’s native payload, bypassing its override.
-pub(super) fn builtin_slot(
+pub(in crate::dynamic) fn builtin_slot(
     ctx: &mut Context,
     name: &str,
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let (owner, method) = name.split_once('.').expect("builtin slot");
+    let (owner, method) = name.rsplit_once('.').expect("builtin slot");
     let Some((&object, rest)) = args.split_first() else {
         return Err(type_error(format!(
             "descriptor '{method}' of '{owner}' object needs an argument"
@@ -1451,8 +1447,41 @@ pub(super) fn builtin_slot(
         )));
     }
     let storage = ctx.scalar_value(object);
+    if name == "list.__setitem__" {
+        if !kwargs.is_empty() {
+            return Err(type_error(
+                "wrapper __setitem__() takes no keyword arguments",
+            ));
+        }
+        let [key, value] = rest else {
+            return Err(type_error(format!(
+                "__setitem__ expected 2 arguments, got {}",
+                rest.len()
+            )));
+        };
+        // A list assigned to its own slice copies its contents without invoking __iter__.
+        let value = if object == *value && matches!(ctx.heap.get(*key), Value::Slice(_)) {
+            storage
+        } else {
+            *value
+        };
+        ctx.put_item(storage, *key, value)?;
+        return Ok(NONE);
+    }
     let set_op = set_operator(method);
-    if matches!(method, "__add__" | "__iadd__" | "__contains__" | "__pow__") || set_op.is_some() {
+    let comparison = super::super::operators::comparison_op(method);
+    if matches!(
+        method,
+        "__add__"
+            | "__iadd__"
+            | "__contains__"
+            | "__getitem__"
+            | "__pow__"
+            | "__truediv__"
+            | "__rtruediv__"
+    ) || set_op.is_some()
+        || comparison.is_some()
+    {
         if !kwargs.is_empty() {
             return Err(type_error(format!(
                 "wrapper {method}() takes no keyword arguments"
@@ -1488,8 +1517,41 @@ pub(super) fn builtin_slot(
                 rest.len()
             )));
         };
+        if owner == "_contextvars.Context" {
+            return match method {
+                "__contains__" => ctx.contains(*value, storage).map(boolean),
+                "__getitem__" => ctx.get_item(storage, *value),
+                _ if !matches!(ctx.heap.get(*value), Value::Context(_)) => Ok(NOT_IMPLEMENTED),
+                _ => Ok(boolean(
+                    ctx.checked_equal_impl(storage, *value, false)? == (method == "__eq__"),
+                )),
+            };
+        }
         if method == "__contains__" {
-            return Ok(boolean(ctx.contains(*value, object)?));
+            return Ok(boolean(
+                find_sequence_item(ctx, storage, *value, 0..i64::MAX)?.is_some(),
+            ));
+        }
+        if let Some(op) = comparison {
+            return Ok(ctx
+                .real_compare_slot(op, storage, *value)?
+                .unwrap_or(NOT_IMPLEMENTED));
+        }
+        if owner == "float" {
+            let other = ctx.scalar_value(*value);
+            if !matches!(
+                ctx.heap.get(other),
+                Value::Float(_) | Value::Int(_) | Value::Bool(_)
+            ) {
+                return Ok(NOT_IMPLEMENTED);
+            }
+            // Calling a builtin wrapper uses the two native values, bypassing Python overrides.
+            let (left, right) = if method == "__rtruediv__" {
+                (other, storage)
+            } else {
+                (storage, other)
+            };
+            return ctx.binary("/", left, right);
         }
         if owner == "int" {
             return integer::add(ctx, storage, *value);
@@ -1519,8 +1581,10 @@ pub(super) fn builtin_slot(
         "__repr__"
             | "__str__"
             | "__index__"
+            | "__hash__"
             | "__bool__"
             | "__abs__"
+            | "__neg__"
             | "__int__"
             | "__float__"
             | "__iter__"
@@ -1541,10 +1605,14 @@ pub(super) fn builtin_slot(
             return match owner {
                 "list" => Ok(ctx.forward_iterator(object, "list_iterator")),
                 "tuple" => Ok(ctx.forward_iterator(object, "tuple_iterator")),
+                "set" | "frozenset" => Ok(ctx.set_iterator(object)),
                 _ => ctx.iterator(storage),
             };
         }
         if method == "__len__" {
+            if owner == "_contextvars.Context" {
+                return super::call(ctx, "len", &[storage], &[]);
+            }
             let length = match ctx.heap.get(storage) {
                 Value::List(items)
                 | Value::Tuple(items)
@@ -1560,25 +1628,28 @@ pub(super) fn builtin_slot(
         if method == "__abs__" {
             return super::absolute_value(ctx, object);
         }
+        if method == "__neg__" {
+            return ctx.op("neg", storage, NONE, NONE);
+        }
         if method == "__int__" {
             return integer::truncate_real(ctx, object);
         }
         if method == "__float__" {
-            if let Value::Float(number) = *ctx.heap.get(storage) {
-                return Ok(if storage == object {
-                    object
-                } else {
-                    ctx.alloc(Value::Float(number))
-                });
+            if owner == "float" {
+                return Ok(float::exact_value(ctx, object, storage));
             }
             let number = crate::floats::int_to_float(&ctx.as_int(storage)?)?;
             return Ok(ctx.alloc(Value::Float(number)));
         }
+        if method == "__hash__" {
+            let hash = ctx.dictionary_hash(storage)?;
+            return Ok(ctx.int(hash));
+        }
         if method == "__index__" {
             return Ok(integer::exact_value(ctx, object));
         }
-        if method == "__str__" {
-            return Ok(storage);
+        if method == "__str__" && owner == "str" {
+            return ctx.unchanged_string(object, storage);
         }
         let text = match ctx.heap.get(storage) {
             Value::Bool(value) if owner == "int" => u8::from(*value).to_string(),
@@ -1615,8 +1686,7 @@ pub(super) fn builtin_slot(
     let Value::List(items) = ctx.heap.get_mut(storage) else {
         unreachable!()
     };
-    let old = std::mem::take(items);
-    for item in old {
+    for item in take_list_contents(items) {
         ctx.heap.weak_edge_removed(item);
     }
     if let Some(&input) = rest.first() {

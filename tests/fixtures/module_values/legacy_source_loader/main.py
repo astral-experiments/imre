@@ -2,6 +2,8 @@ import os
 import sys
 import tempfile
 from importlib.machinery import SourceFileLoader
+from importlib.util import decode_source
+from pathlib import Path
 from types import ModuleType
 import warnings
 
@@ -92,5 +94,23 @@ with tempfile.TemporaryDirectory() as root:
         else:
             raise AssertionError("frozen bootstrap warning ignored")
     assert name not in sys.modules
+
+with tempfile.TemporaryDirectory() as root:
+    path = os.path.join(root, "labels.py")
+    loader = SourceFileLoader("labels", path)
+    data = b"# coding: latin-1\r\ntitle = 'caf\xe9'\r\n"
+    with open(path, "wb") as stream:
+        stream.write(data)
+    assert loader.get_source("labels") == decode_source(data) == "# coding: latin-1\ntitle = 'café'\n"
+    module = ModuleType("labels")
+    SourceFileLoader("labels", Path(path)).exec_module(module)
+    assert module.title == "café"
+    os.remove(path)
+    try:
+        loader.get_source("labels")
+    except ImportError as exc:
+        assert exc.name == "labels" and isinstance(exc.__cause__, FileNotFoundError)
+    else:
+        raise AssertionError("missing source was readable")
 
 print("legacy loader ok")

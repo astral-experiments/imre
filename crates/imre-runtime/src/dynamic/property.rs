@@ -8,6 +8,7 @@ pub(super) const METHODS: &[&str] = &[
     "__set__",
     "__delete__",
     "__set_name__",
+    "getter",
     "setter",
     "deleter",
 ];
@@ -18,7 +19,7 @@ pub(super) struct Property {
     set: Id,
     delete: Id,
     pub(super) doc: Id,
-    pub(super) name: Option<Id>,
+    name: Option<Id>,
     getter_doc: bool,
 }
 
@@ -40,6 +41,38 @@ impl Value {
     }
 }
 
+impl Context {
+    pub(super) fn property_is_abstract(&mut self, receiver: Id) -> Result<Id> {
+        // A marker's Python lookup or truth test can replace the remaining accessors.
+        let mut marked = |select: fn(&Property) -> Id| -> Result<bool> {
+            let property = self
+                .heap
+                .get(receiver)
+                .property()
+                .expect("validated property");
+            let accessor = select(property);
+            Ok(accessor != NONE && self.is_abstract_method(accessor)?)
+        };
+        Ok(super::builtins::boolean(
+            marked(|p| p.get)? || marked(|p| p.set)? || marked(|p| p.delete)?,
+        ))
+    }
+
+    /// Install the new strong edge before releasing the previous name to Python.
+    pub(super) fn replace_property_name(&mut self, receiver: Id, name: Option<Id>) {
+        let property = self.heap.get_mut(receiver).property_mut().unwrap();
+        if let Some(old) = std::mem::replace(&mut property.name, name)
+            && Some(old) != name
+            && self.heap.observes_released_roots()
+            && self.heap.could_release_callback_result(old)
+        {
+            let mark = self.heap.temporary_mark();
+            self.heap.keep(old);
+            self.unwind_operands(mark);
+        }
+    }
+}
+
 impl Property {
     pub(super) fn readonly(get: Id, name: Id) -> Self {
         Self {
@@ -49,7 +82,7 @@ impl Property {
         }
     }
 
-    pub(super) fn children(self, visit: &mut super::value::MarkQueue<'_>) {
+    pub(super) fn children(self, visit: &mut impl super::value::VisitReferences) {
         visit.extend([self.get, self.set, self.delete, self.doc]);
         visit.extend(self.name);
     }
@@ -131,8 +164,12 @@ fn getter_doc(ctx: &mut Context, getter: Id) -> Result<Id> {
     }
 }
 
+pub(super) fn blank(ctx: &mut Context) -> Id {
+    ctx.alloc(Value::Property(Property::default()))
+}
+
 pub(super) fn construct(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
-    let receiver = ctx.alloc(Value::Property(Property::default()));
+    let receiver = blank(ctx);
     initialize(ctx, receiver, args, kwargs)?;
     Ok(receiver)
 }
@@ -174,7 +211,7 @@ pub(super) fn method(
     args: &[Id],
     kwargs: &[(String, Id)],
 ) -> Result<Id> {
-    let wrapper = !matches!(name, "setter" | "deleter" | "__set_name__");
+    let wrapper = !matches!(name, "getter" | "setter" | "deleter" | "__set_name__");
     let Some((&receiver, args)) = args.split_first() else {
         let msg = if wrapper {
             format!("descriptor '{name}' of 'property' object needs an argument")
@@ -207,10 +244,10 @@ pub(super) fn method(
     }
     let count = args.len();
     match (name, args) {
-        ("setter" | "deleter", [accessor]) => {
+        ("getter" | "setter" | "deleter", [accessor]) => {
             copy_accessor(ctx, receiver, property, name, *accessor)
         }
-        ("setter" | "deleter", _) => Err(Error::new(
+        ("getter" | "setter" | "deleter", _) => Err(Error::new(
             "TypeError",
             format!("property.{name}() takes exactly one argument ({count} given)"),
         )),
@@ -232,7 +269,7 @@ pub(super) fn method(
             Ok(NONE)
         }
         ("__set_name__", [_, value]) => {
-            ctx.heap.get_mut(receiver).property_mut().unwrap().name = Some(*value);
+            ctx.replace_property_name(receiver, Some(*value));
             Ok(NONE)
         }
         ("__get__", _) if count == 0 => Err(Error::new(
@@ -269,6 +306,7 @@ fn copy_accessor(
 ) -> Result<Id> {
     if accessor != NONE {
         match name {
+            "getter" => property.get = accessor,
             "setter" => property.set = accessor,
             "deleter" => property.delete = accessor,
             _ => unreachable!(),
@@ -285,8 +323,10 @@ fn copy_accessor(
         vec![property.get, property.set, property.delete, doc],
         Vec::new(),
     )?;
-    if let Some(copy) = ctx.heap.get_mut(new).property_mut() {
-        copy.name = property.name;
+    if ctx.heap.get(new).property().is_some() {
+        // The subtype constructor can rename the source property.
+        let name = ctx.heap.get(receiver).property().unwrap().name;
+        ctx.replace_property_name(new, name);
     }
     Ok(new)
 }

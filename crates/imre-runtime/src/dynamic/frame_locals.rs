@@ -44,8 +44,6 @@ fn class(ctx: &mut Context) -> Result<Id> {
     }
     let object = ctx.builtin("object");
     let class = ctx.allocate_class(CLASS.into(), scope, vec![object])?;
-    let mapping = super::mapping_abc::class(ctx, "Mapping")?;
-    ctx.heap.abc_registrations.push([mapping, class]);
     ctx.heap
         .set_registered_pattern_flags(class, super::collection_pattern::PatternFlags::MAPPING);
     if let Value::Scope(data) = ctx.heap.get_mut(scope) {
@@ -75,23 +73,21 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
         return Ok((scope, code, unoptimized_locals.is_none()));
     }
     let layout = ctx.code_object(code);
-    let mut names: std::collections::HashSet<_> = layout.freevars.iter().cloned().collect();
-    if let Value::Str(parameters) = ctx.heap.get(layout.parameters) {
-        #[derive(serde::Deserialize)]
-        struct Layout {
-            #[serde(default)]
-            scope_locals: Vec<String>,
-        }
-        let layout: Layout = serde_json::from_str(parameters)
-            .map_err(|error| Error::new("SystemError", error.to_string()))?;
-        names.extend(layout.scope_locals);
+    let mut declared = if matches!(ctx.heap.get(layout.parameters), Value::Str(_)) {
+        ctx.parsed_parameters(code)?.locals.clone()
+    } else {
+        Default::default()
+    };
+    let freevars = layout.definition.freevars();
+    if !freevars.is_empty() {
+        declared.extend(freevars.iter().cloned());
     }
     let empty = ctx.scope("", None);
     let Value::Scope(data) = ctx.heap.get_mut(empty) else {
         unreachable!()
     };
     data.closure.cleared = true;
-    data.closure.declared = names;
+    data.closure.declared = declared;
     let Value::PythonFrame { scope, .. } = ctx.heap.get_mut(frame) else {
         unreachable!()
     };
@@ -102,12 +98,14 @@ fn frame_scope(ctx: &mut Context, frame: Id) -> Result<(Id, Id, bool)> {
 /// A class proxy exposes its captured slots, independently of the class namespace.
 pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> {
     let data = ctx.scope_data(scope);
-    data.class_body.as_ref()?;
+    if !data.in_class_body {
+        return None;
+    }
     let parent = data.parent?;
     #[derive(serde::Deserialize)]
     struct Bindings {
         #[serde(default)]
-        class_frame_reads: Vec<String>,
+        scope_reads: Vec<String>,
         #[serde(default)]
         needs_class_cell: bool,
         #[serde(default)]
@@ -132,7 +130,7 @@ pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> 
         names.push("__classdict__".to_owned());
         cells.push(ctx.class_annotation_dict_cell(scope));
     }
-    for name in bindings.class_frame_reads {
+    for name in bindings.scope_reads {
         if ctx.is_enclosing_freevar(parent, &name) == Some(true) && !names.contains(&name) {
             cells.push(ctx.capture_free_cell(parent, &name));
             names.push(name);
@@ -148,7 +146,7 @@ pub(super) fn class_cells(ctx: &mut Context, scope: Id, code: Id) -> Option<Id> 
 /// Capture the actual namespace while a class body or other unoptimized scope is still active.
 pub(super) fn unoptimized_namespace(ctx: &mut Context, scope: Id, code: Id) -> Result<Option<Id>> {
     let data = ctx.scope_data(scope);
-    if data.parent.is_none() || data.exec_locals.is_some() || data.class_body.is_some() {
+    if data.parent.is_none() || data.exec_locals.is_some() || data.in_class_body {
         return ctx.locals_for_code(scope, code).map(Some);
     }
     Ok(None)
@@ -192,18 +190,23 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
     let (original, code, optimized) = frame_scope(ctx, frame)?;
     let mut names = indexmap::IndexSet::new();
     if optimized {
-        names = ctx.frame_binding_names(original, code)?;
-        names.extend(ctx.scope_data(original).closure.declared.iter().cloned());
+        names = ctx.frame_binding_names(original, code, true)?;
     }
     let slots = names
         .iter()
-        .map(|name| (ctx.heap.code_name(name), NONE))
+        .map(|name| {
+            (
+                ctx.heap
+                    .code_name(super::code_locals::visible_slot_name(name)),
+                NONE,
+            )
+        })
         .collect();
     let slots = ctx.dict(slots);
     ctx.heap.keep(slots);
     let (hash, index) = ctx.find_dictionary_key(slots, key, None)?;
     // Hashing or comparing a Python key can clear this frame.
-    let (scope, ..) = frame_scope(ctx, frame)?;
+    let (scope, code, optimized) = frame_scope(ctx, frame)?;
     if let Some(index) = index {
         let name = &names[index];
         let mut owner = scope;
@@ -217,7 +220,7 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
             if cell.is_some()
                 || data.closure.declared.contains(name)
                 || data.closure.cells.contains_key(name)
-                || data.names.contains_key(name)
+                || data.names.contains_key(name.as_str())
             {
                 return match op {
                     Access::Read => Ok(match cell {
@@ -233,6 +236,19 @@ fn access(ctx: &mut Context, frame: Id, key: Id, op: Access) -> Result<Option<Id
                         if let Some(cell) = cell {
                             ctx.heap.replace_cell(cell, Some(value));
                         } else {
+                            if owner == scope
+                                && optimized
+                                && code != NONE
+                                && !data.closure.cells.contains_key(name)
+                                && let Some(&old) = data.names.get(name.as_str())
+                                && old != value
+                                && ctx
+                                    .parsed_parameters(code)?
+                                    .cell_layout
+                                    .retains_displaced(name, data.closure.cleared)
+                            {
+                                ctx.heap.retain_overwritten_local(frame, old)?;
+                            }
                             ctx.bind_local(owner, name, value);
                         }
                         Ok(None)

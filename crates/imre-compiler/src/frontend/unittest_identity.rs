@@ -20,7 +20,9 @@ impl Checker<'_> {
                 body: vec![Statement::Try {
                     body: vec![Statement::Assign(slot, rendered)],
                     handlers: vec![ir::ExceptHandler {
-                        kinds: vec![exception_kind("Exception").unwrap()],
+                        matcher: crate::ir::ExceptionMatcher::Categories(vec![
+                            exception_kind("Exception").unwrap(),
+                        ]),
                         name: None,
                         body: vec![Statement::Assign(slot, fallback)],
                     }],
@@ -41,14 +43,8 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         let failure = self
             .graph
-            .modules
-            .iter()
-            .find(|m| m.bundled && m.name == "unittest")
-            .and_then(|m| m.bindings.get("_raise_identity_failure"))
-            .and_then(|binding| match binding {
-                Binding::Definition(def) => self.functions.get(def),
-                _ => None,
-            })
+            .bundled_definition("unittest", "_raise_identity_failure")
+            .and_then(|def| self.functions.get(&def))
             .cloned()
             .ok_or_else(|| {
                 error(

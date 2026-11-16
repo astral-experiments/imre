@@ -2,6 +2,7 @@
 
 use super::*;
 pub(super) use crate::types::CachePolicy as Policy;
+use std::result::Result;
 
 pub(super) fn policy(
     graph: &SourceGraph,
@@ -175,13 +176,13 @@ fn build_wrapper(
                 let message = field(arg.clone(), 1, Type::Str);
                 body.push(Statement::If(
                     builtin(Builtin::Bool, Type::Bool, vec![message.clone()]),
-                    vec![Statement::Raise(Some(Expr {
+                    vec![Statement::raise(Expr {
                         ty: Type::Exception,
                         kind: ExprKind::Exception {
                             kind: exception_kind("TypeError").unwrap(),
                             message: Some(Box::new(message)),
                         },
-                    }))],
+                    })],
                     vec![],
                 ));
             }
@@ -261,7 +262,7 @@ fn build_wrapper(
     if policy.capacity < 0 {
         // A callback can clear its own cache. Use the table installed after it returns.
         body.push(Statement::Assign(table_slot, cache()));
-        body.push(Statement::SetItem(
+        body.push(Statement::assign_item(
             Expr::local(table_slot, table),
             key,
             entry,
@@ -319,8 +320,9 @@ impl Checker<'_> {
     pub(super) fn cache_constructor(
         &mut self,
         call: &ast::ExprCall,
-    ) -> Result<Option<Expr>, String> {
-        let policy = match self.resolve(&call.func) {
+        binding: Option<Binding>,
+    ) -> phase::Result<Option<Expr>, String> {
+        let policy = match binding {
             Some(Binding::Intrinsic(Intrinsic::FunctionCache)) => Policy {
                 capacity: -1,
                 typed: false,
@@ -370,7 +372,7 @@ impl Checker<'_> {
         policy: Policy,
         annotations: Option<crate::types::AnnotationOrigin>,
         site: &impl Ranged,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         let (params, returns) = self.types.signature(callable.ty).ok_or_else(|| {
             error(
                 self.source,
@@ -408,10 +410,6 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive indirect cache applications are unsupported",
-                ),
                 function: build_wrapper(
                     self.types,
                     &params,
@@ -435,34 +433,112 @@ impl Checker<'_> {
         })
     }
 
-    pub(super) fn wrapped_function(&self, receiver: &Expr, name: &str) -> Option<Expr> {
-        if name != "__wrapped__" || !matches!(receiver.ty, Type::Callable(_)) {
-            return None;
+    pub(super) fn callable_attribute(
+        &mut self,
+        receiver: &Expr,
+        attribute: &ast::ExprAttribute,
+    ) -> phase::Result<Option<Expr>, String> {
+        let name = attribute.attr.as_str();
+        if let Some(base) = self.types.constructor_base(receiver.ty)
+            && self.classes.methods[base].get(name).is_some_and(|sig| {
+                sig.method.is_some_and(|m| {
+                    m.kind(self.classes.declarations) == crate::classes::MethodKind::Class
+                })
+            })
+        {
+            return Err(
+                self.scoped_builtin_error("descriptor lookup on a class factory", attribute)
+            );
         }
-        Some(
-            if let Some(layout) = self.types.cached_function(receiver.ty) {
-                context_field(receiver.clone(), layout, 0, layout.callable)
+        let site = self.types.source_method_site(receiver.ty);
+        if site.is_some_and(|(_, _, ty)| matches!(ty, None | Some(Type::BuiltinClass)))
+            && typing::attribute_index(name).is_some()
+        {
+            return Err(self.scoped_builtin_error("source method metadata", attribute));
+        }
+        if !matches!(name, "__func__" | "__self__" | "__wrapped__")
+            || !matches!(receiver.ty, Type::Callable(_))
+        {
+            return Ok(None);
+        }
+        let mut scope = calls::ArgumentScope::default();
+        let owner = if let Some((class, index, Some(ty))) = site {
+            if name == "__self__" {
+                return Ok(matches!(ty, Type::Class(_) | Type::BuiltinClass)
+                    .then(|| builtin(Builtin::CallableContext, ty, vec![receiver.clone()])));
+            }
+            let record = &self.classes.declarations.definitions[class];
+            let method = &record.methods[index];
+            let owner = if ty == Type::BuiltinClass {
+                // Only a receiver-independent body accepts an arbitrary explicit cls.
+                // A specialized body must resolve methods against the class supplied by the caller.
+                let declaration = &method.function;
+                let origin = record.method_origins[index];
+                let receiver_name = declaration
+                    .parameters
+                    .iter_non_variadic_params()
+                    .next()
+                    .unwrap()
+                    .name();
+                if !self.graph.session.function_reads_only(
+                    origin.module,
+                    declaration,
+                    crate::analysis::EagerDisplays::Excluded,
+                    |name| name != receiver_name.as_str(),
+                    |_| false,
+                    |_| false,
+                ) {
+                    return Err(
+                        self.scoped_builtin_error("the declaring classmethod function", attribute)
+                    );
+                }
+                self.classes.declarations.ids[&origin]
             } else {
-                builtin(
-                    Builtin::FunctionWrappedGet,
-                    receiver.ty,
-                    vec![receiver.clone()],
-                )
-            },
-        )
+                class
+            };
+            let Some(signature) = self.classes.methods[owner]
+                .get(method.name.as_str())
+                .cloned()
+            else {
+                return Err(self.scoped_builtin_error("the declaring method function", attribute));
+            };
+            scope.hold(self, receiver.clone());
+            self.callable_value(&signature, None, None, attribute)?
+        } else if name != "__wrapped__" {
+            return Ok(None);
+        } else {
+            receiver.clone()
+        };
+        if name == "__func__" {
+            return Ok(Some(scope.finish(owner)));
+        }
+        self.wrapper_link.set(true);
+        // A load spanning lines is positioned at the attribute name.
+        let range =
+            if self.source_line(attribute.start()) == self.source_line(attribute.attr.start()) {
+                attribute.range()
+            } else {
+                attribute.attr.range()
+            };
+        let target = self.types.wrapped_link_type(owner.ty);
+        Ok(Some(scope.finish(builtin(
+            Builtin::FunctionWrappedGet(self.fixed_origin(range, None)),
+            target,
+            vec![owner],
+        ))))
     }
 
     pub(super) fn cache_control(
         &mut self,
         call: &ast::ExprCall,
         receiver: Option<&Expr>,
-    ) -> Result<Option<Expr>, String> {
+    ) -> phase::Result<Option<Expr>, String> {
         let ast::Expr::Attribute(attr) = &*call.func else {
             return Ok(None);
         };
         if !matches!(
             attr.attr.as_str(),
-            "cache_info" | "cache_clear" | "cache_parameters" | "__wrapped__"
+            "cache_info" | "cache_clear" | "cache_parameters"
         ) {
             return Ok(None);
         }
@@ -493,9 +569,6 @@ impl Checker<'_> {
         };
         let (state, capacity) = if let Some((id, params, result)) = declaration {
             let policy = self.classes.cached[&id];
-            if name == "__wrapped__" {
-                return Ok(None);
-            }
             if name == "cache_parameters" {
                 return self.cache_parameters(Some(policy), wrapper, call).map(Some);
             }
@@ -509,11 +582,6 @@ impl Checker<'_> {
             };
             if name == "cache_parameters" {
                 return self.cache_parameters(None, Some(wrapper), call).map(Some);
-            }
-            if name == "__wrapped__" {
-                return self
-                    .invoke(call, context_field(wrapper, layout, 0, layout.callable))
-                    .map(Some);
             }
             (
                 context_field(wrapper, layout, 1, layout.table.cache_state()),
@@ -554,7 +622,7 @@ impl Checker<'_> {
         declaration: Option<Policy>,
         receiver: Option<Expr>,
         call: &ast::ExprCall,
-    ) -> Result<Expr, String> {
+    ) -> phase::Result<Expr, String> {
         if !call.arguments.is_empty() {
             return Err(error(
                 self.source,
@@ -592,11 +660,7 @@ impl Checker<'_> {
         ];
         let result = Expr {
             ty: self.types.dict(Type::Str, documents::ANY),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: documents::ANY,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         Ok(Expr {
             ty: result.ty,

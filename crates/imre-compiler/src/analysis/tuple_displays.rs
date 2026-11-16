@@ -176,12 +176,30 @@ fn excessive_inferred_width<'a>(
     body: &'a [Stmt],
     parameters: Option<&'a ast::Parameters>,
 ) -> Option<&'a ast::ExprStarred> {
+    type Bindings<'a> = HashMap<&'a str, usize>;
+
+    #[derive(Default)]
     struct Inferred<'a> {
-        locals: HashMap<&'a str, usize>,
+        locals: Bindings<'a>,
+        class_parent: Option<Bindings<'a>>,
         too_wide: Option<&'a ast::ExprStarred>,
     }
 
     impl<'a> Inferred<'a> {
+        // A nested class, lambda or comprehension bypasses the current class dictionary.
+        fn enclosing(&self) -> Bindings<'a> {
+            self.class_parent.as_ref().unwrap_or(&self.locals).clone()
+        }
+
+        fn scoped(&mut self, locals: Bindings<'a>, visit: impl FnOnce(&mut Self)) {
+            let mut child = Self {
+                locals,
+                ..Self::default()
+            };
+            visit(&mut child);
+            self.too_wide = self.too_wide.or(child.too_wide);
+        }
+
         fn width(&mut self, expr: &'a Expr) -> Option<usize> {
             match expr {
                 Expr::Name(n) => self.locals.get(n.id.as_str()).copied(),
@@ -212,16 +230,27 @@ fn excessive_inferred_width<'a>(
                 return;
             }
             if let Stmt::ClassDef(class) = stmt {
-                if class.type_params.is_some() {
-                    return;
+                if class.type_params.is_none() {
+                    // An ordinary class evaluates its decorators and bases in the enclosing scope.
+                    for decorator in &class.decorator_list {
+                        self.visit_decorator(decorator);
+                    }
+                    if let Some(arguments) = &class.arguments {
+                        self.visit_arguments(arguments);
+                    }
                 }
-                // An ordinary class evaluates its decorators and bases in the enclosing scope.
-                for decorator in &class.decorator_list {
-                    self.visit_decorator(decorator);
-                }
-                if let Some(arguments) = &class.arguments {
-                    self.visit_arguments(arguments);
-                }
+                self.scoped(self.enclosing(), |nested| {
+                    for param in class.type_params.iter().flat_map(|params| params.iter()) {
+                        nested.locals.remove(param.name().as_str());
+                    }
+                    nested.class_parent = Some(nested.locals.clone());
+                    nested.visit_body(&class.body);
+                });
+                return;
+            }
+            if matches!(stmt, Stmt::TypeAlias(_)) {
+                // A lazy alias can observe a later binding, even in its defining class.
+                self.scoped(Bindings::new(), |deferred| walk_stmt(deferred, stmt));
                 return;
             }
             walk_stmt(self, stmt);
@@ -243,13 +272,40 @@ fn excessive_inferred_width<'a>(
         }
 
         fn visit_expr(&mut self, expr: &'a Expr) {
-            if self.too_wide.is_none() {
+            if self.too_wide.is_some() {
+                return;
+            }
+            if let Expr::Lambda(lambda) = expr {
+                if let Some(params) = &lambda.parameters {
+                    self.visit_parameters(params);
+                }
+                self.scoped(self.enclosing(), |nested| {
+                    if let Some(params) = &lambda.parameters {
+                        for param in params.iter() {
+                            nested.locals.remove(param.name().as_str());
+                        }
+                    }
+                    nested.visit_expr(&lambda.body);
+                });
+            } else if let Some(plan) = imre_ast::comprehension::Plan::from_expr(expr) {
+                self.visit_expr(plan.outer);
+                self.scoped(self.enclosing(), |nested| {
+                    for target in plan.target_names() {
+                        nested.locals.remove(target.as_str());
+                    }
+                    plan.visit_body(|expr| nested.visit_expr(expr));
+                });
+            } else {
                 if matches!(expr, Expr::Tuple(t) if t.elts.iter().any(|e| matches!(e, Expr::Starred(_))))
                 {
                     self.width(expr);
                 }
                 walk_expr(self, expr);
             }
+        }
+
+        fn visit_annotation(&mut self, expr: &'a Expr) {
+            self.scoped(Bindings::new(), |deferred| deferred.visit_expr(expr));
         }
 
         fn visit_body(&mut self, body: &'a [Stmt]) {
@@ -273,7 +329,7 @@ fn excessive_inferred_width<'a>(
                 Some((p.name.as_str(), parameter_width(p.annotation.as_deref()?)?))
             })
             .collect(),
-        too_wide: None,
+        ..Inferred::default()
     };
     for stmt in body {
         inferred.visit_stmt(stmt);
@@ -285,13 +341,12 @@ fn excessive_inferred_width<'a>(
 struct Displays<'a> {
     widths: Widths,
     executable_body: bool,
-    scope_body: Option<(TextSize, bool)>,
     error: Option<(&'a ast::ExprStarred, &'static str)>,
 }
 
 impl<'a> Visitor<'a> for Displays<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
-        let previous = (self.executable_body, self.scope_body);
+        let previous = self.executable_body;
         if let Stmt::FunctionDef(function) = stmt {
             local_widths(function, &mut self.widths);
             self.executable_body = false;
@@ -303,23 +358,25 @@ impl<'a> Visitor<'a> for Displays<'a> {
                 ));
                 return;
             }
-            self.scope_body = function.body.first().map(|s| (s.start(), true));
         } else if let Stmt::ClassDef(class) = stmt {
             // Generic class bases have a separate type parameter scope.
             self.executable_body &= class.type_params.is_none();
-            self.scope_body = class.body.first().map(|s| (s.start(), false));
         }
         walk_stmt(self, stmt);
-        (self.executable_body, self.scope_body) = previous;
+        self.executable_body = previous;
+    }
+
+    fn visit_annotation(&mut self, annotation: &'a Expr) {
+        // A deferred annotation executes in its own function, including its tuple displays.
+        let previous = std::mem::replace(&mut self.executable_body, true);
+        self.visit_expr(annotation);
+        self.executable_body = previous;
     }
 
     fn visit_body(&mut self, body: &'a [Stmt]) {
-        if let Some((start, executable)) = self.scope_body
-            && body.first().is_some_and(|stmt| stmt.start() == start)
-        {
-            self.executable_body = executable;
-        }
+        let previous = std::mem::replace(&mut self.executable_body, true);
         ruff_python_ast::visitor::walk_body(self, body);
+        self.executable_body = previous;
     }
 
     fn visit_expr(&mut self, expr: &'a Expr) {
@@ -339,7 +396,7 @@ impl<'a> Visitor<'a> for Displays<'a> {
                     if !self.executable_body {
                         self.error = Some((
                             star,
-                            "starred elements in tuple displays require a module or function body",
+                            "starred elements in tuple displays require a module, class or function body",
                         ));
                         return;
                     }
@@ -378,10 +435,7 @@ pub(super) fn check(body: &[Stmt]) -> Result<Widths, (&ast::ExprStarred, &'stati
             "starred elements in tuple displays exceed 256 inferred fields",
         ));
     }
-    let mut displays = Displays {
-        executable_body: true,
-        ..Displays::default()
-    };
+    let mut displays = Displays::default();
     displays.visit_body(body);
     displays.error.map_or(Ok(displays.widths), Err)
 }
@@ -398,10 +452,43 @@ mod tests {
         }
 
         check("def make(parts):\n    class Child(Base[*parts, int]): pass\n").unwrap();
+        check("def f(*args: *tuple[int, *Ts]): pass\n").unwrap();
+        assert!(check("def f(x=(*Ts,)): pass\n").is_err());
         let fixed = "0,".repeat(150);
         let oversized = format!("parts = ({fixed})\nclass Child(Base[*parts, *parts]): pass\n");
         assert!(check(&oversized).unwrap_err().contains("inferred fields"));
-        assert!(check("class Child:\n    fields = (*[1],)\n").is_err());
+        check("class Child:\n    fields = (*[1],)\n").unwrap();
+
+        let class_body =
+            format!("parts = ({fixed})\nclass Child:\n    fields = (*parts, *parts)\n");
+        assert!(check(&class_body).unwrap_err().contains("inferred fields"));
+        for child in [
+            "class Inner: field = (*parts, *parts)",
+            "field = next(((*parts, *parts) for _ in (0,)))",
+            "field = (lambda: (*parts, *parts))()",
+        ] {
+            for (outer, local, allowed) in
+                [("1,", fixed.as_str(), true), (fixed.as_str(), "1,", false)]
+            {
+                let src =
+                    format!("parts = ({outer})\nclass C:\n    parts = ({local})\n    {child}\n");
+                assert_eq!(check(&src).is_ok(), allowed, "{child}");
+            }
+        }
+        check(&format!(
+            "parts = ({fixed})\nclass C[*parts]: field = (*parts, *parts)"
+        ))
+        .unwrap();
+        check(&format!(
+            "parts = ({fixed})\ntype Alias[*parts] = (*parts, *parts)"
+        ))
+        .unwrap();
+        check(&format!(
+            "class C:\n    parts = ({fixed})\n    type Row = (*parts,*parts)\nC.parts = (1,)"
+        ))
+        .unwrap();
+        let lazy_literal = format!("type Row = (*({fixed}), *({fixed}))");
+        assert!(check(&lazy_literal).unwrap_err().contains("fields"));
     }
 
     #[test]

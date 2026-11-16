@@ -4,6 +4,7 @@
 use crate::ir::{
     self, Builtin, CallArgs, Expr, ExprKind, Function, InstanceType, Module, Statement, Type,
 };
+use ruff_python_ast::UnaryOp;
 
 /// Checks identities before layouts, then validates statements and expression shapes.
 pub(crate) fn module(module: &Module) -> Result<(), String> {
@@ -63,6 +64,145 @@ pub(crate) fn module(module: &Module) -> Result<(), String> {
         })?;
     }
     Ok(())
+}
+
+/// Registered frames resolve slots by their original Python names and can carry either a
+/// checked native scalar or a Python handle as a display operand. They have no native
+/// container layout table. Validate this handoff before the emitter indexes its operands.
+pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result<(), String> {
+    use std::collections::BTreeMap;
+
+    const LOCAL: &str = "invalid registered frame slot or missing Python name";
+    const ENTERED: &str = "context binding needs a private entered-value slot";
+    const PULL: &str = "registered pull needs distinct private cursor, item and readiness slots";
+    let mut required = BTreeMap::new();
+    let local = |slot: usize, required: &mut BTreeMap<_, _>| {
+        if !frame.local_names.contains_key(&slot) {
+            required.entry(slot).or_insert(LOCAL);
+        }
+        require(slot < frame.locals.len(), LOCAL)
+    };
+    for &slot in frame.params.iter().chain(frame.local_names.keys()) {
+        local(slot, &mut required)?;
+    }
+    let mut result = Ok(());
+    let layout = frame.frame_layout(|node, parent, positions| {
+        result = match node {
+            ir::Node::Statement(Statement::Assign(slot, _)) => local(*slot, &mut required),
+            ir::Node::Statement(Statement::With {
+                binding: Some(binding),
+                ..
+            }) => {
+                required.entry(binding.entered).or_insert(ENTERED);
+                require(frame.locals.get(binding.entered) == Some(&Type::PythonObject), ENTERED)
+            }
+            ir::Node::Statement(Statement::IterNext {
+                kind: kind @ (ir::IterNextKind::Generic | ir::IterNextKind::Pair(_) | ir::IterNextKind::Async(_)),
+                iterator,
+                key,
+                ready,
+                value,
+            }) => {
+                for slot in [Some(*iterator), Some(*key), Some(*ready), *value].into_iter().flatten() {
+                    required.entry(slot).or_insert(PULL);
+                }
+                require(
+                    (matches!(kind, ir::IterNextKind::Pair(_)) == value.is_some()) && value.is_none_or(|slot| {
+                        slot != *iterator && slot != *key && slot != *ready
+                            && frame.locals.get(slot) == Some(&Type::PythonObject)
+                    }) && iterator != key && key != ready && iterator != ready
+                        && frame.locals.get(*iterator) == Some(&Type::PythonObject)
+                        && frame.locals.get(*key) == Some(&Type::PythonObject)
+                        && frame.locals.get(*ready) == Some(&Type::Bool),
+                    PULL,
+                )
+            }
+            ir::Node::Expression(value) => match &value.kind {
+                ExprKind::Local(slot) => local(*slot, &mut required),
+                ExprKind::List(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::ListInt | Type::List(_)),
+                    "invalid checked list type",
+                ),
+                ExprKind::Tuple(_) => require(
+                    matches!(value.ty, Type::PythonObject | Type::Tuple(_)),
+                    "invalid checked tuple type",
+                ),
+                ExprKind::Set { element, values } => require(
+                    match value.ty {
+                        Type::PythonObject => *element == Type::PythonObject,
+                        Type::Set(_) => {
+                            *element != Type::PythonObject
+                                && values.iter().all(|item| {
+                                    matches!(
+                                        item.kind,
+                                        ExprKind::Builtin(Builtin::RegisteredSpread, _)
+                                    ) || item.ty == *element
+                                })
+                        }
+                        _ => false,
+                    },
+                    "inconsistent checked set element type",
+                ),
+                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot, &mut required).and_then(|()| {
+                    require(
+                        args.len() == 1,
+                        "registered namespace write needs one operand",
+                    )
+                }),
+                ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => require(
+                    value.ty == Type::None && args.len() <= 1,
+                    "registered assertion failure takes at most one message",
+                ),
+                ExprKind::Invoke { .. } => require(
+                    frame.is_registered_invoke(positions, value),
+                    "registered invocation needs a Python callable, call position and matching argument layout",
+                ),
+                ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => match args.as_slice() {
+                    [inner] => same(value.ty, inner.ty),
+                    _ => Err("registered location needs one operand".into()),
+                },
+                ExprKind::Builtin(Builtin::RegisteredSpread, args) => {
+                    let collection = parent.is_some_and(|parent| match &parent.kind {
+                        ExprKind::List(_) | ExprKind::Tuple(_) | ExprKind::Set { .. } => true,
+                        ExprKind::Builtin(Builtin::Append | Builtin::SetAdd, args) => {
+                            matches!(args.as_slice(), [out, item] if out.ty == Type::PythonObject && std::ptr::eq(item, value))
+                        }
+                        _ => false,
+                    });
+                    require(
+                        collection && value.ty == Type::PythonObject && args.len() == 1,
+                        "registered spread needs one operand in a Python collection",
+                    )
+                }
+                ExprKind::Builtin(Builtin::RegisteredGenerator(_, scoped, _), args) => {
+                    ir::generator_operands(*scoped, args)
+                        .map(|_| ())
+                        .map_err(str::to_owned)
+                }
+                ExprKind::Builtin(op, args) => op
+                    .iteration_operands(args)
+                    .transpose()
+                    .map(|_| ())
+                    .map_err(str::to_owned),
+                _ => Ok(()),
+            },
+            _ => Ok(()),
+        };
+        result.is_ok()
+    });
+    result?;
+    let layout = layout.ok_or("registered fixed sites disagree with the physical body")?;
+    // Declarations may follow reads. Unused allocated slots can survive an IR replacement.
+    for (slot, error) in required {
+        require(layout.index(&slot).is_some(), error)?;
+    }
+    require(
+        layout.slots().iter().all(|slot| {
+            frame.frame_slots.index(slot).is_some()
+                && frame.frame_slots.cursor(slot) == layout.cursor(slot)
+        }),
+        "registered frame storage disagrees with its scoped operations",
+    )
 }
 
 fn require(condition: bool, message: &str) -> Result<(), String> {
@@ -164,6 +304,7 @@ impl Verifier<'_> {
             Type::Class(class) => self.module.class_fields[class].clone(),
             Type::Tuple(_) => self.module.types.fields(receiver).unwrap(),
             Type::ModuleSpec(id) => self.module.types.module_spec_fields(id),
+            Type::Range => vec![Type::Int; 3],
             Type::SysImplementation => crate::version::implementation_fields(&self.module.types),
             Type::CompletedProcess(capture, cmd) => {
                 return match field {
@@ -208,27 +349,47 @@ impl Verifier<'_> {
             Statement::Assign(slot, value) => same(value.ty, self.local(*slot)?),
             Statement::Move(target, source) => same(self.local(*source)?, self.local(*target)?),
             Statement::Clear(slot) => self.local(*slot).map(|_| ()),
+            Statement::With { binding, body, .. } => {
+                if let Some(binding) = binding {
+                    same(self.local(binding.entered)?, Type::PythonObject)?;
+                    self.block(&binding.body)?;
+                }
+                self.block(body)
+            }
             Statement::Scope { body, clear } => {
                 self.slots(clear)?;
                 self.block(body)
             }
-            Statement::SetItem(receiver, index, value) => {
+            Statement::SetItem(_, receiver, index, value) => {
                 same(value.ty, self.item(receiver.ty, index.ty)?)
             }
             Statement::AugmentItem(receiver, index, _, _) => {
                 self.item(receiver.ty, index.ty).map(|_| ())
             }
             Statement::SetField(receiver, field, value) => {
-                self.field(receiver.ty, *field, value.ty)
+                self.field(receiver.ty, field.slot(), value.ty)
             }
             Statement::AugmentField(receiver, field, _, _) => {
                 let Type::Class(class) = receiver.ty else {
                     return Err("augmented field assignment needs a class receiver".into());
                 };
                 require(
-                    *field < self.module.class_fields[class].len(),
+                    field.slot() < self.module.class_fields[class].len(),
                     "invalid augmented field index",
                 )
+            }
+            Statement::Match(_, cases) => {
+                for case in cases {
+                    if case.captures.len() != case.pattern.names.len() {
+                        return Err("match capture names and slots have different lengths".into());
+                    }
+                    self.slots(&case.captures)?;
+                    if let Some(guard) = &case.guard {
+                        same(guard.ty, Type::Bool)?;
+                    }
+                    self.block(&case.body)?;
+                }
+                Ok(())
             }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 same(test.ty, Type::Bool)?;
@@ -265,9 +426,14 @@ impl Verifier<'_> {
                 kind,
             } => {
                 let item_type = match kind {
-                    crate::ir::IterNextKind::String => Some(Type::Str),
+                    crate::ir::IterNextKind::String | crate::ir::IterNextKind::SplitField => {
+                        Some(Type::Str)
+                    }
                     crate::ir::IterNextKind::CodePoint | crate::ir::IterNextKind::Utf8Byte => {
                         Some(Type::Int)
+                    }
+                    crate::ir::IterNextKind::Async(_) | crate::ir::IterNextKind::Pair(_) => {
+                        return Err("Python cursor requires a registered frame".into());
                     }
                     crate::ir::IterNextKind::Generic => None,
                 };
@@ -290,7 +456,6 @@ impl Verifier<'_> {
                 self.distinct_slots(&slots)
             }
             Statement::Return(value) => same(value.ty, self.function.returns),
-            Statement::Assert(test) => same(test.ty, Type::Bool),
             Statement::Try {
                 body,
                 handlers,
@@ -298,6 +463,14 @@ impl Verifier<'_> {
                 finalbody,
             } => {
                 self.block(body)?;
+                let subgroup = |h: &crate::ir::ExceptHandler| {
+                    matches!(h.matcher, crate::ir::ExceptionMatcher::Subgroup(..))
+                };
+                if let Some(first) = handlers.first()
+                    && handlers.iter().any(|h| subgroup(h) != subgroup(first))
+                {
+                    return Err("cannot mix whole-exception and subgroup handlers".into());
+                }
                 for handler in handlers {
                     if let Some(slot) = handler.name {
                         self.local(slot)?;
@@ -307,17 +480,26 @@ impl Verifier<'_> {
                 self.block(orelse)?;
                 self.block(finalbody)
             }
-            Statement::Raise(Some(value)) => require(
-                matches!(
-                    value.ty,
-                    Type::Exception | Type::ImportException | Type::TimeoutExpired
-                ),
-                "raise needs an exception",
-            ),
+            Statement::Raise(Some(value)) => {
+                require(
+                    matches!(
+                        value.exception.ty,
+                        Type::Exception | Type::ImportException | Type::TimeoutExpired
+                    ),
+                    "raise needs an exception",
+                )?;
+                require(
+                    value.cause.as_ref().is_none_or(|cause| {
+                        self.module.types.payload(cause.ty) == Some(Type::Exception)
+                    }),
+                    "raise cause needs an optional exception",
+                )
+            }
             Statement::Raise(None)
             | Statement::Expr(_)
-            | Statement::Break
-            | Statement::Continue
+            | Statement::Position(..)
+            | Statement::Break(_)
+            | Statement::Continue(_)
             | Statement::Exhaust => Ok(()),
         }
     }
@@ -325,9 +507,8 @@ impl Verifier<'_> {
     fn expression_types(&self, value: &Expr) -> Result<(), String> {
         self.ty(value.ty)?;
         match &value.kind {
-            ExprKind::Dict { key, value, .. } => {
-                self.ty(*key)?;
-                self.ty(*value)
+            ExprKind::Builtin(Builtin::Unrepresented | Builtin::UnrepresentedCall, _) => {
+                Err("unrepresented source operand in executable IR".into())
             }
             ExprKind::Set { element, .. } => self.ty(*element),
             ExprKind::Builtin(
@@ -410,18 +591,20 @@ impl Verifier<'_> {
                 }
                 Ok(())
             }
-            ExprKind::Dict {
-                key,
-                value: item,
-                entries,
-            } => {
-                require(
-                    types.mapping(value.ty) == Some((*key, *item)),
-                    "dictionary expression has inconsistent storage types",
-                )?;
-                for (k, v) in entries {
-                    same(k.ty, *key)?;
-                    same(v.ty, *item)?;
+            ExprKind::Dict(_) if value.ty == Type::PythonObject => Ok(()),
+            ExprKind::Dict(entries) => {
+                let (key, item) = types
+                    .mapping(value.ty)
+                    .ok_or("dictionary expression needs mapping storage")?;
+                self.ty(key)?;
+                self.ty(item)?;
+                for entry in entries {
+                    let k = entry
+                        .key
+                        .as_ref()
+                        .ok_or("fixed dictionary display cannot expand a mapping")?;
+                    same(k.ty, key)?;
+                    same(entry.value.ty, item)?;
                 }
                 Ok(())
             }
@@ -462,7 +645,9 @@ impl Verifier<'_> {
                 "unwrap result does not match optional payload",
             ),
             ExprKind::Compare(values, ops) => {
-                same(value.ty, Type::Bool)?;
+                if value.ty != Type::PythonObject {
+                    same(value.ty, Type::Bool)?;
+                }
                 require(
                     !ops.is_empty() && values.len() == ops.len() + 1,
                     "comparison operand/operator count mismatch",
@@ -481,8 +666,9 @@ impl Verifier<'_> {
                 same(yes.ty, value.ty)?;
                 same(no.ty, value.ty)
             }
-            ExprKind::Not(_) => same(value.ty, Type::Bool),
-            ExprKind::Negate(inner) => same(value.ty, inner.ty),
+            ExprKind::Unary(_, _) if value.ty == Type::PythonObject => Ok(()),
+            ExprKind::Unary(UnaryOp::Not, _) => same(value.ty, Type::Bool),
+            ExprKind::Unary(_, operand) => same(value.ty, operand.ty),
             ExprKind::Call(id, args) => {
                 let callee = self.callee(*id)?;
                 same(value.ty, callee.returns)?;
@@ -523,6 +709,10 @@ impl Verifier<'_> {
                 same(native_result, callee.returns)
             }
             ExprKind::Invoke { callable, args } => {
+                require(
+                    args.site.python().is_none(),
+                    "fixed invocation cannot use a Python call site",
+                )?;
                 let (params, returns) = types
                     .signature(callable.ty)
                     .ok_or("indirect call needs a callable")?;
@@ -555,18 +745,30 @@ impl Verifier<'_> {
             ExprKind::Field(receiver, field) => self.field(receiver.ty, *field, value.ty),
             ExprKind::Builtin(operation, args) => {
                 match operation {
-                    Builtin::ExceptionRecordFields => {
-                        let Type::Class(id) = value.ty else {
-                            return Err("exception payload construction needs a record".to_owned());
+                    Builtin::StaticFunction(function) => {
+                        let [entry] = args.as_slice() else {
+                            return Err("static function needs one callable".into());
                         };
-                        let layout = self
-                            .module
-                            .class_fields
-                            .get(id)
-                            .ok_or("unknown exception payload")?;
+                        same(value.ty, entry.ty)?;
+                        require(
+                            matches!(crate::callables::singleton_entry(entry).kind,
+                                ExprKind::Callable { function: target, receiver: None } if target == *function),
+                            "static function does not own its declared entry",
+                        )?;
+                    }
+                    Builtin::RecordFromFields => {
+                        let layout: &[Type] = match value.ty {
+                            Type::Range => &[Type::Int; 3],
+                            Type::Class(id) => self
+                                .module
+                                .class_fields
+                                .get(id)
+                                .ok_or("unknown class layout")?,
+                            _ => return Err("nominal record layout required".into()),
+                        };
                         require(
                             layout.len() == args.len(),
-                            "exception payload field count differs from its layout",
+                            "record field count differs from its layout",
                         )?;
                         for (field, expected) in args.iter().zip(layout) {
                             same(field.ty, *expected)?;
@@ -622,11 +824,15 @@ impl Verifier<'_> {
                     _ => {}
                 }
                 operation
-                    .verify_specialization(args, value.ty, types)
+                    .verify_specialization(args, value.ty, self.module)
                     .map_err(str::to_owned)
             }
             // Arithmetic and value-selecting boolean semantics remain the
             // frontend's responsibility; all child identities are still checked.
+            ExprKind::BooleanValue(_, left, _, Some(predicate)) => {
+                same(left.ty, self.local(predicate.receiver)?)?;
+                same(predicate.condition.ty, Type::Bool)
+            }
             ExprKind::Binary(..) | ExprKind::BooleanValue(..) => Ok(()),
         }
     }
@@ -643,9 +849,11 @@ mod tests {
             list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
+            builtin_module_sources: None,
             json_records: Vec::new(),
             globals: Vec::new(),
             source_frames: Vec::new(),
+            recursive_functions: Default::default(),
             functions: Vec::new(),
             entry: Function {
                 params: Vec::new(),
@@ -659,6 +867,112 @@ mod tests {
     fn reject(module: &Module, expected: &str) {
         let error = super::module(module).unwrap_err();
         assert!(error.contains(expected), "{error}");
+    }
+
+    #[test]
+    fn registered_display_handoff_accepts_heterogeneous_operands_and_checks_frame_slots() {
+        use crate::{frontend, modules::SourceGraph};
+        let text = "out = [1, ('s', callback(arg)), *rest]\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let source = frontend::RegisteredSource {
+            python_optimization: 0,
+            operand_types: None,
+            template_fields: None,
+            generators: None,
+            lambdas: None,
+            text,
+            private_names: None,
+            replacements: &Default::default(),
+            method_imports: &Default::default(),
+        };
+        let operations = Default::default();
+        let body = &graph.modules[graph.entry].parsed.syntax().body;
+        for scope in [
+            frontend::RegisteredScope::Module,
+            frontend::RegisteredScope::Function { is_async: false },
+        ] {
+            let mut frame =
+                frontend::RegisteredFunction::from_suite(body, scope, source, &operations, true)
+                    .unwrap();
+            registered(frame.region()).unwrap();
+            let slot = frame.function.locals.len();
+            frame.function.locals.push(Type::PythonObject);
+            frame
+                .function
+                .body
+                .push(Statement::Expr(Expr::local(slot, Type::PythonObject)));
+            frame.function.body.push(Statement::Scope {
+                body: Vec::new(),
+                clear: vec![slot],
+            });
+            frame.frame_slots = frame.region().frame_layout(|_, _, _| true).unwrap();
+            registered(frame.region()).unwrap();
+            frame.function.body.pop(); // A read still requires a declaration for its allocated slot.
+            assert!(registered(frame.region()).is_err());
+            frame.function.body.pop();
+            registered(frame.region()).unwrap();
+            frame.local_names.clear();
+            assert!(
+                registered(frame.region())
+                    .unwrap_err()
+                    .contains("frame slot")
+            );
+        }
+    }
+
+    #[test]
+    fn registered_namespace_checks_the_optional_parent_before_emission() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            inputs: Default::default(),
+            frame_slots: Default::default(),
+            placed_from: 0,
+            fixed_sites: Box::default(),
+            fixed_attributes: None,
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        for count in 0..=2 {
+            let parent = Expr::none();
+            frame.function.body = vec![Statement::Expr(Expr {
+                ty: Type::PythonObject,
+                kind: ExprKind::Builtin(
+                    Builtin::RegisteredNamespace(Vec::new()),
+                    vec![parent; count],
+                ),
+            })];
+            if count < 2 {
+                registered(frame.region()).unwrap();
+            } else {
+                assert_eq!(
+                    registered(frame.region()).unwrap_err(),
+                    "registered namespace takes at most one parent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn registered_display_handoff_rejects_a_misplaced_or_malformed_spread() {
+        let mut frame = crate::frontend::RegisteredFunction {
+            inputs: Default::default(),
+            frame_slots: Default::default(),
+            placed_from: 0,
+            fixed_sites: Box::default(),
+            fixed_attributes: None,
+            function: empty().entry,
+            local_names: Default::default(),
+        };
+        let spread = |args| Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Builtin(Builtin::RegisteredSpread, args),
+        };
+        frame.function.body = vec![Statement::Expr(spread(vec![Expr::integer(42)]))];
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
+        frame.function.body = vec![Statement::Expr(Expr {
+            ty: Type::PythonObject,
+            kind: ExprKind::Tuple(vec![Expr::integer(42), spread(vec![])]),
+        })];
+        assert!(registered(frame.region()).unwrap_err().contains("spread"));
     }
 
     #[test]
@@ -690,6 +1004,7 @@ mod tests {
             body: Vec::new(),
         });
         let mut args = CallArgs {
+            site: ir::CallSite::None,
             exhaustive_enum_match: false,
             values: vec![
                 Expr {
@@ -765,6 +1080,20 @@ mod tests {
         };
         module.entry.body = vec![invoke(CallArgs::positional(vec![Expr::integer(1)]))];
         super::module(&module).unwrap();
+        let mut frame_args = CallArgs::positional(vec![Expr::integer(1)]);
+        frame_args.site = ir::CallSite::Python(
+            ir::RegisteredCall::new(
+                ruff_text_size::TextRange::new(0.into(), 4.into()),
+                ir::RegisteredCallTarget::Callable {
+                    end: 1.into(),
+                    suspended_name: None,
+                },
+                ir::RegisteredArguments::Positional,
+            )
+            .invoke_site(),
+        );
+        module.entry.body = vec![invoke(frame_args)];
+        reject(&module, "fixed invocation cannot use a Python call site");
         module.entry.body = vec![invoke(CallArgs::positional(Vec::new()))];
         reject(&module, "argument count");
         module.functions[0].locals[0] = Type::Float;
@@ -800,14 +1129,103 @@ mod tests {
 
     #[test]
     fn weak_proxy_upgrade_returns_its_referent_class() {
-        let types = Default::default();
+        let module = empty();
         let check = |input, result| {
             let arg = Expr::local(0, input);
-            Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &types)
+            Builtin::WeakProxyTarget.verify_specialization(&[arg], result, &module)
         };
         assert!(check(Type::WeakProxy(0), Type::Class(0)).is_ok());
         assert!(check(Type::WeakProxy(0), Type::Class(1)).is_err());
         assert!(check(Type::Class(0), Type::Class(0)).is_err());
+    }
+
+    #[test]
+    fn callable_context_returns_the_bound_method_receiver_class() {
+        let source = "\
+from enum import Enum
+class Mode(Enum):
+    ON = 'on'
+    def label(self, value: int = 1) -> int:
+        return value
+class Item:
+    def label(self, value: int = 1) -> int:
+        return value
+";
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let class = |name| {
+            module
+                .class_metadata
+                .iter()
+                .position(|c| c.name == name)
+                .unwrap()
+        };
+        let item = class("Item");
+        let mode = class("Mode");
+        let receiver = Type::Class(item);
+        let signature = module.types.callable(vec![Type::Int], Type::Int);
+        let method = |owner| {
+            Expr::local(
+                0,
+                module
+                    .types
+                    .source_method(signature, owner, 0, Some(Type::Class(owner))),
+            )
+        };
+        let check = |args: &[Expr], result| {
+            Builtin::CallableContext.verify_specialization(args, result, &module)
+        };
+        assert!(check(&[method(item)], receiver).is_ok());
+        assert!(check(&[method(item)], Type::Class(mode)).is_err());
+        assert!(check(&[method(mode)], Type::Class(mode)).is_err());
+        assert!(check(&[method(item)], Type::Int).is_err());
+        assert!(check(&[Expr::local(0, signature)], receiver).is_err());
+        assert!(check(&[Expr::integer(1)], receiver).is_err());
+        assert!(check(&[], receiver).is_err());
+        assert!(check(&[method(item), method(item)], receiver).is_err());
+    }
+
+    #[test]
+    fn checks_sumprod_float_result_requires_a_nonempty_list_literal() {
+        let mut module = empty();
+        let floats = module.types.list(Type::Float);
+        module.entry.locals = vec![floats, Type::Float];
+        let unknown = Expr::local(0, floats);
+        let literal = |items| Expr {
+            ty: floats,
+            kind: ExprKind::List(items),
+        };
+        let empty = literal(vec![]);
+        let nonempty = literal(vec![Expr::local(1, Type::Float)]);
+        let exposed = Expr {
+            ty: floats,
+            kind: ExprKind::Bind(0, Box::new(nonempty.clone())),
+        };
+        let mut verify = |left, right, result| {
+            module.entry.body = vec![Statement::Expr(Expr {
+                ty: result,
+                kind: ExprKind::Builtin(Builtin::Sumprod, vec![left, right]),
+            })];
+            super::module(&module)
+        };
+        verify(nonempty.clone(), unknown.clone(), Type::Float).unwrap();
+        verify(unknown.clone(), nonempty.clone(), Type::Float).unwrap();
+        verify(unknown.clone(), unknown.clone(), Type::ObjectValue).unwrap();
+        verify(empty.clone(), empty.clone(), Type::ObjectValue).unwrap();
+
+        let ints = Expr {
+            ty: Type::ListInt,
+            kind: ExprKind::List(vec![Expr::integer(1)]),
+        };
+        for (left, right) in [
+            (unknown.clone(), unknown.clone()),
+            (empty.clone(), empty),
+            (exposed, unknown),
+            (ints, nonempty),
+        ] {
+            let error = verify(left, right, Type::Float).unwrap_err();
+            assert!(error.contains("invalid specialized operation"), "{error}");
+        }
     }
 
     #[test]

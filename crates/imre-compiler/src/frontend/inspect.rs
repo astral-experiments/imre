@@ -11,10 +11,6 @@ pub(super) fn marks_function(
         == Some(Binding::Intrinsic(Intrinsic::InspectCoroutine { mark: true })))
 }
 
-pub(super) fn is_sentinel(graph: &SourceGraph, module: ModuleId, value: &ast::Expr) -> bool {
-    graph.resolve(module, value) == Some(Binding::Intrinsic(Intrinsic::InspectSentinel))
-}
-
 pub(super) fn sentinel() -> Expr {
     Expr {
         ty: Type::PlainObject,
@@ -316,7 +312,7 @@ impl Checker<'_> {
         let copy = string_enum && method == ir::StrDescriptor::ZFill;
         let mapping = matches!(
             method,
-            ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
+            ir::StrDescriptor::Capitalize | ir::StrDescriptor::Title | ir::StrDescriptor::SwapCase
         );
         if !(matches!(receiver.ty, Type::Str | Type::StrLiteral(_))
             || copy

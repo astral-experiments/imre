@@ -11,14 +11,7 @@ fn string_io_flag(receiver: &Expr, enabled: bool) -> Expr {
         ty: Type::Bool,
         kind: ExprKind::Builtin(Builtin::StringIo(Op::Capability), vec![receiver.clone()]),
     };
-    if enabled {
-        open
-    } else {
-        Expr {
-            ty: Type::Bool,
-            kind: ExprKind::Not(Box::new(open)),
-        }
-    }
+    if enabled { open } else { Expr::not(open) }
 }
 
 impl Checker<'_> {

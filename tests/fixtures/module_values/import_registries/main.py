@@ -31,6 +31,15 @@ with tempfile.TemporaryDirectory() as directory:
 
     saved = sys.meta_path, sys.path, sys.path_hooks, sys.path_importer_cache
     try:
+        # Import hooks such as Ansible's delegate filesystem entries to the installed FileFinder.
+        file_hook, = [hook for hook in sys.path_hooks if 'FileFinder' in repr(hook)]
+        disk_finder = file_hook(directory)
+        assert type(disk_finder) is machinery.FileFinder
+        assert disk_finder.find_spec(name).origin == filename
+        sys.path_hooks = [hook for hook in sys.path_hooks if hook is not file_hook]
+        sys.path_importer_cache = {}
+        assert machinery.PathFinder.find_spec(name, [directory]) is None
+
         sys.meta_path = []
         sys.path = [directory]
         sys.path_hooks = [path_hook]

@@ -1,11 +1,16 @@
 import _imp
 import os
 import sys
+from sysconfig import _INSTALL_SCHEMES, _getuserbase
 
 _BASE_PREFIX = os.path.normpath(sys.base_prefix)
 _BASE_EXEC_PREFIX = os.path.normpath(sys.base_exec_prefix)
 _PY_VERSION_SHORT = "%d.%d" % sys.version_info[:2]
 _CONFIG_VARS = None
+
+
+def get_python_version():
+    return _PY_VERSION_SHORT
 
 
 def get_config_vars(*args):
@@ -22,6 +27,7 @@ def get_config_vars(*args):
             'platbase': exec_prefix,
             'installed_base': _BASE_PREFIX,
             'installed_platbase': _BASE_EXEC_PREFIX,
+            'userbase': _getuserbase(),
             'py_version_short': _PY_VERSION_SHORT,
             'implementation': 'Imre',
             'implementation_lower': 'imre',
@@ -29,6 +35,8 @@ def get_config_vars(*args):
             'Py_DEBUG': 0,
             'TZPATH': ('/usr/share/zoneinfo:/usr/lib/zoneinfo:/usr/share/lib/zoneinfo:/etc/zoneinfo'
                        if os.name == 'posix' else ''),
+            'HOSTRUNNER': '',
+            'EXE': sys._imre_executable_suffix,
             'EXT_SUFFIX': _imp.extension_suffixes()[0],
         }
     if args:
@@ -38,3 +46,63 @@ def get_config_vars(*args):
 
 def get_config_var(name):
     return get_config_vars().get(name)
+
+
+def get_scheme_names():
+    return tuple(sorted(_INSTALL_SCHEMES))
+
+
+def _get_preferred_schemes():
+    # InterpreterLayout uses these scheme names on all Imre targets.
+    return {'prefix': 'posix_prefix', 'user': 'posix_user'}
+
+
+# CPython 3.14.5 Lib/sysconfig/__init__.py. See licenses/CPython.txt.
+def get_preferred_scheme(key):
+    if key == 'prefix' and sys.prefix != sys.base_prefix:
+        return 'venv'
+    scheme = _get_preferred_schemes()[key]
+    if scheme not in _INSTALL_SCHEMES:
+        raise ValueError(
+            f"{key!r} returned {scheme!r}, which is not a valid scheme "
+            f"on this platform"
+        )
+    return scheme
+
+
+def get_default_scheme():
+    return get_preferred_scheme('prefix')
+
+
+# Expansion follows CPython 3.14.5 Lib/sysconfig/__init__.py. See licenses/CPython.txt.
+def _subst_vars(s, local_vars):
+    try:
+        return s.format(**local_vars)
+    except KeyError as var:
+        try:
+            return s.format(**os.environ)
+        except KeyError:
+            raise AttributeError(f'{var}') from None
+
+
+def _expand_vars(scheme, vars):
+    if vars is None:
+        fields = {key: value for key, value in get_config_vars().items() if isinstance(key, str)}
+    else:
+        keys = vars.keys()
+        for key, value in get_config_vars().items():
+            if key not in keys:
+                vars[key] = value
+        fields = {key: vars[key] for key in vars.keys() if isinstance(key, str)}
+    return {name: os.path.normpath(_subst_vars(os.path.expanduser(template), fields))
+            for name, template in _INSTALL_SCHEMES[scheme].items()}
+
+
+def get_paths(scheme=get_default_scheme(), vars=None, expand=True):
+    if expand:
+        return _expand_vars(scheme, vars)
+    return _INSTALL_SCHEMES[scheme]
+
+
+def get_path(name, scheme=get_default_scheme(), vars=None, expand=True):
+    return get_paths(scheme, vars, expand)[name]

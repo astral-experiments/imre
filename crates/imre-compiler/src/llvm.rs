@@ -1,6 +1,8 @@
 //! Ownership lowering and textual LLVM emission, with no C or interpreter layer.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::borrows::{self, FunctionBorrows};
@@ -11,28 +13,34 @@ use crate::contracts::{
 };
 use crate::effects::{self, ExceptionEffects};
 use crate::ir::{
-    self, Binary, Builtin, CallArgs, Compare, ExceptHandler, Expr, ExprKind, Function,
-    InstanceType, Module, RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
+    self, Binary, Builtin, CallArgs, Compare, Expr, ExprKind, Function, InstanceType, Module,
+    RegexCapture, Statement, TUPLE_PROBE_ARITY, Type,
 };
 use crate::ranges::{IntRange, RangeFacts};
 use crate::types::Types;
 
 mod affine;
 mod asyncio;
+pub(crate) mod body;
 mod byte_outputs;
 mod calendar;
 mod callables;
+mod character_filters;
 mod conditionals;
 mod contextvars;
+mod finally;
 mod int_buffers;
 mod integer_regions;
 mod json;
 mod line_views;
 mod literals;
+mod module_registration;
+pub(crate) mod operations;
 mod paths;
 mod posixpath;
 mod processes;
 mod records;
+pub(crate) mod registered;
 mod runtime;
 mod socket;
 mod stdlib;
@@ -44,8 +52,45 @@ mod truthiness;
 mod unions;
 mod units;
 
+pub(crate) use module_registration::{ModuleLauncher, ProviderBody};
+use operations::{CheckedBody, LoopEdges};
 use units::Output;
-pub(crate) use units::emit_units;
+
+/// Fixed data uses hex escapes throughout. Registered strings keep printable ASCII readable.
+enum ByteEscapes {
+    All,
+    NonPrintable,
+}
+
+/// Write the exact initializer bytes, including any terminator supplied by the caller.
+fn write_byte_string(
+    output: &mut String,
+    bytes: impl IntoIterator<Item = u8>,
+    escapes: ByteEscapes,
+) {
+    output.push_str("c\"");
+    for byte in bytes {
+        if matches!(escapes, ByteEscapes::NonPrintable)
+            && (b' '..=b'~').contains(&byte)
+            && !matches!(byte, b'"' | b'\\')
+        {
+            output.push(char::from(byte));
+        } else {
+            write!(output, "\\{byte:02X}").unwrap();
+        }
+    }
+    output.push_str("\"\n");
+}
+
+fn write_private_bytes(output: &mut String, name: &str, value: &str) {
+    write!(
+        output,
+        "@{name} = private unnamed_addr constant [{} x i8] ",
+        value.len()
+    )
+    .unwrap();
+    write_byte_string(output, value.bytes(), ByteEscapes::All);
+}
 
 enum LlvmType {
     I1,
@@ -80,6 +125,9 @@ impl Type {
     /// Classifies the type once for LLVM values, retain/release calls, and field descriptors.
     fn word_kind(self) -> WordKind {
         match self {
+            Self::PythonObject => {
+                unreachable!("registered heap handle in fixed calling convention")
+            }
             Self::None => WordKind::None,
             Self::Bool => WordKind::Bool,
             Self::Int => WordKind::Int,
@@ -99,6 +147,7 @@ impl Type {
             | Self::CmpKey(..)
             | Self::Callable(_)
             | Self::ModuleSpec(_)
+            | Self::Range
             | Self::SysImplementation
             | Self::CompletedProcess(..) => WordKind::Record,
             Self::List(_)
@@ -171,6 +220,8 @@ impl Type {
             | Self::CsvReader
             | Self::Patch(_)
             | Self::RegexPattern
+            | Self::RegexBytesPattern
+            | Self::RegexBytesMatch
             | Self::JsonRoot
             | Self::JsonValue
             | Self::JsonObject
@@ -221,22 +272,48 @@ impl Type {
 }
 
 #[derive(Clone)]
-struct Value {
+pub(crate) struct Value {
     ty: Type,
     operand: String,
     small_integer: bool,
 }
 
 #[derive(Clone, Copy)]
-enum Ownership {
+pub(crate) enum Ownership {
     Owned,
     Borrowed,
 }
 
 /// A call or operator input may borrow a local root instead of acquiring a temporary.
-struct Operand {
+pub(crate) struct Operand {
     value: Value,
     ownership: Ownership,
+}
+
+impl Operand {
+    pub(crate) fn int_word(&self, protected: bool) -> (&str, bool) {
+        assert_eq!(self.value.ty, Type::Int, "expected the native integer ABI");
+        assert!(
+            protected || matches!(self.ownership, Ownership::Borrowed),
+            "a registered native owner must survive a failing conversion"
+        );
+        (&self.value.operand, self.value.small_integer)
+    }
+}
+
+#[derive(Clone)]
+struct ForwardCursor {
+    next: String,
+    end: String,
+    start: Option<String>,
+}
+
+/// Range and append-window facts that hold only in the true suite of a native guard.
+struct NativeIfFacts {
+    small_slots: Vec<usize>,
+    guarded_lists: usize,
+    previous_window: Option<(usize, String)>,
+    window: Option<(usize, ForwardCursor, String)>,
 }
 
 #[derive(Clone)]
@@ -259,12 +336,13 @@ struct LengthSnapshot {
 
 /// Finally routing chooses the eventual transfer before it reaches either
 /// the break exit or the distinct normal-exhaustion/else entry.
-#[derive(Clone)]
 struct LoopTarget {
-    end: String,
-    exhausted: String,
-    next: String,
+    edges: LoopEdges,
     cleanup_depth: usize,
+}
+
+struct NativeLoop {
+    target: LoopTarget,
     raw_subtotal: Option<String>,
 }
 
@@ -273,10 +351,10 @@ struct LoopTarget {
 /// an error; finally bodies may replace the completion currently being routed.
 #[derive(Clone)]
 enum Cleanup {
-    Handler(String),
-    Finally {
-        body: Vec<Statement>,
-        loops: Vec<LoopTarget>,
+    Finally(usize),
+    PendingException {
+        error: Value,
+        previous: Value,
     },
     Slots(Vec<usize>),
     Active {
@@ -286,55 +364,40 @@ enum Cleanup {
     Owner(Value),
 }
 
-enum Completion {
-    Return(Value),
+#[derive(Clone, PartialEq, Eq)]
+enum Completion<T = Value> {
+    Return(T),
     Jump { label: String, depth: usize },
     Error,
 }
 
+#[cfg(test)]
 pub(crate) fn emit(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-) -> Result<String, String> {
-    let mut output = Output::new(&vec![0; module.functions.len()], 1, 0, false);
-    emit_program(module, ranges, sanitize, &mut output)?;
-    Ok(std::mem::take(output.entry_buffer()))
+) -> Result<String, crate::LoweringDiagnostic> {
+    let program =
+        crate::callables::layouts(module, crate::callables::TargetCollector::analyze(module))?;
+    let mut unit = crate::CodegenUnit::new("__main__", String::new());
+    Output::new([], std::slice::from_mut(&mut unit), 0, false)
+        .emit(module, ranges, sanitize, program);
+    Ok(unit.llvm_ir)
 }
+
+const BRANCH_WEIGHTS: &str = "\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n!1 = !{!\"branch_weights\", i32 2000, i32 1}\n";
 
 fn emit_program(
     module: &Module,
     ranges: &RangeFacts<'_>,
     sanitize: bool,
-    output: &mut Output,
-) -> Result<(), String> {
-    let callable_targets = crate::callables::Targets::analyze(module);
-    let mut resource_types: HashSet<_> = module
-        .functions
-        .iter()
-        .chain([&module.entry])
-        .flat_map(|function| function.locals.iter().copied())
-        .collect();
-    resource_types.retain(|&ty| {
-        if matches!(ty, Type::Callable(_)) {
-            // A plain function has no captured receiver to finalize.
-            return callable_targets.get(ty).iter().any(|target| {
-                let f = &module.functions[target.function];
-                target.bound
-                    && module
-                        .types
-                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
-            });
-        }
-        module.types.may_own_file(ty, &module.class_fields, true)
-    });
-    let borrows = borrows::analyze(module, &callable_targets);
-    let effects = effects::analyze(module, &callable_targets);
-    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
+    output: &mut Output<'_>,
+    program: crate::callables::Layouts,
+) {
     let mut literal_globals = vec![None; module.globals.len()];
-    let mut extension_modules = std::collections::BTreeSet::new();
-    let mut function_link_types = HashSet::new();
-    let mut declared_caches = HashSet::new();
+    let mut extension_modules = BTreeSet::new();
+    let mut uses_regex_positions = false;
+    let mut uses_format_field = false;
     let mut uses_sys_argv = false;
     let mut uses_orig_argv = false;
     let mut uses_linecache = false;
@@ -342,22 +405,21 @@ fn emit_program(
     let mut uses_builtins_last = false;
     let mut changes_stdout = false;
     for function in module.functions.iter().chain([&module.entry]) {
-        crate::ir::walk_expressions(&function.body, &mut |expr| {
+        ir::walk_expressions(&function.body, &mut |expr| {
             let ExprKind::Builtin(builtin, args) = &expr.kind else {
                 return;
             };
             match builtin {
+                Builtin::RegexCapture {
+                    operation: RegexCapture::Start | RegexCapture::End,
+                    ..
+                } => uses_regex_positions = true,
+                Builtin::FormatField(_) => uses_format_field = true,
                 Builtin::ExtensionImport(name) => {
                     extension_modules.insert(name.clone());
                 }
-                Builtin::FunctionWrappedSet | Builtin::FunctionWrappedGet => {
-                    function_link_types.insert(args[0].ty);
-                }
-                Builtin::ModuleCache(id) => {
-                    declared_caches.insert(*id);
-                }
                 Builtin::GlobalSet(slot) => {
-                    // A checked module binding has only one initializer.
+                    // A fixed string binding has only one initializer.
                     if let [
                         Expr {
                             kind: ExprKind::Str(value),
@@ -382,27 +444,43 @@ fn emit_program(
             }
         });
     }
-    if function_link_types.iter().any(|&ty| {
-        let targets = callable_targets.get(ty);
-        module.types.dispatcher(ty).is_some()
-            || targets.is_empty()
-            || targets.iter().any(|target| {
+    let mut resource_types: HashSet<_> = module
+        .functions
+        .iter()
+        .chain([&module.entry])
+        .flat_map(|function| function.locals.iter().copied())
+        .collect();
+    resource_types.retain(|&ty| {
+        if matches!(ty, Type::Callable(_)) {
+            // A plain function has no captured receiver to finalize.
+            return program.targets.get(ty).iter().any(|target| {
+                let f = &module.functions[target.function];
                 target.bound
-                    || declared_caches.contains(&target.function)
-                    || module.types.cache_adapter(target.function).is_some()
-            })
-    }) {
-        return Err("Imre: wrapper links require a callable signature with only known, unbound native functions".to_owned());
-    }
+                    && module
+                        .types
+                        .may_own_file(f.locals[f.params[0]], &module.class_fields, true)
+            });
+        }
+        module.types.may_own_file(ty, &module.class_fields, true)
+    });
+    let borrows = borrows::analyze(module, &program.targets);
+    let effects = effects::analyze(module, &program.targets);
+    let inline_dispatch = string_enums::inline_dispatch(module, &effects);
     let mut emitter = Emitter {
         module,
         output,
-        code: String::new(),
-        entry_allocas: String::new(),
+        body: body::FunctionBody::new("entry", ""),
         mapping_words: 0,
         forward_cursors: BTreeMap::new(),
         uses_forward_cursors: false,
+        append_windows: BTreeMap::new(),
+        reserved_append_window: None,
+        uses_append_windows: false,
+        uses_byte_output_windows: false,
+        byte_output_owners: Vec::new(),
         strings: Vec::new(),
+        fault_origin: None,
+        frame_strings: HashMap::new(),
         string_literals: BTreeMap::new(),
         uses_string_interning: false,
         uses_sequence_layout: false,
@@ -411,18 +489,16 @@ fn emit_program(
         callable_uses: callables::Uses::default(),
         async_frames: BTreeMap::new(),
         async_invoke_frames: BTreeMap::new(),
-        function_link_types,
+        linked_functions: program.linked_functions,
         json_schema_roots: Vec::new(),
+        module_reads_regex_positions: uses_regex_positions,
+        uses_regex_positions: false,
         regex_literals: BTreeMap::new(),
         bytes_literals: BTreeMap::new(),
         integer_literals: BTreeMap::new(),
         enum_members: Vec::new(),
         http_members: Vec::new(),
         literal_globals,
-        next_value: 0,
-        next_label: 0,
-        current: "entry".to_owned(),
-        terminated: false,
         loops: Vec::new(),
         locals: Vec::new(),
         directory_slot_count: 0,
@@ -435,6 +511,7 @@ fn emit_program(
         fixed_int_lists: Vec::new(),
         line_slots: Vec::new(),
         affine_literal_lengths: Vec::new(),
+        cached_string_lengths: BTreeSet::new(),
         length_roots: Vec::new(),
         length_snapshots: Vec::new(),
         guarded_integer_lists: Vec::new(),
@@ -442,16 +519,14 @@ fn emit_program(
         small_locals: Vec::new(),
         temporaries: Vec::new(),
         cleanups: Vec::new(),
-        try_nesting: 0,
-        cleanup_bytes: 0,
-        cleanup_limit_hit: false,
+        finalbodies: Vec::new(),
+        handler_depth: 0,
         return_exit: String::new(),
-        error_exit: String::new(),
         sanitize,
         ranges,
         effects,
         inline_dispatch,
-        callable_targets,
+        callable_targets: program.targets,
         integer_regions: integer_regions::analyze(module),
         uses_sys_argv: uses_sys_argv || uses_orig_argv,
         uses_orig_argv,
@@ -463,7 +538,19 @@ fn emit_program(
         has_extensions: !extension_modules.is_empty(),
     };
     emitter.prepare_enum_members();
-    let mut bodies = Vec::with_capacity(module.functions.len() + 1);
+    // Erased formatters may call back through another missing key. The normal
+    // checked function frame bounds that recursion even without a direct IR call edge.
+    let repr_methods: HashSet<_> = module
+        .class_metadata
+        .iter()
+        .filter_map(|m| m.repr_method)
+        .collect();
+    // Keep native function entries aligned to a cache line as the linked runtime changes.
+    let attrs = if sanitize {
+        " sanitize_address"
+    } else {
+        " align 64"
+    };
     for (id, function) in module.functions.iter().chain([&module.entry]).enumerate() {
         let entry = id == module.functions.len();
         emitter.output.current = if entry {
@@ -473,18 +560,48 @@ fn emit_program(
         };
         if emitter.output.split() {
             // SSA names and labels are scoped to one LLVM function.
-            emitter.next_value = 0;
-            emitter.next_label = 0;
+            emitter.body.reset_names();
         }
-        let frame = module.source_frames.get(id).and_then(Option::as_ref);
-        let params = emitter.function(function, entry, frame, &borrows[id])?;
-        bodies.push((params, std::mem::take(&mut emitter.code)));
+        let frame = function_source_frame(module, &repr_methods, id);
+        let stack_layout = module.recursive_functions.contains(&id).then(|| {
+            // The result occupies the first field; the remaining fields carry the checked ABI.
+            let fields = std::iter::once(function.returns.llvm())
+                .chain(
+                    function
+                        .params
+                        .iter()
+                        .map(|&slot| function.locals[slot].llvm()),
+                )
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {fields} }}")
+        });
+        emitter.function(
+            function,
+            entry,
+            frame,
+            &borrows[id],
+            stack_layout.as_deref(),
+        );
+        emitter
+            .output
+            .include_integers(std::mem::take(&mut emitter.body.integers));
+        if !entry {
+            emitter.output.finish_function(
+                id,
+                function,
+                attrs,
+                &emitter.body.code,
+                stack_layout.as_deref(),
+            );
+            emitter.body.code.clear();
+        }
     }
     emitter
         .output
         .common()
         .push_str("; Generated by Imre. Runtime arguments borrow; results transfer ownership.\n");
-    write_declarations(emitter.output.common());
+    write_declarations(emitter.output.common(), uses_format_field);
     if emitter.uses_sequence_layout {
         emitter
             .output
@@ -518,7 +635,7 @@ fn emit_program(
     }
     if !extension_modules.is_empty() {
         let output = emitter.output.common();
-        output.push_str("declare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
+        output.push_str("declare i1 @imre_extension_enter()\ndeclare void @imre_extension_import(ptr)\ndeclare void @imre_extension_clear()\ndeclare i64 @imre_extension_call(ptr, ptr, ptr, ptr, i64, i32)\n");
         for name in extension_modules {
             writeln!(output, "declare ptr @PyInit_{name}()").unwrap();
         }
@@ -567,9 +684,26 @@ fn emit_program(
         .unwrap();
     }
     json::schemas(module, &emitter.json_schema_roots, emitter.output);
-    record_layouts(module, emitter.output);
+    record_layouts(
+        module,
+        emitter.output,
+        &emitter.resource_types,
+        &repr_methods,
+    );
     callables::adapters(&mut emitter);
     asyncio::adapters(&mut emitter);
+    if emitter.uses_byte_output_windows {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/byte_output_window.ll"));
+    }
+    if emitter.uses_append_windows {
+        emitter
+            .output
+            .common()
+            .push_str(include_str!("llvm/list_append_window.ll"));
+    }
     if emitter.uses_forward_cursors {
         emitter
             .output
@@ -597,58 +731,53 @@ fn emit_program(
     for (id, bytes) in emitter.strings.iter().enumerate() {
         let name = emitter.output.string_name(id, "str");
         let owner = emitter.output.string_owner(id);
-        let output = emitter.output.global(
-            owner,
-            &name,
-            "unnamed_addr constant",
-            format_args!("[{} x i8]", bytes.len()),
+        emitter.output.byte_constant(owner, &name, bytes);
+    }
+    if let Some(sources) = &module.builtin_module_sources {
+        emitter.output.byte_constant(
+            emitter.output.entry,
+            "imre_builtin_sources",
+            sources.as_bytes(),
         );
-        output.push_str("c\"");
-        for byte in bytes {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
     }
     emitter.enum_table();
     emitter.literal_pool();
-    for (id, (params, body)) in bodies.into_iter().enumerate() {
-        let (owner, name, returns) = if let Some(f) = module.functions.get(id) {
-            (
-                emitter.output.function_owner(id),
-                emitter.output.function_name(id),
-                f.returns.llvm(),
-            )
-        } else {
-            (emitter.output.entry, "main".to_owned(), "i32")
-        };
-        let attrs = if sanitize { " sanitize_address" } else { "" };
-        emitter.output.common().push('\n');
-        emitter
-            .output
-            .function(owner, &name, returns, &params, attrs)
-            .push_str(&body);
-    }
+    emitter.output.common().push('\n');
+    let entry = emitter.output.entry_buffer();
+    body::begin_main(entry, emitter.uses_sys_argv, attrs);
+    entry.push_str(&emitter.body.code);
+    body::end_main(entry, "@imre_finish_stdio()");
     // Layout hints never replace the representation, overflow, or error guards.
-    emitter
-        .output
-        .common()
-        .push_str("\n!0 = !{!\"branch_weights\", i32 1, i32 2000}\n");
-    emitter
-        .output
-        .common()
-        .push_str("!1 = !{!\"branch_weights\", i32 2000, i32 1}\n");
-    Ok(())
+    emitter.output.common().push_str(BRANCH_WEIGHTS);
 }
 
-struct Emitter<'a, 'module> {
+#[derive(Default)]
+struct CallSite<'a> {
+    origin: Option<&'a ir::FixedOrigin>,
+    inline: bool,
+}
+
+/// Source to attach only when an already-evaluated checked operation fails.
+enum CheckedFaultOrigin {
+    Single(ir::FixedOrigin),
+    SplitField(ir::SplitFieldOrigins),
+}
+
+struct Emitter<'a, 'units> {
     module: &'a Module,
-    output: &'a mut Output,
-    code: String,
-    entry_allocas: String,
+    output: &'a mut Output<'units>,
+    body: body::FunctionBody,
     mapping_words: usize,
-    forward_cursors: BTreeMap<usize, (String, String)>,
+    forward_cursors: BTreeMap<usize, ForwardCursor>,
     uses_forward_cursors: bool,
+    append_windows: BTreeMap<usize, String>,
+    reserved_append_window: Option<(usize, String)>,
+    uses_append_windows: bool,
+    uses_byte_output_windows: bool,
+    byte_output_owners: Vec<Option<usize>>,
     strings: Vec<Vec<u8>>,
+    fault_origin: Option<CheckedFaultOrigin>,
+    frame_strings: HashMap<usize, HashMap<String, String>>,
     string_literals: BTreeMap<Vec<u8>, usize>,
     uses_string_interning: bool,
     uses_sequence_layout: bool,
@@ -657,19 +786,17 @@ struct Emitter<'a, 'module> {
     callable_uses: callables::Uses,
     async_frames: BTreeMap<usize, String>,
     async_invoke_frames: BTreeMap<usize, (String, Type)>,
-    function_link_types: HashSet<Type>,
+    linked_functions: HashSet<usize>,
     json_schema_roots: Vec<Type>,
+    module_reads_regex_positions: bool,
+    uses_regex_positions: bool,
     regex_literals: BTreeMap<Vec<u8>, usize>,
     bytes_literals: BTreeMap<Vec<u8>, usize>,
     integer_literals: BTreeMap<Vec<u8>, usize>,
     enum_members: Vec<[usize; 3]>,
     http_members: Vec<Option<(u64, usize, usize)>>,
     literal_globals: Vec<Option<String>>,
-    next_value: usize,
-    next_label: usize,
-    current: String,
-    terminated: bool,
-    loops: Vec<LoopTarget>,
+    loops: Vec<NativeLoop>,
     locals: Vec<Type>,
     directory_slot_count: usize,
     borrowed_params: Vec<bool>,
@@ -681,6 +808,7 @@ struct Emitter<'a, 'module> {
     fixed_int_lists: Vec<bool>,
     line_slots: Vec<bool>,
     affine_literal_lengths: Vec<(usize, i32)>,
+    cached_string_lengths: BTreeSet<usize>,
     length_roots: Vec<Option<usize>>,
     length_snapshots: Vec<Option<LengthSnapshot>>,
     guarded_integer_lists: Vec<(usize, String, String)>,
@@ -688,13 +816,12 @@ struct Emitter<'a, 'module> {
     small_locals: Vec<bool>,
     temporaries: Vec<Value>,
     cleanups: Vec<Cleanup>,
-    try_nesting: usize,
-    cleanup_bytes: usize,
-    cleanup_limit_hit: bool,
+    finalbodies: Vec<finally::Finalbody>,
+    /// Owners below the active exception target survive a caught failure.
+    handler_depth: usize,
     return_exit: String,
-    error_exit: String,
     sanitize: bool,
-    ranges: &'a RangeFacts<'module>,
+    ranges: &'a RangeFacts<'a>,
     effects: ExceptionEffects,
     inline_dispatch: Vec<bool>,
     callable_targets: crate::callables::Targets,
@@ -709,24 +836,55 @@ struct Emitter<'a, 'module> {
     has_extensions: bool,
 }
 
+/// A function can use byte cursors when every match or cursor stays in locals
+/// and its only observable uses read capture text or participation.
+fn regex_positions_may_escape(module: &crate::ir::Module, function: &Function) -> bool {
+    let cursor = |ty| module.types.cursor_element(ty) == Some(Type::RegexMatch);
+    if !function.locals.iter().copied().any(cursor) {
+        return true;
+    }
+    let tracked = |ty| ty == Type::RegexMatch || cursor(ty);
+    let mut values = 0;
+    let mut consumed = 0;
+    crate::ir::walk_expressions(&function.body, &mut |value| {
+        values += usize::from(tracked(value.ty));
+        if let ExprKind::Builtin(
+            Builtin::RegexGroupDict
+            | Builtin::RegexCapture {
+                operation: RegexCapture::Group | RegexCapture::Absent,
+                ..
+            },
+            args,
+        ) = &value.kind
+        {
+            consumed += usize::from(args[0].ty == Type::RegexMatch);
+        }
+    });
+    crate::ir::walk_statements(&function.body, &mut |stmt| {
+        if let Statement::Assign(slot, value) = stmt
+            && tracked(value.ty)
+            && function.locals[*slot] == value.ty
+        {
+            consumed += 1;
+        }
+    });
+    values != consumed
+}
+
 impl Emitter<'_, '_> {
     fn line(&mut self, line: impl AsRef<str>) {
-        writeln!(self.code, "  {}", line.as_ref()).unwrap();
+        self.body.line(line);
     }
 
     fn instruction(&mut self, instruction: impl AsRef<str>) -> String {
-        let result = format!("%v{}", self.next_value);
-        self.next_value += 1;
-        self.line(format!("{result} = {}", instruction.as_ref()));
-        result
+        self.body.instruction(instruction)
     }
 
     /// Gives each emitted operation independent scratch with function lifetime,
     /// including operations inside loops and duplicated finally cleanup paths.
     fn entry_alloca(&mut self, ty: impl AsRef<str>) -> String {
-        let result = format!("%scratch{}", self.next_value);
-        self.next_value += 1;
-        writeln!(self.entry_allocas, "  {result} = alloca {}", ty.as_ref()).unwrap();
+        let result = self.body.name("%scratch");
+        self.body.entry_slot(&result, ty.as_ref(), None);
         result
     }
 
@@ -764,29 +922,43 @@ impl Emitter<'_, '_> {
     }
 
     fn label(&mut self) -> String {
-        let result = format!("b{}", self.next_label);
-        self.next_label += 1;
-        result
+        self.body.label()
     }
 
     fn start(&mut self, label: &str) {
-        writeln!(self.code, "{label}:").unwrap();
-        self.current = label.to_owned();
-        self.terminated = false;
+        self.body.start(label);
     }
 
     fn jump(&mut self, label: &str) {
-        self.line(format!("br label %{label}"));
-        self.terminated = true;
+        self.body.jump(label);
     }
 
     fn branch(&mut self, condition: &str, yes: &str, no: &str) {
-        self.line(format!("br i1 {condition}, label %{yes}, label %{no}"));
-        self.terminated = true;
+        self.body.branch(condition, yes, no);
     }
 
     fn call(&mut self, name: &str, returns: Type, args: &[&Value]) -> Value {
-        self.call_with_effect(name, returns, args, runtime_call_may_raise(name), false)
+        self.call_at(name, returns, args, None)
+    }
+
+    fn call_at(
+        &mut self,
+        name: &str,
+        returns: Type,
+        args: &[&Value],
+        origin: Option<&ir::FixedOrigin>,
+    ) -> Value {
+        self.call_with_effect(
+            &format!("@{name}"),
+            None,
+            returns,
+            args,
+            runtime_call_may_raise(name),
+            CallSite {
+                origin,
+                ..CallSite::default()
+            },
+        )
     }
 
     /// Uses only the final IR's conservative callee summary. Argument evaluation
@@ -797,21 +969,26 @@ impl Emitter<'_, '_> {
         returns: Type,
         args: &[&Value],
         enum_match: bool,
+        origin: Option<&ir::FixedOrigin>,
     ) -> Value {
-        let name = self.output.function_ref(function);
+        let name = self.output.function_ref(self.module, function);
         self.call_with_effect(
-            &name,
+            &format!("@{name}"),
+            None,
             returns,
             args,
             self.effects.may_raise(function),
-            enum_match && self.inline_dispatch[function],
+            CallSite {
+                origin,
+                inline: enum_match && self.inline_dispatch[function],
+            },
         )
     }
 
     /// Captures in source order, preserving earlier owners across later argument
     /// effects and errors. Parameter reordering happens only after this step.
     fn call_operands(&mut self, args: &CallArgs) -> Vec<Operand> {
-        args.values.iter().map(|arg| self.operand(arg)).collect()
+        operations::capture_call_operands(&args.values, None, |arg| self.operand(arg))
     }
 
     /// Once every argument is evaluated, the callee takes an owner of each
@@ -831,24 +1008,28 @@ impl Emitter<'_, '_> {
 
     fn call_with_effect(
         &mut self,
-        name: &str,
+        target: &str,
+        context: Option<&str>,
         returns: Type,
         args: &[&Value],
         may_raise: bool,
-        inline: bool,
+        site: CallSite<'_>,
     ) -> Value {
-        let args = args
-            .iter()
-            .map(|value| format!("{} {}", value.ty.llvm(), value.operand))
+        let args = context
+            .into_iter()
+            .map(|context| format!("ptr {context}"))
+            .chain(
+                args.iter()
+                    .map(|value| format!("{} {}", value.ty.llvm(), value.operand)),
+            )
             .collect::<Vec<_>>()
             .join(", ");
-        let attribute = if inline { " alwaysinline" } else { "" };
-        let instruction = format!("call {} @{name}({args}){attribute}", returns.llvm());
-        let operand = if may_raise {
-            self.checked_instruction(instruction)
-        } else {
-            self.instruction(instruction)
-        };
+        let attribute = if site.inline { " alwaysinline" } else { "" };
+        let instruction = format!("call {} {target}({args}){attribute}", returns.llvm());
+        let operand = self.instruction(instruction);
+        if may_raise {
+            self.check_error_at(site.origin);
+        }
         let value = Value {
             ty: returns,
             operand,
@@ -912,7 +1093,7 @@ impl Emitter<'_, '_> {
             format!("{operation}_int_nonzero")
         } else if ty == Type::Int {
             format!("{operation}_int")
-        } else if matches!(family, "str" | "object" | "record")
+        } else if matches!(family, "str" | "object" | "record" | "list")
             && (operation == "release" || value.ty != ty)
         {
             format!("{family}_{operation}_if_present")
@@ -958,9 +1139,13 @@ impl Emitter<'_, '_> {
     /// Other fallible calls, including nullable/scalar generic getters, retain
     /// the pending-flag ABI because zero can also be a valid successful result.
     fn check_error(&mut self) {
+        self.check_error_at(None);
+    }
+
+    fn check_error_at(&mut self, origin: Option<&ir::FixedOrigin>) {
         let pending = self.instruction("call i32 @imre_error_pending()");
         let pending = self.instruction(format!("icmp ne i32 {pending}, 0"));
-        self.check_failed(&pending);
+        self.check_failed_at(&pending, origin);
     }
 
     /// SIGINT can arrive during optimized native loops. The ordinary path
@@ -970,9 +1155,7 @@ impl Emitter<'_, '_> {
             self.instruction("load atomic i8, ptr @imre_signal_tripped monotonic, align 1");
         let pending = self.instruction(format!("icmp ne i8 {tripped}, 0"));
         let (slow, next) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {pending}, label %{slow}, label %{next}, !prof !0"
-        ));
+        self.body.conditional(&pending, &slow, &next, Some(false));
         self.start(&slow);
         let raised = self.instruction("call i1 @imre_typed_interrupt()");
         self.check_failed(&raised);
@@ -985,19 +1168,87 @@ impl Emitter<'_, '_> {
     /// restores those SSA owners before inspecting a result or out-parameter.
     /// Branch weights guide layout/inlining without assuming errors impossible.
     fn check_failed(&mut self, failed: &str) {
+        self.check_failed_at(failed, None);
+    }
+
+    fn at_builtin_origin<R>(&mut self, builtin: &Builtin, emit: impl FnOnce(&mut Self) -> R) -> R {
+        let origin = match builtin {
+            Builtin::Process(_, origin) => origin.clone().map(CheckedFaultOrigin::Single),
+            Builtin::Int(origin)
+            | Builtin::Float(origin)
+            | Builtin::ListGet(origin)
+            | Builtin::ListGetI32(origin)
+            | Builtin::ListGetStable(origin)
+            | Builtin::ListGetBounded { origin, .. }
+            | Builtin::GetInAppendWindow(_, origin)
+            | Builtin::FormatField(ir::FieldFormat { origin, .. })
+            | Builtin::SplitTextField(_, origin)
+            | Builtin::GetBoundedInAppendWindow { origin, .. } => {
+                origin.as_deref().cloned().map(CheckedFaultOrigin::Single)
+            }
+            Builtin::SplitIntField(_, origins) | Builtin::SplitIntCached(_, origins) => {
+                Some(CheckedFaultOrigin::SplitField((**origins).clone()))
+            }
+            _ => None,
+        };
+        let parent = std::mem::replace(&mut self.fault_origin, origin);
+        let value = emit(self);
+        self.fault_origin = parent;
+        value
+    }
+
+    fn attach_pending_frame(&mut self, origin: &ir::FixedOrigin) {
+        let frame = self.exception_frame("null", origin);
+        self.line(frame);
+    }
+
+    /// The fused helper raises IndexError during the lookup. Its other failures
+    /// arise in the subsequent conversion. Inspect pending only on the cold edge.
+    fn attach_split_field_frame(&mut self, origins: &ir::SplitFieldOrigins) {
+        if origins.index.is_none() && origins.conversion.is_none() {
+            return;
+        }
+        let kind = imre_ast::exceptions::Kind::IndexError as u32;
+        let missing = self.instruction(format!("call i32 @imre_error_matches(i32 {kind})"));
+        let missing = self.instruction(format!("icmp ne i32 {missing}, 0"));
+        let (lookup, conversion, done) = (self.label(), self.label(), self.label());
+        self.branch(&missing, &lookup, &conversion);
+        self.start(&lookup);
+        if let Some(origin) = &origins.index {
+            self.attach_pending_frame(origin);
+        }
+        self.jump(&done);
+        self.start(&conversion);
+        if let Some(origin) = &origins.conversion {
+            self.attach_pending_frame(origin);
+        }
+        self.jump(&done);
+        self.start(&done);
+    }
+
+    fn check_failed_at(&mut self, failed: &str, origin: Option<&ir::FixedOrigin>) {
         let (error, success) = (self.label(), self.label());
-        self.line(format!(
-            "br i1 {failed}, label %{error}, label %{success}, !prof !0"
-        ));
-        self.terminated = true;
+        self.body.conditional(failed, &error, &success, Some(false));
         let temporaries = self.temporaries.clone();
         self.start(&error);
+        // Cleanup may emit another checked operation. Its failures have their
+        // own source and cannot inherit the operation that entered cleanup.
+        let active = self.fault_origin.take();
+        if let Some(origin) = origin {
+            self.attach_pending_frame(origin);
+        } else if let Some(site) = &active {
+            match site {
+                CheckedFaultOrigin::Single(origin) => self.attach_pending_frame(origin),
+                CheckedFaultOrigin::SplitField(origins) => self.attach_split_field_frame(origins),
+            }
+        }
         for value in temporaries.iter().rev() {
             self.release(value);
         }
         self.route(Completion::Error);
         self.start(&success);
         self.temporaries = temporaries;
+        self.fault_origin = active;
     }
 
     /// Borrows pooled literals and direct locals whose slots cannot be replaced.
@@ -1199,11 +1450,14 @@ impl Emitter<'_, '_> {
         index: &Value,
         ty: Type,
     ) -> Value {
-        debug_assert!(matches!(receiver.ty, Type::List(_)));
-        debug_assert_eq!(self.module.types.element(receiver.ty), Some(ty));
         let mut index = index.clone();
         index.small_integer = true;
         let index = self.index_word(&index, true);
+        if matches!(receiver.ty, Type::Tuple(_)) {
+            return self.indexed_tuple_field(receiver, &index, ty);
+        }
+        debug_assert!(matches!(receiver.ty, Type::List(_)));
+        debug_assert_eq!(self.module.types.element(receiver.ty), Some(ty));
         let word = self.proven_list_word(slot, receiver, &index);
         self.decode_word(word, ty)
     }
@@ -1263,8 +1517,13 @@ impl Emitter<'_, '_> {
             if let ExprKind::Builtin(Builtin::ListAllI32 | Builtin::ListPresent, args) = &guard.kind
                 && let ExprKind::Local(slot) = args[0].kind
             {
+                if self.reserved_append_tail(slot).is_some()
+                    || self.guarded_list_buffer(&args[0]).is_some()
+                {
+                    continue;
+                }
                 let receiver = self.borrow_slot(slot);
-                let length = self.list_length(&receiver);
+                let length = self.container_length(&receiver);
                 let length = self.index_word(&length, true);
                 let data = self.instruction(format!(
                     "call ptr @imre_list_data_readonly(ptr {})",
@@ -1310,7 +1569,7 @@ impl Emitter<'_, '_> {
             .runtime_call(&LIST_BORROW_INDEX, [receiver, &at])
             .value
             .operand;
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(self.instruction(format!(
@@ -1326,6 +1585,7 @@ impl Emitter<'_, '_> {
         source: &Expr,
         receiver: &Value,
         index: &Value,
+        small_elements: bool,
     ) -> Option<Value> {
         let (length, data) = self.guarded_list_buffer(source)?;
         let at = self.instruction(format!("ashr i64 {}, 1", index.operand));
@@ -1341,16 +1601,20 @@ impl Emitter<'_, '_> {
         self.branch(&valid, &fast, &slow);
         self.start(&fast);
         let word = self.load_list_word(&data, &at);
-        let tag = self.instruction(format!("and i64 {word}, 1"));
-        let immediate = self.instruction(format!("icmp ne i64 {tag}, 0"));
-        self.branch(&immediate, &end, &slow);
+        if small_elements {
+            self.jump(&end);
+        } else {
+            let tag = self.instruction(format!("and i64 {word}, 1"));
+            let immediate = self.instruction(format!("icmp ne i64 {tag}, 0"));
+            self.branch(&immediate, &end, &slow);
+        }
         self.start(&slow);
         let ordinary = self
             .runtime_call(&LIST_GET, [receiver, index])
             .into_value(self);
         // The join takes ownership of the value acquired on this edge.
         self.forget(&ordinary);
-        let slow_exit = self.current.clone();
+        let slow_exit = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         let result = self.instruction(format!(
@@ -1458,7 +1722,7 @@ impl Emitter<'_, '_> {
                     || crate::list_bounds::block_readonly(std::slice::from_ref(statement)));
             if needed && self.length_snapshots[root].is_none() {
                 let receiver = self.borrow_slot(root);
-                let length = self.list_length(&receiver);
+                let length = self.container_length(&receiver);
                 self.length_snapshots[root] = Some(LengthSnapshot {
                     receiver,
                     length,
@@ -1540,10 +1804,10 @@ impl Emitter<'_, '_> {
 
     /// Compare the decoded cursor to its count so LLVM can use the same
     /// induction variable for the loop bound and the element address.
-    fn while_condition(&mut self, test: &Expr, contiguous_sum: bool) -> String {
+    fn contiguous_sum_condition(&mut self, test: &Expr, contiguous_sum: bool) -> Option<String> {
         if contiguous_sum
             && let ExprKind::Compare(values, ops) = &test.kind
-            && let ([cursor, length], [Compare::Less]) = (values.as_slice(), ops.as_slice())
+            && let ([cursor, length], [CmpOp::Lt]) = (values.as_slice(), ops.as_slice())
             && self.nonnegative_index(cursor)
             && self.nonnegative_index(length)
         {
@@ -1553,9 +1817,9 @@ impl Emitter<'_, '_> {
             let count = self.instruction(format!("lshr i64 {}, 1", length.value.operand));
             self.release_operand(&length);
             self.release_operand(&cursor);
-            self.instruction(format!("icmp ult i64 {index}, {count}"))
+            Some(self.instruction(format!("icmp ult i64 {index}, {count}")))
         } else {
-            self.expr(test).operand
+            None
         }
     }
 
@@ -1568,13 +1832,17 @@ impl Emitter<'_, '_> {
         name
     }
 
-    /// Exact list storage bounds its length below the tagged-small maximum.
-    /// Unlike bytes or strings, this read cannot allocate a BigInt owner.
-    fn list_length(&mut self, receiver: &Value) -> Value {
+    /// These containers store at least one word per entry, so their lengths fit
+    /// the tagged-small integer representation without acquiring an owner.
+    fn container_length(&mut self, receiver: &Value) -> Value {
         let helper = match receiver.ty {
             Type::ListInt => "imre_list_len",
             Type::List(_) => self.sequence_helper("imre_seq_len_fast"),
-            _ => unreachable!("only exact lists have nonallocating snapshots"),
+            Type::VarTuple(_) => "imre_tuple_len",
+            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
+            Type::Deque(_) => "imre_deque_len",
+            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
+            _ => unreachable!("a word-sized container has a known length helper"),
         };
         let operand = self.instruction(format!("call i64 @{helper}(ptr {})", receiver.operand));
         if self.module.types.element(receiver.ty) == Some(Type::Str) {
@@ -1585,6 +1853,62 @@ impl Emitter<'_, '_> {
             operand,
             small_integer: true,
         }
+    }
+
+    /// Finds immutable string parameters whose length is requested inside a loop.
+    fn loop_string_lengths(function: &ir::Function, writes: &[u8]) -> BTreeSet<usize> {
+        fn in_loops(body: &[Statement], inspect: &mut impl FnMut(&Expr)) {
+            for statement in body {
+                match statement {
+                    Statement::While(test, body, orelse) => {
+                        ir::walk_operand_expressions(test, inspect);
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    Statement::For { body, orelse, .. } => {
+                        ir::walk_expressions(body, inspect);
+                        in_loops(orelse, inspect);
+                    }
+                    _ => statement.suites(|suite| in_loops(suite, inspect)),
+                }
+            }
+        }
+        let mut parameters = BTreeSet::new();
+        in_loops(&function.body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::Len, args) = &expr.kind
+                && let ExprKind::Local(slot) = args[0].kind
+                && args[0].ty == Type::Str
+                && writes[slot] == 0
+                && function.params.contains(&slot)
+            {
+                parameters.insert(slot);
+            }
+        });
+        parameters
+    }
+
+    /// Memoizes immediate lengths on first use. A heap integer remains owned by
+    /// the ordinary call edge and is transferred to the result without caching.
+    fn cached_string_length(&mut self, slot: usize, text: &Value) -> Value {
+        let cached = self.instruction(format!("load i64, ptr %str_count{slot}"));
+        let hit = self.instruction(format!("icmp ne i64 {cached}, 0"));
+        let from = self.body.current.clone();
+        let (miss, done) = (self.label(), self.label());
+        self.branch(&hit, &done, &miss);
+        self.start(&miss);
+        let length = self.call("imre_str_len", Type::Int, &[text]);
+        self.forget(&length);
+        let word = length.operand;
+        let immediate = self.instruction(format!("trunc i64 {word} to i1"));
+        let entry = self.instruction(format!("select i1 {immediate}, i64 {word}, i64 0"));
+        self.line(format!("store i64 {entry}, ptr %str_count{slot}"));
+        let miss_exit = self.body.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        let word = self.instruction(format!(
+            "phi i64 [{cached}, %{from}], [{word}, %{miss_exit}]"
+        ));
+        self.unpack_word(word, Type::Int)
     }
 
     /// Identity-only definitions do not exclude Clear/Move resets. A current
@@ -1601,11 +1925,11 @@ impl Emitter<'_, '_> {
             receiver.operand, snapshot.receiver.operand
         ));
         let (fallback, end) = (self.label(), self.label());
-        let before = self.current.clone();
+        let before = self.body.current.clone();
         self.branch(&same, &end, &fallback);
         self.start(&fallback);
-        let ordinary = self.list_length(receiver);
-        let fallback_end = self.current.clone();
+        let ordinary = self.container_length(receiver);
+        let fallback_end = self.body.current.clone();
         self.jump(&end);
         self.start(&end);
         Some(Value {
@@ -1729,71 +2053,27 @@ impl Emitter<'_, '_> {
     /// from the loops surrounding the instruction that initiated unwinding.
     fn route(&mut self, completion: Completion) {
         let cleanups = self.cleanups.clone();
-        let loops = self.loops.clone();
         self.unwind(completion);
         self.cleanups = cleanups;
-        self.loops = loops;
     }
 
     fn unwind(&mut self, completion: Completion) {
         let stop = match &completion {
             Completion::Jump { depth, .. } => *depth,
-            Completion::Return(_) | Completion::Error => 0,
+            Completion::Error => self.handler_depth,
+            Completion::Return(_) => 0,
         };
         while self.cleanups.len() > stop {
             match self.cleanups.pop().unwrap() {
-                Cleanup::Handler(label) => {
-                    if matches!(completion, Completion::Error) {
-                        self.jump(&label);
-                        return;
-                    }
-                }
                 Cleanup::Slots(slots) => self.clear_slots(&slots),
                 Cleanup::Active { previous, name } => self.restore_active(&previous, name),
                 Cleanup::Owner(value) => self.release(&value),
-                Cleanup::Finally { body, loops } => {
-                    // A finalbody can itself contain transfers and protected
-                    // regions. Bound copied cleanup IR across one outer try.
-                    const MAX_CLEANUP_BYTES: usize = 8 * 1024 * 1024;
-                    if self.cleanup_limit_hit || self.cleanup_bytes >= MAX_CLEANUP_BYTES {
-                        self.cleanup_limit_hit = true;
-                        self.terminated = true;
-                        return;
-                    }
-                    let depth = self.cleanups.len();
-                    let error = if matches!(completion, Completion::Error) {
-                        let error = self.call("imre_error_take", Type::Exception, &[]);
-                        let previous =
-                            self.call("imre_exception_swap_active", Type::Exception, &[&error]);
-                        self.forget(&error);
-                        self.forget(&previous);
-                        self.cleanups.push(Cleanup::Owner(error.clone()));
-                        self.cleanups.push(Cleanup::Active {
-                            previous: previous.clone(),
-                            name: None,
-                        });
-                        Some((error, previous))
-                    } else {
-                        if let Completion::Return(value) = &completion {
-                            self.cleanups.push(Cleanup::Owner(value.clone()));
-                        }
-                        None
-                    };
-                    self.loops = loops;
-                    let before = self.code.len();
-                    let previous_bytes = self.cleanup_bytes;
-                    self.block(&body);
-                    // Nested copies are already included in this byte range.
-                    self.cleanup_bytes = previous_bytes + (self.code.len() - before);
-                    self.cleanups.truncate(depth);
-                    if self.terminated {
-                        return;
-                    }
-                    if let Some((error, previous)) = error {
-                        self.restore_active(&previous, None);
-                        self.void_call("imre_error_set", &[&error]);
-                        self.release(&error);
-                    }
+                Cleanup::PendingException { error, previous } => {
+                    self.discard_pending_exception(&error, &previous);
+                }
+                Cleanup::Finally(region) => {
+                    self.enter_finalbody(region, completion);
+                    return;
                 }
             }
         }
@@ -1809,7 +2089,7 @@ impl Emitter<'_, '_> {
                 self.jump(&self.return_exit.clone());
             }
             Completion::Jump { label, .. } => self.jump(&label),
-            Completion::Error => self.jump(&self.error_exit.clone()),
+            Completion::Error => self.jump(&self.body.error_target.clone()),
         }
     }
 
@@ -1828,34 +2108,23 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Only errors from the try body enter these handlers. Handler and else
-    /// failures first execute finally, then continue to an enclosing handler.
-    fn try_statement(
+    fn catch_exception(&mut self, name: Option<usize>, exception: &Value) {
+        let previous = self.call("imre_exception_swap_active", Type::Exception, &[exception]);
+        self.forget(&previous);
+        if let Some(name) = name {
+            self.store(name, exception);
+        } else {
+            self.release(exception);
+        }
+        self.cleanups.push(Cleanup::Active { previous, name });
+    }
+
+    /// Preserve enclosing expression owners until a transfer leaves the protected scope.
+    fn with_try_cleanups(
         &mut self,
-        body: &[Statement],
-        handlers: &[ExceptHandler],
-        orelse: &[Statement],
         finalbody: &[Statement],
+        protected: impl FnOnce(&mut Self, String, usize),
     ) {
-        if handlers.is_empty()
-            && orelse.is_empty()
-            && finalbody.iter().all(|statement| {
-                matches!(
-                    statement,
-                    Statement::Expr(Expr {
-                        kind: ExprKind::None,
-                        ..
-                    })
-                )
-            })
-        {
-            self.block(body);
-            return;
-        }
-        if self.try_nesting == 0 {
-            self.cleanup_bytes = 0;
-        }
-        self.try_nesting += 1;
         // A try inside an expression can handle an error and resume evaluation.
         // Release the enclosing operands only if control leaves that expression.
         let outer_depth = self.cleanups.len();
@@ -1865,87 +2134,16 @@ impl Emitter<'_, '_> {
         let depth = self.cleanups.len();
         let end = self.label();
         if !finalbody.is_empty() {
-            self.cleanups.push(Cleanup::Finally {
-                body: finalbody.to_vec(),
-                loops: self.loops.clone(),
-            });
+            self.push_finalbody();
         }
-        let dispatch = self.label();
-        let catches_error = !handlers.is_empty() || !finalbody.is_empty();
-        if catches_error {
-            self.cleanups.push(Cleanup::Handler(dispatch.clone()));
-        }
-        self.block(body);
-        if catches_error {
-            self.cleanups.pop();
-        }
-        if !self.terminated {
-            self.block(orelse);
-            if !self.terminated {
-                self.route(Completion::Jump {
-                    label: end.clone(),
-                    depth,
-                });
-            }
-        }
-        if !handlers.is_empty() {
-            self.start(&dispatch);
-            let exception = self.call("imre_error_take", Type::Exception, &[]);
-            let pending_temporary = self.temporaries.clone();
-            for handler in handlers {
-                let matched = if handler.kinds.is_empty() {
-                    "true".to_owned()
-                } else {
-                    let mut matched = "false".to_owned();
-                    for kind in &handler.kinds {
-                        let byte = self.instruction(format!(
-                            "call i32 @imre_exception_matches(ptr {}, i32 {kind})",
-                            exception.operand
-                        ));
-                        let test = self.instruction(format!("icmp ne i32 {byte}, 0"));
-                        matched = self.instruction(format!("or i1 {matched}, {test}"));
-                    }
-                    matched
-                };
-                let (caught, next) = (self.label(), self.label());
-                self.branch(&matched, &caught, &next);
-                self.start(&caught);
-                let previous =
-                    self.call("imre_exception_swap_active", Type::Exception, &[&exception]);
-                self.forget(&previous);
-                if let Some(name) = handler.name {
-                    self.store(name, &exception);
-                } else {
-                    self.release(&exception);
-                }
-                self.cleanups.push(Cleanup::Active {
-                    previous,
-                    name: handler.name,
-                });
-                self.block(&handler.body);
-                if !self.terminated {
-                    self.route(Completion::Jump {
-                        label: end.clone(),
-                        depth,
-                    });
-                }
-                self.cleanups.pop();
-                self.start(&next);
-                self.temporaries = pending_temporary.clone();
-            }
-            self.void_call("imre_error_set", &[&exception]);
-            self.release(&exception);
-            self.route(Completion::Error);
-        } else if catches_error {
-            // Every failure in this protected body shares its pending-error
-            // cleanup. Outer protected bodies provide their own landing pads.
-            self.start(&dispatch);
-            self.route(Completion::Error);
+        protected(self, end.clone(), depth);
+        if !finalbody.is_empty() {
+            self.cleanups.truncate(depth);
+            self.emit_finalbody(finalbody);
         }
         self.cleanups.truncate(outer_depth);
         self.temporaries = outer_temporaries;
         self.start(&end);
-        self.try_nesting -= 1;
     }
 
     /// Resource-bearing parameters own their arguments so rebinding can close
@@ -1956,14 +2154,20 @@ impl Emitter<'_, '_> {
         entry: bool,
         frame: Option<&ir::SourceFrame>,
         borrows: &FunctionBorrows,
-    ) -> Result<String, String> {
-        self.entry_allocas.clear();
+        stack_layout: Option<&str>,
+    ) {
+        self.uses_regex_positions =
+            self.module_reads_regex_positions && regex_positions_may_escape(self.module, function);
+        self.body.entry.clear();
         self.mapping_words = 0;
         self.locals = function.locals.clone();
         self.borrowed_locals = borrows.locals.clone();
         self.rooted_locals = borrows.rooted.clone();
         // The sole owner stays live while extend() evaluates and uses its receiver.
-        for (capture, owner) in byte_outputs::select(function, &mut self.locals) {
+        let aliases =
+            byte_outputs::select(function, &mut self.locals, &mut self.byte_output_owners);
+        self.uses_byte_output_windows |= self.byte_output_owners.iter().any(Option::is_some);
+        for (capture, owner) in aliases {
             self.borrowed_locals[capture] = true;
             self.rooted_locals[owner] = true;
         }
@@ -1982,6 +2186,7 @@ impl Emitter<'_, '_> {
             writes[slot] = writes[slot].saturating_add(1);
         });
         self.affine_literal_lengths = affine::literal_lengths(function, &writes);
+        self.cached_string_lengths = Self::loop_string_lengths(function, &writes);
         self.borrowed_params = vec![false; self.locals.len()];
         for &slot in &function.params {
             self.borrowed_params[slot] =
@@ -2004,24 +2209,26 @@ impl Emitter<'_, '_> {
         self.loops.clear();
         self.temporaries.clear();
         self.cleanups.clear();
-        let params = function
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, &slot)| format!("{} %arg{i}", function.locals[slot].llvm()))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let params = if entry && self.uses_sys_argv {
-            "i32 %argc, ptr %argv".to_owned()
-        } else {
-            params
-        };
-        let returns = if entry {
-            "i32"
-        } else {
-            function.returns.llvm()
-        };
+        self.handler_depth = 0;
         self.start("entry");
+        if let Some(layout) = stack_layout {
+            for (i, &slot) in function.params.iter().enumerate() {
+                let source = self.instruction(format!(
+                    "getelementptr {layout}, ptr %stack_frame, i32 0, i32 {}",
+                    i + 1
+                ));
+                self.line(format!(
+                    "%arg{i} = load {}, ptr {source}",
+                    function.locals[slot].llvm()
+                ));
+            }
+        }
+        for &slot in &function.params {
+            if self.cached_string_lengths.contains(&slot) {
+                self.line(format!("%str_count{slot} = alloca i64"));
+                self.line(format!("store i64 0, ptr %str_count{slot}"));
+            }
+        }
         let fault_frame = if let Some(Statement::Expr(Expr {
             kind: ExprKind::Builtin(Builtin::FaultFrame { file, name, line }, _),
             ..
@@ -2035,7 +2242,7 @@ impl Emitter<'_, '_> {
                 self.start(&failed);
                 let message = self.byte_array(b"cannot enable faulthandler\0".to_vec());
                 self.line(format!("call void @perror(ptr @{message})"));
-                self.line("ret i32 1");
+                self.body.end("ret i32 1");
                 self.start(&ready);
             }
             let filename = self.byte_array(file.as_bytes().to_vec());
@@ -2066,7 +2273,7 @@ impl Emitter<'_, '_> {
         self.directory_slot_count = directory_slots.len();
         let separate_exits = entry || !directory_slots.is_empty();
         self.return_exit = self.label();
-        self.error_exit = if separate_exits {
+        self.body.error_target = if separate_exits {
             self.label()
         } else {
             self.return_exit.clone()
@@ -2077,10 +2284,47 @@ impl Emitter<'_, '_> {
         }
         self.line_slots = line_views::select(function);
         self.forward_cursors.clear();
-        for slot in ir::private_string_cursors(function) {
+        self.append_windows.clear();
+        let cursors = ir::private_string_cursors(function);
+        let invariant = ir::invariant_string_cursors(function, &cursors);
+        let mut estimated = BTreeSet::new();
+        let mut pair_views = BTreeSet::new();
+        let mut field_masks = vec![0_u8; self.locals.len()];
+        let mut text_fields = vec![0_u8; self.locals.len()];
+        ir::walk_nodes(&function.body, &mut |node, _| match node {
+            ir::Node::Expression(expr) => match expr.kind {
+                ExprKind::Builtin(Builtin::CursorScanBudget(slot), _) => {
+                    estimated.insert(slot);
+                }
+                ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) => {
+                    pair_views.insert(slot);
+                }
+                _ => {}
+            },
+            ir::Node::Statement(Statement::Assign(slot, value)) => match value.kind {
+                ExprKind::Builtin(Builtin::SplitIntSource(mask), _) => field_masks[*slot] |= mask,
+                ExprKind::Builtin(Builtin::SplitTextSource(count), _) => text_fields[*slot] = count,
+                _ => {}
+            },
+            ir::Node::Statement(_) => {}
+        });
+        for slot in cursors {
+            // Private cursors keep their UTF-8 position in the two native pointers.
+            // The local only needs to own the source string through the final pull.
+            self.locals[slot] = Type::Str;
+            let start = invariant.contains(&slot).then(|| {
+                let start = self.entry_alloca("ptr");
+                writeln!(self.body.entry, "  store ptr null, ptr {start}").unwrap();
+                start
+            });
             let next = self.entry_alloca("ptr");
             let end = self.entry_alloca("ptr");
-            self.forward_cursors.insert(slot, (next, end));
+            if estimated.contains(&slot) {
+                writeln!(self.body.entry, "  store ptr null, ptr {next}").unwrap();
+                writeln!(self.body.entry, "  store ptr null, ptr {end}").unwrap();
+            }
+            self.forward_cursors
+                .insert(slot, ForwardCursor { next, end, start });
         }
         self.uses_forward_cursors |= !self.forward_cursors.is_empty();
         if self
@@ -2097,31 +2341,10 @@ impl Emitter<'_, '_> {
                 self.line(format!("store [4 x i64] zeroinitializer, ptr %line{slot}"));
             }
         }
-        let allocas_at = self.code.len();
-        let mut pair_views = BTreeSet::new();
-        ir::walk_expressions(&function.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::PairTable(ir::PairTableOp::Snapshot(slot)), _) =
-                expr.kind
-            {
-                pair_views.insert(slot);
-            }
-        });
+        let allocas_at = self.body.code.len();
         for slot in pair_views {
             self.line(format!("%pair_view{slot} = alloca {{ ptr, i64 }}"));
         }
-        let mut field_masks = vec![0_u8; self.locals.len()];
-        ir::walk_statements(&function.body, &mut |stmt| {
-            if let Statement::Assign(
-                slot,
-                Expr {
-                    kind: ExprKind::Builtin(Builtin::SplitIntSource(mask), _),
-                    ..
-                },
-            ) = stmt
-            {
-                field_masks[*slot] |= mask;
-            }
-        });
         for (slot, mask) in field_masks.into_iter().enumerate() {
             if mask != 0 {
                 self.line(format!(
@@ -2130,25 +2353,34 @@ impl Emitter<'_, '_> {
                 ));
             }
         }
-        if function.returns != Type::None {
-            let ty = function.returns.llvm();
-            self.line(format!("%function_return = alloca {ty}"));
-            self.line(format!(
-                "store {ty} {}, ptr %function_return",
-                function.returns.initial()
-            ));
-        }
-        for (slot, &ty) in function.locals.iter().enumerate() {
-            self.line(format!("%local{slot} = alloca {}", ty.llvm()));
-            // Parameters initialize exactly once below. ASan can relocate their
-            // argument stores into its prologue, ahead of a default initializer.
-            if !function.params.contains(&slot) {
+        for (slot, fields) in text_fields.into_iter().enumerate() {
+            if fields != 0 {
                 self.line(format!(
-                    "store {} {}, ptr %local{slot}",
-                    ty.llvm(),
-                    ty.initial()
+                    "%text_fields{slot} = alloca [{} x i64]",
+                    1 + fields * 2
                 ));
             }
+        }
+        if function.returns != Type::None {
+            self.body.stack_slot(
+                "%function_return",
+                function.returns.llvm(),
+                Some(function.returns.initial()),
+            );
+        }
+        for (slot, &ty) in function.locals.iter().enumerate() {
+            if self.byte_output_owners.get(slot) == Some(&Some(slot)) {
+                self.body.stack_slot(
+                    format_args!("%byte_window{slot}"),
+                    "{ ptr, i64, i64 }",
+                    None,
+                );
+            }
+            // Parameters initialize exactly once below. ASan can relocate their
+            // argument stores into its prologue, ahead of a default initializer.
+            let initial = (!function.params.contains(&slot)).then(|| ty.initial());
+            self.body
+                .stack_slot(format_args!("%local{slot}"), ty.llvm(), initial);
         }
         for (i, &slot) in function.params.iter().enumerate() {
             let value = Value {
@@ -2170,7 +2402,7 @@ impl Emitter<'_, '_> {
         }
         let command_flags = self.module.command_flags.as_ref();
         let ignore_env = command_flags.is_some_and(|flags| flags.ignore_environment);
-        let startup_at = self.code.len();
+        let startup_at = self.body.code.len();
         if entry {
             self.line(format!(
                 "call void @imre_process_config_init(i32 {}, i32 {}, i32 {})",
@@ -2179,20 +2411,14 @@ impl Emitter<'_, '_> {
                 command_flags.map_or(-1, |flags| i32::from(flags.context_aware_warnings))
             ));
             self.line("call void @imre_record_error_init()");
-            if command_flags.is_some_and(|flags| flags.unbuffered) {
-                self.line("call void @imre_stdio_unbuffered_init()");
-            }
-            if let Some(utf8_mode) = command_flags.and_then(|flags| flags.utf8_mode) {
-                self.line(format!(
-                    "call void @imre_stdio_command_init(i32 {}, i32 {})",
-                    u32::from(ignore_env),
-                    u32::from(utf8_mode)
-                ));
-            } else if ignore_env {
-                self.line("call void @imre_stdio_isolated_init()");
-            } else {
-                self.line("call void @imre_stdio_init()");
-            }
+            self.line(format!(
+                "call void @imre_stdio_start(i32 {}, i32 {}, i32 {})",
+                u32::from(ignore_env),
+                command_flags
+                    .and_then(|flags| flags.utf8_mode)
+                    .map_or(-1, i32::from),
+                u32::from(command_flags.is_some_and(|flags| flags.unbuffered)),
+            ));
             let warnoptions = command_flags.map_or(&[][..], |flags| flags.warnoptions.as_slice());
             let options = if warnoptions.is_empty() {
                 "null".to_owned()
@@ -2225,8 +2451,8 @@ impl Emitter<'_, '_> {
             Some(ir::SourceFrame::Depth) => Some(self.enter_frame(None)),
             None => None,
         };
-        self.int_buffer_body(function);
-        if !self.terminated {
+        CheckedBody::native(self).emit_function(function);
+        if !self.body.terminated {
             self.jump(&self.return_exit.clone());
         }
         self.start(&self.return_exit.clone());
@@ -2234,10 +2460,10 @@ impl Emitter<'_, '_> {
             self.with_directory_frame(|out, frame| {
                 out.line(format!("call void @imre_object_release(ptr {frame})"));
             });
-            let returned = self.current.clone();
+            let returned = self.body.current.clone();
             let cleanup = self.label();
             self.jump(&cleanup);
-            self.start(&self.error_exit.clone());
+            self.start(&self.body.error_target.clone());
             self.with_directory_frame(|out, frame| {
                 for &slot in &directory_slots {
                     let value = out.borrow_slot(slot);
@@ -2250,7 +2476,7 @@ impl Emitter<'_, '_> {
                     "call void @imre_error_attach_directory_frame(ptr {frame})"
                 ));
             });
-            let raised = self.current.clone();
+            let raised = self.body.current.clone();
             self.jump(&cleanup);
             self.start(&cleanup);
             entry.then(|| {
@@ -2271,8 +2497,24 @@ impl Emitter<'_, '_> {
             self.line("store i64 %fault_depth, ptr @imre_typed_fault_depth");
         }
         if let Some(failed) = failed {
+            // A formatter can use module globals. Report before clearing them, and
+            // defer interruption until cleanup has also released buffered files.
+            let exit = self.instruction("alloca { i32, i1 }");
+            let report = self.label();
+            let cleanup = self.label();
+            self.branch(&failed, &report, &cleanup);
+            self.start(&report);
+            self.line(format!("call void @imre_report_unhandled(ptr {exit})"));
+            self.jump(&cleanup);
+            self.start(&cleanup);
             if self.has_extensions {
+                let clear = self.label();
+                let done = self.label();
+                self.branch("%extension_owner", &clear, &done);
+                self.start(&clear);
                 self.line("call void @imre_extension_clear()");
+                self.jump(&done);
+                self.start(&done);
             }
             self.cleanup_globals();
             if self.uses_linecache {
@@ -2288,31 +2530,34 @@ impl Emitter<'_, '_> {
             if self.uses_sys_argv {
                 self.line("call void @imre_args_clear()");
             }
-            let report = self.label();
+            let error_return = self.label();
             let flush = self.label();
-            self.branch(&failed, &report, &flush);
+            self.branch(&failed, &error_return, &flush);
+            self.start(&error_return);
+            let status = self.instruction(format!("call i32 @imre_finish_unhandled(ptr {exit})"));
+            self.body.end(format!("ret i32 {status}"));
+            // The program entry returns the stdio status after successful cleanup.
             self.start(&flush);
-            let status = self.instruction("call i32 @imre_finish_stdio()");
-            self.line(format!("ret i32 {status}"));
-            self.start(&report);
-            let status = self.instruction("call i32 @imre_error_unhandled()");
-            self.line(format!("ret i32 {status}"));
-        } else if function.returns == Type::None {
-            self.line("ret i8 0");
         } else {
-            let value = self.instruction(format!(
-                "load {}, ptr %function_return",
-                function.returns.llvm()
-            ));
-            self.line(format!("ret {returns} {value}"));
+            let ty = function.returns.llvm();
+            let value = if function.returns == Type::None {
+                "0".to_owned()
+            } else {
+                self.instruction(format!("load {ty}, ptr %function_return"))
+            };
+            if stack_layout.is_some() {
+                self.line(format!("store {ty} {value}, ptr %stack_frame"));
+                self.body.end("ret void");
+            } else {
+                self.body.end(format!("ret {ty} {value}"));
+            }
         }
-        self.code.push_str("}\n");
         // Mapping calls transfer their output words before another call can reuse them.
         for name in ["%mapping_key_word", "%mapping_value_word"]
             .into_iter()
             .take(self.mapping_words)
         {
-            writeln!(self.entry_allocas, "  {name} = alloca i64").unwrap();
+            self.body.entry_slot(name, "i64", None);
         }
         if entry {
             // Main is emitted last, including any sequence operations in its own body.
@@ -2321,7 +2566,13 @@ impl Emitter<'_, '_> {
             } else {
                 "null"
             };
-            self.code.insert_str(
+            if self.has_extensions {
+                self.body.code.insert_str(
+                    startup_at,
+                    "  %extension_owner = call i1 @imre_extension_enter()\n",
+                );
+            }
+            self.body.code.insert_str(
                 startup_at,
                 &format!(
                     "  call void @imre_typed_start(i32 {}, ptr {layout})\n",
@@ -2329,35 +2580,33 @@ impl Emitter<'_, '_> {
                 ),
             );
         }
-        self.code.insert_str(allocas_at, &self.entry_allocas);
-        if self.cleanup_limit_hit {
-            return Err("Imre: finally cleanup expansion exceeds the compiler limit".to_owned());
-        }
-        Ok(params)
+        self.body.code.insert_str(allocas_at, &self.body.entry);
     }
 
     fn block(&mut self, statements: &[Statement]) {
-        let incoming = self.temporaries.clone();
-        let mut statements = statements.iter().peekable();
-        while let Some(statement) = statements.next() {
-            if self.terminated {
-                break;
-            }
-            if let Some(next) = statements.peek()
-                && (self.move_cleared_local(statement, next) || self.append_pair(statement, next))
-            {
-                statements.next();
-            } else {
-                self.statement(statement);
-            }
-            debug_assert!(
-                self.temporaries
-                    .iter()
-                    .map(|value| (&value.operand, value.ty))
-                    .eq(incoming.iter().map(|value| (&value.operand, value.ty))),
-                "statement changed its enclosing expression owners"
-            );
+        CheckedBody::native(self).emit_block(statements);
+    }
+
+    fn move_local(&mut self, target: usize, source: usize) {
+        debug_assert_eq!(self.locals[target], self.locals[source]);
+        if self.line_slots[target] {
+            debug_assert!(self.line_slots[source]);
+            self.copy_line(source, target);
         }
+        let value = if self.borrowed_locals[source] {
+            let value = self.borrow_slot(source);
+            if self.borrowed_locals[target] {
+                self.reset_borrowed(source);
+                self.store_borrowed(target, &value);
+                return;
+            }
+            self.retain(&value);
+            self.reset_borrowed(source);
+            value
+        } else {
+            self.take_slot(source)
+        };
+        self.store(target, &value);
     }
 
     /// A copy immediately followed by clearing its private source transfers one owner.
@@ -2369,7 +2618,7 @@ impl Emitter<'_, '_> {
             && self.owns_slot(source)
             && self.owns_slot(*target)
         {
-            self.statement(&Statement::Move(*target, source));
+            self.move_local(*target, source);
             return true;
         }
         false
@@ -2408,10 +2657,13 @@ impl Emitter<'_, '_> {
         {
             return false;
         }
+        let window = self.byte_output_window(receiver);
         let receiver = self.operand(receiver);
         let first = self.operand(first);
         let second = self.operand(second);
-        if receiver.value.ty == Type::ByteOutput {
+        if let Some(window) = window {
+            self.append_private_bytes(window, &receiver.value, &first.value, Some(&second.value));
+        } else if receiver.value.ty == Type::ByteOutput {
             self.runtime_call(
                 &BYTE_OUTPUT_APPEND_PAIR,
                 [&receiver.value, &first.value, &second.value],
@@ -2428,449 +2680,145 @@ impl Emitter<'_, '_> {
         true
     }
 
-    fn statement(&mut self, statement: &Statement) {
-        match statement {
-            Statement::Assign(slot, expression) => {
-                if let Some((next, end)) = self.forward_cursors.get(slot).cloned() {
-                    // The cursor holds its immutable string until the normal scope cleanup.
-                    let cursor = self.expr(expression);
-                    let start = self.instruction(format!(
-                        "call ptr @imre_str_iter_bounds(ptr {}, ptr {end})",
-                        cursor.operand
-                    ));
-                    self.line(format!("store ptr {start}, ptr {next}"));
-                    self.store(*slot, &cursor);
-                    return;
-                }
-                if self.line_slots[*slot] {
-                    self.assign_line(*slot, expression);
-                    return;
-                }
-                if let ExprKind::Builtin(Builtin::SplitIntSource(mask), args) = &expression.kind {
-                    let value = self.expr(&args[0]);
-                    self.line(format!("call void @imre_str_prepare_int_fields(ptr {}, ptr %split_fields{slot}, i32 {mask})", value.operand));
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.locals[*slot] == Type::ByteOutput
-                    && matches!(&expression.kind, ExprKind::List(values) if values.is_empty())
-                {
-                    let value = self.call("imre_byte_output_new", Type::ByteOutput, &[]);
-                    self.store(*slot, &value);
-                    return;
-                }
-                if self.struct_locals[*slot] {
-                    let value = self
-                        .struct_snapshot(expression)
-                        .expect("checked scalar struct source");
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.borrowed_locals[*slot] {
-                    let value = self.borrow_projection(expression);
-                    self.store_borrowed(*slot, &value);
-                    return;
-                }
-                if self.concat_assign(*slot, expression) {
-                    return;
-                }
-                if !self.loops.is_empty()
-                    && let Some(fields) = records::replacement_fields(self.module, expression)
-                {
-                    self.assign_loop_record(*slot, fields);
-                    return;
-                }
-                let previous_small = self.assignment_replaces_small(*slot, expression);
-                let value = self.expr(expression);
-                self.store_with_previous_small(*slot, &value, previous_small);
-                if self.fixed_int_lists[*slot] {
-                    self.remember_int_buffer(*slot, &value);
-                }
-            }
-            Statement::Move(target, source) => {
-                debug_assert_eq!(self.locals[*target], self.locals[*source]);
-                if self.line_slots[*target] {
-                    debug_assert!(self.line_slots[*source]);
-                    self.copy_line(*source, *target);
-                }
-                if self.borrowed_locals[*source] {
-                    let value = self.borrow_slot(*source);
-                    if self.borrowed_locals[*target] {
-                        self.reset_borrowed(*source);
-                        self.store_borrowed(*target, &value);
-                    } else {
-                        self.retain(&value);
-                        self.reset_borrowed(*source);
-                        self.store(*target, &value);
-                    }
-                    return;
-                }
-                let value = self.take_slot(*source);
-                self.store(*target, &value);
-            }
-            Statement::Clear(slot) => self.clear_slots(&[*slot]),
-            Statement::Scope { body, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                self.cleanups.pop();
-                if !self.terminated {
-                    self.clear_slots(clear);
-                }
-            }
-            Statement::Try {
-                body,
-                handlers,
-                orelse,
-                finalbody,
-            } => self.try_statement(body, handlers, orelse, finalbody),
-            Statement::Raise(exception) => {
-                if let Some(exception) = exception {
-                    let exception = self.operand(exception);
-                    self.void_call("imre_exception_raise", &[&exception.value]);
-                    self.release_operand(&exception);
-                } else {
-                    self.void_call("imre_exception_reraise", &[]);
-                }
-                // Both runtime helpers always set an error; their success edge
-                // is unreachable, but uses the same immediate-check protocol.
-                self.line("unreachable");
-                self.terminated = true;
-            }
-            Statement::IterNext {
-                iterator,
-                key,
-                value,
-                ready,
-                kind,
-            } => {
-                self.iter_next(*iterator, *key, *value, *ready, *kind);
-            }
-            Statement::SetItem(list, index, expression) => {
-                if self.copy_item(list, index, expression) {
-                    return;
-                }
-                // Python evaluates an assignment's RHS before its target expressions.
-                let nonnegative = self.nonnegative_index(index);
-                let fixed_slot = match list.kind {
-                    ExprKind::Local(slot)
-                        if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot) =>
-                    {
-                        Some(slot)
-                    }
-                    _ => None,
-                };
-                let value = self.operand(expression);
-                let list = self.operand(list);
-                let index = self.operand(index);
-                if let Some(slot) = fixed_slot {
-                    self.fixed_int_set(slot, &index.value, &value.value);
-                } else {
-                    self.set_item(&list.value, &index.value, &value.value, nonnegative);
-                }
-                if self.module.types.mapping(list.value.ty).is_some()
-                    && self.module.types.may_own_file(
-                        value.value.ty,
-                        &self.module.class_fields,
-                        true,
-                    )
-                {
-                    // The assignment's stack keeps the RHS alive while the
-                    // temporary dictionary releases its remaining entries.
-                    self.release_operand(&list);
-                    self.release_operand(&index);
-                    self.release_operand(&value);
-                } else {
-                    self.release_operand(&value);
-                    self.release_operand(&index);
-                    self.release_operand(&list);
-                }
-            }
-            Statement::AugmentItem(list, index, op, expression) => {
-                // Augmented assignment instead roots the target and old item first.
-                let nonnegative = self.nonnegative_index(index);
-                let list = self.operand(list);
-                let index = self.operand(index);
-                let element = self
-                    .module
-                    .types
-                    .indexed_element(list.value.ty)
-                    .or_else(|| {
-                        self.module
-                            .types
-                            .mapping(list.value.ty)
-                            .map(|(_, value)| value)
-                    })
-                    .unwrap();
-                let old = self.get_item(&list.value, &index.value, element, nonnegative);
-                let right = self.operand(expression);
-                let value = self.binary(*op, &old, &right.value);
-                self.set_item(&list.value, &index.value, &value, nonnegative);
-                self.release(&value);
-                self.release_operand(&right);
-                self.release(&old);
-                self.release_operand(&index);
-                self.release_operand(&list);
-            }
-            Statement::SetField(receiver, field, expression) => {
-                let value = self.operand(expression);
-                let receiver = self.operand(receiver);
-                self.set_field(&receiver.value, *field, &value.value);
-                self.release_operand(&receiver);
-                self.release_operand(&value);
-            }
-            Statement::AugmentField(receiver, field, op, expression) => {
-                let receiver = self.operand(receiver);
-                let Type::Class(class) = receiver.value.ty else {
-                    unreachable!()
-                };
-                let ty = self.module.class_fields[class][*field];
-                // A scalar or a non-reentrant exact length read cannot replace
-                // this field. Other right-hand sides must own the original
-                // value across arbitrary mutation and exceptions.
-                let stable = matches!(expression.kind, ExprKind::Int(_) | ExprKind::Local(_))
-                    || matches!(&expression.kind, ExprKind::Builtin(Builtin::Len, values)
-                        if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
-                            && (matches!(list.kind, ExprKind::Local(_))
-                                || borrows::getters::selected(list, &self.module.functions).is_some())));
-                let old = if stable && ty == Type::Int {
-                    let pointer = self.field_pointer(&receiver.value, *field);
-                    Operand {
-                        value: self.field_value(&pointer, ty),
-                        ownership: Ownership::Borrowed,
-                    }
-                } else {
-                    Operand {
-                        value: self.get_field(&receiver.value, *field, ty),
-                        ownership: Ownership::Owned,
-                    }
-                };
-                let right = self.operand(expression);
-                let value = self.binary(*op, &old.value, &right.value);
-                self.forget(&value);
-                self.replace_field(&receiver.value, *field, &value);
-                self.release_operand(&right);
-                self.release_operand(&old);
-                self.release_operand(&receiver);
-            }
-            // Discarded scalar literals have no effects. In particular, a
-            // function docstring must not allocate on every call. Literal
-            // allocation exhaustion is already fatal rather than catchable.
-            Statement::Expr(expression)
-                if matches!(
-                    expression.kind,
-                    ExprKind::Int(_)
-                        | ExprKind::Float(_)
-                        | ExprKind::Bool(_)
-                        | ExprKind::Str(_)
-                        | ExprKind::Bytes(_)
-                        | ExprKind::None
-                ) => {}
-            Statement::Expr(expression) => {
-                if let ExprKind::Builtin(Builtin::TextWrite, args) = &expression.kind {
-                    self.write_discard(args);
-                } else {
-                    let value = self.expr(expression);
-                    self.release(&value);
-                }
-            }
-            Statement::Return(expression) => {
-                let value = self.expr(expression);
-                self.forget(&value);
-                self.route(Completion::Return(value));
-            }
-            Statement::If(test, yes, no) => {
-                let condition = self.expr(test);
-                let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-                self.branch(&condition.operand, &yes_label, &no_label);
-                self.start(&yes_label);
-                let prior = self.guarded_integer_lists.len();
-                self.borrow_guarded_integer_lists(test);
-                self.block(yes);
-                self.guarded_integer_lists.truncate(prior);
-                let yes_ends = self.terminated;
-                if !yes_ends {
-                    self.jump(&end);
-                }
-                self.start(&no_label);
-                self.block(no);
-                let no_ends = self.terminated;
-                if !no_ends {
-                    self.jump(&end);
-                }
-                self.start(&end);
-                if yes_ends && no_ends {
-                    self.line("unreachable");
-                    self.terminated = true;
-                }
-            }
-            Statement::While(test, body, orelse) => {
-                let previous_lengths = self.snapshot_loop_lengths(statement);
-                let previous_buffers = self.int_buffer_loop(statement);
-                let raw_subtotal = self.raw_subtotal(body);
-                let (condition, body_label, end) = (self.label(), self.label(), self.label());
-                let exhausted = if orelse.is_empty() {
-                    end.clone()
-                } else {
-                    self.label()
-                };
-                if !self.struct_run_loop(test, body, &condition, &exhausted) {
-                    self.jump(&condition);
-                }
-                self.start(&condition);
-                self.check_interrupt();
-                let test = self.while_condition(test, raw_subtotal.is_some());
-                self.branch(&test, &body_label, &exhausted);
-                self.start(&body_label);
-                self.loops.push(LoopTarget {
-                    end: end.clone(),
-                    exhausted: exhausted.clone(),
-                    next: condition.clone(),
-                    cleanup_depth: self.cleanups.len(),
-                    raw_subtotal,
-                });
-                self.block(body);
-                self.loops.pop();
-                if !self.terminated {
-                    self.jump(&condition);
-                }
-                if !orelse.is_empty() {
-                    self.start(&exhausted);
-                    self.block(orelse);
-                    if !self.terminated {
-                        self.jump(&end);
-                    }
-                }
-                self.start(&end);
-                self.length_snapshots = previous_lengths;
-                self.int_buffers = previous_buffers;
-            }
-            Statement::For {
-                target,
-                cursor,
-                stop,
-                step,
-                args,
-                body,
-                orelse,
-            } => {
-                // This proof includes the final increment and the hidden cursor,
-                // independently of reassignment of the visible loop target.
-                let small_cursor = self.ranges.range_cursor(statement).is_some();
-                let unit_step = match args.as_slice() {
-                    [_] | [_, _] => true,
-                    [_, _, step] => matches!(&step.kind, ExprKind::Int(n) if n == "1"),
-                    _ => false,
-                };
-                let mut args = args.iter().map(|arg| self.expr(arg)).collect::<Vec<_>>();
-                if args.len() == 1 {
-                    args.insert(0, small(0));
-                }
-                if args.len() == 2 {
-                    args.push(small(1));
-                }
-                for (&slot, value) in [*cursor, *stop, *step].iter().zip(&args) {
-                    self.store(slot, value);
-                }
-                let zero = self.compare(Compare::Equal, &args[2], &small(0));
-                let (fail, condition, body_label, increment, end) = (
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                    self.label(),
-                );
-                let exhausted = if orelse.is_empty() {
-                    end.clone()
-                } else {
-                    self.label()
-                };
-                self.uniform_append(body, &args, *target, *cursor, &exhausted);
-                if unit_step {
-                    self.uniform_indexed_sum(body, *target, *cursor, &args, &exhausted);
-                }
-                self.branch(&zero.operand, &fail, &condition);
-                self.start(&fail);
-                self.checked_line("call void @imre_range_step_zero()");
-                self.line("unreachable");
-                self.start(&condition);
-                self.check_interrupt();
-                let mut current = self.borrow_slot(*cursor);
-                current.small_integer |= small_cursor;
-                let mut stop_value = self.borrow_slot(*stop);
-                stop_value.small_integer |= args[1].small_integer;
-                let mut step_value = self.borrow_slot(*step);
-                step_value.small_integer |= args[2].small_integer;
-                let positive = self.compare(Compare::Greater, &step_value, &small(0));
-                let below = self.compare(Compare::Less, &current, &stop_value);
-                let above = self.compare(Compare::Greater, &current, &stop_value);
-                let test = self.instruction(format!(
-                    "select i1 {}, i1 {}, i1 {}",
-                    positive.operand, below.operand, above.operand
-                ));
-                self.branch(&test, &body_label, &exhausted);
-                self.start(&body_label);
-                if unit_step {
-                    self.advance_affine(body, *target, *cursor, *stop);
-                }
-                let current = self.load(*cursor, small_cursor);
-                self.store(*target, &current);
-                self.loops.push(LoopTarget {
-                    end: end.clone(),
-                    exhausted: exhausted.clone(),
-                    next: increment.clone(),
-                    cleanup_depth: self.cleanups.len(),
-                    raw_subtotal: None,
-                });
-                self.block(body);
-                self.loops.pop();
-                if !self.terminated {
-                    if unit_step {
-                        self.batch_modular_writes(body, *target, *cursor, *stop);
-                    }
-                    self.jump(&increment);
-                }
-                self.start(&increment);
-                let mut current = self.borrow_slot(*cursor);
-                current.small_integer |= small_cursor;
-                let mut step_value = self.borrow_slot(*step);
-                step_value.small_integer |= args[2].small_integer;
-                let next = if small_cursor {
-                    self.small_binary(Binary::Add, &current, &step_value, false, None)
-                } else {
-                    self.binary(Binary::Add, &current, &step_value)
-                };
-                self.store(*cursor, &next);
-                self.jump(&condition);
-                if !orelse.is_empty() {
-                    self.start(&exhausted);
-                    self.block(orelse);
-                    if !self.terminated {
-                        self.jump(&end);
-                    }
-                }
-                self.start(&end);
-            }
-            Statement::Break | Statement::Continue | Statement::Exhaust => {
-                let target = self.loops.last().unwrap();
-                self.route(Completion::Jump {
-                    label: match statement {
-                        Statement::Break => target.end.clone(),
-                        Statement::Exhaust => target.exhausted.clone(),
-                        _ => target.next.clone(),
-                    },
-                    depth: target.cleanup_depth,
-                });
-            }
-            Statement::Assert(test) => {
-                let test = self.expr(test);
-                let (success, fail) = (self.label(), self.label());
-                self.branch(&test.operand, &success, &fail);
-                self.start(&fail);
-                self.checked_line("call void @imre_assert_fail()");
-                self.line("unreachable");
-                self.start(&success);
-            }
+    /// Restarts a private UTF-8 cursor, caching the full view when a parameter
+    /// owns its bytes across every iteration of the enclosing loop.
+    fn assign_forward_cursor(&mut self, slot: usize, expression: &Expr, cursor: ForwardCursor) {
+        let ForwardCursor { next, end, start } = cursor;
+        let restart = start.map(|cache| {
+            let previous = self.instruction(format!("load ptr, ptr {cache}"));
+            let missing = self.instruction(format!("icmp eq ptr {previous}, null"));
+            let initialize = self.label();
+            let ready = self.label();
+            self.branch(&missing, &initialize, &ready);
+            self.start(&initialize);
+            (cache, ready)
+        });
+        let ExprKind::Builtin(Builtin::StringIter, args) = &expression.kind else {
+            unreachable!("private forward cursor initialization")
+        };
+        let source = self.expr(&args[0]);
+        let start = self.instruction(format!(
+            "call ptr @imre_str_bounds(ptr {}, ptr {end})",
+            source.operand
+        ));
+        if let Some((cache, ready)) = restart {
+            self.line(format!("store ptr {start}, ptr {cache}"));
+            self.release(&source);
+            self.jump(&ready);
+            self.start(&ready);
+            let first = self.instruction(format!("load ptr, ptr {cache}"));
+            self.line(format!("store ptr {first}, ptr {next}"));
+        } else {
+            self.line(format!("store ptr {start}, ptr {next}"));
+            self.store(slot, &source);
         }
+    }
+
+    fn if_facts(&mut self, test: &Expr, yes: &[Statement]) -> NativeIfFacts {
+        let mut bounded = false;
+        if crate::list_specialization::is_window_range_guard(test)
+            && let [Statement::While(_, body, _)] = yes
+        {
+            crate::ir::walk_expressions(body, &mut |value| {
+                bounded |= matches!(
+                    value.kind,
+                    ExprKind::Builtin(Builtin::GetBoundedInAppendWindow { .. }, _)
+                );
+            });
+        }
+        let small_slots = if bounded {
+            self.ranges
+                .checked_small_slots(yes, &self.locals, &self.small_locals)
+        } else {
+            Vec::new()
+        };
+        let previous_window = self.reserved_append_window.clone();
+        let window = bounded
+            .then(|| crate::list_specialization::reserved_append_window(yes))
+            .flatten()
+            .and_then(|(slot, cursor)| Some((slot, self.forward_cursors.get(&cursor)?.clone())))
+            .map(|(slot, cursor)| {
+                let tail = self.entry_alloca("i64");
+                self.reserved_append_window = Some((slot, tail.clone()));
+                (slot, cursor, tail)
+            });
+        NativeIfFacts {
+            small_slots,
+            guarded_lists: self.guarded_integer_lists.len(),
+            previous_window,
+            window,
+        }
+    }
+
+    /// The fast loop needs tagged starting counters and room for the remaining appends.
+    fn if_edges(
+        &mut self,
+        statement: &Statement,
+        guard: &str,
+        facts: &NativeIfFacts,
+        yes: &str,
+        no: &str,
+    ) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        let mut guard = guard.to_owned();
+        let mut unknown = facts
+            .small_slots
+            .iter()
+            .copied()
+            .filter(|slot| !self.ranges.starts_small(statement, *slot))
+            .collect::<Vec<_>>()
+            .into_iter();
+        if let Some(first) = unknown.next() {
+            let mut words = self.borrow_slot(first).operand;
+            for slot in unknown {
+                let word = self.borrow_slot(slot).operand;
+                words = self.instruction(format!("and i64 {words}, {word}"));
+            }
+            let tagged = self.instruction(format!("trunc i64 {words} to i1"));
+            guard = self.instruction(format!("and i1 {guard}, {tagged}"));
+        }
+        if let Some((slot, cursor, _)) = &facts.window {
+            let check = self.label();
+            self.branch(&guard, &check, no);
+            self.start(&check);
+            let bytes = self.remaining_cursor_bytes(cursor);
+            let list = self.borrow_slot(*slot).operand;
+            let window = self.append_window(*slot);
+            let success = self.instruction(format!(
+                "call i32 @imre_list_try_open_append_window(ptr {list}, i64 {bytes}, ptr {window})"
+            ));
+            guard = self.instruction(format!("icmp ne i32 {success}, 0"));
+        }
+        self.branch(&guard, yes, no);
+    }
+
+    fn enter_if_body(&mut self, test: &Expr, facts: &NativeIfFacts) {
+        if let Some((slot, _, tail)) = &facts.window {
+            self.reserved_append_window = Some((*slot, tail.clone()));
+            // Opening the reserved window proves the list has an immediate tail.
+            let window = self.append_window(*slot);
+            let cursor = self.instruction(format!(
+                "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+            ));
+            let next = self.instruction(format!("load ptr, ptr {cursor}"));
+            let last = self.instruction(format!("getelementptr i64, ptr {next}, i64 -1"));
+            let word = self.instruction(format!("load i64, ptr {last}"));
+            self.line(format!("store i64 {word}, ptr {tail}"));
+        }
+        self.borrow_guarded_integer_lists(test);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = true;
+        }
+    }
+
+    fn leave_if_body(&mut self, facts: &NativeIfFacts) {
+        self.reserved_append_window
+            .clone_from(&facts.previous_window);
+        for &slot in &facts.small_slots {
+            self.small_locals[slot] = false;
+        }
+        self.guarded_integer_lists.truncate(facts.guarded_lists);
     }
 
     fn byte_array(&mut self, bytes: Vec<u8>) -> String {
@@ -2880,6 +2828,59 @@ impl Emitter<'_, '_> {
         self.output.string_name(id, "str")
     }
 
+    /// Source strings are immutable raw bytes in the same LLVM unit as their call.
+    fn frame_string(&mut self, value: &str) -> String {
+        let unit = self.output.current;
+        if let Some(name) = self
+            .frame_strings
+            .get(&unit)
+            .and_then(|strings| strings.get(value))
+        {
+            return name.clone();
+        }
+        let name = self.byte_array(value.as_bytes().to_vec());
+        self.frame_strings
+            .entry(unit)
+            .or_default()
+            .insert(value.to_owned(), name.clone());
+        name
+    }
+
+    /// Build a builtin or named exception from its optional message.
+    fn exception_value(&mut self, kind: u32, message: Option<&Expr>) -> Value {
+        let message = message.map(|message| self.operand(message));
+        let pointer = message
+            .as_ref()
+            .map_or("null", |message| message.value.operand.as_str());
+        let call = if kind >= 256 {
+            let descriptor = self.output.global_ref(format!("exception_type_{kind}"));
+            format!("call ptr @imre_named_exception_new(ptr @{descriptor}, ptr {pointer})")
+        } else {
+            format!("call ptr @imre_exception_new(i32 {kind}, ptr {pointer})")
+        };
+        let value = Value {
+            ty: Type::Exception,
+            operand: self.instruction(call),
+            small_integer: false,
+        };
+        if let Some(message) = &message {
+            self.release_operand(message);
+        }
+        value
+    }
+
+    fn exception_frame(&mut self, exception: &str, origin: &ir::FixedOrigin) -> String {
+        let file = self.frame_string(&origin.frame.filename);
+        let name = self.frame_string(&origin.frame.function);
+        let [start, split, end] = origin.span.unwrap_or_default();
+        format!(
+            "call ptr @imre_exception_at_frame(ptr {exception}, ptr @{file}, i64 {}, ptr @{name}, i64 {}, i32 {}, i32 {start}, i32 {split}, i32 {end})",
+            origin.frame.filename.len(),
+            origin.frame.function.len(),
+            origin.line,
+        )
+    }
+
     /// Produces an owned result; its consumer must transfer or release that ownership.
     fn expr(&mut self, expression: &Expr) -> Value {
         let mut value = if self.can_borrow_projection(expression) {
@@ -2887,356 +2888,13 @@ impl Emitter<'_, '_> {
             self.retain(&value);
             value
         } else {
-            self.expression(expression)
+            CheckedBody::native(self)
+                .emit_value(expression)
+                .into_native()
+                .value
         };
         value.small_integer |= self.ranges.integer(expression).is_some();
         self.owned(value)
-    }
-
-    fn expression(&mut self, expression: &Expr) -> Value {
-        match &expression.kind {
-            ExprKind::Int(value) => {
-                if let Ok(value) = value.parse::<i64>()
-                    && (-(1_i64 << 62)..(1_i64 << 62)).contains(&value)
-                {
-                    small(value)
-                } else {
-                    self.pooled_literal(value.as_bytes(), Type::Int)
-                }
-            }
-            ExprKind::Float(value) => Value {
-                ty: Type::Float,
-                operand: format!("0x{:016X}", value.to_bits()),
-                small_integer: false,
-            },
-            ExprKind::Bool(value) => Value {
-                ty: Type::Bool,
-                operand: u8::from(*value).to_string(),
-                small_integer: false,
-            },
-            ExprKind::Str(value) => Value {
-                ty: expression.ty,
-                ..self.pooled_literal(value.as_bytes(), Type::Str)
-            },
-            ExprKind::Bytes(value) => self.pooled_literal(value, Type::Bytes),
-            ExprKind::None => none(),
-            ExprKind::Local(slot) => {
-                let mut value = self.borrow_slot(*slot);
-                value.small_integer |= self.ranges.integer(expression).is_some();
-                self.retain(&value);
-                value
-            }
-            ExprKind::Bind(slot, expression) => {
-                let value = self.expr(expression);
-                self.retain(&value);
-                let storage = self.locals[*slot];
-                let stored = if storage == value.ty {
-                    value.clone()
-                } else if value.ty == Type::None {
-                    Value {
-                        ty: storage,
-                        operand: "0".into(),
-                        small_integer: false,
-                    }
-                } else if matches!(
-                    self.module.types.payload(storage).unwrap_or(storage),
-                    Type::Union(_)
-                ) && matches!(
-                    self.module.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Str
-                        | Type::Bytes
-                        | Type::List(_)
-                        | Type::Class(_)
-                        | Type::Exception
-                        | Type::NamedException(_)
-                ) {
-                    self.union_inject(value.clone(), storage)
-                } else {
-                    self.present(value.clone(), storage)
-                };
-                self.store(*slot, &stored);
-                value
-            }
-            ExprKind::Scope { body, value, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
-                self.block(body);
-                // Unpacking returns a captured item and clears its slot before
-                // evaluating the next target. Hand its owner to the result.
-                if let ExprKind::Local(slot) = value.kind
-                    && clear.as_slice() == [slot]
-                    && self.owns_slot(slot)
-                {
-                    self.cleanups.pop();
-                    return self.take_slot(slot);
-                }
-                let value = self.expr(value);
-                self.cleanups.pop();
-                self.clear_slots(clear);
-                value
-            }
-            ExprKind::List(values) => {
-                let list = if expression.ty == Type::ListInt {
-                    self.call("imre_list_new", expression.ty, &[])
-                } else {
-                    let element = self.module.types.element(expression.ty).unwrap();
-                    let op = if self.module.types.is_value_struct(element) {
-                        let layout = self.output.record_layout(element);
-                        format!("call ptr @imre_struct_list_new(ptr @{layout})")
-                    } else {
-                        format!(
-                            "call ptr @imre_seq_new(i32 {})",
-                            representation_kind(element, &self.module.types)
-                        )
-                    };
-                    let value = Value {
-                        ty: expression.ty,
-                        operand: self.instruction(op),
-                        small_integer: false,
-                    };
-                    self.owned(value)
-                };
-                for value in values {
-                    if self.append_struct_constructor(&list, value) {
-                        continue;
-                    }
-                    let value = self.operand(value);
-                    self.append(&list, &value.value);
-                    self.release_operand(&value);
-                }
-                list
-            }
-            ExprKind::Dict {
-                key,
-                value,
-                entries,
-            } => {
-                let dict = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_dict_new(i32 {}, i32 {})",
-                        representation_kind(*key, &self.module.types),
-                        representation_kind(*value, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let dict = self.owned(dict);
-                for (key, value) in entries {
-                    let key = self.operand(key);
-                    let value = self.operand(value);
-                    self.set_item(&dict, &key.value, &value.value, false);
-                    self.release_operand(&value);
-                    self.release_operand(&key);
-                }
-                dict
-            }
-            ExprKind::Set { element, values } => {
-                let set = Value {
-                    ty: expression.ty,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_set_new(i32 {})",
-                        representation_kind(*element, &self.module.types)
-                    )),
-                    small_integer: false,
-                };
-                let set = self.owned(set);
-                for value in values {
-                    let value = self.operand(value);
-                    self.set_member(&set, &value.value, true);
-                    self.release_operand(&value);
-                }
-                set
-            }
-            ExprKind::Tuple(values) => self.tuple(expression.ty, values, None),
-            ExprKind::Present(expression_value) => {
-                let value = self.operand(expression_value);
-                let value = self.own_operand(value);
-                self.present(value, expression.ty)
-            }
-            ExprKind::Absent(expression_value) => {
-                let value = self.expr(expression_value);
-                self.release(&value);
-                Value {
-                    ty: expression.ty,
-                    operand: "0".to_owned(),
-                    small_integer: false,
-                }
-            }
-            ExprKind::Unwrap(receiver) => {
-                let receiver = self.operand(receiver);
-                if expression.ty == Type::Float {
-                    let value = self.call("imre_float_unbox", Type::Float, &[&receiver.value]);
-                    self.release_operand(&receiver);
-                    return value;
-                }
-                let receiver = self.own_operand(receiver);
-                self.forget(&receiver);
-                let word = if expression.ty == Type::Bool {
-                    self.instruction(format!("sub i64 {}, 1", receiver.operand))
-                } else {
-                    receiver.operand
-                };
-                self.decode_word(word, expression.ty)
-            }
-            ExprKind::Binary(Binary::Concat, ..) if expression.ty == Type::Str => {
-                self.concat(expression)
-            }
-            ExprKind::Binary(op, left, right) => {
-                if matches!(op, Binary::Add)
-                    && matches!(&left.kind, ExprKind::Builtin(Builtin::IntBounded { .. }, _))
-                    && let Some(slot) = self.active_subtotal().map(str::to_owned)
-                {
-                    let subtotal = self.instruction(format!("load i64, ptr {slot}"));
-                    let term = self.operand(right);
-                    let decoded = self.instruction(format!("ashr i64 {}, 1", term.value.operand));
-                    let updated = self.instruction(format!("add nsw i64 {subtotal}, {decoded}"));
-                    self.release_operand(&term);
-                    self.line(format!("store i64 {updated}, ptr {slot}"));
-                    return self.tag_small(&updated);
-                }
-                let direct = self.small_binary_proof(expression, left, right, *op);
-                let left_value = self.operand(left);
-                let right_value = self.operand(right);
-                let result = if let Some(adjust_floor) = direct {
-                    let bounds = self.ranges.integer(left).zip(self.ranges.integer(right));
-                    self.small_binary(
-                        *op,
-                        &left_value.value,
-                        &right_value.value,
-                        adjust_floor,
-                        bounds,
-                    )
-                } else {
-                    self.binary(*op, &left_value.value, &right_value.value)
-                };
-                self.release_operand(&left_value);
-                self.release_operand(&right_value);
-                result
-            }
-            ExprKind::Negate(value) => {
-                let direct = self.ranges.integer(expression).is_some()
-                    && self.ranges.integer(value).is_some();
-                let value = self.operand(value);
-                let result = if value.value.ty == Type::Float {
-                    Value {
-                        ty: Type::Float,
-                        operand: self.instruction(format!("fneg double {}", value.value.operand)),
-                        small_integer: false,
-                    }
-                } else if direct {
-                    self.small_binary(Binary::Subtract, &small(0), &value.value, false, None)
-                } else {
-                    self.binary(Binary::Subtract, &small(0), &value.value)
-                };
-                self.release_operand(&value);
-                result
-            }
-            ExprKind::Not(value) => {
-                let value = self.expr(value);
-                Value {
-                    ty: Type::Bool,
-                    operand: self.instruction(format!("xor i1 {}, true", value.operand)),
-                    small_integer: false,
-                }
-            }
-            ExprKind::Boolean(and, values) => self.boolean(*and, values),
-            ExprKind::BooleanValue(and, left, right) => {
-                self.boolean_value(*and, left, right, expression.ty)
-            }
-            ExprKind::Conditional(test, yes, no) => self.conditional(test, yes, no),
-            ExprKind::Compare(values, ops) => self.comparisons(values, ops),
-            ExprKind::Call(id, args) => {
-                if let [arg] = args.values.as_slice()
-                    && self.module.types.is_value_struct(arg.ty)
-                    && structs::field_reader(&self.module.functions[*id])
-                    && let Some(snapshot) = self.struct_snapshot(arg)
-                {
-                    return self.user_call(
-                        *id,
-                        expression.ty,
-                        &[&snapshot],
-                        args.exhaustive_enum_match,
-                    );
-                }
-                let mut values = self.call_operands(args);
-                self.transfer_call_operands(&mut values);
-                let result = self.user_call(
-                    *id,
-                    expression.ty,
-                    &args
-                        .order
-                        .iter()
-                        .map(|&index| &values[index].value)
-                        .collect::<Vec<_>>(),
-                    args.exhaustive_enum_match,
-                );
-                for arg in &values {
-                    self.release_operand(arg);
-                }
-                result
-            }
-            ExprKind::Callable { function, receiver } => {
-                self.callable_value(expression.ty, *function, receiver.as_deref())
-            }
-            ExprKind::Invoke { callable, args } => {
-                self.invoke_callable(callable, args, expression.ty)
-            }
-            ExprKind::Construct { initializer, args } => {
-                // A type call keeps its own arguments while __init__ runs.
-                // Its stack releases them in reverse source order on return.
-                let mut values = self.call_operands(args);
-                let object = self.record(expression.ty);
-                let mut inputs = vec![&object];
-                inputs.extend(args.order.iter().map(|&index| &values[index].value));
-                for input in &inputs {
-                    if self.resource_types.contains(&input.ty) {
-                        self.retain(input);
-                    }
-                }
-                self.user_call(*initializer, Type::None, &inputs, false);
-                if values
-                    .iter()
-                    .any(|arg| self.resource_types.contains(&arg.value.ty))
-                {
-                    values.reverse();
-                }
-                for arg in &values {
-                    self.release_operand(arg);
-                }
-                object
-            }
-            ExprKind::Exception { kind, message } => {
-                let message = message.as_ref().map(|message| self.operand(message));
-                let pointer = message
-                    .as_ref()
-                    .map_or("null", |message| message.value.operand.as_str());
-                let call = if *kind >= 256 {
-                    let descriptor = self.output.global_ref(format!("exception_type_{kind}"));
-                    format!("call ptr @imre_named_exception_new(ptr @{descriptor}, ptr {pointer})")
-                } else {
-                    format!("call ptr @imre_exception_new(i32 {kind}, ptr {pointer})")
-                };
-                let value = Value {
-                    ty: Type::Exception,
-                    operand: self.instruction(call),
-                    small_integer: false,
-                };
-                if let Some(message) = &message {
-                    self.release_operand(message);
-                }
-                value
-            }
-            ExprKind::Field(receiver, field) => {
-                if let Some(snapshot) = self.struct_snapshot(receiver) {
-                    let ptr = self.field_pointer(&snapshot, *field);
-                    return self.field_value(&ptr, expression.ty);
-                }
-                let receiver = self.immediate_receiver(receiver);
-                let value = self.get_field(&receiver.value, *field, expression.ty);
-                self.release_operand(&receiver);
-                value
-            }
-            ExprKind::Builtin(builtin, args) => self.builtin(builtin, args, expression.ty),
-        }
     }
 
     /// Transfers an overwritten string only after every suffix has evaluated.
@@ -3247,7 +2905,7 @@ impl Emitter<'_, '_> {
     fn concat_assign(&mut self, slot: usize, expression: &Expr) -> bool {
         if self.locals[slot] != Type::Str
             || self.expression_rebound[slot]
-            || !matches!(expression.kind, ExprKind::Binary(Binary::Concat, ..))
+            || !expression.is_string_concat()
         {
             return false;
         }
@@ -3311,8 +2969,7 @@ impl Emitter<'_, '_> {
     /// still run at their source position, using stack bytes or an owned BigInt
     /// string. The completed result is published only after allocation succeeds.
     /// Unique entry-block scratch avoids loop stack growth and nested overwrite.
-    fn concat(&mut self, expression: &Expr) -> Value {
-        let expressions = concat_leaves(self, expression);
+    fn concat(&mut self, expressions: Vec<&Expr>) -> Value {
         if let [left, right] = expressions.as_slice()
             && !matches!(left.kind, ExprKind::Str(_))
             && !matches!(right.kind, ExprKind::Str(_))
@@ -3397,24 +3054,27 @@ impl Emitter<'_, '_> {
             }
             if let Some(integer) = integer_string_argument(expression) {
                 let integer = self.operand(integer);
-                let buffer = self.entry_alloca("[20 x i8]");
-                let value = Value {
-                    ty: Type::Str,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_int_str_part(i64 {}, ptr {buffer}, ptr {part})",
-                        integer.value.operand
-                    )),
-                    small_integer: false,
-                };
-                // Null denotes inline bytes or an error. Root earlier parts before checking.
-                let value = self.owned(value);
-                owners.push(Operand {
-                    value,
-                    ownership: Ownership::Owned,
-                });
+                let buffer = self.entry_alloca("[40 x i8]");
+                let owner = self.instruction(format!(
+                    "call ptr @imre_int_str_part_into(i64 {}, ptr {buffer}, ptr {part})",
+                    integer.value.operand
+                ));
                 self.release_operand(&integer);
                 if !integer.value.small_integer {
-                    self.check_error();
+                    // Borrowed digits use null. The boxed conversion reports an error
+                    // with address one, which can never be an aligned string owner.
+                    let failed =
+                        self.instruction(format!("icmp eq ptr {owner}, inttoptr (i64 1 to ptr)"));
+                    self.check_failed(&failed);
+                    let value = self.owned(Value {
+                        ty: Type::Str,
+                        operand: owner,
+                        small_integer: false,
+                    });
+                    owners.push(Operand {
+                        value,
+                        ownership: Ownership::Owned,
+                    });
                 }
                 continue;
             }
@@ -3495,7 +3155,7 @@ impl Emitter<'_, '_> {
     /// receiver and fragment roots survive until the status has been checked.
     fn write_discard(&mut self, args: &[Expr]) {
         let receiver = self.operand(&args[0]);
-        let (status, owners) = if matches!(args[1].kind, ExprKind::Binary(Binary::Concat, ..)) {
+        let (status, owners) = if args[1].is_string_concat() {
             let (scratch, count, owners) = self.concat_parts(concat_leaves(self, &args[1]));
             let status = self.instruction(format!(
                 "call i32 @imre_text_write_parts(ptr {}, ptr {scratch}, i64 {count})",
@@ -3518,30 +3178,41 @@ impl Emitter<'_, '_> {
         self.release_operand(&receiver);
     }
 
+    fn promote_int_to_float(&mut self, value: &Value) -> Value {
+        if value.ty == Type::Int {
+            self.call("imre_int_float", Type::Float, &[value])
+        } else {
+            value.clone()
+        }
+    }
+
+    fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
+        let result = self.body.integer_arithmetic(op, left, right, false);
+        if matches!(
+            op,
+            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
+        ) {
+            self.check_error();
+        }
+        self.owned(result)
+    }
+
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
+        if op == Binary::Divide && left.ty.is_path() {
+            let name = if right.ty.is_path() {
+                "imre_path_join_object"
+            } else {
+                "imre_path_join"
+            };
+            return self.call(name, left.ty, &[left, right]);
+        }
         if left.ty == Type::Float || right.ty == Type::Float {
-            let left = if left.ty == Type::Int {
-                self.call("imre_int_float", Type::Float, &[left])
-            } else {
-                left.clone()
-            };
-            let right = if right.ty == Type::Int {
-                self.call("imre_int_float", Type::Float, &[right])
-            } else {
-                right.clone()
-            };
+            let left = self.promote_int_to_float(left);
+            let right = self.promote_int_to_float(right);
             let operand = match op {
                 Binary::Add | Binary::Subtract | Binary::Multiply => {
-                    let instruction = match op {
-                        Binary::Add => "fadd",
-                        Binary::Subtract => "fsub",
-                        Binary::Multiply => "fmul",
-                        _ => unreachable!(),
-                    };
-                    self.instruction(format!(
-                        "{instruction} double {}, {}",
-                        left.operand, right.operand
-                    ))
+                    self.body
+                        .float_arithmetic(op, &left.operand, &right.operand)
                 }
                 Binary::Divide | Binary::FloorDivide | Binary::Modulo => {
                     let operation = match op {
@@ -3555,8 +3226,8 @@ impl Emitter<'_, '_> {
                         left.operand, right.operand
                     ))
                 }
-                Binary::Repeat
-                | Binary::Concat
+                Binary::Power
+                | Binary::MatrixMultiply
                 | Binary::BitAnd
                 | Binary::BitOr
                 | Binary::BitXor
@@ -3572,82 +3243,92 @@ impl Emitter<'_, '_> {
             };
         }
         match op {
-            Binary::Repeat => {
-                let (list, count) = if matches!(
+            Binary::Power | Binary::MatrixMultiply => {
+                unreachable!("fixed operator was checked")
+            }
+            Binary::Add if matches!(left.ty, Type::Str | Type::Bytes) && left.ty == right.ty => {
+                self.call(
+                    if left.ty == Type::Bytes {
+                        "imre_bytes_concat"
+                    } else {
+                        "imre_str_concat"
+                    },
                     left.ty,
-                    Type::ListInt | Type::List(_) | Type::Bytes | Type::Str
-                ) {
+                    &[left, right],
+                )
+            }
+            Binary::Add
+                if matches!(left.ty, Type::Optional(_) | Type::None)
+                    || matches!(right.ty, Type::Optional(_) | Type::None) =>
+            {
+                let left = self.word(left);
+                let right = self.word(right);
+                let operand = self.checked_pointer(format!(
+                    "call ptr @imre_optional_str_concat(i64 {left}, i64 {right})"
+                ));
+                self.owned(Value {
+                    ty: Type::Str,
+                    operand,
+                    small_integer: false,
+                })
+            }
+            Binary::Add if let Some(element) = self.module.types.element(left.ty) => {
+                self.concat_lists(left, right, element)
+            }
+            Binary::Multiply if let Some(sequence) = Type::repeated_sequence(left.ty, right.ty) => {
+                let (value, count) = if sequence == left.ty {
                     (left, right)
                 } else {
                     (right, left)
                 };
-                let name = if list.ty == Type::Str {
-                    "imre_str_repeat"
-                } else if list.ty == Type::Bytes {
-                    "imre_bytes_repeat"
-                } else if list.ty == Type::ListInt {
-                    "imre_list_repeat"
-                } else {
-                    "imre_seq_repeat"
+                let name = match sequence {
+                    Type::Str => "imre_str_repeat",
+                    Type::Bytes => "imre_bytes_repeat",
+                    Type::ListInt => "imre_list_repeat",
+                    _ => "imre_seq_repeat",
                 };
-                self.call(name, list.ty, &[list, count])
+                self.call(name, sequence, &[value, count])
             }
-            Binary::Concat => self.call(
-                if left.ty == Type::Bytes {
-                    "imre_bytes_concat"
-                } else {
-                    "imre_str_concat"
-                },
-                left.ty,
-                &[left, right],
-            ),
-            Binary::Add => self.call("int_add", Type::Int, &[left, right]),
-            Binary::Subtract => self.call("int_sub", Type::Int, &[left, right]),
-            Binary::Multiply => self.call("int_mul", Type::Int, &[left, right]),
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Multiply
+            | Binary::FloorDivide
+            | Binary::Modulo
+            | Binary::RightShift => self.integer_arithmetic(op, &left.operand, &right.operand),
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
-            Binary::FloorDivide => self.call("int_floordiv", Type::Int, &[left, right]),
-            Binary::Modulo => self.call("int_mod", Type::Int, &[left, right]),
             Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
             Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
             Binary::BitXor => self.call("int_xor", Type::Int, &[left, right]),
             Binary::LeftShift => self.call("int_lshift", Type::Int, &[left, right]),
-            Binary::RightShift => self.call("int_rshift", Type::Int, &[left, right]),
         }
     }
 
-    /// Requires immediate operands and result, plus a nonzero divisor for
-    /// division. The optional result says whether Python's floor correction
-    /// can still be necessary. Missing proofs retain checked runtime arithmetic.
-    fn small_binary_proof(
-        &self,
-        expression: &Expr,
-        left: &Expr,
-        right: &Expr,
+    /// Use the evaluated operands when the checked result and both inputs fit
+    /// immediate integers. The same bounds select the instruction and its operands.
+    fn bounded_binary(
+        &mut self,
         op: Binary,
-    ) -> Option<bool> {
+        expression: &Expr,
+        (left, a): (&Expr, &Value),
+        (right, b): (&Expr, &Value),
+    ) -> Option<Value> {
         self.ranges.integer(expression)?;
         let left = self.ranges.integer(left)?;
         let right = self.ranges.integer(right)?;
-        match op {
+        let adjust_floor = match op {
             Binary::Add
             | Binary::Subtract
             | Binary::Multiply
             | Binary::BitAnd
             | Binary::BitOr
-            | Binary::BitXor => Some(false),
-            Binary::LeftShift | Binary::RightShift => {
-                (right.min >= 0 && right.max < 63).then_some(false)
+            | Binary::BitXor => false,
+            Binary::LeftShift | Binary::RightShift if right.min >= 0 && right.max < 63 => false,
+            Binary::FloorDivide | Binary::Modulo if right.min > 0 || right.max < 0 => {
+                !((left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0))
             }
-            Binary::FloorDivide | Binary::Modulo => {
-                if right.min <= 0 && right.max >= 0 {
-                    return None;
-                }
-                let same_sign =
-                    (left.min >= 0 && right.min > 0) || (left.max <= 0 && right.max < 0);
-                Some(!same_sign)
-            }
-            Binary::Divide | Binary::Repeat | Binary::Concat => None,
-        }
+            _ => return None,
+        };
+        Some(self.small_binary(op, a, b, adjust_floor, Some((left, right))))
     }
 
     /// Emits arithmetic only after range analysis proves every value fits the
@@ -3665,6 +3346,11 @@ impl Emitter<'_, '_> {
         bounds: Option<(IntRange, IntRange)>,
     ) -> Value {
         debug_assert!(left.small_integer && right.small_integer);
+        if matches!(op, Binary::Add | Binary::Subtract) {
+            return self
+                .body
+                .integer_arithmetic(op, &left.operand, &right.operand, true);
+        }
         let widening = matches!(op, Binary::Multiply) && self.active_subtotal().is_some();
         let mut decode = |operand: &Value, bound: Option<IntRange>| {
             let raw = self.instruction(format!("ashr i64 {}, 1", operand.operand));
@@ -3681,26 +3367,15 @@ impl Emitter<'_, '_> {
             .filter(|right| right.min == right.max)
             .map(|right| right.min);
         let result = match op {
-            Binary::Add | Binary::Subtract | Binary::Multiply => {
-                let instruction = match op {
-                    Binary::Add => "add",
-                    Binary::Subtract => "sub",
-                    Binary::Multiply => "mul",
-                    _ => unreachable!(),
-                };
-                self.instruction(format!("{instruction} nsw i64 {left}, {right}"))
-            }
+            Binary::Multiply => self.instruction(format!("mul nsw i64 {left}, {right}")),
             Binary::FloorDivide | Binary::Modulo
-                if right_constant
-                    .is_some_and(|value| value > 0 && (value as u64).is_power_of_two()) =>
+                if let Some(mask) = right_constant.and_then(remainder_mask) =>
             {
-                let divisor = right_constant.unwrap() as u64;
-                // Arithmetic right shift already rounds toward negative infinity.
-                // The corresponding nonnegative remainder is the low-bit mask.
                 if matches!(op, Binary::FloorDivide) {
-                    self.instruction(format!("ashr i64 {left}, {}", divisor.trailing_zeros()))
+                    // Arithmetic shift already rounds toward negative infinity.
+                    self.instruction(format!("ashr i64 {left}, {}", (mask + 1).trailing_zeros()))
                 } else {
-                    self.instruction(format!("and i64 {left}, {}", divisor - 1))
+                    self.body.masked_remainder(&left, mask)
                 }
             }
             Binary::FloorDivide | Binary::Modulo
@@ -3720,35 +3395,13 @@ impl Emitter<'_, '_> {
                     self.instruction(format!("sub nsw i64 {left}, {subtract}"))
                 }
             }
-            Binary::FloorDivide | Binary::Modulo => {
-                let instruction = if matches!(op, Binary::FloorDivide) {
-                    "sdiv"
-                } else {
-                    "srem"
-                };
-                let result = self.instruction(format!("{instruction} i64 {left}, {right}"));
-                if adjust_floor {
-                    let remainder = if matches!(op, Binary::Modulo) {
-                        result.clone()
-                    } else {
-                        self.instruction(format!("srem i64 {left}, {right}"))
-                    };
-                    let nonzero = self.instruction(format!("icmp ne i64 {remainder}, 0"));
-                    let signs = self.instruction(format!("xor i64 {remainder}, {right}"));
-                    let opposite = self.instruction(format!("icmp slt i64 {signs}, 0"));
-                    let adjust = self.instruction(format!("and i1 {nonzero}, {opposite}"));
-                    if matches!(op, Binary::FloorDivide) {
-                        let adjust = self.instruction(format!("zext i1 {adjust} to i64"));
-                        self.instruction(format!("sub nsw i64 {result}, {adjust}"))
-                    } else {
-                        let adjust =
-                            self.instruction(format!("select i1 {adjust}, i64 {right}, i64 0"));
-                        self.instruction(format!("add nsw i64 {result}, {adjust}"))
-                    }
-                } else {
-                    result
-                }
-            }
+            Binary::FloorDivide | Binary::Modulo => self.body.small_division(
+                op,
+                &left,
+                &right,
+                adjust_floor,
+                bounds.map(|(_, rhs)| rhs),
+            ),
             Binary::BitAnd
             | Binary::BitOr
             | Binary::BitXor
@@ -3764,7 +3417,11 @@ impl Emitter<'_, '_> {
                 };
                 self.instruction(format!("{instruction} i64 {left}, {right}"))
             }
-            Binary::Divide | Binary::Repeat | Binary::Concat => {
+            Binary::Add
+            | Binary::Subtract
+            | Binary::Power
+            | Binary::MatrixMultiply
+            | Binary::Divide => {
                 unreachable!("only proved integer arithmetic")
             }
         };
@@ -3778,6 +3435,128 @@ impl Emitter<'_, '_> {
             operand: self.instruction(format!("or i64 {shifted}, 1")),
             small_integer: true,
         }
+    }
+
+    /// Counts the bits of a tagged magnitude, falling back to arbitrary precision for a pointer.
+    fn integer_bit_query(&mut self, value: &Value, count_ones: bool) -> Value {
+        if value.small_integer {
+            return self.small_integer_bit_query(value, count_ones);
+        }
+        let tagged = self.instruction(format!("trunc i64 {} to i1", value.operand));
+        let (small, wide, done) = (self.label(), self.label(), self.label());
+        self.branch(&tagged, &small, &wide);
+        self.start(&small);
+        let immediate = self.small_integer_bit_query(value, count_ones);
+        self.jump(&done);
+        self.start(&wide);
+        let symbol = if count_ones {
+            "imre_int_bit_count"
+        } else {
+            "imre_int_bit_length"
+        };
+        let generic = self.call(symbol, Type::Int, &[value]);
+        self.forget(&generic);
+        let wide_exit = self.body.current.clone();
+        self.jump(&done);
+        self.start(&done);
+        let operand = self.instruction(format!(
+            "phi i64 [{}, %{small}], [{}, %{wide_exit}]",
+            immediate.operand, generic.operand
+        ));
+        self.owned(Value {
+            ty: Type::Int,
+            operand,
+            small_integer: false,
+        })
+    }
+
+    /// The signed 63-bit payload has a representable absolute value even at its lower bound.
+    fn small_integer_bit_query(&mut self, value: &Value, count_ones: bool) -> Value {
+        let raw = self.instruction(format!("ashr i64 {}, 1", value.operand));
+        let magnitude = self.instruction(format!("call i64 @llvm.abs.i64(i64 {raw}, i1 true)"));
+        let bits = if count_ones {
+            self.instruction(format!("call i64 @llvm.ctpop.i64(i64 {magnitude})"))
+        } else {
+            let zeros = self.instruction(format!(
+                "call i64 @llvm.ctlz.i64(i64 {magnitude}, i1 false)"
+            ));
+            self.instruction(format!("sub nuw nsw i64 64, {zeros}"))
+        };
+        self.tag_small(&bits)
+    }
+
+    /// Look up a factorial when the operand and result are both proven tagged integers.
+    fn bounded_factorial(&mut self, expression: &Expr, value: &Value) -> Option<Value> {
+        let n = self.ranges.integer(expression)?;
+        if n.min < 0 || n.max > 20 {
+            return None;
+        }
+        if n.min == n.max {
+            return Some(small((2..=n.min).product()));
+        }
+        self.output.local_helper(
+            "imre_small_factorials",
+            include_str!("llvm/small_factorials.ll"),
+        );
+        let index = self.instruction(format!("lshr i64 {}, 1", value.operand));
+        let slot = self.instruction(format!(
+            "getelementptr inbounds [21 x i64], ptr @imre_small_factorials, i64 0, i64 {index}"
+        ));
+        Some(Value {
+            ty: Type::Int,
+            operand: self.instruction(format!("load i64, ptr {slot}, align 8")),
+            small_integer: true,
+        })
+    }
+
+    /// Lower a fixed-order selection when its product fits a word and its result fits a tagged integer.
+    fn bounded_selection(
+        &mut self,
+        builtin: &Builtin,
+        expressions: &[Expr],
+        args: &[Operand],
+    ) -> Option<Value> {
+        let n = self.ranges.integer(&expressions[0])?;
+        let order = self.ranges.integer(&expressions[1])?;
+        // Bound the unrolled product. Unknown signs or orders use the checked runtime.
+        if n.min < 0 || order.min != order.max || !(0..=8).contains(&order.min) {
+            return None;
+        }
+        let k = order.min;
+        if n.max < k {
+            return Some(small(0));
+        }
+        match k {
+            0 => return Some(small(1)),
+            1 => return Some(args[0].value.clone()),
+            _ => {}
+        }
+        let denominator = if matches!(builtin, Builtin::MathComb) {
+            (2..=k).product::<i64>()
+        } else {
+            1
+        };
+        let upper = (0..k).try_fold(1_i64, |product, i| product.checked_mul(n.max - i))?;
+        let largest_result = upper / denominator;
+        if largest_result >= 1_i64 << 62 {
+            return None;
+        }
+        // For n < k one factor is zero before any later negative factors are multiplied.
+        if n.min == n.max {
+            return Some(small(largest_result));
+        }
+        let raw = self.instruction(format!("ashr i64 {}, 1", args[0].value.operand));
+        let mut product = raw.clone();
+        for offset in 1..k {
+            let factor = self.instruction(format!("sub nsw i64 {raw}, {offset}"));
+            product = self.instruction(format!("mul nsw i64 {product}, {factor}"));
+        }
+        let result = if denominator == 1 {
+            product
+        } else {
+            self.instruction(format!("udiv exact i64 {product}, {denominator}"))
+        };
+        Some(self.tag_small(&result))
     }
 
     /// Check the tags once for a short chain of integer comparisons.
@@ -3801,11 +3580,11 @@ impl Emitter<'_, '_> {
         self.branch(&immediate, &fast, &slow);
         self.start(&fast);
         let small = self.select_integer_extremum(order, args, true);
-        let fast_end = self.current.clone();
+        let fast_end = self.body.current.clone();
         self.jump(&done);
         self.start(&slow);
         let generic = self.select_integer_extremum(order, args, false);
-        let slow_end = self.current.clone();
+        let slow_end = self.body.current.clone();
         self.jump(&done);
         self.start(&done);
         Value {
@@ -3842,14 +3621,7 @@ impl Emitter<'_, '_> {
     }
 
     fn compare(&mut self, op: Compare, left: &Value, right: &Value) -> Value {
-        let predicate = match op {
-            Compare::Equal => "eq",
-            Compare::NotEqual => "ne",
-            Compare::Less => "slt",
-            Compare::LessEqual => "sle",
-            Compare::Greater => "sgt",
-            Compare::GreaterEqual => "sge",
-        };
+        let predicate = op.signed_predicate();
         if matches!(
             (left.ty, right.ty),
             (Type::Int, Type::Float) | (Type::Float, Type::Int)
@@ -3898,6 +3670,9 @@ impl Emitter<'_, '_> {
             self.instruction(format!("icmp {predicate} i32 {equal}, 0"))
         } else {
             match left.ty {
+                Type::PythonObject => {
+                    unreachable!("registered comparison in fixed calling convention")
+                }
                 Type::CmpKey(..) => unreachable!("comparator keys use their callback"),
                 Type::ForwardRef(_) | Type::AnnotationValue(_) => {
                     let symbol = if matches!(left.ty, Type::ForwardRef(_)) {
@@ -3920,11 +3695,18 @@ impl Emitter<'_, '_> {
                     format!("icmp {predicate} i64 {}, {}", left.operand, right.operand),
                 ),
                 Type::Int => {
-                    let order = self.instruction(format!(
-                        "call i32 @compare_int(i64 {}, i64 {})",
-                        left.operand, right.operand
-                    ));
-                    self.instruction(format!("icmp {predicate} i32 {order}, 0"))
+                    let (a, b) = (&left.operand, &right.operand);
+                    operations::CheckedBody::native(self)
+                        .integer_relation(op, a, b, |code| {
+                            let rank = code.fixed().instruction(format!(
+                                "call i32 @imre_int_compare(i64 {a}, i64 {b}) cold"
+                            ));
+                            let bit = code
+                                .fixed()
+                                .instruction(format!("icmp {predicate} i32 {rank}, 0"));
+                            operations::CheckedValue::condition(bit)
+                        })
+                        .into_condition()
                 }
                 Type::Float => {
                     let predicate = match op {
@@ -4059,7 +3841,7 @@ impl Emitter<'_, '_> {
                         .module
                         .class_metadata
                         .get(class)
-                        .is_some_and(|metadata| metadata.dataclass_eq) =>
+                        .is_some_and(|metadata| metadata.field_equality) =>
                 {
                     let equal = self.instruction(format!(
                         "call i32 @imre_record_equal(ptr {}, ptr {})",
@@ -4171,11 +3953,14 @@ impl Emitter<'_, '_> {
                 | Type::Patch(_)
                 | Type::LogManager
                 | Type::RegexPattern
+                | Type::RegexBytesPattern
+                | Type::RegexBytesMatch
                 | Type::JsonRoot
                 | Type::JsonValue
                 | Type::JsonObject
                 | Type::RegexMatch
                 | Type::Union(_)
+                | Type::Range
                 | Type::ModuleSpec(_)
                 | Type::StringIterable => {
                     unreachable!("container comparison is rejected by the frontend")
@@ -4189,18 +3974,8 @@ impl Emitter<'_, '_> {
         }
     }
 
-    /// Compare the first UTF-8 byte with an ASCII literal without owning the indexed character.
-    fn indexed_ascii_comparison(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-        op: Compare,
-    ) -> Option<Value> {
-        let predicate = match op {
-            Compare::Equal => "eq",
-            Compare::NotEqual => "ne",
-            _ => return None,
-        };
+    /// A single ASCII scalar can be compared using just the leading UTF-8 byte.
+    fn indexed_ascii_literal<'a>(left: &'a Expr, right: &'a Expr) -> Option<(&'a [Expr], u8)> {
         let (args, literal) = match (&left.kind, &right.kind) {
             (ExprKind::Builtin(Builtin::StringGet, args), ExprKind::Str(literal))
             | (ExprKind::Str(literal), ExprKind::Builtin(Builtin::StringGet, args)) => {
@@ -4211,6 +3986,11 @@ impl Emitter<'_, '_> {
         let [byte] = literal.as_bytes() else {
             return None;
         };
+        Some((args, *byte))
+    }
+
+    /// Evaluate the checked subscript at its original position and retain only its leading byte.
+    fn indexed_leading_byte(&mut self, args: &[Expr]) -> String {
         let source = self.operand(&args[0]);
         let index = self.operand(&args[1]);
         let buffer = self.entry_alloca("[4 x i8]");
@@ -4223,90 +4003,117 @@ impl Emitter<'_, '_> {
         self.check_failed(&failed);
         self.release_operand(&source);
         self.release_operand(&index);
-        let first = self.instruction(format!("load i8, ptr {buffer}"));
+        self.instruction(format!("load i8, ptr {buffer}"))
+    }
+
+    /// Compare one character lookup with an ASCII literal without owning the character.
+    fn indexed_ascii_comparison(
+        &mut self,
+        left: &Expr,
+        right: &Expr,
+        op: Compare,
+    ) -> Option<Value> {
+        let predicate = match op {
+            Compare::Equal => "eq",
+            Compare::NotEqual => "ne",
+            _ => return None,
+        };
+        let (args, literal) = Self::indexed_ascii_literal(left, right)?;
+        let byte = self.indexed_leading_byte(args);
         Some(Value {
             ty: Type::Bool,
-            operand: self.instruction(format!("icmp {predicate} i8 {first}, {byte}")),
+            operand: self.instruction(format!("icmp {predicate} i8 {byte}, {literal}")),
+            small_integer: false,
+        })
+    }
+
+    /// An immutable local string and an unchanged integer index give the same
+    /// character throughout a short-circuit chain of literal comparisons.
+    fn indexed_ascii_membership(&mut self, and: bool, values: &[Expr]) -> Option<Value> {
+        if values.len() < 2 {
+            return None;
+        }
+        let mut tests = values.iter().map(|value| {
+            let ExprKind::Compare(operands, ops) = &value.kind else {
+                return None;
+            };
+            let ([left, right], [op]) = (operands.as_slice(), ops.as_slice()) else {
+                return None;
+            };
+            if !matches!((and, *op), (true, CmpOp::NotEq) | (false, CmpOp::Eq)) {
+                return None;
+            }
+            Self::indexed_ascii_literal(left, right)
+        });
+        let (args, first) = tests.next()??;
+        let ExprKind::Local(source) = args[0].kind else {
+            return None;
+        };
+        let mut literals = Vec::with_capacity(values.len());
+        for test in tests {
+            let (other, literal) = test?;
+            if !matches!(other[0].kind, ExprKind::Local(slot) if slot == source) {
+                return None;
+            }
+            let same_index = match (&args[1].kind, &other[1].kind) {
+                (ExprKind::Local(left), ExprKind::Local(right)) => left == right,
+                _ => args[1]
+                    .tagged_integer_literal()
+                    .is_some_and(|n| Some(n) == other[1].tagged_integer_literal()),
+            };
+            if !same_index {
+                return None;
+            }
+            literals.push(literal);
+        }
+        let byte = self.indexed_leading_byte(args);
+        let (predicate, combine) = if and { ("ne", "and") } else { ("eq", "or") };
+        let mut result = self.instruction(format!("icmp {predicate} i8 {byte}, {first}"));
+        for literal in literals {
+            let test = self.instruction(format!("icmp {predicate} i8 {byte}, {literal}"));
+            result = self.instruction(format!("{combine} i1 {result}, {test}"));
+        }
+        Some(Value {
+            ty: Type::Bool,
+            operand: result,
             small_integer: false,
         })
     }
 
     /// Keeps a chain's middle operand rooted until its final comparison completes.
-    fn comparisons(&mut self, values: &[Expr], ops: &[Compare]) -> Value {
+    fn specialized_comparison(&mut self, values: &[Expr], ops: &[CmpOp]) -> Option<Value> {
         if let ([left, right], [op]) = (values, ops)
-            && let Some(result) = self.indexed_ascii_comparison(left, right, *op)
+            && let Some(op) = Compare::from_operator(*op)
+            && let Some(result) = self.indexed_ascii_comparison(left, right, op)
         {
-            return result;
+            return Some(result);
         }
         if let ([left, right], [op]) = (values, ops)
-            && let Some(result) = self.integer_region_comparison(left, right, *op)
+            && let Some(op) = Compare::from_operator(*op)
+            && let Some(result) = self.integer_region_comparison(left, right, op)
         {
-            return result;
+            return Some(result);
         }
         if let ([left, right], [op]) = (values, ops)
+            && let Some(op) = Compare::from_operator(*op)
             && read_only_integer(left)
             && read_only_integer(right)
         {
-            let left = self.comparison_operand(left);
-            let right = self.comparison_operand(right);
-            let result = self.compare(*op, &left.value, &right.value);
+            let left = self.read_only_integer_operand(left);
+            let right = self.read_only_integer_operand(right);
+            let result = self.compare(op, &left.value, &right.value);
             self.release_operand(&left);
             self.release_operand(&right);
-            return result;
+            return Some(result);
         }
-        // A chain keeps its middle operand across the next expression. Limit
-        // short field borrows to one native comparison with passive operands.
-        let operand = if ops.len() == 1
-            && matches!(
-                values[0].ty,
-                Type::Str | Type::StrLiteral(_) | Type::Tuple(_)
-            )
-            && values.iter().all(read_only_field_operand)
-        {
-            Self::immediate_receiver
-        } else {
-            Self::operand
-        };
-        let end = self.label();
-        let mut incoming = Vec::new();
-        let mut left = operand(self, &values[0]);
-        for (i, &op) in ops.iter().enumerate() {
-            let right = operand(self, &values[i + 1]);
-            let test = self.compare(op, &left.value, &right.value);
-            self.release_operand(&left);
-            if i + 1 == ops.len() {
-                self.release_operand(&right);
-                incoming.push(format!("[ {}, %{} ]", test.operand, self.current));
-                self.jump(&end);
-            } else {
-                let (next, fail) = (self.label(), self.label());
-                self.branch(&test.operand, &next, &fail);
-                let temporaries = self.temporaries.clone();
-                self.start(&fail);
-                self.release_operand(&right);
-                incoming.push(format!("[ false, %{} ]", self.current));
-                self.jump(&end);
-                self.start(&next);
-                self.temporaries = temporaries;
-            }
-            left = right;
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
-            small_integer: false,
-        }
+        None
     }
 
-    /// Requires both complete operands of a two-value integer comparison to
-    /// pass `read_only_integer`. A direct local roots the list, and neither
-    /// operand can remove or replace its elements before the comparison uses
-    /// this unretained word. Only the immediate get is borrowed; arithmetic and
-    /// nested reads keep their ordinary owned-result lowering.
-    fn comparison_operand(&mut self, expression: &Expr) -> Operand {
+    /// Borrows a direct integer-list read under its local root. Callers prove the
+    /// entire operation is read-only, so the element stays live through its use.
+    fn read_only_integer_operand(&mut self, expression: &Expr) -> Operand {
         debug_assert!(read_only_integer(expression));
-        if let ExprKind::Builtin(Builtin::ListGet, args) = &expression.kind
+        if let ExprKind::Builtin(op @ Builtin::ListGet(_), args) = &expression.kind
             && let [receiver, index] = args.as_slice()
             && receiver.ty == Type::ListInt
             && matches!(receiver.kind, ExprKind::Local(_))
@@ -4317,16 +4124,17 @@ impl Emitter<'_, '_> {
             let ExprKind::Local(slot) = receiver.kind else {
                 unreachable!()
             };
-            let borrowed =
-                if let Some(value) = self.int_buffer_borrow(slot, &list.value, &index.value) {
+            let borrowed = self.at_builtin_origin(op, |e| {
+                if let Some(value) = e.int_buffer_borrow(slot, &list.value, &index.value) {
                     Operand {
                         value,
                         ownership: Ownership::Borrowed,
                     }
                 } else {
-                    let at = self.native_index(&index.value);
-                    self.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at])
-                };
+                    let at = e.native_index(&index.value);
+                    e.runtime_call(&LIST_BORROW_INDEX, [&list.value, &at])
+                }
+            });
             self.release_operand(&index);
             self.release_operand(&list);
             return borrowed;
@@ -4334,84 +4142,98 @@ impl Emitter<'_, '_> {
         self.operand(expression)
     }
 
-    /// Each predecessor transfers one result owner into the phi. Removing that
-    /// branch's temporary before emitting the other branch keeps its error
-    /// cleanup from referring to an SSA value that does not dominate it.
-    fn conditional(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Value {
-        if let Some(value) = conditionals::absolute_operand(test, yes, no) {
-            let value = self.operand(value);
-            let result = self.call("int_abs", Type::Int, &[&value.value]);
-            self.release_operand(&value);
-            return result;
-        }
-        let test = self.expr(test);
-        let (yes_label, no_label, end) = (self.label(), self.label(), self.label());
-        self.branch(&test.operand, &yes_label, &no_label);
-        self.start(&yes_label);
-        let yes = self.expr(yes);
-        self.forget(&yes);
-        let yes_end = self.current.clone();
-        self.jump(&end);
-        self.start(&no_label);
-        let no = self.expr(no);
-        self.forget(&no);
-        let no_end = self.current.clone();
-        self.jump(&end);
-        self.start(&end);
-        Value {
-            ty: yes.ty,
-            operand: self.instruction(format!(
-                "phi {} [ {}, %{yes_end} ], [ {}, %{no_end} ]",
-                yes.ty.llvm(),
-                yes.operand,
-                no.operand
-            )),
-            small_integer: yes.small_integer && no.small_integer,
-        }
+    fn integer_absolute(&mut self, value: &Value) -> Value {
+        self.output
+            .local_helper("int_abs", conditionals::INTEGER_ABSOLUTE_HELPER);
+        self.call("int_abs", Type::Int, &[value])
     }
 
-    fn boolean(&mut self, and: bool, values: &[Expr]) -> Value {
-        if !and && let Some(value) = self.ascii_affix_alternatives(values) {
-            return value;
+    fn absolute_choice(&mut self, test: &Expr, yes: &Expr, no: &Expr) -> Option<Value> {
+        let value = self.operand(conditionals::absolute_operand(test, yes, no)?);
+        let result = self.integer_absolute(&value.value);
+        self.release_operand(&value);
+        Some(result)
+    }
+
+    fn boolean_specialization(&mut self, and: bool, values: &[Expr]) -> Option<Value> {
+        self.indexed_ascii_membership(and, values).or_else(|| {
+            (!and)
+                .then(|| self.ascii_affix_alternatives(values))
+                .flatten()
+        })
+    }
+
+    /// A native length can count regex runs without allocating the intermediate list.
+    fn regex_run_count(&mut self, sequence: &Expr) -> Option<Value> {
+        let ExprKind::Builtin(
+            Builtin::RegexCollect {
+                program: imre_regex::Collection::Runs(members),
+                split,
+            },
+            inputs,
+        ) = &sequence.kind
+        else {
+            return None;
+        };
+        let [text] = inputs.as_slice() else {
+            return None;
+        };
+        if text.ty != Type::Str || members.len() < 256 || !members.len().is_multiple_of(4) {
+            return None;
         }
-        let end = self.label();
-        let mut incoming = Vec::new();
-        for (i, expression) in values.iter().enumerate() {
-            let value = self.expr(expression);
-            incoming.push(format!("[ {}, %{} ]", value.operand, self.current));
-            if i + 1 == values.len() {
-                self.jump(&end);
-            } else {
-                let next = self.label();
-                if and {
-                    self.branch(&value.operand, &next, &end);
-                } else {
-                    self.branch(&value.operand, &end, &next);
-                }
-                self.start(&next);
-            }
-        }
-        self.start(&end);
-        Value {
-            ty: Type::Bool,
-            operand: self.instruction(format!("phi i1 {}", incoming.join(", "))),
+        let text = self.operand(text);
+        let subject = &text.value.operand;
+        let table = self.byte_array(members.clone());
+        self.output.local_helper(
+            "regex_run_count_word",
+            include_str!("llvm/regex_run_count_word.ll"),
+        );
+        let call = if let Ok(members) = <&[u8; 256]>::try_from(members.as_slice()) {
+            let mut matching = members.iter().enumerate().filter(|(_, flag)| **flag != 0);
+            let singleton = match (matching.next(), matching.next()) {
+                (Some((byte, _)), None) => byte as i32,
+                _ => -1,
+            };
+            // A range fits in two bytes. A negative descriptor selects the lookup loop.
+            let ranges = imre_regex::small_ranges(members).map_or(-1, |ranges| {
+                ranges.into_iter().rev().fold(0i64, |bits, (lo, width)| {
+                    (bits << 16) | (i64::from(width) << 8) | i64::from(lo)
+                })
+            });
+            self.output.local_helper(
+                "count_ascii_regex_runs",
+                include_str!("llvm/count_ascii_regex_runs.ll"),
+            );
+            format!(
+                "call i64 @count_ascii_regex_runs(ptr {subject}, ptr @{table}, i32 {singleton}, i1 {split}, i64 {ranges})"
+            )
+        } else {
+            self.output.local_helper(
+                "count_unicode_regex_runs",
+                include_str!("llvm/count_unicode_regex_runs.ll"),
+            );
+            let bounds = (members.len() - 256) / 4;
+            format!(
+                "call i64 @count_unicode_regex_runs(ptr {subject}, ptr @{table}, i64 {bounds}, i1 {split})"
+            )
+        };
+        let operand = self.checked_instruction(call);
+        self.release_operand(&text);
+        Some(Value {
+            ty: Type::Int,
+            operand,
             small_integer: false,
-        }
+        })
     }
 
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
-        if let Some(v) = self.line_builtin(builtin, expressions) {
+        if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
         }
-        if let (Builtin::Append, [receiver, item]) = (builtin, expressions)
-            && self.module.types.is_value_struct(item.ty)
-            && matches!(item.kind, ExprKind::Construct { .. })
+        if let (Builtin::Len, [sequence]) = (builtin, expressions)
+            && let Some(count) = self.regex_run_count(sequence)
         {
-            let list = self.operand(receiver);
-            let appended = self.append_struct_constructor(&list.value, item);
-            debug_assert!(appended);
-            self.release_operand(&list);
-            return none();
+            return count;
         }
         if let Builtin::Logging(ir::LogOperation::HandlerRegister(shutdown)) = builtin {
             let handler = self.expr(&expressions[0]);
@@ -4419,7 +4241,7 @@ impl Emitter<'_, '_> {
             let takes_owner = self
                 .resource_types
                 .contains(&function.locals[function.params[0]]);
-            let shutdown = self.output.function_ref(*shutdown);
+            let shutdown = self.output.function_ref(self.module, *shutdown);
             self.line(format!(
                 "call void @imre_log_handler_register(ptr {}, ptr @{shutdown}, i1 {takes_owner})",
                 handler.operand
@@ -4443,10 +4265,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(*layout),
                 kind: ExprKind::Builtin(Builtin::RecordView, expressions.to_vec()),
             };
-            return self.expression(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), 0),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), 0),
+                })
+                .into_native()
+                .value;
         }
         if let Builtin::BoxAnnotation(layout) = builtin {
             return Value {
@@ -4465,10 +4290,13 @@ impl Emitter<'_, '_> {
                 ty: Type::Tuple(id),
                 kind: ExprKind::Builtin(Builtin::RecordView, vec![reference.clone()]),
             };
-            return self.expression(&Expr {
-                ty: returns,
-                kind: ExprKind::Field(Box::new(frame), *index),
-            });
+            return CheckedBody::native(self)
+                .emit_value(&Expr {
+                    ty: returns,
+                    kind: ExprKind::Field(Box::new(frame), *index),
+                })
+                .into_native()
+                .value;
         }
         if matches!(builtin, Builtin::NewForwardRef) {
             let Type::ForwardRef(id) = returns else {
@@ -4508,8 +4336,7 @@ impl Emitter<'_, '_> {
             ] = expressions
             && self.locals[*slot] == rhs.ty
         {
-            let value = self.expr(rhs);
-            self.store(*slot, &value);
+            let value = self.bind_value(*slot, rhs, Ownership::Borrowed);
             return self.truth(&value);
         }
         let probe_index = builtin.tuple_probe_index();
@@ -4530,7 +4357,7 @@ impl Emitter<'_, '_> {
                 })
         });
         let mut probe_fields = Vec::new();
-        let mut args = expressions
+        let args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
@@ -4544,6 +4371,10 @@ impl Emitter<'_, '_> {
                         index + 1 == expressions.len(),
                         &mut probe_fields,
                     )
+                } else if matches!(builtin, Builtin::IntBitCount | Builtin::IntBitLength)
+                    && read_only_integer(arg)
+                {
+                    self.read_only_integer_operand(arg)
                 } else if borrow_probe
                     || (index == 0
                         && matches!(
@@ -4557,7 +4388,67 @@ impl Emitter<'_, '_> {
                 }
             })
             .collect::<Vec<_>>();
+        // Each operand has already performed its own checks at its own site.
+        self.at_builtin_origin(builtin, |e| {
+            e.prepared_builtin(builtin, expressions, returns, args, probe_fields)
+        })
+    }
+
+    fn prepared_builtin(
+        &mut self,
+        builtin: &Builtin,
+        expressions: &[Expr],
+        returns: Type,
+        mut args: Vec<Operand>,
+        probe_fields: Vec<Value>,
+    ) -> Value {
         let result = match builtin {
+            Builtin::RegisteredImport(_)
+            | Builtin::RegisteredSuspend(..)
+            | Builtin::RegisteredAssertionFailure { .. }
+            | Builtin::RegisteredNamespaceAnnotation(_)
+            | Builtin::RegisteredAnnotationFormat
+            | Builtin::RegisteredAnnotations { .. }
+            | Builtin::BindAnnotationExpression { .. }
+            | Builtin::RegisteredDeleteName(..)
+            | Builtin::RegisteredDefinition(_)
+            | Builtin::RegisteredClassNamespace(..)
+            | Builtin::RegisteredLambda(..)
+            | Builtin::RegisteredGenerator(..)
+            | Builtin::RegisteredTypeAlias(_)
+            | Builtin::RegisteredSuite(_)
+            | Builtin::RegisteredInput(_)
+            | Builtin::RegisteredDiscard
+            | Builtin::RegisteredDisplayHook
+            | Builtin::RegisteredNamespace(_)
+            | Builtin::RegisteredUnpack { .. }
+            | Builtin::RegisteredIter(_)
+            | Builtin::RegisteredName(_)
+            | Builtin::Unrepresented
+            | Builtin::UnrepresentedCall
+            | Builtin::RegisteredInPlace(_)
+            | Builtin::RegisteredSubscript(..)
+            | Builtin::RegisteredSpread
+            | Builtin::RegisteredIndexConstant(_)
+            | Builtin::RegisteredSlice
+            | Builtin::DeleteItem
+            | Builtin::RegisteredEllipsis
+            | Builtin::RegisteredComplex(..)
+            | Builtin::FormatConversion(_)
+            | Builtin::RegisteredString(_)
+            | Builtin::RegisteredTemplate
+            | Builtin::RegisteredInterpolation { .. }
+            | Builtin::RegisteredAttribute { .. }
+            | Builtin::RegisteredLocation(..) => {
+                unreachable!("registered operation in fixed calling convention")
+            }
+            Builtin::TupleGet
+            | Builtin::TupleIndex
+            | Builtin::ListGet(_)
+            | Builtin::StringGet
+            | Builtin::BytesGet
+            | Builtin::DictGet => unreachable!("the checked body emits subscript reads"),
+            Builtin::FormatJoin => unreachable!("the checked body emits string joins"),
             Builtin::PairTable(ir::PairTableOp::ViewLen(slot)) => {
                 let count = self.instruction(format!(
                     "getelementptr inbounds {{ ptr, i64 }}, ptr %pair_view{slot}, i32 0, i32 1"
@@ -4588,7 +4479,7 @@ impl Emitter<'_, '_> {
                     "call i64 @imre_pair_table_field(ptr {}, i64 {}, i64 {}, i32 {field})",
                     args[0].value.operand, args[1].value.operand, args[2].value.operand
                 ));
-                let other = self.current.clone();
+                let other = self.body.current.clone();
                 self.jump(&done);
                 self.start(&done);
                 let value = self.instruction(format!(
@@ -4665,12 +4556,7 @@ impl Emitter<'_, '_> {
             } => {
                 let method_name = self.byte_array(method.bytes().chain([0]).collect());
                 let kind_bytes = self.byte_array(kinds.clone());
-                let words = self.entry_alloca(format!("[{} x i64]", args.len()));
-                for (i, arg) in args.iter().enumerate() {
-                    let word = self.word(&arg.value);
-                    let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
-                    self.line(format!("store i64 {word}, ptr {slot}"));
-                }
+                let words = self.argument_words(&args);
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_extension_call(ptr @PyInit_{module}, ptr @{method_name}, ptr @{kind_bytes}, ptr {words}, i64 {}, i32 {result_kind})",
                     args.len()
@@ -4832,11 +4718,27 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value],
             ),
-            Builtin::RegexCompile { source, spelling } => {
-                // A non-UTF-8 byte separates the original spelling from the engine pattern.
-                let bytes = [spelling.as_bytes(), &[0xff], source.as_bytes()].concat();
-                self.pooled_literal(&bytes, returns)
+            Builtin::RegexCompile {
+                spelling,
+                supplied_flags,
+                pattern,
+            } => {
+                let (bytes, spelling) = match spelling {
+                    ir::Constant::Text(spelling) => (false, spelling.as_slice()),
+                    ir::Constant::Bytes(spelling) => (true, spelling.as_slice()),
+                    _ => unreachable!("fixed regex spelling is str or bytes"),
+                };
+                let payload = imre_regex::LiteralPattern {
+                    bytes,
+                    spelling,
+                    source: &pattern.source,
+                    supplied_flags: *supplied_flags,
+                    verbose: pattern.verbose,
+                }
+                .encode();
+                self.pooled_literal(&payload, returns)
             }
+            Builtin::RegexFlags => self.call("imre_regex_flags", returns, &[&args[0].value]),
             Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
             Builtin::UnittestCompilePattern => Value {
                 ty: returns,
@@ -5033,7 +4935,6 @@ impl Emitter<'_, '_> {
                     AddLevel => "imre_log_add_level",
                     LevelName => "imre_log_level_name",
                     LevelForName => "imre_log_level_for_name",
-                    CheckLevel => "imre_log_check_level",
                     InvalidLevel => "imre_log_invalid_level",
                     Disable => "imre_log_disable",
                     EnabledCache => "imre_log_enabled_cache",
@@ -5071,6 +4972,53 @@ impl Emitter<'_, '_> {
                     self.call(name, returns, &values)
                 }
             }
+            Builtin::RegexCollect { program, split } => {
+                let text = &args[0].value.operand;
+                let bytes = args[0].value.ty == Type::Bytes;
+                let split = u32::from(*split);
+                let call = match program {
+                    imre_regex::Collection::Rows { program, .. } => {
+                        let row = self.module.types.element(returns).unwrap();
+                        let layout = self.output.record_layout(row);
+                        let name = self.byte_array(program.clone());
+                        format!(
+                            "call ptr @imre_regex_collect_rows(ptr {text}, ptr @{name}, i64 {}, ptr @{layout}, i32 {})",
+                            program.len(),
+                            u32::from(bytes)
+                        )
+                    }
+                    imre_regex::Collection::Literals(program) => {
+                        let name = self.byte_array(program.clone());
+                        let flags = split | (u32::from(bytes) << 1);
+                        format!(
+                            "call ptr @imre_regex_collect_literals(ptr {text}, ptr @{name}, i64 {}, i32 {flags})",
+                            program.len()
+                        )
+                    }
+                    imre_regex::Collection::Runs(members) => {
+                        let name = self.byte_array(members.clone());
+                        if members.len() == 256 {
+                            let collect = if bytes {
+                                "imre_regex_collect_bytes_runs"
+                            } else {
+                                "imre_regex_collect_runs"
+                            };
+                            format!("call ptr @{collect}(ptr {text}, ptr @{name}, i32 {split})")
+                        } else {
+                            format!(
+                                "call ptr @imre_regex_collect_unicode_runs(ptr {text}, ptr @{name}, i64 {}, i32 {split})",
+                                members.len()
+                            )
+                        }
+                    }
+                };
+                let operand = self.checked_instruction(call);
+                Value {
+                    ty: returns,
+                    operand,
+                    small_integer: false,
+                }
+            }
             Builtin::RegexSub(template) => {
                 let name = self.byte_array(template.clone());
                 let operand = self.checked_instruction(format!(
@@ -5097,14 +5045,12 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexSearch | Builtin::RegexMatchStart => {
-                let operation = if matches!(builtin, Builtin::RegexMatchStart) {
-                    "match"
-                } else {
-                    "search"
-                };
-                let pointer = self.instruction(format!(
-                    "call ptr @imre_regex_{operation}(ptr {}, ptr {})",
-                    args[0].value.operand, args[1].value.operand
+                let pointer = self.checked_instruction(format!(
+                    "call ptr @imre_regex_execute(ptr {}, ptr {}, i32 {}, i32 {})",
+                    args[0].value.operand,
+                    args[1].value.operand,
+                    u32::from(args[1].value.ty == Type::Bytes),
+                    u32::from(matches!(builtin, Builtin::RegexMatchStart)),
                 ));
                 Value {
                     ty: returns,
@@ -5113,7 +5059,11 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::RegexFindIter => self.call(
-                "imre_regex_finditer",
+                if self.uses_regex_positions {
+                    "imre_regex_finditer_positions"
+                } else {
+                    "imre_regex_finditer"
+                },
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
@@ -5121,9 +5071,10 @@ impl Emitter<'_, '_> {
                 self.call("imre_regex_groupdict", returns, &[&args[0].value])
             }
             Builtin::RegexCapture { operation, known } => {
-                let selector = &args[1].value;
-                let group = self.word(selector);
-                let named = u8::from(selector.ty == Type::Str);
+                let (group, named) = args.get(1).map_or_else(
+                    || (small(0).operand, 0),
+                    |arg| (self.word(&arg.value), u8::from(arg.value.ty == Type::Str)),
+                );
                 let receiver = &args[0].value.operand;
                 let call = match operation {
                     RegexCapture::Absent => format!(
@@ -5212,7 +5163,7 @@ impl Emitter<'_, '_> {
                     }
                 }
             }
-            Builtin::Process(operation) => self.process_builtin(*operation, &args, returns),
+            Builtin::Process(operation, _) => self.process_builtin(*operation, &args, returns),
             Builtin::WarningFormat { entry, environment } => {
                 let line = self.optional_object_pointer(&args[5].value);
                 let layout = self.output.record_layout(*entry);
@@ -5259,6 +5210,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::WarningReset => {
                 self.void_call("imre_warning_reset", &[]);
+                none()
+            }
+            Builtin::SignalPause => {
+                self.line("call void @imre_signal_pause()");
+                self.check_interrupt();
                 none()
             }
             Builtin::TimeSleep => {
@@ -5389,7 +5345,7 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::EmptyPartial => self.empty_partial(&args[0].value),
-            Builtin::CallableContext => {
+            Builtin::CallableContext | Builtin::ConstructorClass => {
                 let address = self.callable_context_slot(&args[0].value);
                 let value = Value {
                     ty: returns,
@@ -5449,6 +5405,13 @@ impl Emitter<'_, '_> {
             }
             Builtin::HashStr => self.call("imre_string_hash", returns, &[&args[0].value]),
             Builtin::HashBytes => self.call("imre_bytes_hash", returns, &[&args[0].value]),
+            Builtin::FractionHash(numerator, denominator) => {
+                let [n, d] = [numerator, denominator].map(|index| {
+                    let pointer = self.field_pointer(&args[0].value, *index);
+                    self.field_value(&pointer, Type::Int)
+                });
+                self.call("imre_fraction_hash", Type::Int, &[&n, &d])
+            }
             Builtin::HashRecord => Value {
                 ty: Type::Int,
                 operand: self.checked_instruction(format!(
@@ -5618,6 +5581,7 @@ impl Emitter<'_, '_> {
             | Builtin::SortRestore
             | Builtin::StringJoin
             | Builtin::StringFormat
+            | Builtin::FormatField(_)
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
             | Builtin::HexFormat { .. }
@@ -5632,20 +5596,21 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::GlobalGet(slot) => {
-                let value = self.borrow_global(*slot, returns);
-                self.retain(&value);
-                value
-            }
+            Builtin::GlobalGet(_) => unreachable!("the checked body emits name reads"),
             Builtin::GlobalSet(slot) => {
                 let name = self.output.global_ref(format!("module_value_{slot}"));
                 let value = &args[0].value;
                 self.retain(value);
+                let previous = matches!(value.ty, Type::Callable(_))
+                    .then(|| self.borrow_global(*slot, value.ty));
                 self.line(format!(
                     "store {} {}, ptr @{name}",
                     value.ty.llvm(),
                     value.operand
                 ));
+                if let Some(previous) = previous {
+                    self.release(&previous);
+                }
                 none()
             }
             Builtin::StringIterationList => {
@@ -5697,8 +5662,20 @@ impl Emitter<'_, '_> {
                 small_integer: false,
             },
             Builtin::Bool => self.truth(&args[0].value),
+            Builtin::ObjectCall(..) => unreachable!("object calls require a registered entry"),
             Builtin::Input => self.call("imre_input", Type::Str, &[]),
+            Builtin::InputSelectStdout => self.call("imre_input_select_stdout", Type::TextIO, &[]),
+            Builtin::InputFinish => self.call(
+                "imre_input_finish",
+                Type::Str,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::Chr => self.call("imre_chr", Type::Str, &[&args[0].value]),
+            Builtin::UnicodePropertyOfOrdinal(property) => self.call(
+                &format!("imre_unicode_{}_of_ordinal", property.name()),
+                Type::Str,
+                &[&args[0].value],
+            ),
             Builtin::Random(op) => {
                 use crate::ir::RandomOperation::*;
                 let values: Vec<_> = args.iter().map(|arg| &arg.value).collect();
@@ -5773,6 +5750,16 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::TargetLittleEndian => {
+                // Lane zero holds the byte at the lowest address in the LLVM target's layout.
+                let first =
+                    self.instruction("extractelement <2 x i8> bitcast (i16 1 to <2 x i8>), i32 0");
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp eq i8 {first}, 1")),
+                    small_integer: false,
+                }
+            }
             Builtin::SysOriginalOutput { stderr } => Value {
                 ty: returns,
                 operand: self.instruction(format!(
@@ -5790,7 +5777,8 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_sys_stdout_del", &[]);
                 none()
             }
-            Builtin::TextOptionalReceiver => {
+            Builtin::RequireObjectReceiver => {
+                debug_assert!(matches!(returns.word_kind(), WordKind::Object));
                 let word = self.word(&args[0].value);
                 Value {
                     ty: returns,
@@ -5900,26 +5888,42 @@ impl Emitter<'_, '_> {
                 self.output
                     .local_helper("imre_tagged_modpow", include_str!("llvm/tagged_modpow.ll"));
                 self.call_with_effect(
-                    "imre_tagged_modpow",
+                    "@imre_tagged_modpow",
+                    None,
                     Type::Int,
                     &[&args[0].value, &args[1].value, &args[2].value],
                     true,
-                    false,
+                    CallSite::default(),
                 )
             }
             Builtin::SysArgv => self.call("imre_sys_argv", returns, &[]),
-            Builtin::OptionalStrConcat => {
-                let left = self.word(&args[0].value);
-                let right = self.word(&args[1].value);
+            Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
+            Builtin::StringTupleContains => self.call(
+                "imre_str_tuple_contains",
+                returns,
+                &[&args[0].value, &args[1].value],
+            ),
+            Builtin::SysBuiltinModuleNames => {
+                let sources = self
+                    .module
+                    .builtin_module_sources
+                    .as_ref()
+                    .expect("inventory registration manifest");
+                let names = self.output.global_ref("imre_builtin_sources".to_owned());
+                let frozen = self
+                    .module
+                    .command_flags
+                    .as_ref()
+                    .is_none_or(|flags| flags.frozen_modules);
                 Value {
-                    ty: Type::Str,
+                    ty: returns,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_optional_str_concat(i64 {left}, i64 {right})"
+                        "call ptr @imre_sys_builtin_module_names(ptr @{names}, i64 {}, i1 {frozen})",
+                        sources.len()
                     )),
                     small_integer: false,
                 }
             }
-            Builtin::SysOrigArgv => self.call("imre_sys_orig_argv", returns, &[]),
             Builtin::SysStdlibModuleNames => {
                 let names = self.call("imre_sys_stdlib_module_names", returns, &[]);
                 self.check_error();
@@ -6042,6 +6046,7 @@ impl Emitter<'_, '_> {
                 self.call(function, returns, &[])
             }
             Builtin::SysPlatform => self.call("imre_sys_platform", returns, &[]),
+            Builtin::SysMaxSize => self.call("imre_sys_maxsize", Type::Int, &[]),
             Builtin::SysIntern => {
                 self.uses_string_interning = true;
                 self.call("imre_sys_intern", Type::Str, &[&args[0].value])
@@ -6082,11 +6087,11 @@ impl Emitter<'_, '_> {
             }
             Builtin::DocCaptureTake => self.call("imre_doctest_capture_take", returns, &[]),
             Builtin::AsciiEscape => self.call("imre_ascii_escape", returns, &[&args[0].value]),
-            Builtin::MockCallList { mark } => Value {
+            Builtin::MarkMockCallList => Value {
                 ty: Type::Bool,
                 operand: self.instruction(format!(
-                    "call i1 @imre_seq_mock_call_list(ptr {}, i1 {})",
-                    args[0].value.operand, mark
+                    "call i1 @imre_seq_mock_call_list(ptr {}, i1 true)",
+                    args[0].value.operand
                 )),
                 small_integer: false,
             },
@@ -6134,7 +6139,7 @@ impl Emitter<'_, '_> {
                 // Kind 5 denotes another object view in this ABI.
                 let concrete_object = self.module.types.mapping(other.ty).is_some()
                     || matches!(builtin, Builtin::SystemExitCodeEqual { .. })
-                        && matches!(other.ty, Type::BytesIO | Type::StringIO);
+                        && matches!(other.ty, Type::PlainObject | Type::BytesIO | Type::StringIO);
                 let kind = if concrete_object {
                     17
                 } else if matches!(builtin, Builtin::SystemExitCodeEqual { .. })
@@ -6284,6 +6289,9 @@ impl Emitter<'_, '_> {
             Builtin::DecodeAscii => {
                 self.call("imre_bytes_decode_ascii", Type::Str, &[&args[0].value])
             }
+            Builtin::DecodeLatin1 => {
+                self.call("imre_bytes_decode_latin1", Type::Str, &[&args[0].value])
+            }
             Builtin::Base64Translate => self.call(
                 "imre_base64_translate",
                 Type::Bytes,
@@ -6369,20 +6377,25 @@ impl Emitter<'_, '_> {
                 Type::Int => self.call("imre_bytes_count", Type::Bytes, &[&args[0].value]),
                 Type::ListInt => self.call("imre_bytes_list", Type::Bytes, &[&args[0].value]),
                 Type::ByteOutput => {
-                    self.call("imre_byte_output_finish", Type::Bytes, &[&args[0].value])
+                    if let Some(window) = self.byte_output_window(&expressions[0]) {
+                        let operand = self.checked_instruction(format!(
+                            "call ptr @imre_byte_output_finish_window(ptr {}, ptr %byte_window{window})",
+                            args[0].value.operand
+                        ));
+                        self.owned(Value {
+                            ty: Type::Bytes,
+                            operand,
+                            small_integer: false,
+                        })
+                    } else {
+                        self.call("imre_byte_output_finish", Type::Bytes, &[&args[0].value])
+                    }
                 }
                 _ => unreachable!("bytes conversion was checked"),
             },
             Builtin::Encode => self.call("imre_str_encode", Type::Bytes, &[&args[0].value]),
             Builtin::FloatDivmod => {
-                let [left, right] = [0, 1].map(|index| {
-                    let arg = &args[index].value;
-                    if arg.ty == Type::Int {
-                        self.call("imre_int_float", Type::Float, &[arg])
-                    } else {
-                        arg.clone()
-                    }
-                });
+                let [left, right] = [0, 1].map(|i| self.promote_int_to_float(&args[i].value));
                 let fields = self.entry_alloca("[2 x double]");
                 let status = self.instruction(format!(
                     "call i32 @imre_float_divmod(double {}, double {}, ptr {fields})",
@@ -6659,14 +6672,20 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::FunctionWrappedSet => self.call(
-                "imre_function_set_wrapped",
-                returns,
-                &[&args[0].value, &args[1].value],
-            ),
-            Builtin::FunctionWrappedGet => {
-                self.call("imre_function_get_wrapped", returns, &[&args[0].value])
+            Builtin::FunctionWrappedSet => {
+                self.line(format!(
+                    "call void @imre_function_set_wrapped(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                self.release_operand(&args[1]);
+                return self.own_operand(args.into_iter().next().unwrap());
             }
+            Builtin::FunctionWrappedGet(origin) => self.call_at(
+                "imre_function_get_wrapped",
+                returns,
+                &[&args[0].value],
+                Some(origin),
+            ),
             Builtin::WrapperAttributes(fields) => {
                 let names = fields
                     .names()
@@ -6691,7 +6710,9 @@ impl Emitter<'_, '_> {
             Builtin::Sha256New => self.call("imre_sha256_new", Type::Hash, &[&args[0].value]),
             Builtin::HashName => self.call("imre_hash_name", Type::Str, &[&args[0].value]),
             Builtin::HashType => self.call("imre_hash_type", Type::BuiltinClass, &[&args[0].value]),
-            Builtin::HashIdentity => self.call("imre_hash_identity", Type::Int, &[&args[0].value]),
+            Builtin::PointerIdentity => {
+                self.call("imre_pointer_identity", Type::Int, &[&args[0].value])
+            }
             Builtin::HashBlockSize => {
                 self.call("imre_hash_block_size", Type::Int, &[&args[0].value])
             }
@@ -6789,11 +6810,6 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::ZipImportData => self.call(
-                "imre_zipimport_data",
-                returns,
-                &[&args[0].value, &args[1].value],
-            ),
             Builtin::ZipInfoList => self.call("imre_zip_infolist", returns, &[&args[0].value]),
             Builtin::ZipMember | Builtin::ZipRead => {
                 let name = if matches!(builtin, Builtin::ZipMember) {
@@ -6865,6 +6881,7 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_zip_close", &[&args[0].value]);
                 none()
             }
+            Builtin::IntFromBytes => self.call("imre_int_from_bytes", Type::Int, &[&args[0].value]),
             Builtin::IntToBytes => self.call(
                 "imre_int_to_bytes",
                 Type::Bytes,
@@ -6965,8 +6982,14 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::ObjectIsExactTuple => {
-                self.call("imre_object_is_exact_tuple", returns, &[&args[0].value])
+            Builtin::IsExactTuple => {
+                let value = &args[0].value;
+                let function = if matches!(value.ty, Type::VarTuple(_) | Type::Tuple(_)) {
+                    "imre_record_is_exact_tuple"
+                } else {
+                    "imre_object_is_exact_tuple"
+                };
+                self.call(function, returns, &[value])
             }
             Builtin::ObjectTextProject => {
                 self.call("imre_object_exact_text", returns, &[&args[0].value])
@@ -7037,15 +7060,19 @@ impl Emitter<'_, '_> {
             Builtin::SystemExitFromTuple => {
                 self.call("imre_system_exit_from_tuple", returns, &[&args[0].value])
             }
-            Builtin::ExceptionTupleView => {
-                self.call("imre_exception_tuple_view", returns, &[&args[0].value])
-            }
-            Builtin::ExceptionRecordFields => {
+            Builtin::RecordFromFields => {
                 let record = self.record(returns);
                 for (i, value) in args.iter().enumerate() {
                     self.set_field(&record, i, &value.value);
                 }
                 record
+            }
+            Builtin::BindSourceKeywords => {
+                self.void_call(
+                    "imre_bind_source_keywords",
+                    &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
+                );
+                none()
             }
             Builtin::ExceptionKeywordSuggestion => self.call(
                 "imre_exception_keyword_message",
@@ -7100,11 +7127,11 @@ impl Emitter<'_, '_> {
                 let desc = self.output.global_ref(format!("exception_type_{kind}"));
                 let text = text.map_or_else(
                     || "null".into(),
-                    |f| format!("@{}", self.output.function_ref(f)),
+                    |f| format!("@{}", self.output.function_ref(self.module, f)),
                 );
                 let repr = repr.map_or_else(
                     || "null".into(),
-                    |f| format!("@{}", self.output.function_ref(f)),
+                    |f| format!("@{}", self.output.function_ref(self.module, f)),
                 );
                 Value{ty:returns,operand:self.instruction(format!("call ptr @imre_named_exception_record_new(ptr @{desc}, ptr {}, ptr {message}, ptr {text}, ptr {repr}, i32 {})",record.operand,(u32::from(*dataclass_repr) | (u32::from(self.resource_types.contains(&record.ty)) << 1) | (u32::from(*tuple_args) << 2)))),small_integer:false}
             }
@@ -7113,6 +7140,9 @@ impl Emitter<'_, '_> {
             }
             Builtin::ExceptionRepr => {
                 self.call("imre_exception_repr", Type::Str, &[&args[0].value])
+            }
+            Builtin::ExceptionName => {
+                self.call("imre_exception_name", Type::Str, &[&args[0].value])
             }
             Builtin::ExceptionMessage => {
                 self.call("imre_exception_message", Type::Str, &[&args[0].value])
@@ -7124,23 +7154,11 @@ impl Emitter<'_, '_> {
                 ));
                 self.unpack_word(word, returns)
             }
-            Builtin::ExceptionOrigin(line) => Value {
-                ty: Type::Exception,
-                operand: self.instruction(format!(
-                    "call ptr @imre_exception_with_origin(ptr {}, ptr {}, i64 {line})",
-                    args[0].value.operand, args[1].value.operand
-                )),
-                small_integer: false,
-            },
-            Builtin::ExceptionWithCause => {
-                let cause =
-                    self.instruction(format!("inttoptr i64 {} to ptr", args[1].value.operand));
+            Builtin::ExceptionOrigin(origin) => {
+                let attach = self.exception_frame(&args[0].value.operand, origin);
                 Value {
                     ty: Type::Exception,
-                    operand: self.instruction(format!(
-                        "call ptr @imre_exception_with_cause(ptr {}, ptr {cause})",
-                        args[0].value.operand
-                    )),
+                    operand: self.instruction(attach),
                     small_integer: false,
                 }
             }
@@ -7170,7 +7188,24 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Repr => self.value_repr(&args[0].value),
+            Builtin::Repr | Builtin::ReprWithMethods(_) => self.value_repr(&args[0].value),
+            Builtin::BaseObjectRepr => {
+                let receiver = &args[0].value;
+                let name = receiver
+                    .ty
+                    .builtin_scalar_name()
+                    .expect("checked builtin class");
+                let class = self.byte_array(name.as_bytes().to_vec());
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_instruction(format!(
+                        "call ptr @imre_object_base_repr(ptr {}, ptr @{class}, i64 {})",
+                        receiver.operand,
+                        name.len()
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::DefaultRecordRepr => {
                 self.call("imre_record_default_repr", Type::Str, &[&args[0].value])
             }
@@ -7213,7 +7248,7 @@ impl Emitter<'_, '_> {
                 Type::Class(_) => self.value_repr(&args[0].value),
                 _ => unreachable!("scalar string conversion was checked"),
             },
-            Builtin::Int => match args[0].value.ty {
+            Builtin::Int(_) => match args[0].value.ty {
                 Type::Int => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Bool => {
                     let wide =
@@ -7225,28 +7260,122 @@ impl Emitter<'_, '_> {
                         small_integer: true,
                     }
                 }
-                Type::Str if args.len() == 2 => {
-                    self.call("imre_int_parse_hex", Type::Int, &[&args[0].value])
+                Type::Str => {
+                    let parser = if args.len() == 2 {
+                        "imre_int_parse_hex"
+                    } else {
+                        "imre_int_parse"
+                    };
+                    self.call(parser, Type::Int, &[&args[0].value])
                 }
-                Type::Str => self.call("imre_int_parse", Type::Int, &[&args[0].value]),
                 Type::Float => self.call("imre_float_int", Type::Int, &[&args[0].value]),
                 _ => unreachable!("int conversion was checked"),
             },
             Builtin::IntExtremum { minimum } => self.integer_extremum(*minimum, &args),
-            Builtin::IntBitLength => self.call("imre_int_bit_length", Type::Int, &[&args[0].value]),
+            Builtin::IntHash => self.call("imre_int_hash", Type::Int, &[&args[0].value]),
+            Builtin::MathFactorial => self
+                .bounded_factorial(&expressions[0], &args[0].value)
+                .unwrap_or_else(|| self.call("imre_math_factorial", Type::Int, &[&args[0].value])),
+            Builtin::MathPerm | Builtin::MathComb => self
+                .bounded_selection(builtin, expressions, &args)
+                .unwrap_or_else(|| {
+                    let symbol = if matches!(builtin, Builtin::MathPerm) {
+                        "imre_math_perm"
+                    } else {
+                        "imre_math_comb"
+                    };
+                    self.call(symbol, Type::Int, &[&args[0].value, &args[1].value])
+                }),
+            Builtin::IntBitCount | Builtin::IntBitLength => {
+                self.integer_bit_query(&args[0].value, matches!(builtin, Builtin::IntBitCount))
+            }
+            Builtin::Sumprod if returns == Type::Int => {
+                self.output.local_helper(
+                    "imre_tagged_sumprod",
+                    include_str!("llvm/tagged_sumprod.ll"),
+                );
+                self.call_with_effect(
+                    "@imre_tagged_sumprod",
+                    None,
+                    Type::Int,
+                    &[&args[0].value, &args[1].value],
+                    true,
+                    CallSite::default(),
+                )
+            }
+            Builtin::Sumprod => {
+                let name = match returns {
+                    Type::Float => "imre_sumprod_float_lists",
+                    Type::ObjectValue => "imre_sumprod_number_lists",
+                    _ => unreachable!("checked sumprod result"),
+                };
+                self.call(name, returns, &[&args[0].value, &args[1].value])
+            }
+            Builtin::FloatAcos => self.call("imre_float_acos", Type::Float, &[&args[0].value]),
+            Builtin::FloatAsin => self.call("imre_float_asin", Type::Float, &[&args[0].value]),
+            Builtin::FloatAtan => self.call("atan", Type::Float, &[&args[0].value]),
+            Builtin::FloatFmod => {
+                // Conversion can raise. Both argument expressions have already run.
+                let [left, right] = [0, 1].map(|i| self.promote_int_to_float(&args[i].value));
+                self.call("imre_float_fmod", Type::Float, &[&left, &right])
+            }
+            Builtin::FloatDegrees | Builtin::FloatRadians => {
+                // Use the same rounded scale as the Rust runtime, keeping the multiplication
+                // visible to LLVM after the argument's Python float conversion.
+                let scale = if matches!(builtin, Builtin::FloatDegrees) {
+                    1.0_f64.to_degrees()
+                } else {
+                    1.0_f64.to_radians()
+                };
+                Value {
+                    ty: Type::Float,
+                    operand: self.instruction(format!(
+                        "fmul double {}, 0x{:016X}",
+                        args[0].value.operand,
+                        scale.to_bits()
+                    )),
+                    small_integer: false,
+                }
+            }
+            Builtin::FloatErfc => self.call("erfc", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog1p => self.call("imre_float_log1p", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
+            Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
+            Builtin::FloatLog2 => Value {
+                ty: Type::Float,
+                operand: self.instruction(format!(
+                    "call double @llvm.log2.f64(double {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::FloatIsInteger => {
+                let value = &args[0].value.operand;
+                let truncated =
+                    self.instruction(format!("call double @llvm.trunc.f64(double {value})"));
+                let whole = self.instruction(format!("fcmp oeq double {value}, {truncated}"));
+                // Infinities also compare equal to their truncation.
+                let magnitude =
+                    self.instruction(format!("call double @llvm.fabs.f64(double {value})"));
+                let finite =
+                    self.instruction(format!("fcmp olt double {magnitude}, 0x7FF0000000000000"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {finite}, {whole}")),
+                    small_integer: false,
+                }
+            }
             Builtin::IntSignAsFloat => {
-                let order = self.instruction(format!(
-                    "call i32 @compare_int(i64 {}, i64 {})",
-                    args[0].value.operand,
-                    small(0).operand
-                ));
+                self.output.local_helper("int_sign", INTEGER_SIGN);
+                let word = &args[0].value.operand;
+                let order = self.instruction(format!("call i32 @int_sign(i64 {word})"));
                 Value {
                     ty: Type::Float,
                     operand: self.instruction(format!("sitofp i32 {order} to double")),
                     small_integer: false,
                 }
             }
-            Builtin::Float => match args[0].value.ty {
+            Builtin::Float(_) => match args[0].value.ty {
                 Type::Float => return self.own_operand(args.into_iter().next().unwrap()),
                 Type::Int => self.call("imre_int_float", Type::Float, &[&args[0].value]),
                 Type::Str => self.call("imre_float_parse", Type::Float, &[&args[0].value]),
@@ -7259,11 +7388,12 @@ impl Emitter<'_, '_> {
                 },
                 _ => unreachable!("float conversion was checked"),
             },
-            Builtin::LengthResult => {
-                let value = self.checked_instruction(format!(
+            Builtin::LengthResult(origin) => {
+                let value = self.instruction(format!(
                     "call i64 @imre_length_result(i64 {})",
                     args[0].value.operand
                 ));
+                self.check_error_at(Some(origin));
                 Value {
                     ty: Type::Int,
                     operand: value,
@@ -7279,56 +7409,25 @@ impl Emitter<'_, '_> {
             }
             Builtin::Len => {
                 if let ExprKind::Local(slot) = expressions[0].kind
+                    && self.cached_string_lengths.contains(&slot)
+                {
+                    self.cached_string_length(slot, &args[0].value)
+                } else if let ExprKind::Local(slot) = expressions[0].kind
                     && let Some(length) = self.snapshot_length(slot, &args[0].value)
                 {
                     length
-                } else if matches!(args[0].value.ty, Type::List(_) | Type::ListInt) {
-                    self.list_length(&args[0].value)
                 } else {
-                    self.call(
-                        match args[0].value.ty {
-                            Type::Str => "imre_str_len",
-                            Type::Bytes => "imre_bytes_len",
-                            Type::ByteArray => "imre_bytearray_len",
-                            Type::VarTuple(_) => "imre_tuple_len",
-                            Type::ListInt => "imre_list_len",
-                            Type::Dict(_) | Type::ReadOnlyObjectMapping => "imre_dict_len",
-                            Type::Deque(_) => "imre_deque_len",
-                            Type::Set(_) | Type::StringKeys | Type::FrozenStrings => "imre_set_len",
-                            _ => unreachable!("len input was checked"),
-                        },
-                        Type::Int,
-                        &[&args[0].value],
-                    )
+                    let receiver = &args[0].value;
+                    match receiver.ty {
+                        Type::Str => self.call("imre_str_len", Type::Int, &[receiver]),
+                        Type::Bytes => self.call("imre_bytes_len", Type::Int, &[receiver]),
+                        Type::ByteArray => self.call("imre_bytearray_len", Type::Int, &[receiver]),
+                        _ => self.container_length(receiver),
+                    }
                 }
             }
-            Builtin::TupleGet => {
-                let tuple = &args[0].value;
-                let index = &args[1].value;
-                let len = self.module.types.fields(tuple.ty).unwrap().len();
-                let offset = self.checked_instruction(format!(
-                    "call i64 @imre_tuple_index(i64 {}, i64 {len})",
-                    index.operand
-                ));
-                // Every fixed tuple field occupies one word. Check before forming the inbounds pointer.
-                let ptr = self.instruction(format!(
-                    "getelementptr inbounds {}, ptr {}, i64 {offset}",
-                    storage_type(returns),
-                    tuple.operand
-                ));
-                let selected = self.field_value(&ptr, returns);
-                self.retain(&selected);
-                selected
-            }
-            Builtin::ListGet if matches!(expressions[0].kind, ExprKind::Local(slot) if self.fixed_int_lists[slot] && self.int_buffers.contains_key(&slot)) =>
-            {
-                let ExprKind::Local(slot) = expressions[0].kind else {
-                    unreachable!()
-                };
-                self.fixed_int_get(slot, &args[1].value)
-            }
-            Builtin::ListGetStable => self
-                .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value)
+            Builtin::ListGetStable(_) => self
+                .guarded_owned_integer(&expressions[0], &args[0].value, &args[1].value, false)
                 .unwrap_or_else(|| {
                     self.get_item(
                         &args[0].value,
@@ -7337,13 +7436,10 @@ impl Emitter<'_, '_> {
                         self.nonnegative_index(&expressions[1]),
                     )
                 }),
-            Builtin::ListGet => self.get_item(
-                &args[0].value,
-                &args[1].value,
-                returns,
-                self.nonnegative_index(&expressions[1]),
-            ),
-            Builtin::SequenceGetInBounds if self.module.types.is_value_struct(returns) => {
+            Builtin::SequenceGetInBounds
+                if matches!(args[0].value.ty, Type::List(_))
+                    && self.module.types.is_value_struct(returns) =>
+            {
                 let native = self.instruction(format!("lshr i64 {}, 1", args[1].value.operand));
                 let word = self.checked_instruction(format!(
                     "call i64 @imre_seq_get_index(ptr {}, i64 {native})",
@@ -7376,21 +7472,43 @@ impl Emitter<'_, '_> {
                 self.retain(&value);
                 value
             }
+            Builtin::CollectIntCursor => Value {
+                ty: Type::ListInt,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_collect_int_cursor(ptr {})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
+            Builtin::ListAccumulate => {
+                let start = args.get(1).map_or("0", |arg| arg.value.operand.as_str());
+                Value {
+                    ty: Type::ListInt,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @imre_list_accumulate(ptr {}, i64 {start})",
+                        args[0].value.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::ListSum => self.call(
                 "imre_list_sum",
                 Type::Int,
-                &[&args[0].value, &args[1].value],
+                &[
+                    &args[0].value,
+                    args.get(1).map_or(&small(0), |arg| &arg.value),
+                ],
             ),
             Builtin::ListSliceSum => self.call(
                 "imre_list_slice_sum",
                 Type::Int,
                 &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
             ),
-            Builtin::ListGetI32
+            Builtin::ListGetI32(_)
             | Builtin::ListGetBounded { .. }
             | Builtin::ListGetBoundedInBounds { .. } => {
                 let (min, max) = match builtin {
-                    Builtin::ListGetBounded { min, max }
+                    Builtin::ListGetBounded { min, max, .. }
                     | Builtin::ListGetBoundedInBounds { min, max } => (*min, *max),
                     _ => (i64::from(i32::MIN), i64::from(i32::MAX)),
                 };
@@ -7403,13 +7521,26 @@ impl Emitter<'_, '_> {
                     let mut index = args[1].value.clone();
                     index.small_integer = true;
                     let index = self.index_word(&index, true);
-                    self.proven_list_word(slot, &args[0].value, &index)
-                } else if matches!(builtin, Builtin::ListGetI32)
+                    if let Some((_, data)) = self.guarded_list_buffer(&expressions[0]) {
+                        self.load_list_word(&data, &index)
+                    } else {
+                        self.proven_list_word(slot, &args[0].value, &index)
+                    }
+                } else if matches!(builtin, Builtin::ListGetI32(_))
                     && self.nonnegative_index(&expressions[1])
                     && let Some(word) =
                         self.guarded_integer_word(&expressions[0], &args[0].value, &args[1].value)
                 {
                     word
+                } else if matches!(builtin, Builtin::ListGetI32(_))
+                    && let Some(value) = self.guarded_owned_integer(
+                        &expressions[0],
+                        &args[0].value,
+                        &args[1].value,
+                        true,
+                    )
+                {
+                    value.operand
                 } else if self.nonnegative_index(&expressions[1]) {
                     let index = self.native_index(&args[1].value);
                     self.runtime_call(&LIST_BORROW_INDEX, [&args[0].value, &index])
@@ -7448,7 +7579,7 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::IntBounded { min, max } => {
+            Builtin::BoundedCursorValue { min, max } | Builtin::IntBounded { min, max } => {
                 debug_assert!(min <= max && *min >= -(1_i64 << 62) && *max < (1_i64 << 62));
                 debug_assert!(matches!(expressions[0].kind, ExprKind::Local(_)));
                 // Range analysis already uses the checked induction proof to
@@ -7459,6 +7590,13 @@ impl Emitter<'_, '_> {
                     ty: Type::Int,
                     operand: args[0].value.operand.clone(),
                     small_integer: true,
+                }
+            }
+            Builtin::ListAllI32 if matches!(expressions[0].kind,ExprKind::Local(slot) if self.reserved_append_tail(slot).is_some()) => {
+                Value {
+                    ty: Type::Bool,
+                    operand: "true".to_owned(),
+                    small_integer: false,
                 }
             }
             Builtin::ListAllI32 => {
@@ -7473,6 +7611,46 @@ impl Emitter<'_, '_> {
                     ty: Type::Bool,
                     operand: self.instruction(format!("icmp ne i32 {result}, 0")),
                     small_integer: false,
+                }
+            }
+            Builtin::IntFitsI32 => {
+                if self
+                    .ranges
+                    .integer(&expressions[0])
+                    .is_some_and(|r| r.min >= i64::from(i32::MIN) && r.max <= i64::from(i32::MAX))
+                {
+                    return Value {
+                        ty: Type::Bool,
+                        operand: "true".to_owned(),
+                        small_integer: false,
+                    };
+                }
+                let word = &args[0].value.operand;
+                let tag = self.instruction(format!("trunc i64 {word} to i1"));
+                let shift = self.instruction(format!("add i64 {word}, 4294967295"));
+                let fits = self.instruction(format!("icmp ule i64 {shift}, 8589934590"));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("and i1 {tag}, {fits}")),
+                    small_integer: false,
+                }
+            }
+            Builtin::CursorScanBudget(slot) => {
+                let operand = if let Some(cursor) = self.forward_cursors.get(slot).cloned() {
+                    let remaining = self.remaining_cursor_bytes(&cursor);
+                    // Zero disables the guarded loop when its byte bound cannot fit i32.
+                    let fits = self.instruction(format!("icmp ule i64 {remaining}, {}", i32::MAX));
+                    let count =
+                        self.instruction(format!("select i1 {fits}, i64 {remaining}, i64 0"));
+                    let tagged = self.instruction(format!("shl i64 {count}, 1"));
+                    self.instruction(format!("or i64 {tagged}, 1"))
+                } else {
+                    "1".to_owned()
+                };
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
                 }
             }
             Builtin::ListPresent => Value {
@@ -7495,46 +7673,25 @@ impl Emitter<'_, '_> {
             ),
             Builtin::ListReserveRange => {
                 let count = self.index_word(&args[4].value, true);
-                let name = if args[0].value.ty == Type::ByteOutput {
-                    "imre_byte_output_reserve_range"
+                let (name, cursor) = if let Some(window) = self.byte_output_window(&expressions[0])
+                {
+                    (
+                        "imre_byte_output_reserve_window",
+                        format!(", ptr %byte_window{window}"),
+                    )
+                } else if args[0].value.ty == Type::ByteOutput {
+                    ("imre_byte_output_reserve_range", String::new())
                 } else {
-                    "imre_list_reserve_range"
+                    ("imre_list_reserve_range", String::new())
                 };
                 self.line(format!(
-                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count})",
+                    "call void @{name}(ptr {}, i64 {}, i64 {}, i64 {}, i64 {count}{cursor})",
                     args[0].value.operand,
                     args[1].value.operand,
                     args[2].value.operand,
                     args[3].value.operand
                 ));
                 none()
-            }
-            Builtin::StringGet => {
-                self.call("imre_str_get", Type::Str, &[&args[0].value, &args[1].value])
-            }
-            Builtin::BytesGet => {
-                // Successful bytes are canonical tagged integers in 1..=511;
-                // zero uniquely signals failure, so no pending-state poll is needed.
-                let nonnegative = self.nonnegative_index(&expressions[1]);
-                let index = self.index_word(&args[1].value, nonnegative);
-                let function = if nonnegative {
-                    "imre_bytes_get_index"
-                } else {
-                    "imre_bytes_get"
-                };
-                let operand = self.instruction(format!(
-                    "call i64 @{function}(ptr {}, i64 {index})",
-                    args[0].value.operand
-                ));
-                let failed = self.instruction(format!("icmp eq i64 {operand}, 0"));
-                self.check_failed(&failed);
-                let bounded = self.instruction(format!("icmp ule i64 {operand}, 511"));
-                self.line(format!("call void @llvm.assume(i1 {bounded})"));
-                Value {
-                    ty: Type::Int,
-                    operand,
-                    small_integer: true,
-                }
             }
             Builtin::Progression { bounded: false } if args[0].value.ty == Type::Float => {
                 let step = &args[1].value;
@@ -7582,13 +7739,6 @@ impl Emitter<'_, '_> {
                     operand,
                     small_integer: false,
                 }
-            }
-            Builtin::TupleIndex => {
-                let word = self.checked_instruction(format!(
-                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
-                    args[0].value.operand, args[1].value.operand
-                ));
-                self.unpack_word(word, returns)
             }
             Builtin::IterableTuple => {
                 let source = &args[0].value;
@@ -7651,6 +7801,22 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::AccumulateCursor => {
+                let source = &args[0].value;
+                let mode = iterable_mode(source.ty);
+                let word = self.word(source);
+                let (kind, initial) = args.get(1).map_or((0, "0".to_owned()), |arg| {
+                    (
+                        representation_kind(arg.value.ty, &self.module.types),
+                        self.word(&arg.value),
+                    )
+                });
+                Value {
+                    ty: returns,
+                    operand: self.instruction(format!("call ptr @imre_accumulate_cursor(i32 {mode}, i64 {word}, i32 {kind}, i64 {initial})")),
+                    small_integer: false,
+                }
+            }
             Builtin::Islice | Builtin::Cycle => {
                 let source = &args[0].value;
                 let mode = iterable_mode(source.ty);
@@ -7709,6 +7875,14 @@ impl Emitter<'_, '_> {
                 }
             }
             Builtin::StringIter => self.call("imre_str_iter", Type::Iterator, &[&args[0].value]),
+            Builtin::SortedSplitByteIter(separator) => Value {
+                ty: Type::Iterator,
+                operand: self.checked_pointer(format!(
+                    "call ptr @imre_str_sorted_split_byte_iter(ptr {}, i8 {separator})",
+                    args[0].value.operand
+                )),
+                small_integer: false,
+            },
             Builtin::SplitByteIter(separator) => Value {
                 ty: Type::Iterator,
                 operand: self.checked_instruction(format!(
@@ -7754,9 +7928,12 @@ impl Emitter<'_, '_> {
                     small_integer: true,
                 }
             }
-            Builtin::StringIntList => {
-                self.call("imre_str_int_list", Type::ListInt, &[&args[0].value])
-            }
+            Builtin::StringIntList(origin) => self.call_at(
+                "imre_str_int_list",
+                returns,
+                &[&args[0].value],
+                Some(origin),
+            ),
             Builtin::StringSliceEqual => {
                 let equal = self.instruction(format!(
                     "call i32 @imre_str_slice_equal(ptr {}, i64 {}, i64 {}, ptr {}, i64 {}, i64 {})",
@@ -7769,17 +7946,33 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::Slice => self.call(
-                match returns {
-                    Type::Str => "imre_str_slice",
-                    Type::Bytes => "imre_bytes_slice",
-                    Type::ListInt => "imre_list_slice",
-                    Type::List(_) => "imre_seq_slice",
-                    _ => unreachable!("slice receiver was checked"),
-                },
-                returns,
-                &args.iter().map(|arg| &arg.value).collect::<Vec<_>>(),
-            ),
+            Builtin::Slice => {
+                let omitted;
+                let operands = match args.as_slice() {
+                    [base] => {
+                        omitted = Value {
+                            ty: self.module.types.optional(Type::Int),
+                            ..none()
+                        };
+                        [&base.value, &omitted, &omitted, &omitted]
+                    }
+                    [base, lower, upper, step] => {
+                        [&base.value, &lower.value, &upper.value, &step.value]
+                    }
+                    _ => unreachable!("checked slice operands"),
+                };
+                self.call(
+                    match returns {
+                        Type::Str => "imre_str_slice",
+                        Type::Bytes => "imre_bytes_slice",
+                        Type::ListInt => "imre_list_slice",
+                        Type::List(_) => "imre_seq_slice",
+                        _ => unreachable!("slice receiver was checked"),
+                    },
+                    returns,
+                    &operands,
+                )
+            }
             Builtin::DeepCopy => {
                 let source = self.word(&args[0].value);
                 let kind = representation_kind(returns, &self.module.types);
@@ -7879,7 +8072,6 @@ impl Emitter<'_, '_> {
                 &[&args[0].value, &args[1].value],
             ),
             Builtin::OrderedDict => self.call("imre_ordered_dict", returns, &[&args[0].value]),
-            Builtin::DictGet => self.get_item(&args[0].value, &args[1].value, returns, false),
             Builtin::ChainMapNew => self.call("imre_chainmap_new", returns, &[&args[0].value]),
             Builtin::ChainMapMaps => self.call("imre_chainmap_maps", returns, &[&args[0].value]),
             Builtin::ChainMapGetItem => {
@@ -8010,7 +8202,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::DequeIter { reverse } => Value {
-                ty: Type::Iterator,
+                ty: returns,
                 operand: self.instruction(format!(
                     "call ptr @imre_deque_iter(ptr {}, i32 {})",
                     args[0].value.operand,
@@ -8295,6 +8487,40 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::SetCasePrefixPossible(prefix) => {
+                let text = &args[1].value.operand;
+                let rejected = match prefix {
+                    ir::SetCasePrefix::ExcludedBytes([lower, upper]) => self.instruction(format!(
+                        "call i32 @imre_str_affix_ascii(ptr {text}, i64 {lower}, i64 {upper}, i32 0)"
+                    )),
+                    ir::SetCasePrefix::ThreeByteHashes(mask) => self.instruction(format!(
+                        "call i32 @imre_str_excludes_ascii_prefix3(ptr {text}, i64 {mask})"
+                    )),
+                    ir::SetCasePrefix::ThreeByteValues { mask, tags } => {
+                        self.excluded_literal_prefix(text, *mask, tags)
+                    }
+                };
+                let possible = self.instruction(format!("icmp eq i32 {rejected}, 0"));
+                // A module initializer can call a function before the set is bound.
+                let unbound =
+                    self.instruction(format!("icmp eq ptr {}, null", args[0].value.operand));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("or i1 {unbound}, {possible}")),
+                    small_integer: false,
+                }
+            }
+            Builtin::SetCaseLengthPossible => {
+                let possible = self.instruction(format!(
+                    "call i32 @imre_set_case_length_possible(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                Value {
+                    ty: Type::Bool,
+                    operand: self.instruction(format!("icmp ne i32 {possible}, 0")),
+                    small_integer: false,
+                }
+            }
             Builtin::DictContains | Builtin::SetContains | Builtin::ChainMapContains => {
                 let key = self.mapping_read_key(args[1].value.ty, &args[0].value);
                 let family = match builtin {
@@ -8326,14 +8552,6 @@ impl Emitter<'_, '_> {
                 }
                 none()
             }
-            Builtin::DictDelete => {
-                let key = self.key_word(&args[1].value);
-                self.checked_line(format!(
-                    "call void @imre_dict_delete(ptr {}, i64 {key})",
-                    args[0].value.operand
-                ));
-                none()
-            }
             Builtin::DictIter(items) => Value {
                 ty: Type::Iterator,
                 operand: self.instruction(format!(
@@ -8343,12 +8561,8 @@ impl Emitter<'_, '_> {
                 )),
                 small_integer: false,
             },
-            Builtin::SetAdd | Builtin::SetDiscard => {
-                self.set_member(
-                    &args[0].value,
-                    &args[1].value,
-                    matches!(builtin, Builtin::SetAdd),
-                );
+            Builtin::SetDiscard => {
+                self.set_member(&args[0].value, &args[1].value, false);
                 none()
             }
             Builtin::SetIter => self.call("imre_set_iter", Type::Iterator, &[&args[0].value]),
@@ -8356,35 +8570,73 @@ impl Emitter<'_, '_> {
             Builtin::JoinBufferFinish => {
                 self.call("imre_join_buffer_finish", Type::Str, &[&args[0].value])
             }
-            Builtin::Append | Builtin::JoinBufferAppend => {
-                if matches!(builtin, Builtin::JoinBufferAppend) {
-                    self.checked_status(format!(
-                        "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
-                        args[0].value.operand, args[1].value.operand
-                    ));
-                } else if matches!(args[1].ownership, Ownership::Owned)
-                    && matches!(args[0].value.ty, Type::List(_))
-                    && matches!(
-                        args[1].value.ty,
-                        Type::Tuple(_) | Type::List(_) | Type::ListInt
-                    )
-                {
-                    let item = &args[1].value;
-                    let word = self.word(item);
-                    self.checked_status(format!(
-                        "call i32 @imre_seq_append_owned(ptr {}, i64 {word}, i32 {})",
-                        args[0].value.operand,
-                        representation_kind(item.ty, &self.module.types)
-                    ));
-                    // The failure branch already emitted cleanup with this owner armed.
-                    self.forget(item);
-                    self.release_operand(&args[0]);
-                    return none();
-                } else {
-                    self.append(&args[0].value, &args[1].value);
+            Builtin::BeginListAppends(output) => {
+                let window = self.append_window(*output);
+                self.line(format!("store ptr null, ptr {window}"));
+                none()
+            }
+            Builtin::FinishListAppends(output) => {
+                let window = self.append_window(*output);
+                self.line(format!("call void @finish_list_appends(ptr {window})"));
+                none()
+            }
+            Builtin::AppendInWindow(output) if self.reserved_append_tail(*output).is_some() => {
+                let window = self.append_window(*output);
+                let cursor = self.instruction(format!(
+                    "getelementptr [3 x ptr], ptr {window}, i32 0, i32 1"
+                ));
+                let next = self.instruction(format!("load ptr, ptr {cursor}"));
+                self.line(format!("store i64 {}, ptr {next}", args[1].value.operand));
+                let tail = self.reserved_append_tail(*output).unwrap();
+                self.line(format!("store i64 {}, ptr {tail}", args[1].value.operand));
+                let after = self.instruction(format!("getelementptr i64, ptr {next}, i64 1"));
+                self.line(format!("store ptr {after}, ptr {cursor}"));
+                none()
+            }
+            Builtin::GetBoundedInAppendWindow { output, .. }
+                if self.reserved_append_tail(*output).is_some() =>
+            {
+                let tail = self.reserved_append_tail(*output).unwrap();
+                let word = self.instruction(format!("load i64, ptr {tail}"));
+                Value {
+                    ty: Type::Int,
+                    operand: word,
+                    small_integer: true,
                 }
-                // The list now owns the item. Drop the argument first so a
-                // temporary receiver destroys its items in reverse insertion order.
+            }
+            Builtin::AppendInWindow(output) => {
+                let window = self.append_window(*output);
+                self.checked_status(format!(
+                    "call i32 @append_in_window(ptr {window}, ptr {}, i64 {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
+                none()
+            }
+            Builtin::GetInAppendWindow(output, _)
+            | Builtin::GetBoundedInAppendWindow { output, .. } => {
+                let window = self.append_window(*output);
+                let word = self.checked_int_list_word(format!(
+                    "call i64 @get_in_append_window(ptr {window}, ptr {})",
+                    args[0].value.operand
+                ));
+                if let Builtin::GetBoundedInAppendWindow { min, max, .. } = builtin {
+                    self.line(format!("; inductive list tail {min}..={max}"));
+                    let word = self.instruction(format!("or i64 {word}, 1"));
+                    Value {
+                        ty: Type::Int,
+                        operand: word,
+                        small_integer: true,
+                    }
+                } else {
+                    self.unpack_word(word, Type::Int)
+                }
+            }
+            Builtin::Append | Builtin::SetAdd => unreachable!("checked collection insertion"),
+            Builtin::JoinBufferAppend => {
+                self.checked_status(format!(
+                    "call i32 @imre_join_buffer_append(ptr {}, ptr {})",
+                    args[0].value.operand, args[1].value.operand
+                ));
                 self.release_operand(&args[1]);
                 self.release_operand(&args[0]);
                 return none();
@@ -8411,10 +8663,27 @@ impl Emitter<'_, '_> {
                     self.unpack_word(word, returns)
                 }
             }
-            Builtin::SplitIntSource(_) => {
+            Builtin::SplitTextSource(_) | Builtin::SplitIntSource(_) => {
                 return self.own_operand(args.into_iter().next().unwrap());
             }
-            Builtin::SplitIntCached(index) => {
+            Builtin::SplitTextLen | Builtin::SplitTextField(..) => {
+                let ExprKind::Local(slot) = expressions[0].kind else {
+                    unreachable!()
+                };
+                match builtin {
+                    Builtin::SplitTextField(index, _) => Value {
+                        ty: Type::Str,
+                        operand: self.checked_pointer(format!("call ptr @imre_str_field_at(ptr {}, ptr %text_fields{slot}, i32 {index})", args[0].value.operand)),
+                        small_integer: false,
+                    },
+                    _ => Value {
+                        ty: Type::Int,
+                        operand: self.instruction(format!("load i64, ptr %text_fields{slot}")),
+                        small_integer: true,
+                    },
+                }
+            }
+            Builtin::SplitIntCached(index, _) => {
                 let ExprKind::Local(slot) = expressions[0].kind else {
                     unreachable!()
                 };
@@ -8423,7 +8692,7 @@ impl Emitter<'_, '_> {
                 ));
                 let word = self.instruction(format!("load i64, ptr {ptr}"));
                 let ready = self.instruction(format!("icmp ne i64 {word}, 0"));
-                let (before, slow, end) = (self.current.clone(), self.label(), self.label());
+                let (before, slow, end) = (self.body.current.clone(), self.label(), self.label());
                 self.branch(&ready, &end, &slow);
                 self.start(&slow);
                 let fallback = if self.line_slots[slot] {
@@ -8437,7 +8706,7 @@ impl Emitter<'_, '_> {
                         args[0].value.operand
                     ))
                 };
-                let after = self.current.clone();
+                let after = self.body.current.clone();
                 self.jump(&end);
                 self.start(&end);
                 Value {
@@ -8448,7 +8717,7 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::SplitIntField(index) => {
+            Builtin::SplitIntField(index, _) => {
                 let operand = self.checked_instruction(format!(
                     "call i64 @imre_str_split_int_field(ptr {}, i32 {index})",
                     args[0].value.operand
@@ -8486,17 +8755,43 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::FilterCharacterSet(below) => {
+            Builtin::FilterCharacterSet(filter) => {
+                let below = filter.below;
                 let optional = matches!(returns, Type::Optional(_));
                 let symbol = if optional {
                     "imre_filter_nonempty_character_set"
                 } else {
                     "imre_filter_character_set"
                 };
-                let operand = self.checked_instruction(format!(
-                    "call ptr @{symbol}(ptr {}, ptr {}, i32 {below})",
-                    args[0].value.operand, args[1].value.operand
-                ));
+                let text = &args[0].value.operand;
+                let keys = &args[1].value.operand;
+                let call = format!("call ptr @{symbol}(ptr {text}, ptr {keys}, i32 {below})");
+                let operand = if optional && let Some(table) = filter.ascii_table() {
+                    let matcher =
+                        character_filters::vector_matcher(self.output, &table, self.strings.len());
+                    let table = self.byte_array(table);
+                    self.output.local_helper(
+                        "text_has_table_byte",
+                        include_str!("llvm/text_has_table_byte.ll"),
+                    );
+                    let hit = self.instruction(format!(
+                        "call i1 @text_has_table_byte(ptr {text}, ptr @{table}, ptr {matcher})"
+                    ));
+                    let unbound = self.instruction(format!("icmp eq ptr {keys}, null"));
+                    let collect = self.instruction(format!("or i1 {hit}, {unbound}"));
+                    let empty = self.body.current.clone();
+                    let select = self.label();
+                    let done = self.label();
+                    self.branch(&collect, &select, &done);
+                    self.start(&select);
+                    let result = self.checked_instruction(call);
+                    let selected = self.body.current.clone();
+                    self.jump(&done);
+                    self.start(&done);
+                    self.instruction(format!("phi ptr [null, %{empty}], [{result}, %{selected}]"))
+                } else {
+                    self.checked_instruction(call)
+                };
                 let operand = if optional {
                     self.instruction(format!("ptrtoint ptr {operand} to i64"))
                 } else {
@@ -8579,6 +8874,28 @@ impl Emitter<'_, '_> {
                 self.void_call("imre_stderr_line", &[&args[0].value]);
                 none()
             }
+            Builtin::Print
+                if args.len() > 1
+                    || matches!(
+                        args[0].value.ty.word_kind(),
+                        WordKind::Object | WordKind::Union
+                    ) =>
+            {
+                let kinds = self.byte_array(
+                    args.iter()
+                        .map(|arg| {
+                            u8::try_from(representation_kind(arg.value.ty, &self.module.types))
+                                .expect("checked print operands have non-nullable word kinds")
+                        })
+                        .collect(),
+                );
+                let words = self.argument_words(&args);
+                self.checked_line(format!(
+                    "call void @imre_print_scalars(ptr @{kinds}, ptr {words}, i64 {})",
+                    args.len()
+                ));
+                none()
+            }
             Builtin::Print => {
                 match args[0].value.ty {
                     Type::Int => self.void_call("imre_print_int", &[&args[0].value]),
@@ -8605,6 +8922,17 @@ impl Emitter<'_, '_> {
             self.release(field);
         }
         result
+    }
+
+    /// Store evaluated operands in their native word representations for a borrowed ABI call.
+    fn argument_words(&mut self, args: &[Operand]) -> String {
+        let words = self.entry_alloca(format!("[{} x i64]", args.len()));
+        for (i, arg) in args.iter().enumerate() {
+            let word = self.word(&arg.value);
+            let slot = self.instruction(format!("getelementptr i64, ptr {words}, i64 {i}"));
+            self.line(format!("store i64 {word}, ptr {slot}"));
+        }
+        words
     }
 
     /// Read-only lookups never take ownership of the key, even on a miss in a
@@ -8692,7 +9020,7 @@ impl Emitter<'_, '_> {
             self.present(value, returns)
         };
         self.forget(&value);
-        let present_end = self.current.clone();
+        let present_end = self.body.current.clone();
         self.jump(&end);
         self.start(&absent);
         let default = if let Some(default) = args.get(2) {
@@ -8727,10 +9055,19 @@ impl Emitter<'_, '_> {
         ready: usize,
         kind: ir::IterNextKind,
     ) {
-        debug_assert!(matches!(
-            self.locals[iterator],
-            Type::Iterator | Type::Cursor(_)
-        ));
+        let forward = self.forward_cursors.get(&iterator).cloned();
+        debug_assert!(match self.locals[iterator] {
+            Type::Str =>
+                forward.is_some()
+                    && matches!(
+                        kind,
+                        ir::IterNextKind::String
+                            | ir::IterNextKind::CodePoint
+                            | ir::IterNextKind::Utf8Byte
+                    ),
+            Type::Iterator | Type::Cursor(_) => forward.is_none(),
+            _ => false,
+        });
         debug_assert_eq!(self.locals[ready], Type::Bool);
         debug_assert_ne!(iterator, key);
         debug_assert_ne!(iterator, ready);
@@ -8740,9 +9077,21 @@ impl Emitter<'_, '_> {
             debug_assert_ne!(key, value);
             debug_assert_ne!(ready, value);
         }
-        let forward = self.forward_cursors.get(&iterator).cloned();
         let iterator = self.borrow_slot(iterator);
         let (available, direct_key) = match kind {
+            ir::IterNextKind::Async(_) | ir::IterNextKind::Pair(_) => {
+                unreachable!("Python pull requires a registered frame")
+            }
+            ir::IterNextKind::SplitField => {
+                let field = self.instruction(format!(
+                    "call i64 @imre_split_field_next(ptr {})",
+                    iterator.operand
+                ));
+                (
+                    self.instruction(format!("icmp ne i64 {field}, 0")),
+                    Some(field),
+                )
+            }
             ir::IterNextKind::Generic => {
                 self.mapping_words = self.mapping_words.max(1 + usize::from(value.is_some()));
                 let value_output = if value.is_some() {
@@ -8758,7 +9107,12 @@ impl Emitter<'_, '_> {
             }
             ir::IterNextKind::String | ir::IterNextKind::CodePoint | ir::IterNextKind::Utf8Byte => {
                 debug_assert!(value.is_none());
-                let word = if let Some((next_byte, end)) = forward {
+                let word = if let Some(ForwardCursor {
+                    next: next_byte,
+                    end,
+                    ..
+                }) = forward
+                {
                     debug_assert!(kind != ir::IterNextKind::String);
                     let raw = kind == ir::IterNextKind::Utf8Byte;
                     let end = self.instruction(format!("load ptr, ptr {end}"));
@@ -8785,20 +9139,17 @@ impl Emitter<'_, '_> {
             small_integer: false,
         };
         self.store(ready, &ready_value);
-        let (success, end) = (self.label(), self.label());
-        self.branch(&ready_value.operand, &success, &end);
-        self.start(&success);
-        let word =
-            direct_key.unwrap_or_else(|| self.instruction("load i64, ptr %mapping_key_word"));
-        let key_value = self.unpack_word(word, self.locals[key]);
-        self.store(key, &key_value);
-        if let Some(value) = value {
-            let word = self.instruction("load i64, ptr %mapping_value_word");
-            let value_result = self.unpack_word(word, self.locals[value]);
-            self.store(value, &value_result);
-        }
-        self.jump(&end);
-        self.start(&end);
+        self.when(&ready_value.operand, |emitter| {
+            let word = direct_key
+                .unwrap_or_else(|| emitter.instruction("load i64, ptr %mapping_key_word"));
+            let key_value = emitter.unpack_word(word, emitter.locals[key]);
+            emitter.store(key, &key_value);
+            if let Some(value) = value {
+                let word = emitter.instruction("load i64, ptr %mapping_value_word");
+                let value_result = emitter.unpack_word(word, emitter.locals[value]);
+                emitter.store(value, &value_result);
+            }
+        });
     }
 
     /// Converts a typed value to the runtime's word representation without
@@ -8904,6 +9255,48 @@ impl Emitter<'_, '_> {
         }
     }
 
+    /// Move the payload out of an owned nullable word. A boxed float releases its box after the read.
+    fn unwrap_optional(&mut self, receiver: &Expr, ty: Type) -> Value {
+        let receiver = self.operand(receiver);
+        if ty == Type::Float {
+            let value = self.call("imre_float_unbox", Type::Float, &[&receiver.value]);
+            self.release_operand(&receiver);
+            return value;
+        }
+        let receiver = self.own_operand(receiver);
+        self.forget(&receiver);
+        let word = if ty == Type::Bool {
+            self.instruction(format!("sub i64 {}, 1", receiver.operand))
+        } else {
+            receiver.operand
+        };
+        self.decode_word(word, ty)
+    }
+
+    /// Keep resource arguments alive through __init__ and release them in reverse source order.
+    fn construct_record(&mut self, ty: Type, initializer: usize, args: &CallArgs) -> Value {
+        let mut values = self.call_operands(args);
+        let object = self.record(ty);
+        let mut inputs = vec![&object];
+        inputs.extend(args.order.iter().map(|&index| &values[index].value));
+        for input in &inputs {
+            if self.resource_types.contains(&input.ty) {
+                self.retain(input);
+            }
+        }
+        self.user_call(initializer, Type::None, &inputs, false, None);
+        if values
+            .iter()
+            .any(|arg| self.resource_types.contains(&arg.value.ty))
+        {
+            values.reverse();
+        }
+        for arg in &values {
+            self.release_operand(arg);
+        }
+        object
+    }
+
     /// The zeroed payload is safe to destroy before every initializer completes.
     /// The checked constructor cannot expose a partially initialized record.
     fn record(&mut self, ty: Type) -> Value {
@@ -8914,7 +9307,7 @@ impl Emitter<'_, '_> {
     fn record_with_layout(&mut self, ty: Type, layout: String) -> Value {
         // A loop can produce many small, independently escaping ordinary tuples.
         // Batch only the layouts for which several records fit in one block.
-        let allocate = if !self.loops.is_empty()
+        let operand = if !self.loops.is_empty()
             && matches!(ty, Type::Tuple(_))
             && self.module.types.tuple_origin(ty).is_none()
             && self
@@ -8923,16 +9316,41 @@ impl Emitter<'_, '_> {
                 .fields(ty)
                 .is_some_and(|fields| (1..=8).contains(&fields.len()))
         {
-            "imre_tuple_batch_try_new"
+            self.checked_pointer(format!("call ptr @imre_tuple_batch_try_new(ptr @{layout})"))
         } else {
-            "imre_record_try_new"
+            self.allocate_record(ty, &layout)
         };
         let value = Value {
             ty,
-            operand: self.checked_pointer(format!("call ptr @{allocate}(ptr @{layout})")),
+            operand,
             small_integer: false,
         };
         self.owned(value)
+    }
+
+    /// Pass the exact payload size for records with no runtime-specific trailing fields.
+    fn allocate_record(&mut self, ty: Type, layout: &str) -> String {
+        let words = match ty {
+            Type::Class(class) => {
+                self.module.class_fields[class].len()
+                    + usize::from(
+                        self.module
+                            .class_metadata
+                            .get(class)
+                            .is_some_and(|m| m.toml_hash),
+                    )
+            }
+            Type::Tuple(_) if self.module.types.tuple_metadata(ty).is_none() => {
+                self.module.types.fields(ty).unwrap().len()
+            }
+            _ => {
+                return self
+                    .checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
+            }
+        };
+        self.checked_pointer(format!(
+            "call ptr @imre_record_try_new_sized(ptr @{layout}, i64 {words})"
+        ))
     }
 
     fn checked_pointer(&mut self, instruction: impl AsRef<str>) -> String {
@@ -8955,15 +9373,15 @@ impl Emitter<'_, '_> {
         self.branch(&empty, &allocate, &cached);
         self.start(&allocate);
         let layout = self.output.record_layout(previous.ty);
-        let fresh = self.checked_pointer(format!("call ptr @imre_record_try_new(ptr @{layout})"));
-        let allocated = self.current.clone();
+        let fresh = self.allocate_record(previous.ty, &layout);
+        let allocated = self.body.current.clone();
         self.jump(&write);
         self.start(&cached);
         let replacement = self.checked_pointer(format!(
             "call ptr @imre_record_try_cached_result(ptr {})",
             previous.operand
         ));
-        let reused = self.current.clone();
+        let reused = self.body.current.clone();
         self.jump(&write);
         self.start(&write);
         let record = Value {
@@ -9012,6 +9430,32 @@ impl Emitter<'_, '_> {
         self.owned(value)
     }
 
+    fn field_update_operand(&mut self, receiver: &Value, field: usize, rhs: &Expr) -> Operand {
+        let Type::Class(class) = receiver.ty else {
+            unreachable!()
+        };
+        let ty = self.module.class_fields[class][field];
+        // A scalar or a non-reentrant exact length read cannot replace this
+        // field. Other right-hand sides must own it across mutation and errors.
+        let stable = matches!(rhs.kind, ExprKind::Int(_) | ExprKind::Local(_))
+            || matches!(&rhs.kind, ExprKind::Builtin(Builtin::Len, values)
+                if matches!(values.as_slice(), [list] if matches!(list.ty, Type::ListInt | Type::List(_))
+                    && (matches!(list.kind, ExprKind::Local(_))
+                        || borrows::getters::selected(list, &self.module.functions).is_some())));
+        if stable && ty == Type::Int {
+            let pointer = self.field_pointer(receiver, field);
+            Operand {
+                value: self.field_value(&pointer, ty),
+                ownership: Ownership::Borrowed,
+            }
+        } else {
+            Operand {
+                value: self.get_field(receiver, field, ty),
+                ownership: Ownership::Owned,
+            }
+        }
+    }
+
     /// Acquires before publishing and releases afterward, including self-aliasing
     /// replacement. Zero-initialized owning fields are valid cleanup sentinels.
     fn set_field(&mut self, receiver: &Value, field: usize, value: &Value) {
@@ -9041,19 +9485,98 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn append(&mut self, list: &Value, value: &Value) {
+    /// The unconsumed UTF-8 bytes bound the number of successful scalar pulls.
+    fn remaining_cursor_bytes(&mut self, cursor: &ForwardCursor) -> String {
+        let next = self.instruction(format!("load ptr, ptr {}", cursor.next));
+        let end = self.instruction(format!("load ptr, ptr {}", cursor.end));
+        let next = self.instruction(format!("ptrtoint ptr {next} to i64"));
+        let end = self.instruction(format!("ptrtoint ptr {end} to i64"));
+        self.instruction(format!("sub i64 {end}, {next}"))
+    }
+
+    /// Returns the scalar holding the last initialized word of this exclusive window.
+    fn reserved_append_tail(&self, output: usize) -> Option<&str> {
+        let (root, tail) = self.reserved_append_window.as_ref()?;
+        (*root == output).then_some(tail)
+    }
+
+    /// Keeps one native append window per guarded destination in this activation.
+    fn append_window(&mut self, output: usize) -> String {
+        if let Some(window) = self.append_windows.get(&output) {
+            return window.clone();
+        }
+        let window = self.entry_alloca("[3 x ptr]");
+        self.append_windows.insert(output, window.clone());
+        self.uses_append_windows = true;
+        window
+    }
+
+    /// The scoped extend receiver borrows the same span as its private owner.
+    fn byte_output_window(&self, expr: &Expr) -> Option<usize> {
+        let ExprKind::Local(slot) = expr.kind else {
+            return None;
+        };
+        self.byte_output_owners.get(slot).copied().flatten()
+    }
+
+    /// Append one or two rooted integer words, preserving the allocation error edge.
+    fn append_private_bytes(
+        &mut self,
+        window: usize,
+        output: &Value,
+        a: &Value,
+        b: Option<&Value>,
+    ) {
+        let count = if b.is_some() { 2 } else { 1 };
+        let b = b.map_or("1", |value| &value.operand);
+        self.checked_status(format!(
+            "call i32 @append_private_bytes(ptr %byte_window{window}, ptr {}, i64 {}, i64 {b}, i64 {count})",
+            output.operand, a.operand
+        ));
+    }
+
+    /// Ordinary word lists take ownership on success. Inline rows copy their fields instead.
+    fn append_takes_owner(&self, list: Type, item: Type) -> bool {
+        matches!(list, Type::List(_))
+            && match item {
+                Type::Tuple(_) | Type::List(_) | Type::ListInt | Type::Calendar(_) => true,
+                Type::Str => self.module.types.element(list) == Some(Type::Str),
+                Type::Class(class) => {
+                    self.module.types.element(list) == Some(item)
+                        && !self.module.types.is_value_struct(item)
+                        && self.module.types.concrete_subclasses(class).is_empty()
+                }
+                _ => false,
+            }
+    }
+
+    /// Append the rooted operand, transferring its owner only after the write succeeds.
+    fn append(&mut self, list: &Value, item: &Operand) {
+        let value = &item.value;
         if list.ty == Type::ByteOutput {
             self.runtime_call(&BYTE_OUTPUT_APPEND, [list, value]);
         } else if list.ty == Type::ListInt {
             self.runtime_call(&LIST_APPEND, [list, value]);
         } else {
+            let take = matches!(item.ownership, Ownership::Owned)
+                && self.append_takes_owner(list.ty, value.ty);
+            let symbol = if take {
+                "imre_seq_append_owned"
+            } else {
+                "imre_seq_append"
+            };
             let word = self.word(value);
             self.checked_status(format!(
-                "call i32 @imre_seq_append(ptr {}, i64 {word}, i32 {})",
+                "call i32 @{symbol}(ptr {}, i64 {word}, i32 {})",
                 list.operand,
                 representation_kind(value.ty, &self.module.types)
             ));
+            if take {
+                self.forget(value);
+                return;
+            }
         }
+        self.release_operand(item);
     }
 
     /// Passes a rooted canonical int/str/bytes key without index decoding. The runtime
@@ -9081,6 +9604,31 @@ impl Emitter<'_, '_> {
             .is_some_and(|range| range.min >= 0)
     }
 
+    /// Combine the lookup and store only when the RHS cannot raise or change the entry.
+    fn accumulate_int_item(&mut self, table: &Value, key: &Value, op: Binary, rhs: &Expr) -> bool {
+        let pure_rhs = matches!(rhs.kind, ExprKind::Local(_))
+            || rhs.tagged_integer_literal().is_some()
+            || matches!(&rhs.kind, ExprKind::Field(parent, _) if matches!(parent.kind, ExprKind::Local(_)) && matches!(parent.ty, Type::Class(_)));
+        if !matches!(table.ty, Type::Dict(_))
+            || !matches!(key.ty, Type::Str | Type::Int | Type::Bytes | Type::Bool)
+            || self.module.types.mapping(table.ty) != Some((key.ty, Type::Int))
+            || rhs.ty != Type::Int
+            || !pure_rhs
+            || !matches!(op, Binary::Add | Binary::Subtract)
+        {
+            return false;
+        }
+        let right = self.operand(rhs);
+        let key = self.key_word(key);
+        let operation = u32::from(matches!(op, Binary::Subtract));
+        self.checked_line(format!(
+            "call void @imre_dict_accumulate_int(ptr {}, i64 {key}, i64 {}, i32 {operation})",
+            table.operand, right.value.operand
+        ));
+        self.release_operand(&right);
+        true
+    }
+
     /// Fuses a copy only within the same rooted list local. Both index reads
     /// must be immediate literals or stable locals, so evaluating the target
     /// index before the runtime's source bounds check cannot introduce effects
@@ -9093,7 +9641,7 @@ impl Emitter<'_, '_> {
         if receiver.ty != Type::ListInt || value.ty != Type::Int {
             return false;
         }
-        let ExprKind::Builtin(Builtin::ListGet, args) = &value.kind else {
+        let ExprKind::Builtin(Builtin::ListGet(_), args) = &value.kind else {
             return false;
         };
         let [source_receiver, source] = args.as_slice() else {
@@ -9149,49 +9697,111 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn get_item(&mut self, list: &Value, index: &Value, returns: Type, nonnegative: bool) -> Value {
-        if matches!(list.ty, Type::Deque(_)) {
-            let word = self.checked_instruction(format!(
-                "call i64 @imre_deque_get(ptr {}, i64 {})",
-                list.operand, index.operand
-            ));
-            return self.unpack_word(word, returns);
-        }
-        if matches!(list.ty, Type::Dict(_)) {
-            if let Some(tag) = self.enum_key_for_int(list.ty, index) {
-                let word = self.checked_instruction(format!(
-                    "call i64 @imre_dict_get_enum_int(ptr {}, i64 {tag}, i64 {})",
-                    list.operand, index.operand
-                ));
-                return self.unpack_word(word, returns);
-            }
-            let key = self.key_word(index);
-            let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", list.operand);
-            // A missing Counter key returns immediate zero. Default-list
-            // factories insert a new entry and can fail to reserve it.
-            let word = if self.module.types.is_counter(list.ty) {
-                self.instruction(lookup)
-            } else {
-                self.checked_instruction(lookup)
-            };
-            return self.unpack_word(word, returns);
-        }
-        if list.ty == Type::ListInt {
-            let word = if nonnegative {
-                let index = self.native_index(index);
-                self.runtime_call(&LIST_GET_INDEX, [list, &index])
-            } else {
-                self.runtime_call(&LIST_GET, [list, index])
-            };
-            return word.into_value(self);
-        }
-        let suffix = if nonnegative { "_index" } else { "" };
-        let index = self.index_word(index, nonnegative);
-        let word = self.checked_instruction(format!(
-            "call i64 @imre_seq_get{suffix}(ptr {}, i64 {index})",
-            list.operand
+    /// Each fixed tuple field occupies one word. Both callers have checked the offset.
+    fn indexed_tuple_field(&mut self, receiver: &Value, offset: &str, ty: Type) -> Value {
+        let pointer = self.instruction(format!(
+            "getelementptr inbounds {}, ptr {}, i64 {offset}",
+            storage_type(ty),
+            receiver.operand
         ));
-        self.unpack_word(word, returns)
+        self.field_value(&pointer, ty)
+    }
+
+    /// Read the indexed value using the receiver's checked storage.
+    fn get_item(
+        &mut self,
+        table: &Value,
+        index: &Value,
+        returns: Type,
+        nonnegative: bool,
+    ) -> Value {
+        match table.ty {
+            Type::Tuple(_) => {
+                let len = self.module.types.fields(table.ty).unwrap().len();
+                let offset = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_index(i64 {}, i64 {len})",
+                    index.operand
+                ));
+                let selected = self.indexed_tuple_field(table, &offset, returns);
+                self.retain(&selected);
+                selected
+            }
+            Type::VarTuple(_) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_tuple_get(ptr {}, i64 {})",
+                    table.operand, index.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Type::Str => self.call("imre_str_get", Type::Str, &[table, index]),
+            Type::Bytes => {
+                // Successful bytes are canonical tagged integers in 1..=511;
+                // zero uniquely signals failure, so no pending-state poll is needed.
+                let index = self.index_word(index, nonnegative);
+                let function = if nonnegative {
+                    "imre_bytes_get_index"
+                } else {
+                    "imre_bytes_get"
+                };
+                let operand = self.instruction(format!(
+                    "call i64 @{function}(ptr {}, i64 {index})",
+                    table.operand
+                ));
+                let failed = self.instruction(format!("icmp eq i64 {operand}, 0"));
+                self.check_failed(&failed);
+                let bounded = self.instruction(format!("icmp ule i64 {operand}, 511"));
+                self.line(format!("call void @llvm.assume(i1 {bounded})"));
+                Value {
+                    ty: Type::Int,
+                    operand,
+                    small_integer: true,
+                }
+            }
+            Type::Deque(_) => {
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_deque_get(ptr {}, i64 {})",
+                    table.operand, index.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+            Type::Dict(_) => {
+                if let Some(tag) = self.enum_key_for_int(table.ty, index) {
+                    let word = self.checked_instruction(format!(
+                        "call i64 @imre_dict_get_enum_int(ptr {}, i64 {tag}, i64 {})",
+                        table.operand, index.operand
+                    ));
+                    return self.unpack_word(word, returns);
+                }
+                let key = self.key_word(index);
+                let lookup = format!("call i64 @imre_dict_get(ptr {}, i64 {key})", table.operand);
+                // A missing Counter key returns immediate zero. Default-list
+                // factories insert a new entry and can fail to reserve it.
+                let word = if self.module.types.is_counter(table.ty) {
+                    self.instruction(lookup)
+                } else {
+                    self.checked_instruction(lookup)
+                };
+                self.unpack_word(word, returns)
+            }
+            Type::ListInt => {
+                let word = if nonnegative {
+                    let index = self.native_index(index);
+                    self.runtime_call(&LIST_GET_INDEX, [table, &index])
+                } else {
+                    self.runtime_call(&LIST_GET, [table, index])
+                };
+                word.into_value(self)
+            }
+            _ => {
+                let suffix = if nonnegative { "_index" } else { "" };
+                let index = self.index_word(index, nonnegative);
+                let word = self.checked_instruction(format!(
+                    "call i64 @imre_seq_get{suffix}(ptr {}, i64 {index})",
+                    table.operand
+                ));
+                self.unpack_word(word, returns)
+            }
+        }
     }
 
     fn set_item(&mut self, list: &Value, index: &Value, value: &Value, nonnegative: bool) {
@@ -9272,8 +9882,8 @@ fn read_only_integer(expression: &Expr) -> bool {
             ) && read_only_integer(left)
                 && read_only_integer(right)
         }
-        ExprKind::Negate(value) => read_only_integer(value),
-        ExprKind::Builtin(Builtin::ListGet, args) => {
+        ExprKind::Unary(UnaryOp::USub, value) => read_only_integer(value),
+        ExprKind::Builtin(Builtin::ListGet(_), args) => {
             matches!(args.as_slice(), [receiver, index]
                 if receiver.ty == Type::ListInt
                     && matches!(receiver.kind, ExprKind::Local(_))
@@ -9290,7 +9900,9 @@ const INLINE_CONCAT_LITERAL: usize = 3 * size_of::<usize>();
 /// leaf order without evaluating through calls or other expression boundaries.
 fn concat_leaves<'e>(emitter: &Emitter<'_, '_>, expression: &'e Expr) -> Vec<&'e Expr> {
     fn visit<'a>(emitter: &Emitter<'_, '_>, expression: &'a Expr, output: &mut Vec<&'a Expr>) {
-        if let ExprKind::Binary(Binary::Concat, left, right) = &expression.kind {
+        if let ExprKind::Builtin(Builtin::FormatJoin, parts) = &expression.kind {
+            output.extend(parts);
+        } else if let Some((left, right)) = expression.string_addends() {
             // A completed left addition can raise before the right operand runs.
             // An in-bounds ASCII lookup with an already evaluated index is
             // also an immutable read. The range proof alone does not establish
@@ -9358,8 +9970,26 @@ fn representation_kind(ty: Type, types: &Types) -> u32 {
     }
 }
 
+/// The frame emitted in the checked function body also counts indirect calls into it.
+fn function_source_frame<'a>(
+    module: &'a Module,
+    repr_methods: &HashSet<usize>,
+    id: usize,
+) -> Option<&'a ir::SourceFrame> {
+    module
+        .source_frames
+        .get(id)
+        .and_then(Option::as_ref)
+        .or_else(|| {
+            repr_methods
+                .contains(&id)
+                .then_some(&ir::SourceFrame::Depth)
+        })
+}
+
 fn record_name(ty: Type) -> String {
     match ty {
+        Type::Range => "range_record".to_owned(),
         Type::SysImplementation => "sys_implementation_record".to_owned(),
         Type::Class(id) => format!("class_{id}"),
         Type::Tuple(id) => format!("tuple_{id}"),
@@ -9395,7 +10025,15 @@ fn storage_type(ty: Type) -> &'static str {
 /// Emits concrete field layouts and static destruction descriptors. No per-field
 /// runtime tag or presence bitmap is needed: owning fields reserve zero until
 /// initialization, and their exact kinds are shared by every instance.
-fn record_layouts(module: &Module, output: &mut Output) {
+fn record_layouts(
+    module: &Module,
+    output: &mut Output<'_>,
+    resource_types: &HashSet<Type>,
+    repr_methods: &HashSet<usize>,
+) {
+    // All record descriptors live in the entry unit, including references to
+    // checked formatters defined in other source modules.
+    output.current = output.entry;
     let mut records: Vec<_> = std::mem::take(&mut output.record_types)
         .into_iter()
         .map(|(ty, descriptor)| (record_name(ty), ty, descriptor))
@@ -9406,6 +10044,7 @@ fn record_layouts(module: &Module, output: &mut Output) {
             Type::Class(id) => module.class_fields[id].clone(),
             Type::Tuple(_) => module.types.fields(ty).unwrap(),
             Type::ModuleSpec(id) => module.types.module_spec_fields(id),
+            Type::Range => vec![Type::Int; 3],
             Type::SysImplementation => crate::version::implementation_fields(&module.types),
             Type::CompletedProcess(capture, cmd) => vec![
                 module.types.completed_command(cmd),
@@ -9440,7 +10079,15 @@ fn record_layouts(module: &Module, output: &mut Output) {
             "@kinds_{name} = private unnamed_addr constant [{kind_count} x i32] [{kinds}]"
         )
         .unwrap();
-        let semantics = records::semantics(module, ty, &name, output.entry_buffer());
+        let semantics = records::semantics(
+            module,
+            ty,
+            &fields,
+            &name,
+            output,
+            resource_types,
+            repr_methods,
+        );
         writeln!(
             output.global(
                 output.entry,
@@ -9451,6 +10098,19 @@ fn record_layouts(module: &Module, output: &mut Output) {
             "{{ i64 {count}, ptr @kinds_{name}, ptr {semantics} }}"
         )
         .unwrap();
+    }
+}
+
+impl Compare {
+    fn signed_predicate(self) -> &'static str {
+        match self {
+            Self::Equal => "eq",
+            Self::NotEqual => "ne",
+            Self::Less => "slt",
+            Self::LessEqual => "sle",
+            Self::Greater => "sgt",
+            Self::GreaterEqual => "sge",
+        }
     }
 }
 
@@ -9472,7 +10132,11 @@ fn none() -> Value {
 
 // Use i32 for runtime flags and status codes. Narrow C integers require different
 // extension attributes on Apple ARM64 and Linux ARM64, even for the same Rust type.
-fn write_declarations(output: &mut String) {
+fn write_declarations(output: &mut String, uses_format_field: bool) {
+    if uses_format_field {
+        output.push_str("declare ptr @imre_format_scalar(i32, i64, ptr)\n");
+        output.push_str("declare ptr @imre_format_object(i32, i64, ptr)\n");
+    }
     output.push_str(
         r#"
 declare ptr @imre_run_config(ptr, i32, i64, i64, i32, i32, i1, ptr)
@@ -9511,6 +10175,7 @@ declare void @imre_warning_scope_exit()
 declare ptr @imre_warning_format(ptr, ptr, ptr, ptr, i64, ptr, ptr, ptr, i32, ptr)
 declare void @imre_warning_write(ptr, ptr, i32)
 declare void @imre_time_sleep(double)
+declare void @imre_signal_pause()
 declare ptr @imre_str_percent_int(ptr,i64)
 declare ptr @imre_str_percent_pack(ptr,ptr)
 declare ptr @imre_str_percent_dict(ptr,ptr)
@@ -9531,7 +10196,7 @@ declare ptr @imre_cache_table(ptr)
 declare i1 @imre_cache_probe(ptr, i64, i64)
 declare void @imre_cache_insert(ptr, i64, i64, i64)
 declare i64 @imre_cache_stat(ptr, i32)
-declare void @imre_callable_copy_cache_policy(ptr, ptr, i64, i32) nounwind
+declare void @imre_callable_init_cache(ptr, ptr, i64, i32) nounwind
 declare ptr @imre_callable_cache_parameter(ptr, i32)
 declare void @imre_cache_clear(ptr, i32, i32)
 declare ptr @imre_module_cache(i64, i32, i32)
@@ -9540,6 +10205,7 @@ declare i64 @imre_string_hash(ptr)
 declare i64 @imre_bytes_hash(ptr)
 declare void @imre_prepare_record_key(ptr)
 declare i64 @imre_projected_hash(ptr)
+declare i64 @imre_fraction_hash(i64, i64)
 declare ptr @imre_subprocess_shell_output(ptr, i32, i64, i64, ptr)
 declare ptr @imre_popen_config(ptr)
 declare i64 @imre_call_config(ptr, i32, i64, i1 zeroext)
@@ -9746,8 +10412,24 @@ declare void @imre_float_box_retain(i64)
 declare void @imre_float_box_release(i64)
 declare ptr @imre_float_str(double)
 declare void @imre_print_float(double)
+declare i64 @imre_math_comb(i64, i64)
+declare i64 @imre_math_perm(i64, i64)
+declare i64 @imre_math_factorial(i64)
+declare i64 @imre_int_bit_count(i64)
 declare i64 @imre_int_bit_length(i64)
+declare i64 @imre_int_hash(i64)
 declare double @imre_int_float(i64)
+declare i64 @imre_sumprod_int_lists(ptr, ptr)
+declare double @imre_sumprod_float_lists(ptr, ptr)
+declare ptr @imre_sumprod_number_lists(ptr, ptr)
+declare double @imre_float_fmod(double, double)
+declare double @imre_float_acos(double)
+declare double @imre_float_asin(double)
+declare double @atan(double)
+declare double @imre_float_log1p(double)
+declare double @imre_float_log10(double)
+declare double @imre_int_log10(i64)
+declare double @erfc(double)
 declare i64 @imre_float_int(double)
 declare double @imre_float_parse(ptr)
 declare double @imre_bytes_float(ptr)
@@ -9787,6 +10469,7 @@ declare ptr @imre_bytes_decode_splitlines(ptr)
 declare ptr @imre_bytes_hex(ptr)
 declare ptr @imre_bytes_decode(ptr)
 declare ptr @imre_bytes_decode_ascii(ptr)
+declare ptr @imre_bytes_decode_latin1(ptr)
 declare ptr @imre_urlsafe_b64encode(ptr)
 declare ptr @imre_base64_translate(ptr, ptr, i1)
 declare ptr @imre_binascii_ascii_input(ptr)
@@ -9833,6 +10516,11 @@ declare ptr @imre_functools_placeholder(i32)
 @imre_socket_sol_socket = external constant i64
 @imre_socket_so_type = external constant i64
 @imre_socket_so_reuseaddr = external constant i64
+@imre_socket_ipv6_recvhoplimit = external constant i64
+@imre_socket_ipv6_hoplimit = external constant i64
+@imre_socket_ipv6_recvtclass = external constant i64
+@imre_socket_ipv6_tclass = external constant i64
+@imre_socket_ipproto_udplite = external constant i64
 @imre_socket_ipproto_tcp = external constant i64
 @imre_socket_tcp_nodelay = external constant i64
 @imre_socket_somaxconn = external constant i64
@@ -9851,6 +10539,7 @@ declare void @imre_socket_shutdown(ptr, i64)
 declare ptr @imre_socket_accept(ptr, ptr, ptr)
 declare void @imre_socket_connect(ptr, ptr)
 declare ptr @imre_socket_getfqdn(ptr)
+declare i64 @imre_socket_control_size(i64, i1)
 declare ptr @imre_socket_sockname(ptr, ptr)
 declare ptr @imre_socket_recv(ptr, i64, i64)
 declare i64 @imre_socket_send(ptr, ptr, i64)
@@ -9869,7 +10558,7 @@ declare ptr @imre_sha1_new(ptr)
 declare ptr @imre_sha256_new(ptr)
 declare ptr @imre_hash_name(ptr)
 declare ptr @imre_hash_type(ptr)
-declare i64 @imre_hash_identity(ptr)
+declare i64 @imre_pointer_identity(ptr)
 declare i64 @imre_hash_digest_size(ptr)
 declare i64 @imre_hash_block_size(ptr)
 declare ptr @imre_codec_lookup(ptr)
@@ -9927,6 +10616,7 @@ declare ptr @imre_zip_open(ptr)
 declare ptr @imre_zip_import_index(ptr)
 declare ptr @imre_zip_namelist(ptr)
 declare void @imre_zip_close(ptr)
+declare i64 @imre_int_from_bytes(ptr)
 declare ptr @imre_int_to_bytes(i64, i64, ptr, i1)
 declare ptr @imre_bytes_validate_utf8(ptr)
 declare ptr @imre_binary_open(ptr, i32)
@@ -9941,8 +10631,10 @@ declare i64 @imre_binary_write(ptr, ptr)
 declare i1 @imre_typed_interrupt()
 declare i32 @imre_error_pending()
 declare ptr @imre_error_take()
+declare i32 @imre_error_matches(i32)
 declare void @imre_error_set(ptr)
-declare i32 @imre_error_unhandled()
+declare void @imre_report_unhandled(ptr)
+declare i32 @imre_finish_unhandled(ptr)
 declare i32 @imre_record_has_type(ptr, ptr) nounwind memory(read)
 declare ptr @imre_source_module(ptr, ptr)
 declare ptr @imre_source_module_name(ptr)
@@ -9958,6 +10650,7 @@ declare void @imre_union_retain(i64)
 declare void @imre_union_release(i64)
 declare i32 @imre_union_truthy(i64)
 declare ptr @imre_exception_message(ptr)
+declare ptr @imre_exception_name(ptr)
 declare ptr @imre_import_error_new(i32, ptr, ptr, i32, i64, i32, i64, i32, i64)
 declare ptr @imre_import_error_field(ptr, i32)
 declare void @imre_import_error_reset(ptr, ptr)
@@ -9980,10 +10673,10 @@ declare ptr @imre_contextvars_enter(ptr)
 declare void @imre_contextvars_leave(ptr, ptr)
 declare i64 @imre_contextvars_len(ptr)
 declare zeroext i1 @imre_object_is_exact_tuple(ptr)
+declare zeroext i1 @imre_record_is_exact_tuple(ptr)
 declare ptr @imre_object_exact_text(ptr)
 declare ptr @imre_object_record_payload(ptr, ptr)
 declare ptr @imre_mapping_object_get(ptr, ptr)
-declare ptr @imre_exception_tuple_view(ptr)
 declare ptr @imre_exception_formatter_result(ptr, i32)
 declare ptr @imre_exception_args(ptr)
 declare i32 @imre_exception_field_matches(ptr, i32)
@@ -9993,12 +10686,13 @@ declare ptr @imre_exception_field_repr(ptr)
 declare i64 @imre_exception_field_len(ptr)
 declare ptr @imre_exception_field_index(ptr, i64)
 declare ptr @imre_exception_keyword_message(ptr, ptr, ptr)
+declare void @imre_bind_source_keywords(ptr, ptr, ptr, ptr, ptr, ptr, i64)
 declare ptr @imre_exception_argument(i32, ptr, i64, i32)
 declare ptr @imre_exception_repr(ptr)
 declare ptr @imre_named_exception_record(ptr)
 declare ptr @imre_named_exception_record_new(ptr, ptr, ptr, ptr, ptr, i32)
 declare ptr @imre_exception_with_cause(ptr, ptr)
-declare ptr @imre_exception_with_origin(ptr, ptr, i64)
+declare ptr @imre_exception_at_frame(ptr, ptr, i64, ptr, i64, i32, i32, i32, i32)
 declare ptr @imre_exception_cause(ptr)
 declare i32 @imre_exception_suppress_context(ptr)
 declare ptr @imre_exception_current()
@@ -10010,12 +10704,9 @@ declare void @imre_typed_start(i32, ptr)
 declare void @imre_process_config_init(i32, i32, i32)
 declare i64 @imre_sys_context_aware_warnings()
 declare void @imre_record_error_init()
-declare void @imre_stdio_unbuffered_init()
-declare void @imre_stdio_init()
-declare void @imre_stdio_isolated_init()
+declare void @imre_stdio_start(i32, i32, i32)
 declare void @imre_warning_options_init(i32, ptr)
 declare i64 @imre_tuple_index(i64, i64)
-declare void @imre_stdio_command_init(i32, i32)
 declare ptr @imre_sys_stream_text(i32, i32)
 declare i1 @imre_sys_utf8_mode()
 declare void @imre_sys_init_encoding_names()
@@ -10024,8 +10715,9 @@ declare ptr @imre_sys_default_encoding()
 declare ptr @imre_sys_filesystem_encoding()
 declare ptr @imre_sys_filesystem_errors()
 declare ptr @imre_record_try_new(ptr)
+declare ptr @imre_record_try_new_sized(ptr, i64)
 declare ptr @imre_tuple_batch_try_new(ptr)
-declare ptr @imre_record_class_factory(ptr, ptr, ptr)
+declare ptr @imre_record_class_value(ptr, ptr, ptr, ptr)
 declare ptr @imre_tuple_probe(ptr, ptr)
 declare ptr @imre_json_decode(ptr, ptr)
 declare ptr @imre_json_loads(ptr)
@@ -10056,8 +10748,8 @@ declare ptr @imre_json_dumps(i64, ptr, i64, i32, i32, i32, i32, i64, ptr)
 declare i32 @imre_json_dump(i64, ptr, i64, i32, i32, i32, i32, i64, ptr, ptr)
 declare ptr @imre_record_try_cached_result(ptr)
 declare void @imre_record_retain(ptr)
-declare ptr @imre_function_set_wrapped(ptr, ptr)
 declare zeroext i1 @imre_inspect_coroutine_fn(ptr, ptr) nounwind
+declare void @imre_function_set_wrapped(ptr, ptr) nounwind
 declare ptr @imre_function_get_wrapped(ptr)
 declare void @imre_record_release(ptr)
 declare i32 @imre_record_equal(ptr, ptr) nounwind
@@ -10070,6 +10762,7 @@ declare i32 @imre_builtin_issubclass(ptr, ptr) nounwind
 declare i32 @imre_sequence_equal(ptr, ptr) nounwind
 declare i32 @imre_tuple_compare(ptr, ptr) nounwind
 declare ptr @imre_value_repr(i64, i32)
+declare ptr @imre_object_base_repr(ptr, ptr, i64)
 declare ptr @imre_record_default_repr(ptr)
 declare void @imre_object_retain(ptr)
 declare void @imre_object_release(ptr)
@@ -10082,7 +10775,7 @@ declare void @imre_struct_seek_span(ptr, i64, ptr) nounwind
 declare i64 @imre_struct_binary_prefix(ptr, ptr) nounwind
 declare i64 @imre_struct_sparse_indexed_count(ptr, ptr, i64, i64, i64, i64) nounwind
 declare double @imre_struct_binary_ordered(ptr, i64, i64, double, double, double) nounwind
-declare ptr @imre_struct_row(ptr, i64) nounwind
+declare ptr @imre_struct_row(ptr, i64) nounwind willreturn memory(read)
 declare ptr @imre_struct_row_checked(ptr, i64)
 declare i32 @imre_struct_append(ptr, ptr, ptr)
 declare i32 @imre_struct_list_contains(ptr, ptr) nounwind
@@ -10181,20 +10874,23 @@ declare i64 @imre_defaultdict_missing(ptr, i64)
 declare i32 @imre_defaultdict_has_factory(ptr)
 declare void @imre_defaultdict_set_factory(ptr, i32, i32)
 declare void @imre_dict_set(ptr, i64, i64)
+declare void @imre_dict_accumulate_int(ptr, i64, i64, i32)
 declare void @imre_dict_delete(ptr, i64)
 declare void @imre_dict_clear(ptr)
 declare ptr @imre_dict_iter(ptr, i32)
 declare ptr @imre_set_new(i32)
 declare i64 @imre_set_len(ptr)
 declare i32 @imre_set_contains(ptr, i64)
+declare i32 @imre_set_case_length_possible(ptr, ptr)
 declare void @imre_set_add(ptr, i64)
 declare void @imre_set_discard(ptr, i64)
 declare ptr @imre_set_iter(ptr)
 declare i64 @imre_str_iter_next_owned(ptr)
 declare i64 @imre_str_iter_next_codepoint(ptr)
-declare ptr @imre_str_iter_bounds(ptr, ptr)
+declare ptr @imre_str_bounds(ptr, ptr)
 declare i64 @imre_utf8_next_non_ascii(ptr, ptr)
 declare i32 @imre_mapping_iter_next(ptr, ptr, ptr)
+declare i64 @imre_split_field_next(ptr)
 declare ptr @imre_optional_str_concat(i64, i64)
 declare ptr @imre_str_concat(ptr, ptr)
 declare ptr @imre_str_repeat(ptr, i64)
@@ -10203,8 +10899,10 @@ declare ptr @imre_str_concat_parts_owned(ptr, ptr, i64)
 declare ptr @imre_str_append_utf8_owned(ptr, ptr, i64)
 declare ptr @imre_str_append_literal_owned(ptr, ptr, ptr, i64)
 declare i32 @imre_str_get_part(ptr, i64, ptr, ptr)
-declare ptr @imre_int_str_part(i64, ptr, ptr)
+declare ptr @imre_int_str_part_into(i64, ptr, ptr)
 declare ptr @imre_str_split_whitespace(ptr)
+declare void @imre_str_field_spans(ptr, ptr, i32)
+declare ptr @imre_str_field_at(ptr, ptr, i32)
 declare i64 @imre_str_split_int_field(ptr, i32)
 declare void @imre_str_prepare_int_fields(ptr, ptr, i32) nounwind
 declare ptr @imre_str_split(ptr, ptr, i64, i32)
@@ -10214,6 +10912,11 @@ declare ptr @imre_str_unquote_rsplit_last(ptr, ptr)
 declare ptr @imre_str_strip(ptr, ptr, i32)
 declare ptr @imre_str_expandtabs(ptr, i64)
 declare ptr @imre_str_zfill(ptr, i64, i32)
+declare ptr @imre_unicode_east_asian_width(ptr)
+declare ptr @imre_unicode_bidirectional(ptr)
+declare ptr @imre_unicode_bidirectional_of_ordinal(i64)
+declare ptr @imre_unicode_category(ptr)
+declare ptr @imre_unicode_category_of_ordinal(i64)
 declare ptr @imre_unicode_normalize(ptr, ptr)
 declare ptr @imre_str_case_map(ptr, i32)
 declare ptr @imre_str_lower(ptr)
@@ -10221,6 +10924,7 @@ declare ptr @imre_str_upper(ptr)
 declare ptr @imre_str_capitalize(ptr)
 declare i32 @imre_str_affix(ptr, ptr, i32)
 declare i32 @imre_str_affix_ascii(ptr, i64, i64, i32)
+declare i32 @imre_str_excludes_ascii_prefix3(ptr, i64)
 declare i64 @imre_str_find(ptr, ptr, i64)
 declare void @imre_str_partition(ptr, ptr, ptr)
 declare ptr @imre_str_translate(ptr, ptr)
@@ -10239,10 +10943,13 @@ declare ptr @imre_str_splitlines_options(ptr, i32)
 declare i32 @imre_str_isspace(ptr)
 declare i32 @imre_str_isalnum(ptr)
 declare i32 @imre_str_isalpha(ptr)
+declare i32 @imre_str_isdecimal(ptr)
 declare i32 @imre_str_isdigit(ptr)
+declare i32 @imre_str_isnumeric(ptr)
 declare ptr @imre_splitlines_joined_tail(ptr, ptr)
 declare ptr @imre_str_splitlines_iter(ptr)
 declare ptr @imre_str_split_byte_iter(ptr, i8)
+declare ptr @imre_str_sorted_split_byte_iter(ptr, i8)
 declare ptr @imre_str_matching_split_iter(ptr, ptr, i64, i8)
 declare ptr @imre_ndiff_deferred(ptr, ptr)
 declare ptr @imre_str_list_copy(ptr)
@@ -10267,7 +10974,6 @@ declare ptr @imre_str_format(ptr, ptr, i64)
 declare ptr @imre_str_format_fields(ptr, ptr, i64)
 declare ptr @imre_str_replace(ptr, ptr, ptr)
 declare ptr @imre_str_replace_count(ptr, ptr, ptr, i64)
-declare ptr @imre_str_dedent(ptr)
 declare ptr @imre_shlex_split_options(ptr, i32, i32)
 declare ptr @imre_shlex_quote(ptr)
 declare ptr @imre_sys_executable()
@@ -10275,6 +10981,7 @@ declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
+declare double @llvm.log2.f64(double)
 declare double @llvm.fabs.f64(double)
 declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
@@ -10326,7 +11033,10 @@ declare i64 @imre_sys_getframemodulename(i64)
 declare i64 @imre_sys_getrecursionlimit()
 declare void @imre_sys_setrecursionlimit(i64)
 declare ptr @imre_sys_platform()
+declare i64 @imre_sys_maxsize()
 declare ptr @imre_frozenset_strings(ptr)
+declare i1 @imre_str_tuple_contains(ptr, ptr)
+declare ptr @imre_sys_builtin_module_names(ptr, i64, i1)
 declare ptr @imre_sys_stdlib_module_names()
 declare i32 @imre_str_is_ascii(ptr)
 declare i32 @imre_str_is_lower(ptr)
@@ -10368,6 +11078,7 @@ declare i64 @imre_length_result(i64)
 declare i64 @imre_int_binary(i64, i64, i32)
 declare i32 @imre_int_compare(i64, i64)
 declare void @imre_print_int(i64)
+declare void @imre_print_scalars(ptr, ptr, i64)
 declare void @imre_print_bool(i32)
 declare void @imre_print_none()
 declare ptr @imre_str_static_literal(ptr, i64)
@@ -10375,6 +11086,7 @@ declare ptr @imre_str_interned_literal(ptr, i64)
 declare ptr @imre_sys_intern(ptr)
 declare i32 @imre_sys_is_interned(ptr)
 declare ptr @imre_regex_literal(ptr, i64)
+declare i64 @imre_regex_flags(ptr)
 declare ptr @imre_regex_spelling(ptr)
 declare ptr @imre_unittest_compile_pattern(ptr)
 declare i64 @imre_patch_len(ptr)
@@ -10386,19 +11098,28 @@ declare ptr @imre_patch_hunks(ptr)
 declare ptr @imre_patch_path(ptr)
 declare i64 @imre_patch_source_start(ptr)
 declare ptr @imre_patch_hunk_text(ptr)
-declare ptr @imre_regex_search(ptr, ptr)
+declare ptr @imre_regex_execute(ptr, ptr, i32, i32)
 declare ptr @imre_regex_search_text(ptr, ptr, i1, i1)
 declare ptr @imre_regex_sub(ptr, ptr, ptr, i64)
-declare ptr @imre_regex_match(ptr, ptr)
+declare ptr @imre_regex_collect_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_bytes_runs(ptr, ptr, i32)
+declare ptr @imre_regex_collect_literals(ptr, ptr, i64, i32)
+declare ptr @imre_regex_collect_rows(ptr, ptr, i64, ptr, i32)
+declare ptr @imre_regex_collect_unicode_runs(ptr, ptr, i64, i32)
 declare ptr @imre_log_file_new(ptr, ptr, i64, i64, i64, i1, i1, i64, i64)
 declare ptr @imre_calendar_delta(i32, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_datetime(i64, i64, i64, i64, i64, i64, i64, i64, i64)
 declare ptr @imre_calendar_date(i64, i64, i64)
+declare ptr @imre_datetime_fromisoformat(ptr)
 declare ptr @imre_calendar_combine(ptr, ptr, i64)
 declare ptr @imre_calendar_replace(ptr, i64, i64, i64, i64, i64, i64, i64, i64, i64, i1)
 declare ptr @imre_calendar_astimezone(ptr, ptr)
 declare i1 @imre_calendar_is_datetime(ptr)
 declare ptr @imre_calendar_zone(ptr, i64)
+declare ptr @imre_calendar_month_grid(i64, i64)
+declare ptr @imre_calendar_instance_grid(i64, i64, i64)
+declare i64 @imre_calendar_firstweekday()
+declare i8 @imre_calendar_setfirstweekday(i64)
 declare ptr @imre_calendar_utc()
 declare ptr @imre_calendar_zone_limit(i1)
 declare ptr @imre_calendar_now(i64)
@@ -10484,7 +11205,6 @@ declare ptr @imre_log_new(ptr, i64)
 declare void @imre_log_add_level(i64, ptr)
 declare ptr @imre_log_level_name(i64)
 declare i64 @imre_log_level_for_name(ptr)
-declare i64 @imre_log_check_level(ptr)
 declare i64 @imre_log_invalid_level(ptr)
 declare void @imre_log_disable(i64)
 declare ptr @imre_log_enabled_cache(ptr)
@@ -10526,6 +11246,7 @@ declare void @imre_log_set_level(ptr, i64)
 declare ptr @imre_regex_group(ptr, i64, i32)
 declare ptr @imre_regex_groupdict(ptr)
 declare ptr @imre_regex_finditer(ptr, ptr)
+declare ptr @imre_regex_finditer_positions(ptr, ptr)
 declare i32 @imre_regex_present(ptr, i64, i32)
 declare i64 @imre_regex_bound(ptr, i64, i32, i32)
 declare ptr @imre_str_get(ptr, i64)
@@ -10549,6 +11270,7 @@ declare ptr @imre_tuple_buffer_new()
 declare i32 @imre_tuple_buffer_push(ptr, i32, i64)
 declare ptr @imre_tuple_buffer_finish(ptr)
 declare ptr @imre_cycle(i32, i64)
+declare ptr @imre_accumulate_cursor(i32, i64, i32, i64)
 declare ptr @imre_iterable_tuple(i32, i64)
 declare ptr @imre_combinatorial(i32, i64, ptr, ptr, i64)
 declare i64 @imre_cursor_length_hint(ptr, i64)
@@ -10584,6 +11306,8 @@ declare i32 @imre_optional_str_equal(i64, i64)
 declare i64 @imre_int_parse(ptr)
 declare i64 @imre_int_parse_hex(ptr)
 declare ptr @imre_input()
+declare ptr @imre_input_select_stdout()
+declare ptr @imre_input_finish(ptr, ptr)
 declare ptr @imre_chr(i64)
 declare void @imre_random_shuffle_int_list(ptr)
 declare void @imre_random_shuffle_list(ptr)
@@ -10600,7 +11324,9 @@ declare i64 @imre_ord(i64, i32)
 declare i64 @imre_int_pow(i64, i64)
 declare double @imre_int_negative_pow(i64, i64)
 declare i64 @imre_int_modpow(i64, i64, i64)
-declare ptr @imre_list_new()
+declare nonnull ptr @imre_list_new()
+declare ptr @imre_list_accumulate(ptr, i64)
+declare ptr @imre_collect_int_cursor(ptr)
 declare i64 @imre_list_sum(ptr, i64)
 declare i64 @imre_list_slice_sum(ptr, i64, i64, i64)
 declare i32 @imre_list_all_i32(ptr, i64, i64, i64)
@@ -10633,8 +11359,10 @@ declare i64 @imre_list_view_index(i64, i64) nounwind
 declare ptr @imre_list_repeat(ptr, i64)
 declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)
-declare void @imre_assert_fail()
 declare void @imre_range_step_zero()
+declare i64 @llvm.abs.i64(i64, i1 immarg)
+declare i64 @llvm.ctpop.i64(i64)
+declare i64 @llvm.ctlz.i64(i64, i1 immarg)
 declare void @llvm.assume(i1)
 declare { i64, i1 } @llvm.sadd.with.overflow.i64(i64, i64)
 declare { i64, i1 } @llvm.ssub.with.overflow.i64(i64, i64)
@@ -10647,7 +11375,7 @@ declare { i64, i1 } @llvm.smul.with.overflow.i64(i64, i64)
 /// After mem2reg, a cleared or never-filled slot needs no runtime call at all.
 fn nullable_pointer_helpers() -> String {
     let mut output = String::new();
-    for family in ["str", "object", "record"] {
+    for family in ["str", "object", "record", "list"] {
         for operation in ["release", "retain"] {
             writeln!(
                 output,
@@ -10669,37 +11397,40 @@ done:
     output
 }
 
-/// Operates on tagged integers directly. For E(x) = 2x + 1, addition and
-/// subtraction produce E(x +/- y); multiplication first produces 2xy.
-/// Signed overflow is exactly failure to fit the tagged-small range.
-/// Explicit odd results expose representation facts after helper inlining;
-/// cold ownership boundaries keep heap destructors out of immediate fast paths.
 fn integer_helpers() -> String {
     let mut output = String::new();
     for operation in ["retain", "release"] {
-        writeln!(
-            output,
-            r#"
+        write_integer_reference(&mut output, operation, &[false, true]);
+    }
+    output.push_str(&bitwise_helpers());
+    output
+}
+
+/// The low bit distinguishes an immediate integer from an owned heap reference.
+fn write_integer_reference(output: &mut String, operation: &str, nonzero_forms: &[bool]) {
+    writeln!(
+        output,
+        r#"
 define internal void @{operation}_int_heap(i64 %value) cold noinline {{
 entry:
   call void @imre_int_{operation}(i64 %value)
   ret void
 }}"#
-        )
-        .unwrap();
-        for nonzero in [false, true] {
-            let (suffix, presence, immediate) = if nonzero {
-                ("_nonzero", "", "%small")
-            } else {
-                (
-                    "",
-                    "  %absent = icmp eq i64 %value, 0\n  %immediate = or i1 %small, %absent\n",
-                    "%immediate",
-                )
-            };
-            writeln!(
-                output,
-                r#"
+    )
+    .unwrap();
+    for &nonzero in nonzero_forms {
+        let (suffix, presence, immediate) = if nonzero {
+            ("_nonzero", "", "%small")
+        } else {
+            (
+                "",
+                "  %absent = icmp eq i64 %value, 0\n  %immediate = or i1 %small, %absent\n",
+                "%immediate",
+            )
+        };
+        writeln!(
+            output,
+            r#"
 define internal void @{operation}_int{suffix}(i64 %value) alwaysinline {{
 entry:
   %tag = and i64 %value, 1
@@ -10711,94 +11442,106 @@ big:
 done:
   ret void
 }}"#
-            )
-            .unwrap();
-        }
+        )
+        .unwrap();
     }
-    for (op, intrinsic, number) in [("add", "sadd", 0), ("sub", "ssub", 1), ("mul", "smul", 2)] {
-        let (left, decode) = if op == "mul" {
-            ("%x", "  %x = ashr i64 %a, 1\n")
-        } else {
-            ("%a", "")
-        };
+}
+
+const INTEGER_SIGN: &str = r#"
+define internal i32 @int_sign(i64 %value) alwaysinline {
+entry:
+  %small = trunc i64 %value to i1
+  br i1 %small, label %tagged, label %heap, !prof !1
+tagged:
+  %negative = icmp slt i64 %value, 1
+  %positive = icmp sgt i64 %value, 1
+  %below = sext i1 %negative to i32
+  %above = zext i1 %positive to i32
+  %sign = or i32 %below, %above
+  ret i32 %sign
+heap:
+  %sign_big = call i32 @imre_int_compare(i64 %value, i64 1) cold
+  ret i32 %sign_big
+}
+"#;
+
+/// Tagged add, subtract and multiply used by checked integer operations in either call ABI.
+/// Overflow promotes an unbounded input. For a bounded operation it violates the
+/// range proof, so the immediate result carries the same poison as a signed no-wrap operation.
+fn write_integer_arithmetic(output: &mut String, op: Binary, declare_overflow: bool) {
+    let (op, intrinsic, number) = match op {
+        Binary::Add => ("add", "sadd", 0),
+        Binary::Subtract => ("sub", "ssub", 1),
+        Binary::Multiply => ("mul", "smul", 2),
+        _ => unreachable!("expected integer addition, subtraction or multiplication"),
+    };
+    if declare_overflow {
         writeln!(
             output,
-            r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+            "declare {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64, i64)"
+        )
+        .unwrap();
+    }
+    let (left, decode) = if op == "mul" {
+        ("%x", "  %x = ashr i64 %a, 1\n")
+    } else {
+        ("%a", "")
+    };
+    write!(
+        output,
+        r#"
+define internal i64 @int_{op}(i64 %a, i64 %b, i1 %bounded) alwaysinline {{
 entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
   %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
+  %immediate = or i1 %bounded, %small
+  br i1 %immediate, label %fast, label %big, !prof !1
 fast:
 {decode}  %right = sub i64 %b, 1
   %pair = call {{ i64, i1 }} @llvm.{intrinsic}.with.overflow.i64(i64 {left}, i64 %right)
   %result = extractvalue {{ i64, i1 }} %pair, 0
   %overflow = extractvalue {{ i64, i1 }} %pair, 1
-  br i1 %overflow, label %big, label %done, !prof !0
+  %promote = select i1 %bounded, i1 false, i1 %overflow
+  br i1 %promote, label %big, label %done, !prof !0
 done:
-  %encoded = or i64 %result, 1
+  %exact = select i1 %overflow, i64 poison, i64 %result
+  %encoded = or i64 %exact, 1
   ret i64 %encoded
 big:
   %slow = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold
   ret i64 %slow
-}}"#
-        )
-        .unwrap();
-    }
-    output.push_str(conditionals::INTEGER_ABSOLUTE_HELPER);
-    output.push_str(&division_helpers());
-    output.push_str(&bitwise_helpers());
-    output.push_str(
-        r#"
-define internal i32 @compare_int(i64 %a, i64 %b) alwaysinline {
-entry:
-  %both = and i64 %a, %b
-  %tag = and i64 %both, 1
-  %small = icmp eq i64 %tag, 1
-  br i1 %small, label %fast, label %big, !prof !1
-fast:
-  %less = icmp slt i64 %a, %b
-  %equal = icmp eq i64 %a, %b
-  %nonless = select i1 %equal, i32 0, i32 1
-  %order = select i1 %less, i32 -1, i32 %nonless
-  ret i32 %order
-big:
-  %slow = call i32 @imre_int_compare(i64 %a, i64 %b) cold
-  ret i32 %slow
+}}
+"#
+    )
+    .unwrap();
 }
-"#,
-    );
-    output
+
+/// A power of two has a nonnegative Python remainder even for negative dividends.
+fn remainder_mask(divisor: i64) -> Option<i64> {
+    (divisor > 0 && (divisor as u64).is_power_of_two()).then(|| divisor - 1)
 }
 
 /// Decoded small integers cannot overflow i64 division. Guard zero before any
 /// division, apply Python's floor/sign rule, and promote MIN_SMALL / -1 rather
 /// than wrapping its result back into a tagged integer.
-fn division_helpers() -> String {
-    let mut output = String::new();
-    for (op, number, calculation) in [
-        (
-            "floordiv",
-            3,
-            r#"  %quotient = sdiv i64 %x, %y
-  %adjustment = zext i1 %adjust to i64
-  %result = sub i64 %quotient, %adjustment
-  %over = icmp sgt i64 %result, 4611686018427387903
-  br i1 %over, label %slow, label %done"#,
-        ),
-        (
-            "mod",
-            4,
-            r#"  %adjustment = select i1 %adjust, i64 %y, i64 0
-  %result = add i64 %remainder, %adjustment
-  br label %done"#,
-        ),
-    ] {
-        writeln!(
-            output,
-            r#"
-define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
+fn division_helper(op: Binary) -> String {
+    let (name, number) = match op {
+        Binary::FloorDivide => ("floordiv", 3),
+        Binary::Modulo => ("mod", 4),
+        _ => unreachable!("expected integer floor division or remainder"),
+    };
+    let mut fast = body::FunctionBody::new("fast", "slow");
+    let result = fast.small_division(op, "%x", "%y", true, None);
+    if op == Binary::FloorDivide {
+        let over = fast.instruction(format!("icmp sgt i64 {result}, 4611686018427387903"));
+        fast.branch(&over, "slow", "done");
+    } else {
+        fast.jump("done");
+    }
+    format!(
+        r#"
+define internal i64 @int_{name}(i64 %a, i64 %b) alwaysinline {{
 entry:
   %both = and i64 %a, %b
   %tag = and i64 %both, 1
@@ -10809,24 +11552,17 @@ entry:
 fast:
   %x = ashr i64 %a, 1
   %y = ashr i64 %b, 1
-  %remainder = srem i64 %x, %y
-  %nonzero_remainder = icmp ne i64 %remainder, 0
-  %signs = xor i64 %remainder, %y
-  %opposite = icmp slt i64 %signs, 0
-  %adjust = and i1 %nonzero_remainder, %opposite
-{calculation}
-done:
-  %shift = shl i64 %result, 1
+{fast}done:
+  %shift = shl i64 {result}, 1
   %encoded = or i64 %shift, 1
   ret i64 %encoded
 slow:
   %fallback = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %fallback
-}}"#
-        )
-        .unwrap();
-    }
-    output
+}}
+"#,
+        fast = fast.code
+    )
 }
 
 /// Tagged bitwise results remain small. Shifts guard LLVM's count and signed
@@ -10854,8 +11590,13 @@ slow:
         )
         .unwrap();
     }
-    for (op, number, calculation) in [
-        (
+    write_shift_helper(&mut output, Binary::LeftShift);
+    output
+}
+
+fn write_shift_helper(output: &mut String, shift: Binary) {
+    let (op, number, calculation) = match shift {
+        Binary::LeftShift => (
             "lshift",
             8,
             r#"  %safe_count = icmp ult i64 %y, 63
@@ -10870,7 +11611,7 @@ shift:
   %overflow = or i1 %lost, %outside
   br i1 %overflow, label %slow, label %done"#,
         ),
-        (
+        Binary::RightShift => (
             "rshift",
             9,
             r#"  %within = icmp ult i64 %y, 63
@@ -10878,10 +11619,11 @@ shift:
   %result = ashr i64 %x, %count
   br label %done"#,
         ),
-    ] {
-        writeln!(
-            output,
-            r#"
+        _ => unreachable!("expected an integer shift"),
+    };
+    writeln!(
+        output,
+        r#"
 define internal i64 @int_{op}(i64 %a, i64 %b) alwaysinline {{
 entry:
   %both = and i64 %a, %b
@@ -10902,15 +11644,67 @@ slow:
   %fallback = call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number})
   ret i64 %fallback
 }}"#
-        )
-        .unwrap();
-    }
-    output
+    )
+    .unwrap();
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{CompileOptions, compile};
+
+    #[test]
+    fn recursive_entry_passes_the_checked_signature_to_one_python_frame() {
+        let llvm = compile(
+            "def copy(text: str) -> str:\n    return text\ndef choose(n: int, x: float, b: bool, text: str) -> str:\n    if n:\n        return choose(n - 1, x, b, text)\n    return copy(text)\nprint(choose(2, 1.0, True, 'ok'))\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(llvm.matches("call void @imre_on_call_stack(").count(), 1);
+        assert!(llvm.contains("alloca { ptr, i64, double, i1, ptr }"));
+        let (_, body) = llvm
+            .split_once("define internal void @fn_1.frame(")
+            .unwrap();
+        let (body, _) = body.split_once("\n}").unwrap();
+        assert_eq!(body.matches("call void @imre_recursion_enter()").count(), 1);
+        assert_eq!(body.matches("call void @imre_recursion_leave()").count(), 1);
+        assert!(body.contains("call ptr @fn_1("));
+    }
+
+    #[test]
+    fn ascii_membership_shares_only_stable_character_lookups() {
+        let llvm = compile(
+            "def check(s: str, i: int, j: int) -> bool:\n    return (s[i] == '+' or '-' == s[i] or s[i] == '.') and (s[i] != '/' and s[j] != ':')\n\nprint(check('ab', 0, 1))\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert_eq!(llvm.matches("call i32 @imre_str_get_part(").count(), 3);
+    }
+
+    #[test]
+    fn integer_dictionary_updates_keep_effectful_operands_after_lookup() {
+        let llvm = compile(
+            "class Row:\n    def __init__(self, amount: int):\n        self.amount = amount\n\ndef change(d: dict[str, int], row: Row, key: str):\n    d[key] += row.amount\n    d[key] -= 1\n    d[key] += d.pop(key)\n\nchange({'x': 2}, Row(3), 'x')\n",
+            &CompileOptions::default(),
+        ).unwrap();
+        assert_eq!(
+            llvm.matches("call void @imre_dict_accumulate_int(").count(),
+            2
+        );
+        assert!(llvm.contains("call i64 @imre_dict_get("));
+    }
+
+    #[test]
+    fn set_constructor_copies_the_keys_of_an_exact_mapping() {
+        let source = "def copy(d: dict[str, int]) -> set[str]:\n    return set(d)\nprint(len(copy({'key': 1})))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call ptr @imre_key_union("));
+    }
+
+    #[test]
+    fn set_constructors_iterate_concrete_sequences() {
+        let source = "def from_list(xs: list[int]) -> set[int]:\n    return set(xs)\ndef from_bytes(xs: bytes) -> set[int]:\n    return set(xs)\ndef from_text(xs: str) -> set[str]:\n    return set(xs)\nprint(len(from_list([1, 2])), len(from_bytes(b'ab')), len(from_text('abc')))\n";
+        let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call void @imre_set_add(").count(), 3);
+    }
 
     #[test]
     fn fixed_patterns_compile_once_across_search_sites() {
@@ -10920,7 +11714,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(llvm.matches("call ptr @imre_regex_literal(").count(), 1);
-        assert_eq!(llvm.matches("call ptr @imre_regex_search(").count(), 2);
+        assert_eq!(llvm.matches("call ptr @imre_regex_execute(").count(), 2);
         let cleanup = llvm
             .split_once("define internal void @imre_clear_literals(")
             .unwrap()
@@ -10932,6 +11726,15 @@ mod tests {
                 .0
                 .contains("call void @imre_object_release(")
         );
+    }
+
+    #[test]
+    fn constant_latin1_encoding_decodes_the_buffer_directly() {
+        let body = function_body(
+            "def convert(data: bytes) -> str:\n    return str(data, 'IsO-8859-1')\nprint(convert(b'x'))",
+        );
+        assert!(body.contains("call ptr @imre_bytes_decode_latin1("));
+        assert!(!body.contains("call ptr @imre_codec_lookup("));
     }
 
     #[test]
@@ -11018,7 +11821,7 @@ print(show("x"))
                 .unwrap()
                 .0
         };
-        assert!(body("fn_0").contains("call ptr @imre_record_try_new("));
+        assert!(body("fn_0").contains("call ptr @imre_record_try_new_sized("));
         assert!(body("fn_0").contains("icmp eq ptr "));
         assert!(body("fn_1").contains("call i32 @imre_error_pending()"));
         assert!(llvm.contains("call void @imre_record_error_init()"));
@@ -11055,7 +11858,7 @@ print(show("x"))
             .split_once("\n}")
             .unwrap()
             .0;
-        assert!(!init.contains("@imre_record_try_new("));
+        assert!(!init.contains("@imre_record_try_new"));
     }
 
     #[test]
@@ -11101,6 +11904,16 @@ print(show("x"))
         let effect = body("later() % 4");
         let (before, _) = effect.split_once("call i64 @fn_1(").unwrap();
         assert!(before.contains("call ptr @imre_str_concat_parts("));
+    }
+
+    #[test]
+    fn list_addition_polls_while_copying_into_a_fresh_list() {
+        let body = function_body(
+            "def joined(left: list[int], right: list[int]) -> list[int]:\n    return left + right\nprint(joined([1], [2]))",
+        );
+        assert_eq!(body.matches("call ptr @imre_list_new(").count(), 1);
+        assert_eq!(body.matches("call i1 @imre_typed_interrupt(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_list_append(").count(), 2);
     }
 
     #[test]
@@ -11170,9 +11983,10 @@ print(show("x"))
         let main = llvm.split_once("define i32 @main(").unwrap().1;
         assert_eq!(main.matches("call void @imre_init_literals()").count(), 1);
         assert_eq!(main.matches("call void @imre_clear_literals()").count(), 1);
-        let (_, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        let (before_cleanup, exits) = main.split_once("call void @imre_clear_literals()").unwrap();
+        assert!(before_cleanup.contains("call void @imre_report_unhandled("));
+        assert!(exits.contains("call i32 @imre_finish_unhandled("));
         assert!(exits.contains("call i32 @imre_finish_stdio()"));
-        assert!(exits.contains("call i32 @imre_error_unhandled()"));
     }
 
     /// Classifies only assignments to a source slot, excluding its argument and
@@ -11200,6 +12014,92 @@ print(show("x"))
             .unwrap()
             .0
             .to_owned()
+    }
+
+    #[test]
+    fn integer_list_literals_batch_pairs_and_append_the_odd_element() {
+        let body = function_body(
+            "def make(value: int) -> list[int]:\n    return [value, value + 1, value - 1]\nprint(len(make(3)))",
+        );
+        assert_eq!(body.matches("call i32 @imre_list_append_pair(").count(), 1);
+        assert_eq!(body.matches("call i32 @imre_list_append(").count(), 1);
+    }
+
+    #[test]
+    fn conditional_integer_list_is_released_only_when_present_at_exit() {
+        let body = function_body(
+            "def choose(value: int, enabled: bool) -> int:\n    if enabled:\n        items = [value]\n        items.append(value + 1)\n        return items.pop()\n    return value\nprint(choose(4, True))",
+        );
+        assert!(body.contains("call void @list_release_if_present("));
+    }
+
+    #[test]
+    fn factorials_use_a_word_table_only_for_proven_inputs() {
+        let body = |arg| {
+            function_body(&format!(
+                "from math import factorial\ndef score(n: int) -> int:\n    return factorial({arg})\n"
+            ))
+        };
+        let bounded = body("n & 15");
+        assert!(bounded.contains("@imre_small_factorials"), "{bounded}");
+        assert!(!bounded.contains("@imre_math_factorial("), "{bounded}");
+        let constant = body("6");
+        assert!(constant.contains("i64 1441"), "{constant}");
+        for arg in ["n", "n & 31", "-1"] {
+            let wide = body(arg);
+            assert!(wide.contains("@imre_math_factorial("), "{wide}");
+        }
+    }
+
+    #[test]
+    fn bounded_permutations_require_a_taggable_product() {
+        let body = |args| {
+            function_body(&format!(
+                "from math import perm\ndef count(n: int) -> int:\n    return perm({args})\n"
+            ))
+        };
+        let fixed = body("n & 63, 5");
+        assert!(fixed.contains("mul nsw i64"), "{fixed}");
+        assert!(!fixed.contains("@imre_math_perm("), "{fixed}");
+        for args in ["(n & 3) + 2147483647, 2", "n & 63, n", "-1, 2"] {
+            let fallback = body(args);
+            assert!(fallback.contains("@imre_math_perm("), "{fallback}");
+        }
+    }
+
+    #[test]
+    fn bounded_combinations_preserve_the_checked_fallback() {
+        let fixed = function_body(
+            "from math import comb\ndef count(n: int) -> int:\n    return comb(n & 63, 5)\n",
+        );
+        assert!(fixed.contains("udiv exact i64"), "{fixed}");
+        assert!(!fixed.contains("@imre_math_comb("), "{fixed}");
+        for arguments in ["n, 2", "n & 63, n", "n & 1073741823, 8"] {
+            let source = format!(
+                "from math import comb\ndef count(n: int) -> int:\n    return comb({arguments})\n"
+            );
+            let body = function_body(&source);
+            assert!(body.contains("@imre_math_comb("), "{body}");
+        }
+    }
+
+    #[test]
+    fn temporary_split_fields_can_use_the_original_text() {
+        let body = function_body(
+            "def field(s: str) -> str:\n    fields = s.split()\n    if len(fields) != 2:\n        raise ValueError('two fields required')\n    return fields[1]\n",
+        );
+        assert!(body.contains("@imre_str_field_spans("), "{body}");
+        assert!(body.contains("@imre_str_field_at("), "{body}");
+        assert!(!body.contains("@imre_str_split_whitespace("), "{body}");
+
+        for source in [
+            "def repeated(s: str) -> str:\n    fields = s.split()\n    return fields[0] + fields[0]\n",
+            "def escaped(s: str) -> list[str]:\n    fields = s.split()\n    return fields\n",
+            "def looped(s: str, n: int) -> str:\n    fields = s.split()\n    first = ''\n    for i in range(n):\n        first = fields[0]\n    return first\n",
+        ] {
+            let body = function_body(source);
+            assert!(!body.contains("@imre_str_field_spans("), "{body}");
+        }
     }
 
     #[test]
@@ -11302,7 +12202,10 @@ print(show("x"))
             "def probe(d: dict[tuple[str, int], int], x: str) -> int:\n    d.get((x, 1))\n    d.get((x, 2), 3)\n    if (x, 4) in d:\n        return d[(x, 5)]\n    return 0\n",
         );
         assert_eq!(body.matches("call ptr @imre_tuple_probe(").count(), 3);
-        assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
+        assert_eq!(
+            body.matches("call ptr @imre_record_try_new_sized(").count(),
+            1
+        );
     }
 
     #[test]
@@ -11333,8 +12236,11 @@ print(show("x"))
             "def probe(d: dict[tuple[str, str], int], x: str, y: str, write: bool) -> int:\n    key = (x, y)\n    found = d.get(key, 0)\n    if write:\n        d[key] = found + 1\n    return found\n",
         );
         let (_, after_probe) = body.split_once("call ptr @imre_tuple_probe(").unwrap();
-        assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
-        assert!(after_probe.contains("call ptr @imre_record_try_new("));
+        assert_eq!(
+            body.matches("call ptr @imre_record_try_new_sized(").count(),
+            1
+        );
+        assert!(after_probe.contains("call ptr @imre_record_try_new_sized("));
     }
 
     #[test]
@@ -11372,7 +12278,10 @@ print(show("x"))
                 "def probe(d: dict[tuple[str, int], int], other: dict[tuple[str, int], int], x: str) -> int:\n    key = (x, 0)\n    found = d.get(key, 0)\n{stores}\n    return found\n"
             ));
             assert!(!body.contains("call ptr @imre_tuple_probe("));
-            assert_eq!(body.matches("call ptr @imre_record_try_new(").count(), 1);
+            assert_eq!(
+                body.matches("call ptr @imre_record_try_new_sized(").count(),
+                1
+            );
         }
     }
 
@@ -11711,6 +12620,19 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
     }
 
     #[test]
+    fn optional_float_real_returns_the_incoming_owner() {
+        let body = function_body(
+            "def project(value: float | None) -> float | None:\n    if value is None:\n        return None\n    return value.real\n",
+        );
+        assert!(body.contains("store i64 %arg0, ptr %local0"));
+        assert!(body.lines().filter_map(|line| {
+            line.trim().strip_suffix(" = load i64, ptr %local0")
+        }).any(|owner| body.contains(&format!(
+            "call void @imre_float_box_retain(i64 {owner})\n  store i64 {owner}, ptr %function_return"
+        ))), "{body}");
+    }
+
+    #[test]
     fn exact_integer_owners_keep_nullable_record_and_optional_cleanup_separate() {
         let exact =
             function_body("def keep(value: int) -> int:\n    value = value\n    return value\n");
@@ -11751,7 +12673,11 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
 
     #[test]
     fn integer_fast_results_are_odd_only_after_the_overflow_guard() {
-        let helpers = super::integer_helpers();
+        let helpers = compile(
+            "def arithmetic(a: int, b: int) -> int:\n    return (a + b) * (a - b)\n",
+            &CompileOptions::default(),
+        )
+        .unwrap();
         for (operation, number) in [("add", 0), ("sub", 1), ("mul", 2)] {
             let body = helpers
                 .split_once(&format!("define internal i64 @int_{operation}("))
@@ -11761,12 +12687,15 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
                 .unwrap()
                 .0;
             let guard = body
-                .find("br i1 %overflow, label %big, label %done")
+                .find("br i1 %promote, label %big, label %done")
                 .unwrap();
-            let encoded = body.find("%encoded = or i64 %result, 1").unwrap();
+            let encoded = body.find("%encoded = or i64 %exact, 1").unwrap();
             assert!(guard < encoded, "{body}");
-            assert!(body.contains("br i1 %small, label %fast, label %big, !prof !1"));
-            assert!(body.contains("br i1 %overflow, label %big, label %done, !prof !0"));
+            assert!(body.contains("%immediate = or i1 %bounded, %small"));
+            assert!(body.contains("br i1 %immediate, label %fast, label %big, !prof !1"));
+            assert!(body.contains("%promote = select i1 %bounded, i1 false, i1 %overflow"));
+            assert!(body.contains("br i1 %promote, label %big, label %done, !prof !0"));
+            assert!(body.contains("%exact = select i1 %overflow, i64 poison, i64 %result"));
             let (_, slow) = body.split_once("big:").unwrap();
             assert!(slow.contains(&format!(
                 "call i64 @imre_int_binary(i64 %a, i64 %b, i32 {number}) cold"
@@ -11779,17 +12708,21 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
         }
     }
 
+    fn calls_integer_operation(body: &str, operation: &str, bounded: bool) -> bool {
+        let call = format!("call i64 @int_{operation}(");
+        let proof = format!(", i1 {bounded})");
+        body.lines()
+            .any(|line| line.contains(&call) && line.ends_with(&proof))
+    }
+
     #[test]
     fn suspended_list_pipeline_cursors_use_native_arithmetic() {
-        for (source, operation, fallback) in [
-            ("values", "add nsw i64", "@int_add("),
-            ("reversed(values)", "sub nsw i64", "@int_sub("),
-        ] {
+        for (source, operation) in [("values", "add"), ("reversed(values)", "sub")] {
             let body = function_body(&format!(
                 "def same(values: list[int]) -> bool:\n    return all(left == right for left, right in zip({source}, {source}))\n"
             ));
-            assert!(body.contains(operation));
-            assert!(!body.contains(fallback));
+            assert!(calls_integer_operation(&body, operation, true));
+            assert!(!calls_integer_operation(&body, operation, false));
             assert!(body.contains("@imre_list_get_index("));
             assert!(!body.contains("@imre_list_get("));
         }
@@ -11859,9 +12792,9 @@ def handler(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> l
                 !body.contains("call void @llvm.assume"),
                 "the accumulator proof must not add a second use of its recurrence"
             );
-            assert!(body.contains("add nsw i64"));
+            assert!(calls_integer_operation(&body, "add", true));
             assert!(
-                body.contains("call i64 @int_add"),
+                calls_integer_operation(&body, "add", false),
                 "lists outside the checked subtotal budget retain arbitrary-precision arithmetic"
             );
             assert!(body.contains("icmp sle i64"));
@@ -11895,6 +12828,21 @@ def transform(values: list[int], count: int) -> int:
     }
 
     #[test]
+    fn string_lengths_in_loop_conditions_and_bodies_cache_only_unwritten_parameters() {
+        let source = "def score(a: str, b: str) -> int:\n    total = 0\n    i = 0\n    while i < len(a):\n        total += len(b)\n        i += 1\n    return total\n";
+        let slots = |source: &str| {
+            compile(source, &CompileOptions::default())
+                .unwrap()
+                .lines()
+                .filter(|line| line.contains("%str_count") && line.contains(" = alloca i64"))
+                .count()
+        };
+        assert_eq!(slots(source), 2);
+        let rebound = source.replace("        i += 1", "        b = a + b\n        i += 1");
+        assert_eq!(slots(&rebound), 1);
+    }
+
+    #[test]
     fn float_divmod_uses_one_native_remainder_operation() {
         let source =
             "def pair(x: int, y: float) -> tuple[float, float]:\n    return divmod(x, y)\n";
@@ -11911,8 +12859,12 @@ def transform(values: list[int], count: int) -> int:
 
     #[test]
     fn lowers_integer_bytes_and_hex_conversions() {
-        let source = "def encode(value: int) -> str:\n    return value.to_bytes(16).hex()\n";
+        let source = concat!(
+            "def encode(value: int) -> str:\n    return value.to_bytes(16).hex()\n",
+            "def decode(value: bytes) -> int:\n    return int.from_bytes(value)\n",
+        );
         let llvm = compile(source, &CompileOptions::default()).unwrap();
+        assert!(llvm.contains("call i64 @imre_int_from_bytes("));
         assert!(llvm.contains("call ptr @imre_int_to_bytes("));
         assert!(llvm.contains("call ptr @imre_bytes_hex("));
     }
@@ -11984,8 +12936,8 @@ def total(text: str) -> int:
         )
         .unwrap();
         assert!(llvm.contains("call i64 @imre_list_borrow_index_proven("));
-        assert!(llvm.contains("add nsw i64"));
-        assert!(llvm.contains("call i64 @int_add"));
+        assert!(calls_integer_operation(&llvm, "add", true));
+        assert!(calls_integer_operation(&llvm, "add", false));
         assert!(
             !llvm.contains("!llvm.loop"),
             "bounded arithmetic and access proofs do not guarantee backend vectorization"
@@ -12004,6 +12956,11 @@ def total(text: str) -> int:
             .expect("private byte append");
         assert!(instructions.next().unwrap().contains("icmp eq i32"));
         assert!(eligible.contains("call ptr @imre_byte_output_finish("));
+        let ranged = function_body(
+            "def encode(data: list[int]) -> bytes:\n    out: list[int] = []\n    for i in range(1, len(data)):\n        previous = data[i - 1]\n        current = data[i]\n        out.extend(divmod(previous + current, 256))\n    return bytes(out)\n",
+        );
+        assert!(ranged.contains("call i32 @append_private_bytes("));
+        assert!(ranged.contains("call ptr @imre_byte_output_finish_window("));
         assert!(!eligible.contains("call void @imre_object_retain("));
         assert!(!eligible.contains("call ptr @imre_bytes_list("));
 
@@ -12023,6 +12980,24 @@ def total(text: str) -> int:
                 "{observer}"
             );
         }
+    }
+
+    #[test]
+    fn sequence_literals_transfer_temporary_items_and_retain_borrowed_owners() {
+        let body = function_body(
+            "def build(name: str) -> list[str]:\n    return [name + '!', name, name + '?']\nprint(len(build('x')))",
+        );
+        assert_eq!(body.matches("call i32 @imre_seq_append_owned(").count(), 2);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 1);
+    }
+
+    #[test]
+    fn string_lists_take_temporaries_and_retain_borrowed_items() {
+        let body = function_body(
+            "def add(items: list[str], name: str):\n    items.append(name + '!')\n    items.append(name)\n",
+        );
+        assert_eq!(body.matches("call i32 @imre_seq_append_owned(").count(), 1);
+        assert_eq!(body.matches("call i32 @imre_seq_append(").count(), 1);
     }
 
     #[test]

@@ -30,3 +30,22 @@ def current():
             print("empty")
         items.put("again")
         print(items.get())
+
+    class Poll:
+        calls = 0
+
+        def __bool__(self):
+            self.calls += 1
+            return False
+
+    poll = Poll()
+    replies = queue.SimpleQueue()
+    replies.put("ready")
+    assert replies.get(poll, timeout=object()) == "ready"
+    try:
+        replies.get(poll, timeout=-1)
+    except queue.Empty:
+        pass
+    else:
+        raise AssertionError("empty poll returned an item")
+    assert poll.calls == 2

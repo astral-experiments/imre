@@ -16,6 +16,13 @@ pub(super) fn operation(kind: PathOperation, ty: Type, args: Vec<Expr>) -> Expr 
     }
 }
 
+fn joined(left: Expr, right: Expr) -> Expr {
+    Expr {
+        ty: left.ty,
+        kind: ExprKind::Binary(Binary::Divide, Box::new(left), Box::new(right)),
+    }
+}
+
 /// A raw binary mode contains one access letter, one b and an optional +.
 pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
     let mode = mode.as_bytes();
@@ -26,13 +33,19 @@ pub(super) fn is_raw_binary_mode(mode: &str) -> bool {
 }
 
 /// An update mode has one access letter, one '+' and optionally 'b' or 't', in any order.
-pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
+pub(super) fn is_update_mode(mode: &str) -> bool {
     let mode = mode.as_bytes();
     let expected_len = if mode.contains(&b't') || mode.contains(&b'b') {
         3
     } else {
         2
     };
+    mode.len() == expected_len
+        && mode.contains(&b'+')
+        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
+}
+
+pub(super) fn has_open_arguments(args: &ast::Arguments) -> bool {
     let parameters = [
         "file",
         "mode",
@@ -42,10 +55,7 @@ pub(super) fn is_update_open(args: &ast::Arguments, mode: &str) -> bool {
         "newline",
         "closefd",
     ];
-    mode.len() == expected_len
-        && mode.contains(&b'+')
-        && mode.iter().any(|c| matches!(c, b'r' | b'w' | b'x' | b'a'))
-        && !args.args.iter().any(ast::Expr::is_starred_expr)
+    !args.args.iter().any(ast::Expr::is_starred_expr)
         && parameters.get(args.args.len()..).is_some_and(|available| {
             args.keywords.iter().all(|kw| {
                 kw.arg
@@ -195,31 +205,24 @@ impl Checker<'_> {
         } else {
             let first = self.path_text(left, node)?;
             if let Type::PurePath(flavor) = right.ty {
-                operation(
-                    PathOperation::Join,
-                    right.ty,
-                    vec![
-                        operation(PathOperation::PureNew(flavor), right.ty, vec![]),
-                        first,
-                    ],
+                joined(
+                    operation(PathOperation::PureNew(flavor), right.ty, vec![]),
+                    first,
                 )
             } else {
                 operation(PathOperation::New, Type::Path, vec![first])
             }
         };
-        let ty = left.ty;
-        if right.ty.is_path() {
-            return Ok(operation(PathOperation::JoinObject, ty, vec![left, right]));
-        }
-        Ok(operation(
-            PathOperation::Join,
-            ty,
-            vec![left, self.path_text(right, node)?],
-        ))
+        let right = if right.ty.is_path() {
+            right
+        } else {
+            self.path_text(right, node)?
+        };
+        Ok(joined(left, right))
     }
 
     pub(super) fn path_attribute(
-        &self,
+        &mut self,
         receiver: Expr,
         attribute: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
@@ -242,7 +245,11 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(operation(kind, ty, vec![receiver]))
+        let value = operation(kind, ty, vec![receiver]);
+        if let Some(sites) = &mut self.fixed_sites {
+            sites.field(attribute, &value);
+        }
+        Ok(value)
     }
 
     /// CPython's tuple contains integral seconds, while its time attributes use the subsecond stat data.
@@ -300,6 +307,9 @@ impl Checker<'_> {
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
         let name = attribute.attr.as_str();
+        if receiver.ty == Type::Path && name == "touch" {
+            return self.registered_method_call(call, attribute, receiver, Type::None);
+        }
         if receiver.ty == Type::Path && name == "samefile" {
             return self.path_samefile(receiver, call);
         }
@@ -322,10 +332,12 @@ impl Checker<'_> {
             };
             if let Some(query) = query {
                 let kind = PathOperation::Query(query);
-                if matches!(
-                    query,
-                    PathQuery::Exists | PathQuery::Directory | PathQuery::File
-                ) {
+                if !call.arguments.is_empty()
+                    && matches!(
+                        query,
+                        PathQuery::Exists | PathQuery::Directory | PathQuery::File
+                    )
+                {
                     let param = ParameterKind::KeywordOnly.parameter(
                         "follow_symlinks",
                         Type::Bool,
@@ -350,12 +362,11 @@ impl Checker<'_> {
                     ));
                 }
                 self.reject_builtin_keywords(call)?;
-                let follow = !matches!(query, PathQuery::Symlink);
-                return Ok(operation(
-                    kind,
-                    Type::Bool,
-                    vec![receiver, Expr::boolean(follow)],
-                ));
+                let value = operation(kind, Type::Bool, vec![receiver]);
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.method(call, attribute, &value);
+                }
+                return Ok(value);
             }
             if info {
                 return Err(error(self.source, call, "unsupported Path.info method"));
@@ -439,6 +450,13 @@ impl Checker<'_> {
             return self.path_io(receiver, name, call);
         }
         if name == "open" {
+            if let Some(ast::Expr::StringLiteral(mode)) =
+                call.arguments.find_argument_value("mode", 0)
+                && is_update_mode(mode.value.to_str())
+            {
+                // The Python stream owns the shared read/write cursor and its context manager.
+                return self.registered_method_call(call, attribute, receiver, Type::PythonObject);
+            }
             return self.path_open(receiver, call);
         }
         if matches!(
@@ -453,7 +471,7 @@ impl Checker<'_> {
                 | "symlink_to"
                 | "hardlink_to"
         ) {
-            return self.path_call(receiver, name, call);
+            return self.path_call(receiver, attribute, call);
         }
         if matches!(name, "iterdir" | "glob" | "rglob" | "walk") {
             return self.path_iterator(receiver, call, name);
@@ -582,9 +600,10 @@ impl Checker<'_> {
     fn path_call(
         &mut self,
         receiver: Expr,
-        name: &str,
+        attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
+        let name = attribute.attr.as_str();
         let (kind, returns, params) = match name {
             "mkdir" => (
                 PathOperation::Mkdir,
@@ -626,6 +645,13 @@ impl Checker<'_> {
                 Type::None,
                 vec![parameter("target", Type::Str, None)],
             ),
+            "resolve" if call.arguments.is_empty() => {
+                let value = operation(PathOperation::Resolve, Type::Path, vec![receiver]);
+                if let Some(sites) = &mut self.fixed_sites {
+                    sites.method(call, attribute, &value);
+                }
+                return Ok(value);
+            }
             "resolve" => (
                 PathOperation::Resolve,
                 Type::Path,
@@ -730,6 +756,7 @@ impl Checker<'_> {
                 ));
             }
         };
+        // A read/write stream needs the buffered update implementation used by io.open.
         let (ty, mut builtin) = match mode {
             "rt" | "tr" => file_open_mode("r"),
             "wt" | "tw" => file_open_mode("w"),
@@ -771,7 +798,7 @@ impl Checker<'_> {
                     "binary Path.open does not accept an encoding",
                 ));
             }
-            self.utf8_encoding_keyword(encoding)?;
+            self.utf8_encoding_keyword(encoding, is_utf8_codec)?;
         }
         let path = operation(PathOperation::Text, Type::Str, vec![receiver]);
         let mut args = vec![path];
@@ -950,7 +977,7 @@ impl Checker<'_> {
                 text
             } else if let Type::PurePath(flavor) = ty {
                 let base = operation(PathOperation::PureNew(flavor), ty, vec![]);
-                operation(PathOperation::Join, ty, vec![base, text])
+                joined(base, text)
             } else {
                 operation(PathOperation::New, Type::Path, vec![text])
             }
@@ -982,13 +1009,12 @@ impl Checker<'_> {
         returns: Type,
         arguments: ir::CallArgs,
     ) -> Expr {
-        let (scope, args) = self.held_path_arguments(arguments);
-        scope.finish(operation(kind, returns, args))
+        self.ordered_builtin(Builtin::Path(kind), returns, arguments)
     }
 
     /// Construct the iterator at the call site. Globs bind and validate their pattern
     /// now, but defer every directory scan until the consumer first requests a path.
-    pub(super) fn path_iterator(
+    fn path_iterator(
         &mut self,
         receiver: Expr,
         call: &ast::ExprCall,

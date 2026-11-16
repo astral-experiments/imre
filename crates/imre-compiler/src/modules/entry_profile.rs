@@ -7,10 +7,12 @@ use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
+type ExcludedSuites = HashMap<(ModuleId, TextSize), (TextRange, String)>;
+
 #[derive(Default)]
 pub(crate) struct Profile {
-    // Each excluded suite has a single raising entry and a source range for ty.
-    suites: HashMap<(ModuleId, TextSize), (TextRange, String)>,
+    // Even a profile with no excluded suites requires a statically compiled entry.
+    suites: Option<ExcludedSuites>,
 }
 
 fn name(expr: &ast::Expr) -> Option<String> {
@@ -32,7 +34,7 @@ impl Profile {
             .map_err(|e| format!("{}: {e}", path.display()))?;
         let mut rules: BTreeMap<String, BTreeMap<String, String>> =
             serde_json::from_slice(&definition).map_err(|e| format!("{}: {e}", path.display()))?;
-        let mut profile = Self::default();
+        let mut suites = ExcludedSuites::new();
         for (module, source) in modules.iter().enumerate() {
             for statement in &source.parsed.syntax().body {
                 let ast::Stmt::FunctionDef(function) = statement else {
@@ -44,7 +46,7 @@ impl Profile {
                 };
                 for (subject, expected) in constraints {
                     let mut scan = Selector {
-                        profile: &mut profile,
+                        suites: &mut suites,
                         module,
                         subject: &subject,
                         expected: &expected,
@@ -64,11 +66,18 @@ impl Profile {
         if let Some(name) = rules.keys().next() {
             return Err(format!("entry profile: unknown function {name}"));
         }
-        Ok(profile)
+        Ok(Self {
+            suites: Some(suites),
+        })
+    }
+
+    pub(crate) fn requires_fixed_entry(&self) -> bool {
+        self.suites.is_some()
     }
 
     pub(crate) fn excluded(&self, module: ModuleId, start: TextSize) -> Option<&str> {
         self.suites
+            .as_ref()?
             .get(&(module, start))
             .map(|(_, explanation)| explanation.as_str())
     }
@@ -76,13 +85,14 @@ impl Profile {
     pub(crate) fn ranges(&self, module: ModuleId) -> impl Iterator<Item = TextRange> + '_ {
         self.suites
             .iter()
+            .flatten()
             .filter(move |((owner, _), _)| *owner == module)
             .map(|(_, (range, _))| *range)
     }
 }
 
 struct Selector<'a> {
-    profile: &'a mut Profile,
+    suites: &'a mut ExcludedSuites,
     module: ModuleId,
     subject: &'a str,
     expected: &'a str,
@@ -93,7 +103,7 @@ impl Selector<'_> {
     fn exclude(&mut self, body: &[ast::Stmt]) {
         if let (Some(first), Some(last)) = (body.first(), body.last()) {
             let range = TextRange::new(first.start(), last.end());
-            self.profile.suites.insert(
+            self.suites.insert(
                 (self.module, first.start()),
                 (
                     range,
@@ -138,6 +148,25 @@ mod tests {
     use std::fs;
 
     #[test]
+    fn empty_profile_still_requires_a_fixed_class_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let entry = dir.path().join("main.py");
+        let profile = dir.path().join("profile.json");
+        fs::write(&entry, "from typing import NamedTuple as Base\nclass Row(Base):\n    value: int\nprint(Row(1).value)\n").unwrap();
+        fs::write(&profile, "{}").unwrap();
+        check_file(&entry, None).unwrap();
+        let options = CompileOptions {
+            entry_profile: Some(profile),
+            ..Default::default()
+        };
+        let error = compile_file(&entry, None, &options).err().unwrap();
+        assert!(
+            error.contains(":2:11: Imre: the base must be a known fixed-layout class"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn excluded_suite_traps_and_remains_an_input() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("main.py");
@@ -164,10 +193,10 @@ def choose(debug: bool) -> str:
         let graph = super::super::SourceGraph::load_with(
             &entry,
             None,
-            &[],
+            &options,
             Default::default(),
-            true,
-            Some(&profile),
+            &mut None,
+            &mut Default::default(),
         )
         .unwrap();
         let (module, service) = graph

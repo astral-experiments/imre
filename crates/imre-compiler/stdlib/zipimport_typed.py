@@ -3,10 +3,6 @@ from pathlib import Path as _Path
 from posixpath import exists as _exists
 from zipfile import BadZipFile as _BadZipFile, ZipFile as _ZipFile
 
-class ZipImportError(ImportError):
-    pass
-
-
 _indexes: dict[str, _ZipFile] = {}
 
 
@@ -24,7 +20,7 @@ def _index(path: str) -> bool:
 
 
 def _read(path: str, key: str) -> bytes:
-    return _indexes[path]._read_import_data(key)
+    return _indexes[path].read(key)
 
 
 class zipimporter(_ZipResourceLoader):

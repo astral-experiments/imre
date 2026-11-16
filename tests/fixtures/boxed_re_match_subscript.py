@@ -40,6 +40,9 @@ def current():
     ):
         match = re.match(pattern, subject)
         assert (match.lastindex, match.lastgroup) == want
+    assert re.search(r"(.*?b|.*?a)(.*)", "ab").groups() == ("ab", "")
+    match = re.search(r"(?P<left>.*?b|.*?a)(?P<tail>.*)(?:(?P<t>x)?)*", "ab")
+    assert (match.groups(), match.lastgroup) == (("ab", "", None), "tail")
     data = bytearray(b"!abz")
     match = re.compile(br"(?P<outer>(a))(b)$").search(data, 1, 3)
     data[:] = b""
@@ -47,6 +50,17 @@ def current():
     assert match.regs == ((1, 3), (1, 2), (1, 2), (2, 3))
     assert match.regs is match.regs
     assert (match.lastindex, match.lastgroup) == (3, None)
+    for spelling in (r"(?P<a>a)|(?P<b>b)", r"(?=(?P<a>a)|(?P<b>b))[ab]"):
+        pattern = re.compile(spelling)
+        first = pattern.search("!a")
+        assert pattern.search("!") is None
+        second = pattern.match("b")
+        assert pattern.fullmatch("b").groups() == (None, "b")
+        assert pattern.fullmatch("aa") is None
+        assert pattern.fullmatch("a").groups() == ("a", None)
+        assert (second.groups(), second.lastgroup) == ((None, "b"), "b")
+        assert (first.groups(), first.lastgroup) == (("a", None), "a")
+        assert first.regs == ((1, 2), (1, 2), (-1, -1))
     parts = re.compile(r"(é)|(a)").finditer("xéa!", 1, 3)
     first, second = tuple(parts)
     assert first.regs == ((1, 2), (1, 2), (-1, -1))

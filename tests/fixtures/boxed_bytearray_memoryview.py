@@ -38,6 +38,12 @@ def current():
     assert bytes(data) == b"Abcd"
     resize_buffer()
     unsigned_cast()
+    for fmt in ("b", "@b"):
+        raw = bytearray(b"\xff")
+        with memoryview(raw).cast(fmt) as signed:
+            assert signed.format == fmt and signed[0] == -1
+            signed[0] = -128
+            assert raw == b"\x80"
     unsigned_int_cast()
     print("bytearray memoryview")
 

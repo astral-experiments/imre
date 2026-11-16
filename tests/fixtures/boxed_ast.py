@@ -41,6 +41,20 @@ class GrowingFields(ast.AST):
         return None
 
 
+class ReplacingFields(ast.AST):
+    @property
+    def first(self):
+        self._fields = ()
+        for i in range(9000):
+            unused = [{"n": i}, (i, i)]
+        return None
+
+
+class CustomFieldOrder(tuple):
+    def __iter__(self):
+        yield "tail"
+
+
 def check_import_nodes():
     import sys
     from ast import Import, ImportFrom, alias
@@ -152,6 +166,14 @@ def current():
     check_import_nodes()
     check_comparison_nodes()
     check_template_nodes()
+
+    indices = ast.parse("table[row, col]", mode="eval").body.slice
+    assert indices.dims is indices.elts
+    swapped = list(reversed(indices.dims))
+    indices.dims = swapped
+    assert indices.elts is swapped
+    assert [node.id for node in ast.walk(indices) if isinstance(node, ast.Name)] == ["col", "row"]
+
     decorated_source = (
         "if ready:\n"
         "    @first\n"
@@ -229,3 +251,11 @@ def current():
     root._fields = ["first"]
     root.tail = ast.Name("added", ast.Load())
     assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["added"]
+
+    root = ReplacingFields()
+    root._fields = tuple(["first", "tail"])
+    root.tail = ast.Name("retained", ast.Load())
+    assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["retained"]
+
+    root._fields = CustomFieldOrder(("missing",))
+    assert [node.id for node in ast.walk(root) if isinstance(node, ast.Name)] == ["retained"]

@@ -51,17 +51,6 @@ fn render_allocation(_: std::collections::TryReserveError) -> Error {
     Error::new("MemoryError", "")
 }
 
-/// Reserve the entire destination before copying either sequence's object references.
-fn concat_ids(left: &[Id], right: &[Id]) -> Result<Vec<Id>> {
-    let mut items = Vec::new();
-    items
-        .try_reserve_exact(left.len() + right.len())
-        .map_err(render_allocation)?;
-    items.extend_from_slice(left);
-    items.extend_from_slice(right);
-    Ok(items)
-}
-
 fn push_frame<T>(stack: &mut Vec<T>, value: T) -> Result<()> {
     stack.try_reserve(1).map_err(render_allocation)?;
     stack.push(value);
@@ -129,6 +118,7 @@ enum FormatLookup {
     Repr,
     Str,
     MethodName,
+    ModuleRepr,
     DictViewList,
     TypingTuple(usize),
 }
@@ -204,7 +194,21 @@ impl FormatPart {
     }
 }
 
-fn slice_positions(start: i64, end: i64, step: i64) -> impl Iterator<Item = usize> + Clone {
+/// Count normalized positions without traversing the slice or negating a minimum stride.
+pub(crate) fn slice_count(start: i64, end: i64, step: i64) -> usize {
+    let distance = if step > 0 {
+        end.saturating_sub(start)
+    } else {
+        start.saturating_sub(end)
+    };
+    (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize
+}
+
+pub(super) fn slice_positions(
+    start: i64,
+    end: i64,
+    step: i64,
+) -> impl Iterator<Item = usize> + Clone {
     std::iter::successors(Some(start), move |&i| i.checked_add(step))
         .take_while(move |&i| if step > 0 { i < end } else { i > end })
         .map(|i| i as usize)
@@ -440,6 +444,19 @@ impl Context {
         Ok(Some(length as usize))
     }
 
+    /// In nb_bool, an AttributeError during descriptor binding skips that slot.
+    /// The fallback tests the returned length object itself (CPython slot_nb_bool).
+    fn truth_after_missing_bool(&mut self, id: Id) -> Result<bool> {
+        let hook = match self.bound_slot(id, "__len__") {
+            Ok(Some(hook)) => hook,
+            Ok(None) => return Ok(true),
+            Err(error) if self.is_attribute_error(&error) => return Ok(true),
+            Err(error) => return Err(error),
+        };
+        let value = self.call(hook, Vec::new(), Vec::new())?;
+        self.with_slot_depth("maximum recursion depth exceeded", |ctx| ctx.truth(value))
+    }
+
     pub(super) fn truth(&mut self, id: Id) -> Result<bool> {
         let id = self.weak_proxy_target(id)?;
         Ok(match self.heap.get(id) {
@@ -462,6 +479,8 @@ impl Context {
             Value::SurrogateStr(points) => !points.is_empty(),
             Value::Bytes(b) | Value::ByteArray(b) => !b.is_empty(),
             Value::MemoryView { .. } => self.view_layout(id)?.first_len()? != 0,
+            #[cfg(target_os = "linux")]
+            obj @ Value::Mmap { .. } => super::stdlib::mmap::region(obj)?.len() != 0,
             Value::List(v) | Value::Tuple(v) | Value::NamedTuple { values: v, .. } => !v.is_empty(),
             Value::Set { entries: v, .. }
             | Value::Dict(v)
@@ -481,8 +500,28 @@ impl Context {
             } => !bindings.is_empty(),
             Value::Array(array) => array.len() != 0,
             Value::Range(range) => range.len.as_small() != Some(0),
-            Value::Instance { .. } | Value::Raised(_) | Value::FrameLocalsProxy { .. } => {
-                if let Some(hook) = self.bound_slot(id, "__bool__")? {
+            Value::Instance { .. }
+            | Value::Class {
+                metaclass: Some(_), ..
+            }
+            | Value::Raised(_)
+            | Value::FrameLocalsProxy { .. } => {
+                let hook = match self.bound_slot(id, "__bool__") {
+                    Err(error) if self.is_attribute_error(&error) => {
+                        return self.truth_after_missing_bool(id);
+                    }
+                    result => result?,
+                };
+                if let Some(hook) = hook {
+                    if hook == NONE {
+                        return Err(Error::new(
+                            "TypeError",
+                            format!(
+                                "'{:.200}' cannot be interpreted as a boolean",
+                                self.type_name(id)
+                            ),
+                        ));
+                    }
                     let value = self.call(hook, Vec::new(), Vec::new())?;
                     let Value::Bool(result) = self.heap.get(value) else {
                         return Err(Error::new(
@@ -686,12 +725,15 @@ impl Context {
                     continue 'walk;
                 }
                 let children = match (self.heap.get(a), self.heap.get(b)) {
-                    (Value::List(_), right) if !matches!(right, Value::List(_)) => {
-                        break 'current false;
+                    (Value::List(left), Value::List(right)) if left.len() == right.len() => {
+                        Some(Children::Sequence(0))
                     }
-                    (left, Value::List(_)) if !matches!(left, Value::List(_)) => {
-                        break 'current false;
-                    }
+                    (Value::List(_), _) | (_, Value::List(_)) => break 'current false,
+                    // Tuple equality compares the common prefix before deciding by length.
+                    (
+                        Value::Tuple(_) | Value::NamedTuple { .. },
+                        Value::Tuple(_) | Value::NamedTuple { .. },
+                    ) => Some(Children::Sequence(0)),
                     (
                         Value::Dict(x) | Value::DefaultDict { entries: x, .. },
                         Value::Dict(y) | Value::DefaultDict { entries: y, .. },
@@ -710,16 +752,8 @@ impl Context {
                         }
                         (!std::rc::Rc::ptr_eq(x, y)).then_some(Children::Context(0))
                     }
-                    _ => match (self.sequence_at(a, 0), self.sequence_at(b, 0)) {
-                        (Some((x, _)), Some((y, _))) => {
-                            if x != y {
-                                break 'current false;
-                            }
-                            Some(Children::Sequence(0))
-                        }
-                        _ if self.equal(a, b) => None,
-                        _ => break 'current false,
-                    },
+                    _ if self.equal(a, b) => None,
+                    _ => break 'current false,
                 };
                 if let Some(children) = children {
                     let memory = |_| Error::new("MemoryError", "");
@@ -1354,6 +1388,15 @@ impl Context {
     fn format_slot(&self, id: Id, name: &str) -> Option<(Id, Id)> {
         let class = match self.heap.get(id) {
             Value::Instance { class, .. } | Value::FrameLocalsProxy { class, .. } => *class,
+            Value::Module {
+                constructor: Some(class),
+                ..
+            } => {
+                // The native module slot uses the renderer's recursion guard.
+                let slot = self.class_attr(*class, name)?;
+                return (self.builtins.get("module.__repr__") != Some(&slot))
+                    .then_some((*class, slot));
+            }
             Value::Raised(error) => error.class()?,
             Value::Weak(wr) if name == "__repr__" => *self.builtins.get(wr.kind.class())?,
             Value::Partial { .. } if name == "__repr__" => {
@@ -1429,6 +1472,23 @@ impl Context {
 
     /// Invoke the special method once and preserve an accepted string subclass.
     pub(super) fn repr_override(&mut self, id: Id) -> Result<Option<Id>> {
+        let value = self.call_repr_slot(id)?;
+        if let Some(result) = value
+            && self.string_storage(result).is_none()
+        {
+            return Err(Error::new(
+                "TypeError",
+                format!(
+                    "__repr__ returned non-string (type {})",
+                    self.type_name(result)
+                ),
+            ));
+        }
+        Ok(value)
+    }
+
+    /// Call the live repr slot directly, as the inherited object.__str__ descriptor does.
+    pub(super) fn call_repr_slot(&mut self, id: Id) -> Result<Option<Id>> {
         if let Some(text) = super::stdlib::datetime::render::exact(self, id, true)? {
             return Ok(Some(text));
         }
@@ -1438,24 +1498,42 @@ impl Context {
         let Some((class, slot)) = self.format_slot(id, "__repr__") else {
             return Ok(None);
         };
-        let result = if matches!(self.heap.get(slot), Value::Native(symbol)
-            if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
+        self.with_repr_slot_depth(|ctx| {
+            if matches!(ctx.heap.get(slot), Value::Native(symbol)
+                if super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol).is_some())
+            {
+                ctx.call(slot, vec![id], Vec::new())
+            } else {
+                let hook = ctx.bind_attribute(slot, id, class)?;
+                ctx.call(hook, Vec::new(), Vec::new())
+            }
+        })
+        .map(Some)
+    }
+
+    /// A recursive repr may delegate entirely through native descriptors, without a Python frame.
+    fn with_repr_slot_depth<T>(
+        &mut self,
+        operation: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        const MESSAGE: &str =
+            "maximum recursion depth exceeded while getting the repr of an object";
+        let dispatch = |ctx: &mut Self| ctx.with_slot_depth(MESSAGE, operation);
+        // Unoptimized builtin dispatch can cross the usual slot margin in one call.
+        // Allow a finite delegation to continue on one spare segment. Its own
+        // margin remains the boundary for an unbounded chain.
+        if cfg!(debug_assertions)
+            && stacker::remaining_stack().is_some_and(|remaining| remaining < 512 * 1024)
         {
-            self.call(slot, vec![id], Vec::new())?
-        } else {
-            let hook = self.bind_attribute(slot, id, class)?;
-            self.call(hook, Vec::new(), Vec::new())?
-        };
-        if self.string_storage(result).is_none() {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "__repr__ returned non-string (type {})",
-                    self.type_name(result)
-                ),
-            ));
+            if self.repr_spare_stack {
+                return Err(Error::new("RecursionError", MESSAGE));
+            }
+            self.repr_spare_stack = true;
+            let result = stacker::grow(4 * 1024 * 1024, || dispatch(self));
+            self.repr_spare_stack = false;
+            return result;
         }
-        Ok(Some(result))
+        dispatch(self)
     }
 
     /// Look up a method's live qualified name, falling back only when that attribute is absent.
@@ -1507,11 +1585,12 @@ impl Context {
             FormatLookup::Repr => self.repr_override(id),
             FormatLookup::Str => builtins::call(self, "str", &[id], &[]).map(Some),
             FormatLookup::MethodName => self.bound_method_name(id),
+            FormatLookup::ModuleRepr => self.module_base_repr(id).map(Some),
             FormatLookup::DictViewList => builtins::call(self, "list", &[id], &[]).map(Some),
             FormatLookup::TypingTuple(frames) => {
-                self.suspended_typing_frames += frames;
+                self.heap.execution.suspended_typing_frames += frames;
                 let result = typing::typing_alias_helper(self, "_type_repr", vec![id]);
-                self.suspended_typing_frames -= frames;
+                self.heap.execution.suspended_typing_frames -= frames;
                 result.map(Some)
             }
         };
@@ -2095,6 +2174,28 @@ impl Context {
                         ));
                     }
                     match ctx.heap.get(storage) {
+                        Value::Class { name, scope, .. } if ctx.has_base(storage, "enum.Enum") => {
+                            let prefix = if ctx.has_base(storage, "enum.Flag") {
+                                "<flag "
+                            } else {
+                                "<enum "
+                            };
+                            append_rendered_text(&mut output, prefix)?;
+                            push_frame(&mut work, Part::Text(">"))?;
+                            if let Some(name) = ctx.assigned_class_name(*scope) {
+                                push_frame(&mut work, Part::Value(name, true))?;
+                            } else {
+                                append_rendered_text(
+                                    &mut output,
+                                    &crate::objects::exceptions::string_repr(name),
+                                )?;
+                            }
+                            continue;
+                        }
+                        Value::Struct { .. } => {
+                            append_rendered_text(&mut output, &stdlib::structure::repr(&ctx, id)?)?;
+                            continue;
+                        }
                         Value::RegexMatch(m) => {
                             append_rendered_text(&mut output, &m.repr(&ctx)?)?;
                             continue;
@@ -2222,12 +2323,7 @@ impl Context {
                             continue;
                         }
                         Value::Raised(error) => {
-                            if !repr
-                                && let Some(fields) = error
-                                    .trace
-                                    .as_ref()
-                                    .and_then(|trace| trace.source_syntax.as_ref())
-                            {
+                            if !repr && let Some(fields) = ctx.syntax_members(error) {
                                 syntax
                                     .try_reserve(1)
                                     .map_err(|_| Error::new("MemoryError", ""))?;
@@ -2239,10 +2335,10 @@ impl Context {
                                         "maximum recursion depth exceeded while getting the str of an object",
                                     ));
                                 }
-                                let suffix = ctx.syntax_suffix(fields[1].get(), fields[2].get())?;
+                                let suffix = ctx.syntax_suffix(fields[1], fields[2])?;
                                 push_frame(&mut work, Part::SyntaxEnd(id))?;
                                 push_frame(&mut work, Part::Suffix(suffix))?;
-                                push_frame(&mut work, Part::SyntaxMessage(fields[0].get()))?;
+                                push_frame(&mut work, Part::SyntaxMessage(fields[0]))?;
                                 continue;
                             }
                             if !repr
@@ -2265,6 +2361,21 @@ impl Context {
                             constructor: Some(_),
                             ..
                         } => {
+                            // The Python formatter can re-enter this module after a callback
+                            // changes its spec. Only enclosing containers are active here.
+                            if checked && ctx.bootstrap_globals != NONE {
+                                let text = element_repr(
+                                    &mut ctx,
+                                    id,
+                                    FormatLookup::ModuleRepr,
+                                    &mut work,
+                                    &active,
+                                    remaining_sequence_words,
+                                )?
+                                .expect("checked module repr");
+                                append_rendered_text(&mut output, ctx.str_value(text)?)?;
+                                continue;
+                            }
                             if !enter_ancestor(&mut ancestors, id)? {
                                 if checked {
                                     return Err(Error::new(
@@ -2407,7 +2518,7 @@ impl Context {
                         Value::ContextToken { variable, used, .. } => {
                             append_rendered_text(
                                 &mut output,
-                                if *used {
+                                if used.get() {
                                     "<Token used var="
                                 } else {
                                     "<Token var="
@@ -2469,7 +2580,7 @@ impl Context {
                             "(...)",
                             Part::Sequence(storage, 0),
                         ),
-                        Value::SlotMember { owner, name } => {
+                        Value::SlotMember { owner, name, .. } => {
                             let owner = ctx.class_name(*owner);
                             let field = ctx.str_value(*name)?;
                             append_rendered_text(
@@ -2509,6 +2620,34 @@ impl Context {
                             } else {
                                 append_rendered_text(&mut output, "<NULL>")?;
                             }
+                            continue;
+                        }
+                        Value::MethodCaller {
+                            name,
+                            args,
+                            keywords,
+                        } => {
+                            if !enter_ancestor(&mut ancestors, id)? {
+                                append_rendered_text(&mut output, "operator.methodcaller(...)")?;
+                                continue;
+                            }
+                            push_frame(&mut active, id)?;
+                            append_rendered_text(&mut output, "operator.methodcaller(")?;
+                            push_frame(&mut work, Part::Leave(id, ")"))?;
+                            for &(key, value) in ctx.dict_entries(*keywords).unwrap().iter().rev() {
+                                push_frame(&mut work, Part::Value(value, true))?;
+                                push_frame(&mut work, Part::Text("="))?;
+                                push_frame(&mut work, Part::Value(key, false))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            let Value::Tuple(positional) = ctx.heap.get(*args) else {
+                                unreachable!("captured positional tuple")
+                            };
+                            for &arg in positional.iter().rev() {
+                                push_frame(&mut work, Part::Value(arg, true))?;
+                                push_frame(&mut work, Part::Text(", "))?;
+                            }
+                            push_frame(&mut work, Part::Value(*name, true))?;
                             continue;
                         }
                         Value::ItemGetter(keys) => {
@@ -2624,7 +2763,7 @@ impl Context {
             Value::Native(name) => name.clone(),
             _ => self.type_name(receiver).to_owned(),
         };
-        format!("<{name} object at {receiver:#x}>")
+        crate::objects::base_object_repr(&name, receiver).to_string()
     }
 
     pub(super) fn qualified_class_name(&self, class: Id, scope: Id) -> String {
@@ -2737,6 +2876,7 @@ impl Context {
                 name,
                 default,
                 repr_active,
+                ..
             } => {
                 if repr_active.replace(true) {
                     return "...".to_owned();
@@ -2752,7 +2892,7 @@ impl Context {
                 repr
             }
             Value::ContextToken { variable, used, .. } => {
-                let state = if *used { " used" } else { "" };
+                let state = if used.get() { " used" } else { "" };
                 format!(
                     "<Token{state} var={} at {id:#x}>",
                     self.format_value(*variable, true, active)
@@ -2765,6 +2905,9 @@ impl Context {
             Value::Scandir(scan) => super::stdlib::os::scandir::iterator_repr(scan),
             Value::DirEntry(entry) => {
                 format!("<DirEntry {}>", self.format_value(entry.name, true, active))
+            }
+            Value::ThreadHandle(handle) => {
+                format!("<_thread._ThreadHandle object: ident={}>", handle.ident())
             }
             Value::PrimitiveLock(lock) => {
                 let state = if lock.locked() { "locked" } else { "unlocked" };
@@ -2801,7 +2944,7 @@ impl Context {
             }
             Value::SurrogateStr(points) => surrogate_repr(points),
             Value::Str(s) if repr => crate::objects::exceptions::string_repr(s).into_string(),
-            Value::Str(s) => s.clone(),
+            Value::Str(s) => s.to_string(),
             Value::Instance { class, .. } if let Some(name) = self.heap.get(*class).hash_type() => {
                 format!("<{name} object at {id:#x}>")
             }
@@ -2904,8 +3047,10 @@ impl Context {
                 format!("{variance}{}", self.display(var.name))
             }
             Value::GetSetDescriptor { owner, name, .. }
-                if matches!(*owner, "int" | "float")
-                    || crate::objects::HashState::is_provider_class(owner)
+                if matches!(
+                    *owner,
+                    "code" | "int" | "float" | "wrapper_descriptor" | "getset_descriptor"
+                ) || crate::objects::HashState::is_provider_class(owner)
                     || *owner == super::value::TEMPLATE_TYPE
                     || stdlib::datetime::members(owner).is_some() =>
             {
@@ -2925,7 +3070,7 @@ impl Context {
             } if let Value::Native(symbol) = self.heap.get(*callable)
                 && let Some(slot) =
                     super::wrapper_descriptor::BuiltinDescriptor::lookup(symbol)
-                && !slot.method =>
+                && slot.class() == "wrapper_descriptor" =>
             {
                 slot.bound_repr(self, *receiver)
             }
@@ -2939,9 +3084,13 @@ impl Context {
             {
                 format!("<built-in function {leaf}>")
             }
-            Value::HeapTypeMethod { name, owner } => {
+            Value::HeapTypeMethod {
+                name,
+                owner,
+                slot_wrapper,
+            } => {
                 let class = self.heap.get(*owner).heap_type().unwrap();
-                let kind = if matches!(*name, "__repr__" | "__str__") {
+                let kind = if *slot_wrapper {
                     "slot wrapper"
                 } else {
                     "method"
@@ -2950,13 +3099,18 @@ impl Context {
             }
             Value::Method {
                 callable, receiver, ..
-            } if let Value::HeapTypeMethod { name, owner } = self.heap.get(*callable) => {
+            } if let Value::HeapTypeMethod {
+                name,
+                owner,
+                slot_wrapper,
+            } = self.heap.get(*callable) =>
+            {
                 let class = self.heap.get(*owner).heap_type().unwrap();
                 if matches!(self.heap.get(*receiver), Value::Module { .. }) {
                     format!("<built-in function {name}>")
                 } else if *name == "__new__" {
                     format!("<built-in method __new__ of type object at {receiver:#x}>")
-                } else if matches!(*name, "__repr__" | "__str__") {
+                } else if *slot_wrapper {
                     format!("<method-wrapper '{name}' of {class} object at {receiver:#x}>")
                 } else {
                     format!("<built-in method {name} of {class} object at {receiver:#x}>")
@@ -3003,10 +3157,8 @@ impl Context {
                 let arguments = paths
                     .iter()
                     .map(|path| {
-                        let mut quoted = String::new();
-                        crate::objects::exceptions::write_string_repr(&path.join("."), &mut quoted)
-                            .expect("writing into a string cannot fail");
-                        quoted
+                        crate::objects::exceptions::string_repr(&self.attrgetter_name(path))
+                            .into_string()
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -3016,10 +3168,17 @@ impl Context {
                 "operator.itemgetter({})",
                 self.format_elements(self.itemgetter_keys(*keys), active)
             ),
-            Value::File(file) if let Some(name) = file.socket_reader_name() => {
-                format!("<_io.BufferedReader name={name}>")
-            }
             Value::Instance { class, .. } => self.default_object_repr(id, *class),
+            Value::Socket { handle: socket, .. } => {
+                use crate::objects::socket::{family, fd, kind, proto};
+                format!(
+                    "<socket object, fd={}, family={}, type={}, proto={}>",
+                    fd(socket),
+                    family(socket),
+                    kind(socket),
+                    proto(socket),
+                )
+            }
             _ => "<object>".to_owned(),
         };
         if recursive.is_some() {
@@ -3027,7 +3186,23 @@ impl Context {
         }
         result
     }
+    pub(super) fn exact_sequence_item(&self, obj: Id, index: &crate::Int) -> Option<Id> {
+        let (Value::List(items) | Value::Tuple(items)) = self.heap.get(obj) else {
+            return None;
+        };
+        items.get(usize::try_from(index.as_small()?).ok()?).copied()
+    }
+
     pub(super) fn get_item(&mut self, obj: Id, key: Id) -> Result<Id> {
+        if let Value::Int(index) = self.heap.get(key)
+            && let Some(item) = self.exact_sequence_item(obj, index)
+        {
+            return Ok(item);
+        }
+        #[cfg(target_os = "linux")]
+        if matches!(self.heap.get(obj), Value::Mmap { .. }) {
+            return super::stdlib::mmap::get_item(self, obj, key);
+        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             return self.memoryview_get(obj, key);
         }
@@ -3079,10 +3254,10 @@ impl Context {
 
     /// Read a native sequence directly once Python's subscription slots have been resolved.
     pub(super) fn sequence_subscript(&mut self, obj: Id, key: Id) -> Result<Id> {
-        let storage = self.scalar_value(obj);
         if let Value::Slice(parts) = *self.heap.get(key) {
             return self.slice(obj, parts);
         }
+        let storage = self.scalar_value(obj);
         let kind = match self.heap.get(storage) {
             Value::List(_) => "list",
             Value::Tuple(_) | Value::NamedTuple { .. } => "tuple",
@@ -3157,14 +3332,19 @@ impl Context {
                 let point = points[position(points.len())?];
                 self.text_codepoints(vec![point])
             }
+            Value::Str(s) if self.heap.is_ascii_str(storage) => {
+                let character = char::from(s.as_bytes()[position(s.len())?]);
+                self.text(character.to_string())
+            }
             Value::Str(s) => {
-                let index = if (0..s.chars().size_hint().0 as i128).contains(&offset) {
-                    offset as usize
+                let index = isize::try_from(offset).map_err(|_| bounds_error())?;
+                let character = if index < 0 {
+                    s.chars().nth_back(index.unsigned_abs() - 1)
                 } else {
-                    position(s.chars().count())?
-                };
-                let c = s.chars().nth(index).unwrap();
-                self.text(c.to_string())
+                    s.chars().nth(index as usize)
+                }
+                .ok_or_else(bounds_error)?;
+                self.text(character.to_string())
             }
             Value::Array(array) => {
                 let item = array.at(position(array.len())?)?;
@@ -3178,9 +3358,8 @@ impl Context {
     /// Look up a builtin mapping key before dispatching the original object's missing hook.
     pub(super) fn dictionary_item(&mut self, object: Id, key: Id) -> Result<Id> {
         let storage = self.dict_storage(object).expect("dictionary");
-        let (_, index) = self.find_dictionary_key(storage, key, None)?;
-        if let Some(index) = index {
-            return Ok(self.dict_entries(storage).expect("dictionary")[index].1);
+        if let Some(value) = self.dictionary_value(storage, key)? {
+            return Ok(value);
         }
         if let Some(hook) = self.bound_slot(object, "__missing__")? {
             return self.call(hook, vec![key], Vec::new());
@@ -3252,9 +3431,13 @@ impl Context {
     }
 
     pub(super) fn put_item(&mut self, obj: Id, key: Id, val: Id) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        if matches!(self.heap.get(obj), Value::Mmap { .. }) {
+            return super::stdlib::mmap::put_item(self, obj, key, val);
+        }
         if matches!(self.heap.get(obj), Value::MemoryView { .. }) {
             if let Some(window) = self.raw_read_window(obj) {
-                self.window_bytes(window)?;
+                window.checked_range(self.owner_byte_len(window.backing)?)?;
                 // An index or value conversion can try to resize the unpinned backing.
                 return self
                     .with_buffer_export(window.backing, |ctx| ctx.memoryview_set(obj, key, val));
@@ -3323,7 +3506,14 @@ impl Context {
     }
     pub(super) fn contains(&mut self, item: Id, container: Id) -> Result<bool> {
         let container = self.mapping_proxy_target(container);
-        if let Some(hook) = self.bound_slot(container, "__contains__")? {
+        let hook = match self.bound_slot(container, "__contains__") {
+            Ok(hook) => hook,
+            Err(error) if self.is_attribute_error(&error) => {
+                return self.iter_contains(item, container);
+            }
+            Err(error) => return Err(error),
+        };
+        if let Some(hook) = hook {
             if hook == NONE {
                 return Err(Error::new(
                     "TypeError",
@@ -3332,6 +3522,9 @@ impl Context {
             }
             let result = self.call(hook, vec![item], Vec::new())?;
             return self.truth(result);
+        }
+        if self.enum_values(container).is_some() && self.has_base(container, "enum.Flag") {
+            return self.flag_contains(container, item);
         }
         if let Value::Context(bindings) = self.heap.get(container) {
             self.context_key(item)?;
@@ -3401,6 +3594,10 @@ impl Context {
         ) {
             return Ok(self.find_dictionary_key(container, item, None)?.1.is_some());
         }
+        self.iter_contains(item, container)
+    }
+
+    fn iter_contains(&mut self, item: Id, container: Id) -> Result<bool> {
         let iterator = self.iterator(container).map_err(|error| {
             let ty = self.builtin("TypeError");
             if self.raised_error_matches(&error, ty) {
@@ -3416,22 +3613,76 @@ impl Context {
             }
         })?;
         self.heap.keep(iterator);
+        self.contains_next(item, |ctx| ctx.next_item(iterator))
+    }
+
+    /// Compare candidates in order and release rich-comparison temporaries between calls.
+    pub(super) fn contains_next(
+        &mut self,
+        item: Id,
+        mut next: impl FnMut(&mut Self) -> Result<Option<Id>>,
+    ) -> Result<bool> {
         let mark = self.heap.temporary_mark();
-        while let Some(value) = self.next_item(iterator)? {
-            if value == item {
-                return Ok(true);
-            }
-            // Equality can resize the source and collect a removed candidate.
-            self.heap.keep(value);
-            let equal = self.binary("==", value, item)?;
-            let matched = self.truth(equal)?;
-            self.heap.release_temporaries_since(mark);
-            if matched {
+        while let Some(value) = next(self)? {
+            if self.sequence_item_matches(value, item, mark)? {
                 return Ok(true);
             }
         }
         Ok(false)
     }
+    /// Keep each candidate alive through user equality and truth, then release comparison temporaries.
+    pub(super) fn sequence_item_matches(
+        &mut self,
+        value: Id,
+        item: Id,
+        mark: usize,
+    ) -> Result<bool> {
+        if value == item {
+            return Ok(true);
+        }
+        self.heap.keep(value);
+        let result = self
+            .binary("==", value, item)
+            .and_then(|equal| self.truth(equal));
+        self.heap.release_temporaries_since(mark);
+        result
+    }
+
+    /// Read an ordinary sequence slice directly when its bounds need no Python callbacks.
+    pub(super) fn get_slice(
+        &mut self,
+        receiver: Id,
+        start: Id,
+        stop: Id,
+        slot: Option<usize>,
+    ) -> Result<Id> {
+        let parts = [start, stop, NONE];
+        if matches!(
+            self.heap.get(receiver),
+            Value::Str(_)
+                | Value::SurrogateStr(_)
+                | Value::Bytes(_)
+                | Value::Tuple(_)
+                | Value::List(_)
+        ) && [start, stop].iter().all(|&id| {
+            matches!(
+                self.heap.get(id),
+                Value::None | Value::Int(_) | Value::Bool(_)
+            )
+        }) {
+            return self.slice(receiver, parts);
+        }
+        let key = if let Some(slot) = slot {
+            self.heap
+                .cached_constant(super::value::ConstantSlot::Linked(slot), |heap| {
+                    Ok(heap.alloc(Value::Slice(parts)))
+                })?
+        } else {
+            self.alloc(Value::Slice(parts))
+        };
+        self.get_item(receiver, key)
+    }
+
     fn slice(&mut self, receiver: Id, parts: [Id; 3]) -> Result<Id> {
         let obj = self.scalar_value(receiver);
         if let Value::Range(range) = self.heap.get(obj) {
@@ -3455,19 +3706,22 @@ impl Context {
         }
         let bounds = super::slice::sequence_components(self, parts)?;
         let len = match self.heap.get(obj) {
-            Value::Str(text) => match bounds {
-                // A forward slice with nonnegative bounds only needs to know that
-                // its stop is in range. The iterator's lower bound proves that
-                // for short prefixes without counting the rest of the string.
-                [start, Some(stop), step]
-                    if start.unwrap_or(0) >= 0
-                        && step.unwrap_or(1) > 0
-                        && (0..=text.chars().size_hint().0 as i64).contains(&stop) =>
-                {
-                    stop as usize
+            Value::Str(text) if self.heap.is_ascii_str(obj) => text.len(),
+            Value::Str(text) => {
+                let lower = text.chars().size_hint().0;
+                // Only a stop strictly below this bound proves a proper prefix.
+                // At equality the slice could contain the entire string.
+                match bounds {
+                    [start, Some(stop), step]
+                        if start.unwrap_or(0) >= 0
+                            && step.unwrap_or(1) > 0
+                            && (0..lower as i64).contains(&stop) =>
+                    {
+                        lower
+                    }
+                    _ => text.chars().count(),
                 }
-                _ => text.chars().count(),
-            },
+            }
             Value::SurrogateStr(points) => points.len(),
             Value::Array(array) => array.len(),
             Value::Bytes(data) | Value::ByteArray(data) => data.len(),
@@ -3477,16 +3731,17 @@ impl Context {
             _ => unreachable!("validated sequence"),
         };
         let [start, end, step] = super::slice::normalize(bounds, len as i64);
-        let distance = if step > 0 {
-            end.saturating_sub(start)
-        } else {
-            start.saturating_sub(end)
-        };
-        let count = (distance.max(0) as u64).div_ceil(step.unsigned_abs()) as usize;
+        let count = slice_count(start, end, step);
         let positions = slice_positions(start, end, step);
+        let full_forward = start == 0 && step == 1 && count == len;
         let result = match self.heap.get(obj) {
+            Value::Str(_) | Value::SurrogateStr(_) | Value::Tuple(_)
+                if receiver == obj && full_forward =>
+            {
+                return Ok(obj);
+            }
             Value::SurrogateStr(points) => {
-                return Ok(self.text_codepoints(sliced_values(points, positions, count)?));
+                Value::from_codepoints(sliced_values(points, positions, count)?)
             }
             Value::Str(text) => {
                 let stride = usize::try_from(step.unsigned_abs()).unwrap_or(usize::MAX);
@@ -3504,13 +3759,16 @@ impl Context {
                     let skip = (len as i64 - 1 - start) as usize;
                     sliced_text(text.chars().rev().skip(skip), stride, count)?
                 };
-                Value::Str(value)
+                Value::Str(value.into())
             }
             Value::Bytes(data) if step == 1 => {
                 if receiver == obj && count == len {
                     return Ok(obj);
                 }
-                let bytes = sliced_values(data, positions, count)?;
+                let start = start as usize;
+                let mut bytes = Vec::new();
+                bytes.try_reserve_exact(count).map_err(slice_memory_error)?;
+                bytes.extend_from_slice(&data[start..start + count]);
                 return Ok(self.heap.bytes_from_data(bytes));
             }
             Value::Bytes(data) => Value::Bytes(sliced_values(data, positions, count)?),
@@ -3522,37 +3780,77 @@ impl Context {
             }
             _ => unreachable!("validated sequence"),
         };
+        // Extended slices and full subclass copies bypass the single-character cache.
+        if count == 1 && (step != 1 || full_forward) && matches!(result, Value::Str(_)) {
+            return self.heap.fresh_string(result);
+        }
         Ok(self.alloc(result))
     }
 
-    /// Materialize the iterable before normalizing against the possibly resized destination.
+    /// Borrow disjoint arrays directly and finish arbitrary iterators before normalizing.
     fn set_list_slice(&mut self, obj: Id, parts: [Id; 3], source: Option<Id>) -> Result<()> {
         let bounds = super::slice::sequence_components(self, parts)?;
-        let replacement = source.map(|source| self.items(source)).transpose()?;
-        let Value::List(target) = self.heap.get_mut(obj) else {
-            unreachable!("list slice receiver")
+        let owned;
+        let (target, replacement, observe_removed) = if let Some(source) = source
+            && source != obj
+            && matches!(self.heap.get(source), Value::List(_) | Value::Tuple(_))
+        {
+            let observe = self.heap.has_weak_values;
+            let (source, Value::List(target)) = self.heap.source_and_target(source, obj).unwrap()
+            else {
+                unreachable!("list slice receiver")
+            };
+            let (Value::List(items) | Value::Tuple(items)) = source else {
+                unreachable!("exact replacement sequence")
+            };
+            (target, Some(items.as_slice()), observe)
+        } else {
+            owned = source
+                .map(|source| {
+                    self.fast_sequence_values(source, "must assign iterable to extended slice")
+                })
+                .transpose()?;
+            let observe = self.heap.has_weak_values;
+            let Value::List(target) = self.heap.get_mut(obj) else {
+                unreachable!("list slice receiver")
+            };
+            (target, owned.as_deref(), observe)
         };
         let [start, end, step] = super::slice::normalize(bounds, target.len() as i64);
         let positions = slice_positions(start, end, step);
-        let count = positions.clone().count();
-        let removed = sliced_values(target, positions.clone(), count)?;
+        let count = slice_count(start, end, step);
+        if step != 1
+            && let Some(values) = replacement
+            && values.len() != count
+        {
+            return Err(Error::new(
+                "ValueError",
+                format!(
+                    "attempt to assign sequence of size {} to extended slice of size {count}",
+                    values.len()
+                ),
+            ));
+        }
+        // The heap only observes displaced weak edges. Most lists can be changed
+        // directly without allocating and traversing a second set of slots.
+        let removed = if observe_removed {
+            sliced_values(target, positions.clone(), count)?
+        } else {
+            Vec::new()
+        };
         if step == 1 {
             let replacement = replacement.unwrap_or_default();
             target
                 .try_reserve(replacement.len().saturating_sub(count))
                 .map_err(slice_memory_error)?;
-            target.splice(start as usize..end.max(start) as usize, replacement);
-        } else if let Some(replacement) = replacement {
-            if replacement.len() != count {
-                return Err(Error::new(
-                    "ValueError",
-                    format!(
-                        "attempt to assign sequence of size {} to extended slice of size {count}",
-                        replacement.len()
-                    ),
-                ));
+            let range = start as usize..end.max(start) as usize;
+            if count == replacement.len() {
+                target[range].copy_from_slice(replacement);
+            } else {
+                target.splice(range, replacement.iter().copied());
             }
-            for (i, value) in positions.zip(replacement) {
+        } else if let Some(replacement) = replacement {
+            for (i, &value) in positions.zip(replacement) {
                 target[i] = value;
             }
         } else {
@@ -3597,8 +3895,7 @@ impl Context {
             // Assigning an empty buffer deletes even the non-contiguous positions.
             remove_slice_positions(target, start, end, step);
         } else {
-            let positions = slice_positions(start, end, step);
-            let count = positions.clone().count();
+            let count = slice_count(start, end, step);
             if count != data.len() {
                 return Err(Error::new(
                     "ValueError",
@@ -3608,7 +3905,7 @@ impl Context {
                     ),
                 ));
             }
-            for (i, byte) in positions.zip(data) {
+            for (i, byte) in slice_positions(start, end, step).zip(data) {
                 target[i] = byte;
             }
         }
@@ -4244,6 +4541,23 @@ impl Context {
             .is_some_and(|slot| self.builtins.get(builtin_add) != Some(&slot))
     }
 
+    /// Concatenate a string receiver directly, with no reflected operation on the other operand.
+    pub(super) fn concat_str(&mut self, left: Id, right: Id) -> Result<Id> {
+        if self.string_storage(right).is_none() {
+            let name = self.type_name(right);
+            let name = &name[..name.floor_char_boundary(200)];
+            return Err(Error::new(
+                "TypeError",
+                format!("can only concatenate str (not \"{name}\") to str"),
+            ));
+        }
+        match (self.heap.get(left), self.heap.get(right)) {
+            (Value::Str(s), Value::Str(_) | Value::SurrogateStr(_)) if s.is_empty() => Ok(right),
+            (Value::Str(_) | Value::SurrogateStr(_), Value::Str(s)) if s.is_empty() => Ok(left),
+            _ => self.concat_strings(left, right),
+        }
+    }
+
     /// Concatenate the two reference arrays without invoking either operand's iterator.
     pub(super) fn concat_list(&mut self, storage: Id, other: Id) -> Result<Id> {
         let Value::List(left) = self.heap.get(storage) else {
@@ -4433,7 +4747,41 @@ impl Context {
             })
     }
 
+    fn unsupported_binary(&self, op: &str, a: Id, b: Id, inplace: bool) -> Error {
+        Error::new(
+            "TypeError",
+            format!(
+                "unsupported operand type(s) for {op}{}: '{}' and '{}'",
+                if inplace { "=" } else { "" },
+                self.type_name(a),
+                self.type_name(b)
+            ),
+        )
+    }
+
     fn binary_operation(&mut self, op: &str, a: Id, b: Id, inplace: bool) -> Result<Id> {
+        match op {
+            "is" => return Ok(builtins::boolean(a == b)),
+            "is not" => return Ok(builtins::boolean(a != b)),
+            _ => {}
+        }
+        if let (Value::Int(left), Value::Int(right)) = (self.heap.get(a), self.heap.get(b)) {
+            if matches!(op, "==" | "!=") {
+                return Ok(builtins::boolean(left.cmp(right).is_eq() == (op == "==")));
+            }
+            if let Some(code) = integer_binary_code(op) {
+                let result = crate::integer_binary(left, right, code)?;
+                return Ok(self.alloc(Value::Int(result)));
+            }
+        }
+        if matches!(a, FALSE | TRUE) && matches!(b, FALSE | TRUE) {
+            match op {
+                "&" => return Ok(builtins::boolean(a == TRUE && b == TRUE)),
+                "|" => return Ok(builtins::boolean(a == TRUE || b == TRUE)),
+                "^" => return Ok(builtins::boolean(a != b)),
+                _ => {}
+            }
+        }
         if !inplace && op == "|" {
             let weak_proxy = |id| matches!(self.heap.get(id), Value::Weak(wr) if wr.kind != weakref::Kind::Reference);
             if matches!(self.heap.get(a), Value::MappingProxy(_))
@@ -4443,7 +4791,7 @@ impl Context {
                 return self.with_proxy_operands(a, b, |ctx| ctx.mapping_proxy_union(a, b));
             }
         }
-        if self.heap.has_weak_values && !matches!(op, "is" | "is not") {
+        if self.heap.has_weak_values {
             let left = self.weak_proxy_target(a)?;
             let right = self.weak_proxy_target(b)?;
             if left != a || right != b {
@@ -4460,7 +4808,7 @@ impl Context {
         {
             return super::union::make(self, &[a, b]);
         }
-        if let Some(result) = self.binary_special(op, a, b)? {
+        if let Some(result) = self.dispatch_binary_slots(op, a, b, inplace)? {
             return Ok(result);
         }
         if inplace
@@ -4575,8 +4923,6 @@ impl Context {
                     && !matches!(self.heap.get(a), Value::Complex(z) if z.real.is_nan() || z.imag.is_nan());
                 return Ok(truth(equal == (op == "==")));
             }
-            "is" => return Ok(truth(a == b)),
-            "is not" => return Ok(truth(a != b)),
             "in" => return Ok(truth(self.contains(a, b)?)),
             "not in" => return Ok(truth(!self.contains(a, b)?)),
             "<" | "<=" | ">" | ">=" => return self.order(op, a, b),
@@ -4584,21 +4930,18 @@ impl Context {
                 return self.concat_template(a, b);
             }
             "+" if self.string_storage(a).is_some() => {
-                let message = if self.overrides_add(a, "str.__add__") {
-                    format!(
-                        "unsupported operand type(s) for +{}: '{}' and '{}'",
-                        if inplace { "=" } else { "" },
-                        self.type_name(a),
-                        self.type_name(b)
-                    )
-                } else if self.string_storage(b).is_some() {
-                    return self.concat_strings(a, b);
-                } else {
-                    let name = self.type_name(b);
-                    let name = &name[..name.floor_char_boundary(200)];
-                    format!("can only concatenate str (not \"{name}\") to str")
-                };
-                return Err(Error::new("TypeError", message));
+                if self.overrides_add(a, "str.__add__") {
+                    return Err(Error::new(
+                        "TypeError",
+                        format!(
+                            "unsupported operand type(s) for +{}: '{}' and '{}'",
+                            if inplace { "=" } else { "" },
+                            self.type_name(a),
+                            self.type_name(b)
+                        ),
+                    ));
+                }
+                return self.concat_str(a, b);
             }
             "+" if self.builtin_slot_accepts(a, "tuple") => {
                 if self.overrides_add(a, "tuple.__add__") {
@@ -4732,102 +5075,87 @@ impl Context {
             && (matches!(self.heap.get(left), Value::Complex(_))
                 || matches!(self.heap.get(right), Value::Complex(_)))
         {
-            return Err(Error::new(
-                "TypeError",
-                format!(
-                    "unsupported operand type(s) for {op}{}: '{}' and '{}'",
-                    if inplace { "=" } else { "" },
-                    self.type_name(a),
-                    self.type_name(b)
-                ),
-            ));
+            return Err(self.unsupported_binary(op, a, b, inplace));
         }
-        if matches!(self.heap.get(left), Value::Float(_))
-            || matches!(self.heap.get(right), Value::Float(_))
+        let float_operand = matches!(self.heap.get(left), Value::Float(_))
+            || matches!(self.heap.get(right), Value::Float(_));
+        // After a float subtype declines division, its underlying value cannot retry it.
+        if float_operand
+            && (op != "/" || (a == left && b == right))
+            && let (Some(x), Some(y)) = (self.real_component(left)?, self.real_component(right)?)
         {
-            let number = |value| -> Result<Option<f64>> {
-                match self.heap.get(value) {
-                    Value::Float(number) => Ok(Some(*number)),
-                    Value::Int(_) | Value::Bool(_) => {
-                        Ok(Some(crate::floats::int_to_float(&self.as_int(value)?)?))
-                    }
-                    _ => Ok(None),
-                }
-            };
-            if let (Some(x), Some(y)) = (number(left)?, number(right)?) {
-                let result = match op {
-                    "+" => Some(x + y),
-                    "-" => Some(x - y),
-                    "*" => Some(x * y),
-                    "**" => {
-                        if y == 0.0 {
-                            Some(1.0)
-                        } else if x.is_nan() {
-                            Some(x)
-                        } else if y.is_nan() {
-                            Some(if x == 1.0 { 1.0 } else { y })
-                        } else if y.is_infinite() {
-                            let magnitude = x.abs();
-                            Some(if magnitude == 1.0 {
-                                1.0
-                            } else if (y > 0.0) == (magnitude > 1.0) {
-                                f64::INFINITY
+            let result = match op {
+                "+" => Some(x + y),
+                "-" => Some(x - y),
+                "*" => Some(x * y),
+                "**" => {
+                    if y == 0.0 {
+                        Some(1.0)
+                    } else if x.is_nan() {
+                        Some(x)
+                    } else if y.is_nan() {
+                        Some(if x == 1.0 { 1.0 } else { y })
+                    } else if y.is_infinite() {
+                        let magnitude = x.abs();
+                        Some(if magnitude == 1.0 {
+                            1.0
+                        } else if (y > 0.0) == (magnitude > 1.0) {
+                            f64::INFINITY
+                        } else {
+                            0.0
+                        })
+                    } else {
+                        let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
+                        if x.is_infinite() {
+                            Some(if y > 0.0 {
+                                if odd { x } else { x.abs() }
+                            } else if odd {
+                                0.0_f64.copysign(x)
                             } else {
                                 0.0
                             })
-                        } else {
-                            let odd = y.fract() == 0.0 && (y % 2.0).abs() == 1.0;
-                            if x.is_infinite() {
-                                Some(if y > 0.0 {
-                                    if odd { x } else { x.abs() }
-                                } else if odd {
-                                    0.0_f64.copysign(x)
-                                } else {
-                                    0.0
-                                })
-                            } else if x == 0.0 {
-                                if y < 0.0 {
-                                    return Err(Error::new(
-                                        "ZeroDivisionError",
-                                        "zero to a negative power",
-                                    ));
-                                }
-                                Some(if odd { x } else { 0.0 })
-                            } else if x < 0.0 && y.fract() != 0.0 {
-                                let base = super::complex::Complex::from(x);
-                                return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
-                            } else {
-                                let magnitude = x.abs().powf(y);
-                                if magnitude.is_infinite() {
-                                    return Err(Error::new(
-                                        "OverflowError",
-                                        "(34, 'Numerical result out of range')",
-                                    ));
-                                }
-                                Some(if x < 0.0 && odd {
-                                    -magnitude
-                                } else {
-                                    magnitude
-                                })
+                        } else if x == 0.0 {
+                            if y < 0.0 {
+                                return Err(Error::new(
+                                    "ZeroDivisionError",
+                                    "zero to a negative power",
+                                ));
                             }
+                            Some(if odd { x } else { 0.0 })
+                        } else if x < 0.0 && y.fract() != 0.0 {
+                            let base = super::complex::Complex::from(x);
+                            return Ok(self.alloc(Value::Complex(base.power(y.into())?)));
+                        } else {
+                            let magnitude = x.abs().powf(y);
+                            if magnitude.is_infinite() {
+                                return Err(Error::new(
+                                    "OverflowError",
+                                    "(34, 'Numerical result out of range')",
+                                ));
+                            }
+                            Some(if x < 0.0 && odd {
+                                -magnitude
+                            } else {
+                                magnitude
+                            })
                         }
                     }
-                    "/" | "//" | "%" => {
-                        if y == 0.0 {
-                            return Err(Error::new("ZeroDivisionError", "division by zero"));
-                        }
-                        let operation = match op {
-                            "/" => 0,
-                            "//" => 1,
-                            _ => 2,
-                        };
-                        Some(crate::floats::imre_float_divide(x, y, operation))
-                    }
-                    _ => None,
-                };
-                if let Some(result) = result {
-                    return Ok(self.alloc(Value::Float(result)));
                 }
+                "/" | "//" | "%" => {
+                    if y == 0.0 {
+                        return Err(Error::new("ZeroDivisionError", "division by zero"));
+                    }
+                    let operation = match op {
+                        "/" => 0,
+                        "//" => 1,
+                        _ => 2,
+                    };
+                    Some(crate::floats::imre_float_divide(x, y, operation))
+                }
+                _ => None,
+            };
+            if let Some(result) = result {
+                return Ok(self.alloc(Value::Float(result)));
             }
         }
         if op == "%"
@@ -4845,17 +5173,26 @@ impl Context {
                 ),
             ));
         }
-        if op == "**"
+        if matches!(op, "+" | "**" | "/")
             && [left, right]
                 .into_iter()
                 .any(|id| !matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
         {
+            let operator = match (op, inplace) {
+                ("+", true) => "+=",
+                ("+", false) => "+",
+                ("/", true) => "/=",
+                ("/", false) => "/",
+                _ => "** or pow()",
+            };
+            let left = stdlib::diagnostic_type_name(self, a);
+            let right = stdlib::diagnostic_type_name(self, b);
             return Err(Error::new(
                 "TypeError",
                 format!(
-                    "unsupported operand type(s) for ** or pow(): '{}' and '{}'",
-                    self.type_name(a),
-                    self.type_name(b)
+                    "unsupported operand type(s) for {operator}: '{}' and '{}'",
+                    &left[..left.floor_char_boundary(100)],
+                    &right[..right.floor_char_boundary(100)]
                 ),
             ));
         }
@@ -4870,24 +5207,8 @@ impl Context {
             }
             crate::integer_power::power(&x, &y)?
         } else {
-            let code = match op {
-                "+" => 0,
-                "-" => 1,
-                "*" => 2,
-                "//" => 3,
-                "%" => 4,
-                "&" => 5,
-                "|" => 6,
-                "^" => 7,
-                "<<" => 8,
-                ">>" => 9,
-                _ => {
-                    return Err(Error::new(
-                        "TypeError",
-                        format!("unsupported operator {op}"),
-                    ));
-                }
-            };
+            let code = integer_binary_code(op)
+                .ok_or_else(|| Error::new("TypeError", format!("unsupported operator {op}")))?;
             crate::integer_binary(&x, &y, code)?
         };
         let class = if matches!(op, "&" | "|" | "^") {
@@ -4897,6 +5218,39 @@ impl Context {
         };
         self.flag_or_integer(class, result)
     }
+}
+
+/// Map an integer operator to the operation implemented by the integer runtime.
+pub(super) fn integer_binary_code(op: &str) -> Option<u32> {
+    Some(match op {
+        "+" => 0,
+        "-" => 1,
+        "*" => 2,
+        "//" => 3,
+        "%" => 4,
+        "&" => 5,
+        "|" => 6,
+        "^" => 7,
+        "<<" => 8,
+        ">>" => 9,
+        _ => return None,
+    })
+}
+
+// These operations implement both integer slots through integer_binary.
+const INHERITED_INTEGER_OPS: [&str; 4] = ["//", "%", "<<", ">>"];
+
+/// Match a numeric wrapper to its operation and operand direction.
+pub(super) fn numeric_binary_slot(owner: &str, name: &str) -> Option<(&'static str, bool)> {
+    let operations: &[&str] = match owner {
+        "int" => &INHERITED_INTEGER_OPS,
+        "complex" => &["*", "/", "**"],
+        _ => return None,
+    };
+    operations.iter().find_map(|&op| {
+        let (forward, reflected, _) = binary_slots(op)?;
+        (name == forward || name == reflected).then_some((op, name == reflected))
+    })
 }
 
 /// Return the comparison performed by a rich comparison slot.
@@ -4959,7 +5313,28 @@ impl Context {
             .is_some_and(|slot| Some(&slot) != self.builtins.get("object.__ne__"))
     }
 
-    fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+    pub(super) fn operator_slot(&mut self, obj: Id, name: &str, other: Id) -> Result<Option<Id>> {
+        self.call_binary_operator(obj, name, other, false)
+    }
+
+    fn call_binary_operator(
+        &mut self,
+        obj: Id,
+        name: &str,
+        other: Id,
+        inplace: bool,
+    ) -> Result<Option<Id>> {
+        // Rich comparison calls a native wrapper with an explicit receiver. In
+        // particular, an alias on a foreign class raises the wrapper's call error.
+        if comparison_op(name).is_some()
+            && let Some(slot) = self.slot(obj, name)
+            && let Value::Native(symbol) = self.heap.get(slot)
+            && let Some(("int" | "float", method)) = symbol.split_once('.')
+            && comparison_op(method).is_some()
+        {
+            let result = self.call(slot, vec![obj, other], vec![])?;
+            return Ok((result != value::NOT_IMPLEMENTED).then_some(result));
+        }
         if let Value::KeyWrapper { comparator, object } = *self.heap.get(obj) {
             return stdlib::functools::key_comparison(self, name, comparator, object, other);
         }
@@ -4989,6 +5364,7 @@ impl Context {
         // Sequence concatenation runs after the right operand's reflected numeric slot.
         if name == "__add__" {
             let native = match self.heap.get(self.scalar_value(obj)) {
+                Value::Str(_) | Value::SurrogateStr(_) => Some("str.__add__"),
                 Value::List(_) => Some("list.__add__"),
                 Value::Deque(_) => Some("collections.deque.__add__"),
                 _ => None,
@@ -5004,7 +5380,12 @@ impl Context {
             (
                 "__mul__" | "__rmul__" | "__truediv__" | "__rtruediv__" | "__pow__" | "__rpow__",
                 Value::Complex(_)
-            ) | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
+            ) | ("__truediv__" | "__rtruediv__", Value::Float(_))
+                | (
+                    "__mod__" | "__rmod__",
+                    Value::Str(_) | Value::SurrogateStr(_)
+                )
+                | ("__lt__" | "__le__" | "__gt__" | "__ge__", Value::Deque(_))
                 | ("__xor__" | "__rxor__", Value::Set { .. })
                 | (
                     "__or__" | "__ror__",
@@ -5039,9 +5420,23 @@ impl Context {
         {
             Some(self.lookup_attr(obj, name)?)
         } else {
-            self.bound_slot(obj, name)?
+            match self.bound_slot(obj, name) {
+                Err(error) if !inplace && self.is_attribute_error(&error) => return Ok(None),
+                result => result?,
+            }
         };
         let Some(method) = method else {
+            // An inherited integer addition accepts any integer storage, including bool.
+            if matches!(name, "__add__" | "__radd__") {
+                let (left, right) = (self.scalar_value(obj), self.scalar_value(other));
+                if [left, right]
+                    .iter()
+                    .all(|&id| matches!(self.heap.get(id), Value::Int(_) | Value::Bool(_)))
+                {
+                    let sum = self.as_int(left)?.add(&self.as_int(right)?);
+                    return Ok(Some(self.heap.alloc(Value::Int(sum))));
+                }
+            }
             let union = match name {
                 "__or__" => Some([obj, other]),
                 "__ror__" => Some([other, obj]),
@@ -5065,26 +5460,6 @@ impl Context {
                     .map(Some);
             }
 
-            // A float subtype inherits float's comparison slots independently. In particular,
-            // float.__ne__ need not call an overridden __eq__, and NaN is unequal to itself.
-            if matches!(name, "__eq__" | "__ne__")
-                && let Value::Instance {
-                    scalar: Some(scalar),
-                    ..
-                } = self.heap.get(obj)
-                && let Value::Float(number) = self.heap.get(*scalar)
-            {
-                let other = self.scalar_value(other);
-                let equal = match self.heap.get(other) {
-                    Value::Float(right) => number == right,
-                    Value::Int(_) | Value::Bool(_) => {
-                        crate::floats::compare(&self.as_int(other)?, *number) == 0
-                    }
-                    _ => return Ok(None),
-                };
-                return Ok(Some(builtins::boolean(equal == (name == "__eq__"))));
-            }
-
             if name == "__ne__"
                 && let Some(equal) = self.operator_slot(obj, "__eq__", other)?
             {
@@ -5092,6 +5467,18 @@ impl Context {
             }
             return Ok(None);
         };
+        self.call_operator_slot(method, other)
+    }
+
+    pub(super) fn inherited_integer_slot(&mut self, a: Id, b: Id, code: u32) -> Result<Option<Id>> {
+        let (Ok(a), Ok(b)) = (self.borrow_int(a), self.borrow_int(b)) else {
+            return Ok(None);
+        };
+        let result = crate::integer_binary(&a, &b, code)?;
+        Ok(Some(self.alloc(Value::Int(result))))
+    }
+
+    fn call_operator_slot(&mut self, method: Id, other: Id) -> Result<Option<Id>> {
         let result = self.call(method, vec![other], vec![])?;
         Ok((result != value::NOT_IMPLEMENTED).then_some(result))
     }
@@ -5149,8 +5536,9 @@ impl Context {
                 let remainder = self.alloc(Value::Float(remainder));
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             } else if let (Ok(x), Ok(y)) = (self.as_int(a), self.as_int(b)) {
-                let quotient = self.alloc(Value::Int(crate::integer_binary(&x, &y, 3)?));
-                let remainder = self.alloc(Value::Int(crate::integer_binary(&x, &y, 4)?));
+                let (quotient, remainder) = x.divmod(&y)?;
+                let quotient = self.alloc(Value::Int(quotient));
+                let remainder = self.alloc(Value::Int(remainder));
                 return Ok(self.alloc(Value::Tuple(vec![quotient, remainder])));
             }
         }
@@ -5174,6 +5562,30 @@ impl Context {
             self.slot(obj, name)
                 .is_some_and(|slot| !matches!(self.heap.get(slot), Value::Native(_)))
         })
+    }
+
+    /// Order a subtype's reflected integer override against the effective slot on the left.
+    fn integer_reflected_first(
+        &mut self,
+        left: Id,
+        right: Id,
+        forward: &str,
+        reflected: &str,
+    ) -> Result<bool> {
+        if self.numeric_slot_override(right, reflected).is_none() {
+            return Ok(false);
+        }
+        let owner = if self.numeric_slot_override(left, reflected).is_some() {
+            left
+        } else if self.numeric_slot_override(left, forward).is_some() {
+            // Both classes have Python slots. Compare against the inherited int
+            // method, even when another base after int declares the same name.
+            self.builtin("int")
+        } else {
+            // A Python subtype slot precedes the built-in implementation.
+            return Ok(true);
+        };
+        self.reflected_slot_overridden(owner, right, reflected)
     }
 
     /// Compare the attributes on the two classes after applying descriptor binding.
@@ -5200,18 +5612,61 @@ impl Context {
         self.truth(different)
     }
 
+    /// Compare through the native int or float slot, bypassing the receiver’s override.
+    /// Float accepts either real payload. Int declines floats so they can reflect.
+    pub(super) fn real_compare_slot(
+        &mut self,
+        op: &str,
+        receiver: Id,
+        other: Id,
+    ) -> Result<Option<Id>> {
+        let payload = self.scalar_value(other);
+        if other != payload
+            && let (Value::Float(number), Value::Int(integer)) =
+                (self.heap.get(receiver), self.heap.get(payload))
+            && number.is_finite()
+            && (49..=1024).contains(&integer.bits())
+        {
+            // CPython compares equal-width, same-sign magnitudes above 48 bits
+            // as integers. The original int subtype can observe that comparison.
+            let whole = crate::floats::float_to_integer(*number)?;
+            if whole.bits() == integer.bits() && whole.sign() == integer.big().sign() {
+                let op = if number.fract() == 0.0 {
+                    op
+                } else {
+                    match op {
+                        "==" | "!=" => return Ok(Some(builtins::boolean(op == "!="))),
+                        "<" | "<=" if *number > 0.0 => "<",
+                        "<" | "<=" => "<=",
+                        _ if *number > 0.0 => ">=",
+                        _ => ">",
+                    }
+                };
+                let left = self.alloc(Value::Int(crate::Int::new(whole)));
+                let result = self.binary(op, left, other)?;
+                return Ok(Some(builtins::boolean(self.truth(result)?)));
+            }
+        }
+        match (self.heap.get(receiver), self.heap.get(payload)) {
+            (Value::Int(_) | Value::Bool(_) | Value::Float(_), Value::Int(_) | Value::Bool(_))
+            | (Value::Float(_), Value::Float(_)) => self.binary(op, receiver, payload).map(Some),
+            _ => Ok(None),
+        }
+    }
+
     /// Call the first Python or native comparison slot in the receiver's MRO.
     fn builtin_compare_slot(
         &mut self,
         name: &str,
         a: Id,
         b: Id,
-        native_order: bool,
+        native_comparison: bool,
     ) -> Result<Option<Id>> {
-        if native_order {
+        if native_comparison {
             let receiver = self.heap.get(self.scalar_value(a));
             let other = self.heap.get(self.scalar_value(b));
             let compatible = match receiver {
+                Value::Complex(_) => matches!(other, Value::Float(_)),
                 Value::Set { .. } => matches!(other, Value::Set { .. }),
                 Value::Calendar { value, .. } if value.class() != "timezone" => {
                     matches!(other, Value::Calendar { value: right, .. } if value.class() == right.class())
@@ -5221,7 +5676,7 @@ impl Context {
             let class = self.exact_type(a)?;
             let native = self.find_in_mro(class, |base| match self.heap.get(base) {
                 Value::Native(kind)
-                    if matches!(kind.as_str(), "set" | "frozenset")
+                    if matches!(kind.as_str(), "complex" | "set" | "frozenset")
                         || stdlib::datetime::members(kind).is_some() =>
                 {
                     Some(true)
@@ -5234,8 +5689,26 @@ impl Context {
             if !compatible {
                 return Ok(None);
             }
-        } else if self.slot(a, name).is_some() {
+        } else if let Some(slot) = self.slot(a, name) {
+            // A class may bind int.__gt__ as __lt__. The descriptor selects the operation.
+            if let Value::Native(symbol) = self.heap.get(slot)
+                && let Some((kind, member)) = symbol.split_once('.')
+                && matches!(kind, "int" | "float")
+                && let Some(op) = comparison_op(member)
+                && self.builtin_slot_accepts(a, kind)
+            {
+                return self.real_compare_slot(op, self.scalar_value(a), b);
+            }
             return self.operator_slot(a, name, b);
+        } else if matches!(
+            self.heap.get(a),
+            Value::Int(_) | Value::Bool(_) | Value::Float(_)
+        ) {
+            return self.real_compare_slot(
+                comparison_op(name).expect("rich comparison slot"),
+                a,
+                b,
+            );
         }
         let value = match name {
             "__eq__" | "__ne__" => {
@@ -5251,6 +5724,16 @@ impl Context {
     }
 
     pub(super) fn binary_special(&mut self, op: &str, a: Id, b: Id) -> Result<Option<Id>> {
+        self.dispatch_binary_slots(op, a, b, false)
+    }
+
+    fn dispatch_binary_slots(
+        &mut self,
+        op: &str,
+        a: Id,
+        b: Id,
+        assignment: bool,
+    ) -> Result<Option<Id>> {
         // Keep inherited dict comparisons on the iterative container walk, including cycles.
         if op == "=="
             && [a, b].into_iter().all(|value| {
@@ -5402,25 +5885,47 @@ impl Context {
             })
         };
         let (mut ac, mut bc) = (class(a), class(b));
+        let mixed_division = op == "/" && (ac.is_some() || bc.is_some());
         let set_xor = op == "^"
             && [a, b]
                 .into_iter()
                 .any(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Set { .. }));
         let dict_union = op == "|" && [a, b].into_iter().any(|id| self.dict_storage(id).is_some());
-        if set_xor || dict_union || matches!(op, "*" | "/" | "**") {
+        // An exact str has a numeric remainder slot. Order it against Python methods,
+        // but leave pairs of exact builtins on the direct formatting path.
+        let mixed_remainder = op == "%" && (ac.is_some() || bc.is_some());
+        let shift = matches!(op, "<<" | ">>");
+        let integer_slot = integer_binary_code(op).filter(|_| INHERITED_INTEGER_OPS.contains(&op));
+        let mixed_integer_slots = (op == "+" || integer_slot.is_some())
+            && (ac.is_some() || bc.is_some())
+            && [a, b]
+                .into_iter()
+                .all(|id| self.builtin_slot_accepts(id, "int"));
+        if set_xor
+            || dict_union
+            || mixed_remainder
+            || mixed_integer_slots
+            || shift
+            || matches!(op, "*" | "/" | "**")
+        {
             for (value, class) in [(a, &mut ac), (b, &mut bc)] {
                 if matches!(
                     (op, self.heap.get(value)),
                     ("*" | "/" | "**", Value::Complex(_))
+                        | ("%", Value::Str(_) | Value::SurrogateStr(_))
                         | ("^", Value::Set { .. })
                         | ("|", Value::Dict(_) | Value::DefaultDict { .. })
-                ) {
+                ) || ((op == "+" || integer_slot.is_some())
+                    && matches!(self.heap.get(value), Value::Int(_) | Value::Bool(_)))
+                    || (mixed_division && matches!(self.heap.get(value), Value::Float(_)))
+                {
                     *class = Some(self.exact_type(value)?);
                 }
             }
         }
         if ac.is_none()
             && bc.is_none()
+            && !shift
             && !(inplace.is_empty()
                 && [a, b]
                     .iter()
@@ -5428,15 +5933,43 @@ impl Context {
         {
             return Ok(None);
         }
-        let native_order = matches!(op, "<" | "<=" | ">" | ">=")
-            && [a, b]
-                .into_iter()
-                .any(|id| match self.heap.get(self.scalar_value(id)) {
-                    Value::Set { .. } | Value::Deque(_) => true,
-                    Value::Calendar { value, .. } => value.class() != "timezone",
-                    _ => false,
-                });
-        if inplace.is_empty() && (self.same_sequence_family(a, b) || native_order) {
+        let native_comparison = match op {
+            // Complex accepts float equality before an unrelated float subtype can reflect.
+            "==" | "!=" => matches!(
+                (
+                    self.heap.get(self.scalar_value(a)),
+                    self.heap.get(self.scalar_value(b))
+                ),
+                (Value::Complex(_), Value::Float(_)) | (Value::Float(_), Value::Complex(_))
+            ),
+            "<" | "<=" | ">" | ">=" => {
+                [a, b]
+                    .into_iter()
+                    .any(|id| match self.heap.get(self.scalar_value(id)) {
+                        Value::Set { .. } | Value::Deque(_) => true,
+                        Value::Calendar { value, .. } => value.class() != "timezone",
+                        _ => false,
+                    })
+            }
+            _ => false,
+        };
+        let real_pair = inplace.is_empty()
+            && [a, b].into_iter().all(|value| {
+                matches!(
+                    self.heap.get(self.scalar_value(value)),
+                    Value::Int(_) | Value::Bool(_) | Value::Float(_)
+                )
+            });
+        // Once both string equality slots decline, distinct objects compare unequal
+        // even when their underlying spellings are identical.
+        let text_equality = matches!(op, "==" | "!=")
+            && self.string_storage(a).is_some()
+            && self.string_storage(b).is_some();
+        if real_pair
+            || native_comparison
+            || text_equality
+            || (inplace.is_empty() && self.same_sequence_family(a, b))
+        {
             let ac = self.exact_type(a)?;
             let bc = self.exact_type(b)?;
             // The proper subtype's reflected slot has priority, even when it is inherited.
@@ -5446,7 +5979,9 @@ impl Context {
                 [(left, a, b), (right, b, a)]
             };
             for (name, left, right) in slots {
-                if let Some(result) = self.builtin_compare_slot(name, left, right, native_order)? {
+                if let Some(result) =
+                    self.builtin_compare_slot(name, left, right, native_comparison)?
+                {
                     return Ok(Some(result));
                 }
             }
@@ -5456,34 +5991,45 @@ impl Context {
                 _ => Err(self.unsupported_order(op, a, b)),
             };
         }
-        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
-            && let Some(decimal) = [ac, bc]
-                .into_iter()
-                .flatten()
-                .find(|&class| self.is_bundled_decimal(class))
-            && !(matches!(op, "==" | "!=")
-                && [ac, bc]
-                    .into_iter()
-                    .all(|class| class.is_some_and(|class| self.direct_subclass(class, decimal))))
-        {
-            return Err(Error::new(
-                "NotImplementedError",
-                "native Decimal numeric comparisons are unsupported",
-            ));
-        }
         let reflected_first = if let (Some(ac), Some(bc)) = (ac, bc) {
             let complex_pair = matches!(op, "*" | "/" | "**")
                 && [a, b]
                     .into_iter()
                     .all(|id| matches!(self.heap.get(self.scalar_value(id)), Value::Complex(_)));
+            let float_operands = [a, b].map(|id| {
+                mixed_division && matches!(self.heap.get(self.scalar_value(id)), Value::Float(_))
+            });
             let strict_subclass = ac != bc
-                && if set_xor || dict_union || complex_pair {
+                && if set_xor
+                    || dict_union
+                    || complex_pair
+                    || mixed_integer_slots
+                    || float_operands.contains(&true)
+                {
                     self.direct_subclass(bc, ac)
                 } else {
                     self.subclass(bc, ac)
                 };
             strict_subclass
-                && if (dict_union || complex_pair)
+                && if mixed_integer_slots && integer_slot.is_some() {
+                    self.integer_reflected_first(ac, bc, left, right)?
+                } else if float_operands == [true, true] {
+                    // Restoring both original descriptors restores the native division slot.
+                    let float = self.exact_type(self.scalar_value(a))?;
+                    let [left_native, right_native] = [ac, bc].map(|class| {
+                        [left, right].into_iter().all(|name| {
+                            self.numeric_slot_override(class, name)
+                                .is_none_or(|method| {
+                                    self.own_class_attr(float, name) == Some(method)
+                                })
+                        })
+                    });
+                    if left_native || right_native {
+                        left_native != right_native
+                    } else {
+                        self.reflected_slot_overridden(ac, bc, right)?
+                    }
+                } else if (dict_union || complex_pair)
                     && self.has_python_binary_slot(a, left, right)
                     && self.has_python_binary_slot(b, left, right)
                 {
@@ -5494,10 +6040,22 @@ impl Context {
         } else {
             false
         };
-        if reflected_first && let Some(result) = self.operator_slot(b, right, a)? {
+        let slot = |ctx: &mut Self, receiver, name: &str, other| {
+            if let Some(code) = integer_slot
+                && ctx.builtin_slot_accepts(receiver, "int")
+            {
+                if let Some(method) = ctx.bound_numeric_slot(receiver, name)? {
+                    return ctx.call_operator_slot(method, other);
+                }
+                // In either direction the inherited int slot uses the original operand order.
+                return ctx.inherited_integer_slot(a, b, code);
+            }
+            ctx.operator_slot(receiver, name, other)
+        };
+        if reflected_first && let Some(result) = slot(self, b, right, a)? {
             return Ok(Some(result));
         }
-        if let Some(result) = self.operator_slot(a, left, b)? {
+        if let Some(result) = slot(self, a, left, b)? {
             return Ok(Some(result));
         }
         if matches!(op, "==" | "!=")
@@ -5505,10 +6063,52 @@ impl Context {
         {
             self.check_buffer_exporter(a)?;
         }
-        if !reflected_first && (ac != bc || inplace.is_empty()) {
-            return self.operator_slot(b, right, a);
+        if !reflected_first
+            && (ac != bc || inplace.is_empty())
+            && let Some(result) = slot(self, b, right, a)?
+        {
+            return Ok(Some(result));
+        }
+        if mixed_integer_slots || shift {
+            return Err(self.unsupported_binary(op, a, b, assignment));
+        }
+        // Both rich comparison methods declined. Keep the explicit numeric boundary,
+        // but let unrelated operands use the normal identity or ordering fallback.
+        if matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=")
+            && [(ac, b), (bc, a)].into_iter().any(|(class, other)| {
+                class.is_some_and(|class| {
+                    self.is_bundled_decimal(class) && self.decimal_numeric_peer(class, other)
+                })
+            })
+        {
+            return Err(Error::new(
+                "NotImplementedError",
+                "native Decimal numeric comparisons are unsupported",
+            ));
         }
         Ok(None)
+    }
+
+    fn decimal_numeric_peer(&self, decimal: Id, other: Id) -> bool {
+        if matches!(
+            self.heap.get(self.scalar_value(other)),
+            Value::Bool(_) | Value::Int(_) | Value::Float(_) | Value::Complex(_)
+        ) {
+            return true;
+        }
+        let Some(class) = self.heap.get(other).instance_class() else {
+            return false;
+        };
+        if self.is_bundled_decimal(class) || self.direct_subclass(class, decimal) {
+            return true;
+        }
+        if let Some(numbers) = self.dict_named_item(self.modules, "numbers")
+            && let Value::Module { scope, .. } = *self.heap.get(numbers)
+            && let Some(rational) = self.scope_name(scope, "Rational")
+        {
+            return self.instance_of(other, rational);
+        }
+        false
     }
 
     pub(super) fn inplace(&mut self, op: &str, a: Id, b: Id) -> Result<Id> {
@@ -5521,7 +6121,7 @@ impl Context {
             return builtins::call(self, "mappingproxy.__ior__", &[a, b], &[]);
         }
         if let Some((_, _, slot)) = binary_slots(op)
-            && let Some(result) = self.operator_slot(a, slot, b)?
+            && let Some(result) = self.call_binary_operator(a, slot, b, true)?
         {
             return Ok(result);
         }
@@ -5541,10 +6141,11 @@ impl Context {
     }
 
     pub(super) fn finalize_removed_dict_value(&mut self, removed: Id) {
-        if self.heap.tracks_finalizers()
+        let collect = self.heap.tracks_finalizers()
             && self.heap.could_own_finalizer(removed, true)
-            && self.heap.has_unbound_finalizer(NONE)
-        {
+            && self.heap.has_unbound_finalizer(NONE);
+        self.release_list_owner(removed);
+        if collect {
             self.collect_unreachable();
         }
     }

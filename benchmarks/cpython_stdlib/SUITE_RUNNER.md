@@ -1,10 +1,66 @@
-# Running pinned CPython methods in Imre
+# Running pinned CPython tests in Imre
+
+## Run a complete suite with unittest
+
+Start with a matching Imre SDK and source checkout. Stage the repository's
+pinned test files in an empty directory. The staging tool verifies their
+upstream Git blobs, including package data. Run from the checkout root.
+
+```sh
+checkout=$(pwd -P)
+stage=$(mktemp -d)
+python3 benchmarks/cpython_stdlib/full/stage_tests.py "$stage"
+root="$stage/Lib"
+imre=$(realpath /path/to/sdk/imre)
+level=0
+suite=test.test_fnmatch
+env -u IMRE_ENCODED_FLAGS IMREFLAGS="--opt-level $level" IMRE_PYTHON="$imre" \
+    PYTHONPATH="$root" PYTHONDONTWRITEBYTECODE=1 PYTHON_COLORS=0 NO_COLOR=1 \
+    "$imre" run "$checkout/crates/imre-compiler/stdlib/runpy.py" \
+    --module-root "$checkout" --extension-path "$root" --quiet --opt-level "$level" \
+    --include-module unittest.__main__ --include-module "$suite" -- unittest -v "$suite"
+```
+
+Repeat with `level=3`. For base64 set `suite=test.test_base64`. The build
+declares both module names that runpy and unittest will resolve at runtime.
+Arguments after `-- unittest` go to the ordinary unittest CLI, including
+dotted test IDs and selection flags. For `suite=test.test_tomllib`, add these
+build options before `--`. Leave the package as the sole unittest selector.
+
+```sh
+--include-module test.test_tomllib.test_data \
+--include-module test.test_tomllib.test_error \
+--include-module test.test_tomllib.test_misc
+```
+
+This lets the package's original `load_tests` discover the tests and read
+their files. Other packages need their own finite list of dynamically loaded
+modules. Keep the test declarations on the build command. Passing them through
+`IMREFLAGS` also declares them in child compiles and can change the result of
+CPython's `test.support.script_helper` isolation probe. `IMRE_PYTHON` selects
+the actual SDK executable for tests that launch `sys.executable`. A child
+using `-I` can choose the SDK's default native optimization level.
+
+For the default baseline, run the same selector with each executable.
+
+```sh
+PYTHONPATH="$root" "$stock_python" -B -m unittest -v "$suite"
+env -u IMRE_ENCODED_FLAGS IMREFLAGS="--opt-level $level" \
+    PYTHONPATH="$root" "$imre" -B -m unittest -v "$suite"
+```
+
+Set `stock_python` to the pinned CPython 3.14.5. Retain each process exit,
+original IDs and skips. On an SDK with finite module loading, the
+undeclared launch can stop before collection. The compiled runpy entry uses
+program startup. On the tested SDKs its parent lacks `sys.orig_argv` and
+`subprocess._args_from_interpreter_flags()` omits the module launcher's `-B`.
+Check suites that pass interpreter flags to children against the module launch.
+
+## Run native method evidence in both compiler modes
 
 Import `suite_inventory` and `suite_native` from this directory. Use the release's
 test-enabled Python for discovery, shared fixtures and host assertions. Build each
 native entry at both `Toolchain(..., level=0)` and `level=3`.
-
-## Run an existing suite in both compiler modes
 
 [suite_modes.py](suite_modes.py) invokes the selected checkout's own runner
 twice. It passes `--reachable-only` to native builds on the second invocation.

@@ -10,11 +10,21 @@ from pathlib import Path
 
 # Validation also runs under -I; use only the trusted sibling harness directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from comprehensions import BOOTSTRAP, cases, require_result, run, snapshot, write_files
+from comprehensions import BOOTSTRAP, cases, check_programs, require_result, run, snapshot, write_files
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "assignments"
 
 REJECTED = {
+    "boxed_literal_initializer": 'values = {1} ^ {2}\nunits: int = "three"\n',
+    "boxed_alias_initializer": (
+        'values = {1} ^ {2}\ntype Count = int\ntype Units = Count\nunits: Units = "three"\n'
+    ),
+    "boxed_unused_initializer": (
+        "from fractions import Fraction\n"
+        "def active() -> bool:\n    return Fraction(1, 2) < 1\n"
+        'def unused() -> int:\n    units: int = "three"\n    return units\n'
+        "print(active())\n"
+    ),
     "conditional_assignment": "def bad(flag: bool) -> int:\n    value = (saved := 1) if flag else 0\n    return saved\n",
     "short_circuit_and": "def bad(flag: bool) -> int:\n    value = flag and (saved := 1) > 0\n    return saved\n",
     "short_circuit_or": "def bad(flag: bool) -> int:\n    value = flag or (saved := 1) > 0\n    return saved\n",
@@ -50,6 +60,9 @@ REJECTED = {
     "loop_type_change": "def scale(value: int) -> float:\n    while value > 0:\n        value: float = float(value)\n    return float(value)\n",
     "captured_type_change": "def scale(value: int) -> float:\n    def read() -> int:\n        return value\n    value: float = float(value)\n    return float(read())\n",
     "shadowed_class_operand": "def test(bytes: int) -> bool:\n    return isinstance(4, bytes)\n",
+}
+
+CHECKED = {
     "recursive_comprehension": "def recurse() -> list[int]:\n    saved = 0\n    return [(saved := recurse()[0]) for index in range(0)]\n",
 }
 
@@ -95,7 +108,9 @@ def main(
     label: str = "assignment expression",
     description: str | None = __doc__,
     thinlto_build_timeout: int = 60,
+    build_timeouts: dict[str, int] | None = None,
     require_imported: bool = False,
+    checked: dict[str, str | dict[str, str]] | None = None,
     check_rejection: Callable[[str, str], None] | None = None,
 ) -> None:
     """Run a fixture suite using the shared output, filesystem, and failure oracle."""
@@ -124,6 +139,7 @@ def main(
         flags += ["--lto-linker", str(args.lto_linker.absolute())]
     if args.sanitize:
         flags.append("--sanitize")
+    default_timeout = thinlto_build_timeout if args.lto_linker and not args.sanitize else 60
     checks = 0
     with tempfile.TemporaryDirectory(prefix=f"imre-{fixtures.name}-") as directory:
         temporary = Path(directory)
@@ -156,7 +172,7 @@ def main(
                         *flags,
                     ],
                     temporary,
-                    timeout=thinlto_build_timeout if args.lto_linker and not args.sanitize else 60,
+                    timeout=(build_timeouts or {}).get(name, default_timeout),
                 )
                 assert built.returncode == 0 and not built.stderr, (
                     name,
@@ -181,6 +197,8 @@ def main(
                 )
                 binary.unlink()
                 checks += 1
+        if checked:
+            checks += check_programs(compiler, temporary, checked)
         rejected = {name: {"main.py": source} for name, source in rejections.items()}
         rejected.update(imported_rejections)
         for name, files in rejected.items():
@@ -195,11 +213,6 @@ def main(
                 "panicked" not in result.stderr
                 and "AddressSanitizer" not in result.stderr
             ), (name, result.stderr)
-            if "recursion" in name:
-                assert "recursive calls are unsupported" in result.stderr, (
-                    name,
-                    result.stderr,
-                )
             if check_rejection is not None:
                 check_rejection(name, result.stderr)
             checks += 1
@@ -209,4 +222,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    main(checked=CHECKED)

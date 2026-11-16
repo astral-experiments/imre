@@ -156,7 +156,7 @@ impl Checker<'_> {
                 let count = scope.hold(self, checked);
                 let item = |n| {
                     op(
-                        Builtin::ListGet,
+                        Builtin::ListGet(None),
                         element,
                         vec![source.clone(), Expr::integer(n)],
                     )

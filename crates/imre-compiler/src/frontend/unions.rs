@@ -2,17 +2,22 @@
 
 use super::*;
 use crate::ir::{CalendarType, InstanceType};
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 use ty_python_semantic::types::KnownClass;
 
 impl Checker<'_> {
     /// int() on a closed string/integer value preserves the integer or parses the
     /// string. Keep the original value alive and evaluate it only once.
-    pub(super) fn integer_from_text_or_int(&mut self, value: Expr) -> Expr {
+    pub(super) fn integer_from_text_or_int(&mut self, value: Expr, call: &ast::ExprCall) -> Expr {
         let (slot, test, text, integer) = self.protocol_alternatives(value.ty).unwrap();
         debug_assert_eq!((text.ty, integer.ty), (Type::Str, Type::Int));
         let parsed = Expr {
             ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Int, vec![text]),
+            kind: ExprKind::Builtin(
+                Builtin::Int(Some(Box::new(self.call_origin(call)))),
+                vec![text],
+            ),
         };
         Expr {
             ty: Type::Int,
@@ -34,9 +39,6 @@ impl Checker<'_> {
     /// Store a protocol operand once, then provide the test and exact values for
     /// its two possible layouts. The caller assigns the operand to the returned slot.
     pub(super) fn protocol_alternatives(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
-        if self.types.payload(ty).is_none() && self.types.members(ty).is_none() {
-            return None;
-        }
         if self
             .types
             .members(ty)
@@ -44,8 +46,18 @@ impl Checker<'_> {
         {
             return None;
         }
+        self.split_protocol_union(ty)
+    }
+
+    /// Split off one possible layout, keeping the remaining alternatives as a typed union.
+    pub(super) fn split_protocol_union(&mut self, ty: Type) -> Option<(usize, Expr, Expr, Expr)> {
+        let payload = self.types.payload(ty);
+        let members = self.types.members(ty);
+        if payload.is_none() && members.is_none() {
+            return None;
+        }
         let slot = self.hidden(ty);
-        let (test, first, second) = if let Some(payload) = self.types.payload(ty) {
+        let (test, first, second) = if let Some(payload) = payload {
             (
                 Expr {
                     ty: Type::Bool,
@@ -58,24 +70,68 @@ impl Checker<'_> {
                 },
             )
         } else {
-            let members = self.types.members(ty).unwrap();
-            let project = |ty| Expr {
-                ty,
-                kind: ExprKind::Builtin(Builtin::UnionProject, vec![self.local(slot)]),
-            };
-            (
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Builtin(
-                        Builtin::IsInstance(vec![ir::InstanceType::Exact(members[0])]),
-                        vec![self.local(slot)],
-                    ),
-                },
-                project(members[0]),
-                project(members[1]),
-            )
+            let members = members.unwrap();
+            let rest = self.types.union(&members[1..])?;
+            self.protocol_members(&self.local(slot), members[0], rest)
         };
         Some((slot, test, first, second))
+    }
+
+    /// Select the active layout of a rooted union without evaluating its receiver again.
+    fn protocol_members(&self, source: &Expr, first: Type, rest: Type) -> (Expr, Expr, Expr) {
+        // A record stored in the base arm can have any of its concrete layouts.
+        let alternatives = match first {
+            Type::Class(base) => self
+                .classes
+                .concrete_layouts(base)
+                .into_iter()
+                .map(|class| ir::InstanceType::Exact(Type::Class(class)))
+                .collect(),
+            ty => vec![ir::InstanceType::Exact(ty)],
+        };
+        let project = |ty| Expr {
+            ty,
+            kind: ExprKind::Builtin(Builtin::UnionProject, vec![source.clone()]),
+        };
+        (
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(Builtin::IsInstance(alternatives), vec![source.clone()]),
+            },
+            project(first),
+            project(rest),
+        )
+    }
+
+    /// The source and optional index are rooted by the caller. Both arms read the
+    /// same item contract, using the selected container's own bounds and errors.
+    pub(super) fn sequence_read(
+        &self,
+        source: &Expr,
+        item: Type,
+        index: Option<(&Expr, Option<Box<ir::FixedOrigin>>)>,
+    ) -> Expr {
+        let (test, list, tuple) =
+            self.protocol_members(source, self.types.list(item), self.types.var_tuple(item));
+        let operation = |ty, builtin, args| Expr {
+            ty,
+            kind: ExprKind::Builtin(builtin, args),
+        };
+        let (yes, no) = if let Some((index, origin)) = index {
+            (
+                operation(item, Builtin::ListGet(origin), vec![list, index.clone()]),
+                operation(item, Builtin::TupleIndex, vec![tuple, index.clone()]),
+            )
+        } else {
+            (
+                operation(Type::Int, Builtin::Len, vec![list]),
+                operation(Type::Int, Builtin::Len, vec![tuple]),
+            )
+        };
+        Expr {
+            ty: yes.ty,
+            kind: ExprKind::Conditional(Box::new(test), Box::new(yes), Box::new(no)),
+        }
     }
 
     /// Reads a proved member through explicit ownership-preserving projection.
@@ -196,7 +252,7 @@ impl Checker<'_> {
             return Expr {
                 ty,
                 kind: ExprKind::Builtin(
-                    Builtin::Process(ir::ProcessOperation::ExceptionView),
+                    Builtin::process(ir::ProcessOperation::ExceptionView),
                     vec![value],
                 ),
             };
@@ -267,7 +323,7 @@ impl Checker<'_> {
             .map(|value| {
                 let cast = match value.ty {
                     Type::Int => return value,
-                    Type::Bool => Builtin::Int,
+                    Type::Bool => Builtin::Int(None),
                     _ => Builtin::UnionProject,
                 };
                 Expr {
@@ -282,6 +338,9 @@ impl Checker<'_> {
     /// annotations such as list[int] never become runtime class objects.
     fn instance_types(&self, expression: &ast::Expr) -> Result<Vec<InstanceType>, String> {
         use InstanceType::{Deque, Exact, List, Tuple};
+        if matches!(self.resolve(expression), Some(Binding::RegisteredClass(_))) {
+            return Err(self.scoped_builtin_error("isinstance with a Python class", expression));
+        }
         let classinfo = expression
             .as_subscript_expr()
             .map_or(expression, |item| item.value.as_ref());
@@ -290,11 +349,27 @@ impl Checker<'_> {
         {
             return Err(self.object_runtime_export("typing.Sequence", expression));
         }
-        if self.collection_binding(expression) == Some(Binding::Intrinsic(Intrinsic::Number)) {
-            // int includes bool and IntEnum. The typed value representation has no complex.
-            return Ok(vec![Exact(Type::Int), Exact(Type::Float)]);
+        let numeric = self.collection_binding(expression);
+        let number = numeric == Some(Binding::Intrinsic(Intrinsic::Number));
+        if number
+            || numeric
+                == Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                    "numbers.Rational",
+                )))
+        {
+            // Int includes bool and IntEnum; Fraction inherits Rational and Number.
+            let mut types = vec![Exact(Type::Int)];
+            if number {
+                types.push(Exact(Type::Float));
+            }
+            if let Some(fraction) = (0..self.classes.declarations.definitions.len())
+                .find(|&class| self.fraction_class(class))
+            {
+                types.push(Exact(Type::Class(fraction)));
+            }
+            return Ok(types);
         }
-        match self.collection_class_name(expression) {
+        match Self::collection_class_name(numeric) {
             Some("collections.deque") => return Ok(vec![Deque]),
             Some("collections.abc.MutableMapping") => return Ok(vec![InstanceType::Dict]),
             Some("collections.abc.MutableSequence") => return Ok(vec![List, Deque]),
@@ -319,11 +394,13 @@ impl Checker<'_> {
         if self.resolve(expression) == Some(Binding::Intrinsic(Intrinsic::StatResult)) {
             return Ok(vec![InstanceType::Exact(self.types.stat_result())]);
         }
-        match self.resolve(expression) {
-            Some(Binding::Intrinsic(Intrinsic::BytesIo)) => return Ok(vec![Exact(Type::BytesIO)]),
-            Some(Binding::Intrinsic(Intrinsic::StringIo)) => {
-                return Ok(vec![Exact(Type::StringIO)]);
-            }
+        let binding = self.resolve(expression);
+        if let Some(ty) = annotations::fixed_instance_type(binding)
+            && self.graph.session.is_class_object(self.module, expression)
+        {
+            return Ok(vec![Exact(ty)]);
+        }
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::Calendar(CalendarType::Date))) => {
                 return Ok(vec![
                     Exact(Type::Calendar(CalendarType::Date)),
@@ -332,12 +409,6 @@ impl Checker<'_> {
             }
             Some(Binding::Intrinsic(Intrinsic::Calendar(kind))) => {
                 return Ok(vec![Exact(Type::Calendar(kind))]);
-            }
-            Some(Binding::Intrinsic(Intrinsic::ClockTime)) => {
-                return Ok(vec![Exact(Type::ClockTime)]);
-            }
-            Some(Binding::Intrinsic(Intrinsic::Context)) => {
-                return Ok(vec![InstanceType::Exact(Type::Context)]);
             }
             Some(Binding::Intrinsic(Intrinsic::ContextVar)) => {
                 return Ok(vec![InstanceType::ContextVar]);
@@ -410,12 +481,6 @@ impl Checker<'_> {
         }
         if matches!(
             self.resolve(expression),
-            Some(Binding::Intrinsic(Intrinsic::Path))
-        ) {
-            return Ok(vec![InstanceType::Exact(Type::Path)]);
-        }
-        if matches!(
-            self.resolve(expression),
             Some(Binding::Intrinsic(Intrinsic::CompletedProcess))
         ) {
             return Ok(vec![InstanceType::Exact(Type::CompletedProcess(
@@ -446,7 +511,11 @@ impl Checker<'_> {
                 .map(|(id, _)| InstanceType::Exact(records.instance(id)))
                 .collect());
         }
-        if let ast::Expr::Name(name) = expression {
+        if let ast::Expr::Name(name) = expression
+            && !self.is_class_receiver(expression)
+            && !self.comprehension_targets.contains(name.id.as_str())
+            && self.unshadowed_builtin(expression, name.id.as_str())
+        {
             let ty = match name.id.as_str() {
                 "str" => InstanceType::Exact(Type::Str),
                 "type" => InstanceType::Exact(Type::BuiltinClass),
@@ -520,6 +589,14 @@ impl Checker<'_> {
             Err(diagnostic) => {
                 if let Ok(target) = self.expr(classes) {
                     match target.ty {
+                        Type::BuiltinClass if self.has_plain_factory_metaclass(value.ty) => {
+                            let result = self.builtin_subclass_values(
+                                annotations::class_value("type"),
+                                target,
+                                call,
+                            )?;
+                            return Ok(self.evaluated_receiver(Some(value), result));
+                        }
                         Type::Placeholder(ir::PlaceholderKind::Class) => {
                             // Looking up either operand can run Python code.
                             let mut scope = calls::ArgumentScope::default();
@@ -639,6 +716,13 @@ impl Checker<'_> {
         at: &impl Ranged,
     ) -> Result<Expr, String> {
         match (first.ty, second.ty) {
+            (Type::PythonObject, _) | (_, Type::PythonObject) => {
+                self.require_registered_operation(at)?;
+                Ok(Expr {
+                    ty: Type::Bool,
+                    ..Expr::unrepresented()
+                })
+            }
             (Type::BuiltinClass, Type::BuiltinClass) => Ok(Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(Builtin::IsBuiltinSubclass, vec![first, second]),
@@ -755,6 +839,7 @@ impl Checker<'_> {
     /// Evaluating the original condition remains in IR even when its result is known.
     pub(super) fn instance_condition(&self, expression: &Expr) -> Option<bool> {
         match &expression.kind {
+            ExprKind::Bool(value) => Some(*value),
             ExprKind::Builtin(Builtin::IsInstance(classes), args) => {
                 let mut result = None;
                 for member in self.instance_members(args[0].ty) {
@@ -774,27 +859,24 @@ impl Checker<'_> {
                     return None;
                 };
                 match ops.as_slice() {
-                    [Compare::Equal] => Some(left == right),
-                    [Compare::NotEqual] => Some(left != right),
+                    [CmpOp::Eq] => Some(left == right),
+                    [CmpOp::NotEq] => Some(left != right),
                     _ => None,
                 }
             }
-            ExprKind::Not(value) => self.instance_condition(value).map(|value| !value),
+            ExprKind::Unary(UnaryOp::Not, value) => {
+                self.instance_condition(value).map(|value| !value)
+            }
             _ => None,
         }
     }
 
-    /// Recognize exact builtin type comparisons on a local with an erased payload.
+    /// Recognize exact builtin type comparisons on erased values and typed tuples.
     pub(super) fn exact_object_type<'n>(
         &self,
-        compare: &'n ast::ExprCompare,
-    ) -> Option<(&'n ast::Expr, KnownClass, bool)> {
-        let [op @ (ast::CmpOp::Is | ast::CmpOp::IsNot)] = compare.ops.as_ref() else {
-            return None;
-        };
-        let [left, right] = compare.operands.as_ref() else {
-            return None;
-        };
+        left: &'n ast::Expr,
+        right: &'n ast::Expr,
+    ) -> Option<(&'n ast::Expr, KnownClass)> {
         let (call, name) = if let Some(call) = left.as_call_expr() {
             (call, right)
         } else {
@@ -815,19 +897,28 @@ impl Checker<'_> {
         if !call.arguments.keywords.is_empty() || !self.unshadowed_builtin(&call.func, "type") {
             return None;
         }
-        let slot = *self.names.get(value.as_name_expr()?.id.as_str())?;
-        let ty = self
-            .narrowed
-            .get(&slot)
-            .copied()
-            .unwrap_or(self.locals[slot]);
-        (ty == Type::ObjectValue
+        let local_type = value
+            .as_name_expr()
+            .and_then(|name| self.names.get(name.id.as_str()))
+            .map(|slot| {
+                self.narrowed
+                    .get(slot)
+                    .copied()
+                    .unwrap_or(self.locals[*slot])
+            });
+        let exact_tuple = class == KnownClass::Tuple
+            && (matches!(local_type, Some(Type::VarTuple(_)))
+                // Typeshed exposes the native inventory as Sequence[str].
+                || (self.has_static_namespace_root(value)
+                    && self.resolve(value) == Some(Binding::Intrinsic(Intrinsic::SysBuiltinModuleNames)))
+                || self.graph.session.is_string_tuple(self.module, value));
+        ((local_type == Some(Type::ObjectValue) || exact_tuple)
             && self
                 .graph
                 .session
                 .is_known_class(self.module, &call.func, KnownClass::Type)
             && self.graph.session.is_known_class(self.module, name, class))
-        .then_some((value, class, *op == ast::CmpOp::Is))
+        .then_some((value, class))
     }
 
     /// A later walrus write invalidates earlier tests even inside the same and/or.
@@ -837,19 +928,21 @@ impl Checker<'_> {
         test: &ast::Expr,
         truth: bool,
     ) -> HashMap<String, Vec<(Vec<InstanceType>, bool)>> {
+        if let Some((left, op, right)) = self.identity_test(test)
+            && let Some((expr, KnownClass::Str)) = self.exact_object_type(left, right)
+            && let Some(name) = expr.as_name_expr()
+        {
+            return HashMap::from([(
+                name.id.to_string(),
+                vec![(
+                    vec![InstanceType::ExactText],
+                    truth == (op == ast::CmpOp::Is),
+                )],
+            )]);
+        }
         match test {
-            ast::Expr::Compare(compare)
-                if let Some((expr, KnownClass::Str, positive)) =
-                    self.exact_object_type(compare)
-                    && let Some(name) = expr.as_name_expr() =>
-            {
-                HashMap::from([(
-                    name.id.to_string(),
-                    vec![(vec![InstanceType::ExactText], truth == positive)],
-                )])
-            }
             ast::Expr::Call(call)
-                if matches!(&*call.func, ast::Expr::Name(name) if name.id == "isinstance")
+                if self.unshadowed_builtin(&call.func, "isinstance")
                     && call.arguments.args.len() == 2
                     && call.arguments.keywords.is_empty() =>
             {

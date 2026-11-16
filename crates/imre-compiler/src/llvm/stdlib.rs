@@ -89,6 +89,35 @@ impl Emitter<'_, '_> {
                     none()
                 }
             }
+            Builtin::FormatField(_) => {
+                let value = &args[0].value;
+                if args.len() == 1 {
+                    assert_eq!(
+                        value.ty,
+                        Type::Str,
+                        "fixed default format requires an exact string"
+                    );
+                    self.retain(value);
+                    return value.clone();
+                }
+                let spec = &args[1].value;
+                debug_assert_eq!(spec.ty, Type::Str);
+                let format = if value.ty.is_format_scalar() {
+                    "imre_format_scalar"
+                } else {
+                    "imre_format_object"
+                };
+                let kind = representation_kind(value.ty, &self.module.types);
+                let word = self.word(value);
+                Value {
+                    ty: Type::Str,
+                    operand: self.checked_pointer(format!(
+                        "call ptr @{format}(i32 {kind}, i64 {word}, ptr {})",
+                        spec.operand
+                    )),
+                    small_integer: false,
+                }
+            }
             Builtin::StringFormat => {
                 let (template, fields) = args.split_first().unwrap();
                 let (pairs, tail) = fields.as_chunks::<2>();
@@ -188,9 +217,7 @@ impl Emitter<'_, '_> {
                 Type::Float,
                 &[&args[0].value, &args[1].value],
             ),
-            Builtin::Abs if args[0].value.ty == Type::Int => {
-                self.call("int_abs", Type::Int, &[&args[0].value])
-            }
+            Builtin::Abs if args[0].value.ty == Type::Int => self.integer_absolute(&args[0].value),
             Builtin::Abs => self.call("llvm.fabs.f64", Type::Float, &[&args[0].value]),
             _ => unreachable!("only typed stdlib operations enter this dispatch"),
         }
@@ -199,6 +226,22 @@ impl Emitter<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn checked_math_fabs_uses_the_float_intrinsic() {
+        let source = r#"
+from math import fabs
+
+def total(x: float, n: int, flag: bool) -> float:
+    return fabs(x) + fabs(n) + fabs(flag)
+
+print(total(-0.0, -3, True))
+"#;
+        let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        assert_eq!(llvm.matches("call double @llvm.fabs.f64(").count(), 3);
+        assert!(llvm.contains("call double @imre_int_float("));
+        assert!(llvm.contains("uitofp i1"));
+    }
+
     #[test]
     fn float_copysign_uses_the_llvm_intrinsic() {
         let source = "from math import copysign\ndef sign(x: float, y: float) -> float:\n    return copysign(x, y)\nprint(sign(1.0, -0.0))";
@@ -229,13 +272,54 @@ print(f"{abs(-0.125):.2%}")
     }
 
     #[test]
+    fn fixed_format_fields_use_the_source_specification() {
+        use crate::ir::{Builtin, ExprKind, Type, walk_expressions};
+
+        let source = concat!(
+            "def render(text: str, number: float, items: list[int], spec: str) -> str:\n",
+            "    return f'{text}{number:{spec}}{items:{spec}}'\n",
+            "print(render('v', 2.5, [1], ''))",
+        );
+        let graph = crate::modules::SourceGraph::single(source).unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let mut fields = Vec::new();
+        walk_expressions(&module.functions[0].body, &mut |expr| {
+            if let ExprKind::Builtin(Builtin::FormatField(_), args) = &expr.kind {
+                fields.push(args.iter().map(|arg| arg.ty).collect::<Vec<_>>());
+            }
+        });
+        assert_eq!(
+            fields,
+            [
+                vec![Type::Str],
+                vec![Type::Float, Type::Str],
+                vec![Type::Str], // nested {spec} for the float
+                vec![Type::ListInt, Type::Str],
+                vec![Type::Str], // nested {spec} for the list
+            ]
+        );
+    }
+
+    #[test]
+    fn dynamic_and_large_float_precisions_use_native_formatting() {
+        for source in [
+            "print(f'{1.0:.1001f}')",
+            "precision = 2\nprint(f'{1.0:.{precision}f}')",
+        ] {
+            let llvm = crate::compile(source, &crate::CompileOptions::default()).unwrap();
+            assert_eq!(
+                llvm.matches("call ptr @imre_format_scalar(i32 7,").count(),
+                1
+            );
+        }
+    }
+
+    #[test]
     fn sorting_and_formatting_reject_unproved_dynamic_operations() {
         for source in [
             "values = sorted([1.0, 2.0])\nprint(len(values))",
             "values = sorted([1, 2], key=lambda value: float(value))\nprint(len(values))",
             "values = sorted([1, 2], reverse=1)\nprint(len(values))",
-            "print(f'{1.0:.1001f}')",
-            "precision = 2\nprint(f'{1.0:.{precision}f}')",
             "print(','.join([1, 2]))",
             "print('{x}'.format('positional'))",
             "print('{x}'.format(x=[1]))",

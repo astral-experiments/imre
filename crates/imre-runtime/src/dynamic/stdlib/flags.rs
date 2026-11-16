@@ -32,6 +32,7 @@ pub(super) fn current(ctx: &mut Context) -> Id {
     let optimize = ctx.config["optimize"].as_i64().unwrap_or(0);
     let dont_write_bytecode = enabled("dont_write_bytecode");
     let no_user_site = enabled("no_user_site");
+    let no_site = enabled("no_site");
     let warn_default_encoding = enabled("warn_default_encoding");
     let zero = ctx.int(0);
     let values = vec![
@@ -41,7 +42,7 @@ pub(super) fn current(ctx: &mut Context) -> Id {
         ctx.int(optimize),
         ctx.int(i64::from(dont_write_bytecode)),
         ctx.int(i64::from(no_user_site)),
-        zero,
+        ctx.int(i64::from(no_site)),
         ctx.int(i64::from(ignore_environment)),
         zero,
         zero,

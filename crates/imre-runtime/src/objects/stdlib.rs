@@ -264,7 +264,7 @@ unsafe fn key_order(keys: *const (), kind: u32, reverse: bool) -> Option<SmallVe
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_sort_detach(list: *const (), kind: u32) -> *const () {
     if kind == 2 {
-        let Ok(saved) = crate::try_new_list(crate::sorting_empty_ints()) else {
+        let Ok(saved) = crate::try_new_list(crate::SORTING_EMPTY.empty()) else {
             return super::Error::allocation().returning(std::ptr::null());
         };
         // SAFETY: the new owner is private and no callback runs during the swap.
@@ -404,7 +404,7 @@ pub unsafe extern "C" fn imre_list_extend_unhinted(list: *const (), kind: u32) {
         // SAFETY: only an unallocated empty marker is replaced.
         unsafe {
             (&*list.cast::<List>()).0.with_mut(|values| {
-                if crate::is_sorting_empty_ints(values) {
+                if crate::SORTING_EMPTY.is_untouched(values) {
                     *values = Vec::new();
                 }
             })
@@ -440,7 +440,7 @@ pub unsafe extern "C" fn imre_sort_restore(
         // SAFETY: the caller proves distinct handles and no reentrant access.
         unsafe {
             (&*list.cast::<List>()).0.with_mut(|current| {
-                let modified = !crate::is_sorting_empty_ints(current);
+                let modified = !crate::SORTING_EMPTY.is_untouched(current);
                 (&*saved.cast::<List>())
                     .0
                     .with_mut(|saved| std::mem::swap(current, saved));
@@ -549,12 +549,22 @@ unsafe fn apply_order(values: *const (), element_kind: u32, order: &mut [usize])
     }
 }
 
-fn string_buffer(length: Option<usize>) -> Option<Str> {
-    let buffer = length.and_then(|length| Str::try_with_capacity(length).ok());
-    if buffer.is_none() {
-        super::exceptions::sequence_allocation_failed();
+/// Join validated UTF-8 string payloads in their original order.
+pub(crate) fn join_utf8<'a>(
+    separator: &str,
+    content_bytes: Option<usize>,
+    parts: impl ExactSizeIterator<Item = &'a str>,
+) -> Option<Str> {
+    let separators = separator.len().checked_mul(parts.len().saturating_sub(1))?;
+    let length = separators.checked_add(content_bytes?)?;
+    let mut result = Str::try_with_capacity(length).ok()?;
+    for (index, part) in parts.enumerate() {
+        if index != 0 {
+            result.push_str(separator);
+        }
+        result.push_str(part);
     }
-    buffer
+    Some(result)
 }
 
 /// Joins an exact string sequence, retaining a single item without copying it.
@@ -585,23 +595,17 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
                 StrOwner::increment_strong_count(value);
                 return value;
             }
-            let length = separator
-                .len()
-                .checked_mul(values.values.len().saturating_sub(1))
-                .and_then(|separators| {
-                    values.values.iter().try_fold(separators, |length, &word| {
-                        length.checked_add((&*(word as *const Str)).len())
-                    })
-                });
-            let Some(mut result) = string_buffer(length) else {
+            let parts = values
+                .values
+                .iter()
+                .map(|&word| (&*(word as *const Str)).as_str());
+            let content_bytes = parts
+                .clone()
+                .try_fold(0usize, |length, part| length.checked_add(part.len()));
+            let Some(result) = join_utf8(separator, content_bytes, parts) else {
+                super::exceptions::sequence_allocation_failed();
                 return std::ptr::null();
             };
-            for (index, &word) in values.values.iter().enumerate() {
-                if index != 0 {
-                    result.push_str(separator);
-                }
-                result.push_str(&*(word as *const Str));
-            }
             StrOwner::try_new(result).map_or_else(
                 |_| Error::memory_error().returning(std::ptr::null()),
                 StrOwner::into_raw,
@@ -612,20 +616,10 @@ pub unsafe extern "C" fn imre_str_join(separator: *const Str, values: *const Obj
 
 /// Parse a decimal format width or field index using Python's Unicode decimal digits.
 pub(crate) fn format_index(name: &str) -> crate::Result<Option<usize>> {
-    let mut index = 0isize;
-    // A decimal prefix can overflow before a nondigit makes this a named field.
-    for ch in name.chars() {
-        let Some(digit) = crate::integer_text::decimal_digit(ch) else {
-            return Ok(None);
-        };
-        index = index
-            .checked_mul(10)
-            .and_then(|value| value.checked_add(isize::from(digit)))
-            .ok_or_else(|| {
-                Error::new(Kind::ValueError, "Too many decimal digits in format string")
-            })?;
-    }
-    Ok(Some(index as usize))
+    let mut tail = name;
+    let value = crate::format_grammar::decimal(&mut tail)
+        .map_err(|message| Error::new(Kind::ValueError, message))?;
+    Ok(tail.is_empty().then_some(value.unwrap_or(0)))
 }
 
 /// Both keyword-only formatters have an empty tuple of positional arguments.
@@ -832,9 +826,7 @@ unsafe fn replace_string(
 ) -> *const Str {
     // SAFETY: all input strings stay rooted until replacement completes.
     let (text, old, new) = unsafe { (&*value, &*old, &*new) };
-    match replace_text(text, old, new, limit, old == new, |len| {
-        Str::try_with_capacity(len).ok()
-    }) {
+    match replace_text(text, old, new, limit, old == new) {
         Ok(Some(result)) => StrOwner::into_raw(StrOwner::new(result)),
         Ok(None) => {
             // SAFETY: transfer one additional strong count from the original allocation.
@@ -850,14 +842,13 @@ unsafe fn replace_string(
 
 /// Reserve the complete replacement once, counting empty matches at Unicode boundaries.
 /// An unchanged result lets the caller retain its original string.
-pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
-    value: &'a str,
+pub(crate) fn replace_text(
+    value: &str,
     old: &str,
-    new: &'a str,
+    new: &str,
     limit: usize,
     same_pattern: bool,
-    buffer: impl FnOnce(usize) -> Option<T>,
-) -> crate::Result<Option<T>> {
+) -> crate::Result<Option<Str>> {
     let matches = || value.match_indices(old).take(limit);
     if same_pattern || (old.is_empty() && new.is_empty()) {
         return Ok(None);
@@ -867,18 +858,19 @@ pub(crate) fn replace_text<'a, T: Extend<&'a str>>(
         return Ok(None);
     }
     let retained = value.len() - count * old.len();
-    let mut result = new
+    let len = new
         .len()
         .checked_mul(count)
         .and_then(|extra| retained.checked_add(extra))
-        .and_then(buffer)
         .ok_or_else(Error::memory_error)?;
+    let mut result = Str::try_with_capacity(len).map_err(|_| Error::memory_error())?;
     let mut copied = 0;
     for (index, _) in matches() {
-        result.extend([&value[copied..index], new]);
+        result.push_str(&value[copied..index]);
+        result.push_str(new);
         copied = index + old.len();
     }
-    result.extend([&value[copied..]]);
+    result.push_str(&value[copied..]);
     Ok(Some(result))
 }
 
@@ -1160,7 +1152,7 @@ mod tests {
             assert!(
                 (*target)
                     .0
-                    .with(|values| crate::is_sorting_empty_ints(values))
+                    .with(|values| crate::SORTING_EMPTY.is_untouched(values))
             );
             imre_sort_restore(target.cast(), 2, saved, 1);
             crate::imre_list_release(saved.cast());

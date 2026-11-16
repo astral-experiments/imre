@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use super::*;
 use crate::classes::{Class, DataclassOptions, Field};
 use crate::modules::SourceModule;
+use std::result::Result;
 
 mod registration;
 
@@ -15,10 +16,16 @@ pub(super) struct Parsers {
     declarations: HashSet<(ModuleId, TextSize)>,
     calls: HashMap<(ModuleId, TextRange), Parser>,
     registration_errors: HashMap<(ModuleId, TextSize), Expr>,
-    choice_checks: HashMap<(ModuleId, TextRange), usize>,
+    registrations: HashMap<(ModuleId, TextRange), Registration>,
     namespaces: HashSet<usize>,
     /// Child layouts share the complete parent prefix and add their own options.
     commands: HashMap<usize, CommandVariants>,
+}
+
+enum Registration {
+    ChoiceDigits(usize),
+    /// Capture the evaluated keyword values on the ordinary Python action.
+    EvaluatedArguments,
 }
 
 struct CommandVariants {
@@ -222,13 +229,13 @@ impl<'a> Flags<'a> {
 /// A class constant must resolve to the builtin in the builder's lexical scope.
 fn builtin_constant<'a>(
     value: &'a ast::Expr,
-    module: &SourceModule,
-    locals: &HashSet<String>,
+    graph: &SourceGraph,
+    module: ModuleId,
 ) -> Option<&'a str> {
     let name = value.as_name_expr()?.id.as_str();
     (annotations::is_builtin_type(name)
-        && !module.bindings.contains_key(name)
-        && !locals.contains(name))
+        && !graph.modules[module].bindings.contains_key(name)
+        && graph.session.reads_module_binding(module, value))
     .then_some(name)
 }
 
@@ -239,8 +246,7 @@ fn option(
     types: &Types,
     classes: &Classes,
     flags: &Flags,
-    locals: &HashSet<String>,
-) -> Result<(OptionField, Option<usize>), String> {
+) -> Result<(OptionField, Option<Registration>), String> {
     let module = &graph.modules[id];
     let Some((flag, rest)) = call.arguments.args.split_first() else {
         return Err(module.error(
@@ -357,8 +363,7 @@ fn option(
         };
         required = value.value;
     }
-    let is_intrinsic =
-        |expr, intrinsic| registration::is_intrinsic(expr, intrinsic, graph, id, locals);
+    let is_intrinsic = |expr, intrinsic| registration::is_intrinsic(expr, intrinsic, graph, id);
     let action = match kw.get("action").copied() {
         None => "store",
         Some(expr) if is_intrinsic(expr, Intrinsic::BooleanOptionalAction) => "boolean_optional",
@@ -444,9 +449,7 @@ fn option(
                     None | Some(ast::Expr::NoneLiteral(_)) => None,
                     Some(ast::Expr::StringLiteral(_)) => Some(Type::Str),
                     Some(ast::Expr::BooleanLiteral(_)) => Some(Type::Bool),
-                    Some(v) if builtin_constant(v, module, locals).is_some() => {
-                        Some(Type::BuiltinClass)
-                    }
+                    Some(v) if builtin_constant(v, graph, id).is_some() => Some(Type::BuiltinClass),
                     Some(v) if numeric_literal(v, Type::Int).is_some() => Some(Type::Int),
                     Some(v) if numeric_literal(v, Type::Float).is_some() => Some(Type::Float),
                     _ => return Err(invalid()),
@@ -487,7 +490,7 @@ fn option(
         None if action == "store_true" => Some("True"),
         None if action == "store_false" => Some("False"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, graph, id),
         Some(ast::Expr::BooleanLiteral(value)) if action == "store_const" => {
             Some(if value.value { "True" } else { "False" })
         }
@@ -574,11 +577,12 @@ fn option(
     let mut enum_default = None;
     let enum_default_text;
     let default_number;
+    let mut evaluated_default = false;
     let default = match kw.get("default").copied() {
         None if action == "store_true" => Some("False"),
         None if action == "store_false" => Some("True"),
         None | Some(ast::Expr::NoneLiteral(_)) => None,
-        Some(value) if element == Type::BuiltinClass => builtin_constant(value, module, locals),
+        Some(value) if element == Type::BuiltinClass => builtin_constant(value, graph, id),
         Some(expr @ ast::Expr::StringLiteral(_))
             if element == Type::Str
                 || !many && matches!(element, Type::Path | Type::Int | Type::Float) =>
@@ -629,6 +633,14 @@ fn option(
         {
             Some(literal(value, module)?)
         }
+        Some(value)
+            if action == "store"
+                && element == Type::Str
+                && graph.session.scalar_type(id, value) == Some(Type::Str) =>
+        {
+            evaluated_default = true;
+            None
+        }
         Some(value) => return Err(module.error(
             value,
             "argparse default must be None, a fixed enum member, or a literal of the option type",
@@ -641,8 +653,16 @@ fn option(
         ));
     }
     let path_default = matches!(kw.get("default"), Some(ast::Expr::Call(_)));
+    let mut evaluated_help = false;
     let help = match kw.get("help") {
         Some(value) if is_intrinsic(value, Intrinsic::ArgparseSuppress) => None,
+        Some(value)
+            if !value.is_string_literal_expr()
+                && graph.session.scalar_type(id, value) == Some(Type::Str) =>
+        {
+            evaluated_help = true;
+            None
+        }
         Some(value) => Some(literal(value, module)?),
         None => Some(""),
     };
@@ -670,9 +690,10 @@ fn option(
         kw.get(name)
             .is_some_and(|v| numeric_literal(v, ty).is_some())
     };
-    let optional = (!required && default.is_none() && !(positional && nargs == "zero_or_more"))
+    let has_default = evaluated_default || default.is_some();
+    let optional = (!required && !has_default && !(positional && nargs == "zero_or_more"))
         || ((!positional && nargs == "optional" || action == "store_const") && constant.is_none());
-    let list_default = many && !required && default.is_some();
+    let list_default = many && !required && has_default;
     let ty = if many {
         let list = types.list(element);
         if list_default {
@@ -688,7 +709,7 @@ fn option(
             .ok_or_else(|| module.error(call, "argparse requires a sealed string/enum field"))?
     } else if int_default || int_constant {
         types.string_or_int()
-    } else if element == Type::Str && !choices.is_empty() {
+    } else if element == Type::Str && !choices.is_empty() && !evaluated_default {
         let values = choices
             .iter()
             .map(|s| s.to_string())
@@ -722,7 +743,11 @@ fn option(
             "float_default": element == Type::Float && numeric_kw("default", element),
             "float_constant": element == Type::Float && numeric_kw("const", element), "converter": converter, "default": default, "path_default": path_default, "help": help, "optional": optional }),
         },
-        choice_digits,
+        if evaluated_default || evaluated_help {
+            Some(Registration::EvaluatedArguments)
+        } else {
+            choice_digits.map(Registration::ChoiceDigits)
+        },
     ))
 }
 
@@ -858,7 +883,7 @@ fn namespace_class(
         static_bindings: Default::default(),
         name: "Namespace".into(),
         definition,
-        node: ast::StmtClassDef {
+        node: std::borrow::Cow::Owned(ast::StmtClassDef {
             node_index: ast::AtomicNodeIndex::NONE,
             range,
             decorator_list: Default::default(),
@@ -866,7 +891,7 @@ fn namespace_class(
             type_params: None,
             arguments: None,
             body: Default::default(),
-        },
+        }),
         fields: fields
             .iter()
             .map(|field| Field {
@@ -968,6 +993,10 @@ impl<'ast> Visitor<'ast> for Uses<'_> {
 }
 
 impl Parsers {
+    pub(super) fn has_fixed_call(&self, module: ModuleId, range: TextRange) -> bool {
+        self.calls.contains_key(&(module, range))
+    }
+
     pub(super) fn namespace(&self, class: usize) -> bool {
         self.namespaces.contains(&class)
     }
@@ -1000,7 +1029,7 @@ impl Parsers {
         types: &Types,
         classes: &mut Classes,
         layouts: &mut Vec<Vec<Type>>,
-    ) -> Result<Self, String> {
+    ) -> Self {
         let mut parsers = Self::default();
         for (module_id, module) in graph.modules.iter().enumerate() {
             let functions =
@@ -1021,21 +1050,7 @@ impl Parsers {
                         })
                     });
             for (statement, function) in functions {
-                for (start, stmt) in function.body.iter().enumerate() {
-                    let ast::Stmt::Assign(assign) = stmt else {
-                        continue;
-                    };
-                    let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
-                        continue;
-                    };
-                    let ast::Expr::Call(ctor) = &*assign.value else {
-                        continue;
-                    };
-                    if graph.resolve(module_id, &ctor.func)
-                        != Some(Binding::Intrinsic(Intrinsic::ArgumentParser))
-                    {
-                        continue;
-                    }
+                let mut specialize = |start: usize, name: &ast::ExprName, ctor: &ast::ExprCall| {
                     if !ctor.arguments.args.is_empty() {
                         return Err(module
                             .error(ctor, "ArgumentParser requires named literal configuration"));
@@ -1120,15 +1135,8 @@ impl Parsers {
                         };
                     register(name, &builders)?;
                     builders.push(builder.to_owned());
-                    let mut locals = crate::narrowing::assigned_names(&function.body);
-                    locals.extend(
-                        function
-                            .parameters
-                            .iter_non_variadic_params()
-                            .map(|p| p.name().to_string()),
-                    );
                     let mut registration_errors = HashMap::new();
-                    let mut choice_checks = HashMap::new();
+                    let mut registrations = HashMap::new();
                     let mut read_options =
                         |builder: &str,
                          flags: &Flags,
@@ -1142,7 +1150,6 @@ impl Parsers {
                                     owner,
                                     graph,
                                     module_id,
-                                    &locals,
                                     flags.prefixes,
                                 )
                             };
@@ -1215,10 +1222,10 @@ impl Parsers {
                                     *index += 1;
                                     continue;
                                 }
-                                let (mut field, choice_digits) =
-                                    option(add, graph, module_id, types, classes, flags, &locals)?;
-                                if let Some(digits) = choice_digits {
-                                    choice_checks.insert(add.range(), digits);
+                                let (mut field, registration) =
+                                    option(add, graph, module_id, types, classes, flags)?;
+                                if let Some(registration) = registration {
+                                    registrations.insert(add.range(), registration);
                                 }
                                 if let Some(group) = group {
                                     field.option["group"] = json!(group);
@@ -1472,15 +1479,15 @@ impl Parsers {
                     for stmt in &function.body[start..index] {
                         if !matches!(stmt, ast::Stmt::Expr(stmt)
                             if registration_errors.contains_key(&stmt.value.start())
-                                || choice_checks.contains_key(&stmt.value.range()))
+                                || registrations.contains_key(&stmt.value.range()))
                         {
                             parsers.declarations.insert((module_id, stmt.start()));
                         }
                     }
-                    parsers.choice_checks.extend(
-                        choice_checks
+                    parsers.registrations.extend(
+                        registrations
                             .into_iter()
-                            .map(|(range, digits)| ((module_id, range), digits)),
+                            .map(|(range, registration)| ((module_id, range), registration)),
                     );
                     parsers.registration_errors.extend(
                         registration_errors
@@ -1498,18 +1505,41 @@ impl Parsers {
                         schema,
                         description: description.cloned(),
                     };
-                    for operation in operations {
-                        parsers.calls.insert((module_id, operation), parser.clone());
+                    let layouts = std::iter::repeat_n(parser, operations.len());
+                    for (operation, layout) in operations.into_iter().zip(layouts) {
+                        parsers.calls.insert((module_id, operation), layout);
                     }
+                    Ok(())
+                };
+                for (start, stmt) in function.body.iter().enumerate() {
+                    let ast::Stmt::Assign(assign) = stmt else {
+                        continue;
+                    };
+                    let [ast::Expr::Name(name)] = assign.targets.as_slice() else {
+                        continue;
+                    };
+                    let ast::Expr::Call(ctor) = &*assign.value else {
+                        continue;
+                    };
+                    if graph.resolve(module_id, &ctor.func)
+                        != Some(Binding::Intrinsic(Intrinsic::ARGUMENT_PARSER))
+                    {
+                        continue;
+                    }
+                    // Without a fixed layout, the constructor uses its ordinary argparse binding.
+                    let _ = specialize(start, name, ctor);
                 }
             }
         }
-        Ok(parsers)
+        parsers
     }
 }
 
 impl Checker<'_> {
-    pub(super) fn parse_args(&mut self, call: &ast::ExprCall) -> Result<Option<Expr>, String> {
+    pub(super) fn parse_args(
+        &mut self,
+        call: &ast::ExprCall,
+    ) -> phase::Result<Option<Expr>, String> {
         if let Some(error) = self
             .classes
             .parsers
@@ -1518,26 +1548,34 @@ impl Checker<'_> {
         {
             return registration::at_call(self, call, error.clone()).map(Some);
         }
-        if let Some(&digits) = self
+        if let Some(registration) = self
             .classes
             .parsers
-            .choice_checks
+            .registrations
             .get(&(self.module, call.range()))
         {
-            return Ok(Some(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::ArgparseChoiceDigits(digits), Vec::new()),
-            }));
+            return match registration {
+                Registration::ChoiceDigits(digits) => Ok(Some(Expr {
+                    ty: Type::None,
+                    kind: ExprKind::Builtin(Builtin::ArgparseChoiceDigits(*digits), Vec::new()),
+                })),
+                Registration::EvaluatedArguments => {
+                    Err(self.scoped_builtin_error("argparse argument registration", call))
+                }
+            };
         }
         let Some(parser) = self.classes.parsers.calls.get(&(self.module, call.range())) else {
             return Ok(None);
         };
         let description = match &parser.description {
             Some(expr) if !matches!(expr, ast::Expr::NoneLiteral(_)) => {
-                let value = self.expr(expr)?;
-                if let ExprKind::Str(text) = &value.kind
-                    && text.contains("%(prog)")
-                    && !template(text, &["prog"])
+                let value = self.typed_expr(expr)?;
+                let invalid = |text: &str| text.contains("%(prog)") && !template(text, &["prog"]);
+                if matches!(&value.kind, ExprKind::Str(text) if invalid(text))
+                    || self
+                        .types
+                        .literal_strings(value.ty)
+                        .is_some_and(|strings| matches!(&*strings, [text] if invalid(text)))
                 {
                     return Err(error(
                         self.source,
@@ -1545,7 +1583,9 @@ impl Checker<'_> {
                         "unsupported argparse description substitution",
                     ));
                 }
-                if value.ty == Type::Str {
+                if matches!(value.ty, Type::StrLiteral(_)) {
+                    literals::view(value, Type::Str)
+                } else if value.ty == Type::Str {
                     value
                 } else if value.ty == Type::None {
                     Expr {
@@ -1613,56 +1653,79 @@ impl Checker<'_> {
                 ),
             }));
         }
-        let explicit = match (
-            call.arguments.args.as_ref(),
-            call.arguments.keywords.as_ref(),
-        ) {
-            ([], []) => None,
-            ([value], []) => Some(value),
-            ([], [keyword]) if keyword.arg.as_ref().is_some_and(|name| name == "args") => {
-                Some(&keyword.value)
-            }
-            (args, keywords)
-                if !args.iter().any(ast::Expr::is_starred_expr)
-                    && match (args.len(), keywords.len()) {
-                        (2, 0) => true,
-                        (0 | 1, 1) => keywords[0].arg.as_deref() == Some("namespace"),
-                        (0, 2) => {
-                            call.arguments.find_keyword("args").is_some()
-                                && call.arguments.find_keyword("namespace").is_some()
-                        }
-                        _ => false,
-                    } =>
-            {
-                // A supplied namespace keeps its identity and existing attributes.
-                return Err(self.scoped_builtin_error(method, call));
-            }
-            _ => {
-                return Err(error(
-                    self.source,
-                    call,
-                    &format!("argparse {method} accepts one argument list"),
-                ));
-            }
-        };
-        let explicit = explicit.filter(|value| !matches!(value, ast::Expr::NoneLiteral(_)));
         let argv_type = self.types.list(Type::Str);
-        let argv = match explicit {
-            Some(ast::Expr::Tuple(tuple)) => Expr {
-                ty: argv_type,
-                kind: ExprKind::List(
-                    tuple
-                        .elts
-                        .iter()
-                        .map(|value| self.expr_expected(value, Type::Str))
-                        .collect::<Result<_, _>>()?,
-                ),
-            },
-            Some(value) => self.expr_expected(value, argv_type)?,
-            None => Expr {
+        let params = [
+            calls::parameter("args", argv_type, Some(Expr::none())),
+            calls::parameter("namespace", Type::PythonObject, Some(Expr::none())),
+        ];
+        let supplied = call
+            .arguments
+            .find_argument_value("namespace", 1)
+            .is_some_and(|value| !value.is_none_literal_expr());
+        let mut supplied_class = None;
+        let mut bound = self.arguments_with(call, &params, None, |checker, slot, arg| {
+            if supplied {
+                if slot == 1
+                    && let Some(name) = arg.as_name_expr()
+                    && !checker.names.contains_key(name.id.as_str())
+                    && let Some(class) = checker.class_reference(arg)
+                {
+                    // Actions can write to the class itself. Read that binding in its Python frame.
+                    supplied_class = Some(class);
+                    return Ok(registered::values::name_binding(name.id.clone()));
+                }
+                return checker.expr(arg);
+            }
+            if slot == 1 || arg.is_none_literal_expr() {
+                return Ok(Expr::none());
+            }
+            if let ast::Expr::Tuple(tuple) = arg {
+                return Ok(Expr {
+                    ty: argv_type,
+                    kind: ExprKind::List(
+                        tuple
+                            .elts
+                            .iter()
+                            .map(|value| checker.expr_expected(value, Type::Str))
+                            .collect::<Result<_, _>>()?,
+                    ),
+                });
+            }
+            checker.expr_expected(arg, argv_type)
+        })?;
+        if supplied {
+            // The collected builder name denotes the real parser in the Python frame.
+            let attribute = call.func.as_attribute_expr().unwrap();
+            let builder = attribute
+                .value
+                .as_name_expr()
+                .expect("collected parser name");
+            let receiver = registered::values::name_binding(builder.id.clone());
+            bound.values.truncate(call.arguments.len());
+            let value = self.registered_method_call_with_values(
+                call,
+                attribute,
+                receiver,
+                Type::PythonObject,
+                Some(bound.values),
+            )?;
+            if let Some(class) = supplied_class {
+                let layouts = std::iter::once(&parser.class).chain(&parser.children);
+                self.module_namespace
+                    .supplied_classes
+                    .extend(layouts.map(|&layout| (class, layout)));
+            }
+            return Ok(Some(value));
+        }
+        let argv = bound.values.swap_remove(bound.order[0]);
+        let process_argv = argv.ty == Type::None;
+        let argv = if process_argv {
+            Expr {
                 ty: argv_type,
                 kind: ExprKind::Builtin(Builtin::SysArgv, Vec::new()),
-            },
+            }
+        } else {
+            argv
         };
         let namespace = Type::Class(parser.class);
         Ok(Some(Expr {
@@ -1675,7 +1738,7 @@ impl Checker<'_> {
                 Builtin::ParseArgs {
                     namespace: parser.class,
                     children: parser.children.clone(),
-                    process_argv: explicit.is_none(),
+                    process_argv,
                 },
                 vec![schema, description, argv],
             ),
@@ -1713,14 +1776,14 @@ impl Checker<'_> {
             let mut reassigned = false;
             for operand in value.values.iter().rev() {
                 if !reassigned && let Some(guard) = self.namespace_guard(operand, truth, body) {
-                    self.namespace_guards.push(guard);
+                    self.present_fields.push(guard);
                 }
                 if !matches!(operand, ast::Expr::Attribute(attr) if attr.value.is_name_expr()) {
                     reassigned = true
                 }
             }
         } else if let Some(guard) = self.namespace_guard(test, truth, body) {
-            self.namespace_guards.push(guard);
+            self.present_fields.push(guard);
         }
     }
 

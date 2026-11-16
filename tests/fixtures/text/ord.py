@@ -46,6 +46,13 @@ for s in ["", "A", "\U0010ffff", "é", "á", "👨‍👧", "ab", "a" * 100000]
     show(s)
 for b in [b"", b"\x00", b"\xff", b"zz"]:
     show(b)
+buffer = bytearray()
+for byte in (255, 0, 1):
+    try:
+        print(ord(buffer))
+    except TypeError as error:
+        print(str(error))
+    buffer.append(byte)
 show(None)
 try: print(ord(42))
 except TypeError as error: print(str(error))

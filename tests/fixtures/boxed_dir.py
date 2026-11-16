@@ -198,10 +198,30 @@ def callable_directories():
     assert "__name__" not in dir(bound)
     del fn.marker
     assert "marker" not in dir(bound)
-    assert "bit_length" in dir(0) and dir(0) == dir(int)
+
+
+def descriptor_directories():
+    common = set(dir(object))
+    fields = {"__call__", "__get__", "__name__", "__objclass__", "__qualname__", "__text_signature__"}
+    for descriptor in (object.__delattr__, str.lower, dict.__dict__["fromkeys"]):
+        assert dir(descriptor) == dir(type(descriptor)) == sorted(common | fields)
+    member = object.__dict__["__class__"]
+    fields = {"__delete__", "__get__", "__name__", "__objclass__", "__qualname__", "__set__"}
+    assert dir(member) == dir(type(member)) == sorted(common | fields)
+    assert dir(None) == dir(type(None)) == sorted(common | {"__bool__"})
+
+
+def numeric_directories():
+    for value, member in [(0, "bit_length"), (False, "bit_length"),
+                          (1.0, "as_integer_ratio"), (1j, "__complex__")]:
+        names = dir(value)
+        assert names == dir(type(value)) == sorted(set(names))
+        assert member in names and callable(getattr(value, member))
 
 
 def current():
+    descriptor_directories()
+    numeric_directories()
     callable_directories()
     weak_proxy_directory()
     import _io

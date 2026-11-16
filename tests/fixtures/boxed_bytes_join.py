@@ -3,11 +3,14 @@ from array import array
 
 def current():
     class Bytes(bytes):
-        pass
+        def __new__(cls, value):
+            return super().__new__(cls, value)
 
     one = b"one"
     assert b"/".join([one]) is one
-    derived = Bytes(one)
+    derived = Bytes(memoryview(one))
+    assert type(derived) is Bytes and derived == one
+    assert one.__new__ is bytes.__new__
     assert type(bytes.join(derived, [derived])) is bytes
     assert b"".join([]) == b""
     doubles = array("d", [0.0])

@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 type Raw = *mut c_void;
 type Name = *const c_char;
+type StartDoctype = unsafe extern "C" fn(Raw, Name, Name, Name, c_int);
 type Start = unsafe extern "C" fn(Raw, Name, *const Name);
 type OneName = unsafe extern "C" fn(Raw, Name);
 type TwoNames = unsafe extern "C" fn(Raw, Name, Name);
@@ -34,6 +35,7 @@ impl Encoding {
 
 #[derive(Default)]
 pub(super) struct Handlers {
+    pub(super) start_doctype: Option<StartDoctype>,
     pub(super) start_element: Option<Start>,
     pub(super) end_element: Option<OneName>,
     pub(super) text: Option<Text>,
@@ -99,6 +101,7 @@ functions! {
     set_encoding = c"XML_SetEncoding": fn(Raw, Name) -> c_int;
     unknown_encoding = c"XML_SetUnknownEncodingHandler": fn(Raw, Option<UnknownEncoding>, Raw);
     user_data = c"XML_SetUserData": fn(Raw, Raw);
+    start_doctype = c"XML_SetStartDoctypeDeclHandler": fn(Raw, Option<StartDoctype>);
     elements = c"XML_SetElementHandler": fn(Raw, Option<Start>, Option<OneName>);
     set_ns_triplet = c"XML_SetReturnNSTriplet": fn(Raw, c_int);
     namespaces = c"XML_SetNamespaceDeclHandler": fn(Raw, Option<TwoNames>, Option<OneName>);
@@ -237,6 +240,7 @@ impl Parser {
         let p = self.ptr.as_ptr();
         // SAFETY: p is owned by self and the callback types match expat.h.
         unsafe {
+            (self.api.start_doctype)(p, handlers.start_doctype);
             (self.api.elements)(p, handlers.start_element, handlers.end_element);
             (self.api.namespaces)(p, handlers.start_ns, handlers.end_ns);
             (self.api.text)(p, handlers.text);

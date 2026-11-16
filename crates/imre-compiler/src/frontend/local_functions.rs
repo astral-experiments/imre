@@ -1,6 +1,6 @@
 //! Lift typed local definitions into native functions. A captured binding is
 //! loaded at each direct call, after its explicit arguments, as Python would
-//! read the enclosing cell on entry. No callable with captures can escape.
+//! read the enclosing cell on entry. A stable callable can own a lifted callback’s context.
 use ruff_python_ast::visitor::{Visitor, walk_expr};
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -12,6 +12,7 @@ pub(super) struct Function {
     pub signature: Signature,
     pub definition: Rc<ast::StmtFunctionDef>,
     captures: Vec<usize>,
+    bound_capture: bool,
 }
 
 #[derive(Clone)]
@@ -23,12 +24,22 @@ struct Site {
 }
 
 impl Site {
-    fn new(function: &ast::StmtFunctionDef, following: &[ast::Stmt], cmp_input: bool) -> Self {
+    fn new(
+        function: &ast::StmtFunctionDef,
+        following: &[ast::Stmt],
+        cmp_input: bool,
+        source_contracts: bool,
+    ) -> Self {
         Self {
             range: function.range,
-            cmp_input: cmp_input && cmp_keys::can_specialize(function),
-            value_read: reads_function_value(following, function.name.as_str()),
-            later_writes: if function.is_async {
+            cmp_input,
+            value_read: reads_function_value(
+                following,
+                |expr| matches!(expr, ast::Expr::Name(n) if n.id == function.name.as_str()),
+                None,
+                |_| true,
+            ),
+            later_writes: if function.is_async || source_contracts {
                 narrowing::assigned_names(following)
             } else {
                 HashSet::new()
@@ -51,6 +62,7 @@ pub(super) struct Binding {
     comparators: HashMap<u32, Comparator>,
     pub(super) overload_stub: bool,
     function: Option<Function>,
+    direct_only: bool,
     pub(super) generic: Option<Rc<ast::StmtFunctionDef>>,
     instances: HashMap<Type, Function>,
     later_writes: HashSet<String>,
@@ -59,26 +71,41 @@ pub(super) struct Binding {
 
 /// A direct call can target a lifted helper. Every other read of the name
 /// must see the same callable object for this execution of its definition.
-fn reads_function_value(body: &[ast::Stmt], name: &str) -> bool {
-    struct Read<'n>(&'n str, bool);
-    impl<'a> Visitor<'a> for Read<'_> {
+/// Skip one defining store and the callee of each supported call.
+pub(super) fn reads_function_value(
+    body: &[ast::Stmt],
+    identifies: impl Fn(&ast::Expr) -> bool,
+    binding: Option<TextRange>,
+    accepts: impl Fn(&ast::ExprCall) -> bool,
+) -> bool {
+    struct Read<N, F> {
+        identifies: N,
+        binding: Option<TextRange>,
+        accepts: F,
+        observed: bool,
+    }
+    impl<'a, N: Fn(&ast::Expr) -> bool, F: Fn(&ast::ExprCall) -> bool> Visitor<'a> for Read<N, F> {
         fn visit_expr(&mut self, expr: &'a ast::Expr) {
-            if self.1 {
+            if self.observed || Some(expr.range()) == self.binding {
                 return;
             }
             match expr {
-                ast::Expr::Call(call) if matches!(&*call.func, ast::Expr::Name(n) if n.id == self.0) =>
-                {
-                    self.visit_arguments(&call.arguments);
+                ast::Expr::Call(call) if (self.identifies)(&call.func) && (self.accepts)(call) => {
+                    self.visit_arguments(&call.arguments)
                 }
-                ast::Expr::Name(n) if n.id == self.0 => self.1 = true,
+                _ if (self.identifies)(expr) => self.observed = true,
                 _ => walk_expr(self, expr),
             }
         }
     }
-    let mut read = Read(name, false);
+    let mut read = Read {
+        identifies,
+        binding,
+        accepts,
+        observed: false,
+    };
     read.visit_body(body);
-    read.1
+    read.observed
 }
 
 /// Admit independent call-site layouts when every read has a supported operation.
@@ -140,9 +167,25 @@ impl Binding {
                 .is_some_and(|f| comprehensions::function_reads(f).contains(name))
     }
 
-    pub(super) fn target(&self, source: &str, node: &impl Ranged) -> Result<&Function, String> {
+    /// A plain nested definition read only at direct calls owns no value in the caller.
+    pub(super) fn direct_definition(&self) -> Option<usize> {
+        self.function
+            .as_ref()
+            .filter(|_| self.direct_only)
+            .map(|function| function.signature.id)
+    }
+
+    pub(super) fn is_bound(&self) -> bool {
+        self.function.is_some() || self.generic.is_some()
+    }
+
+    pub(super) fn target(
+        &self,
+        source: &str,
+        node: &impl Ranged,
+    ) -> std::result::Result<&Function, String> {
         self.function.as_ref().ok_or_else(|| {
-            error(
+            diagnostic_message(
                 source,
                 node,
                 "forward and recursive local function references are unsupported",
@@ -154,14 +197,14 @@ impl Binding {
 impl Function {
     pub(super) fn callback(
         &self,
-        types: &Types,
-        source: &str,
+        checker: &Checker<'_>,
         node: &impl Ranged,
-    ) -> Result<Expr, String> {
+    ) -> std::result::Result<Expr, String> {
+        let types = checker.types;
         if self.signature.asynchronous {
             types.set_coroutine_target(self.signature.id, crate::types::CoroutineTarget::Coroutine);
         }
-        if !self.captures.is_empty()
+        if (!self.captures.is_empty() && !self.bound_capture)
             || self.signature.params.iter().any(|p| {
                 matches!(
                     p.kind,
@@ -169,11 +212,17 @@ impl Function {
                 )
             })
         {
-            return Err(error(
-                source,
+            return Err(diagnostic_message(
+                checker.source,
                 node,
                 "local callbacks must be noncapturing and have positional parameters",
             ));
+        }
+        if self.bound_capture {
+            checker
+                .graph
+                .layout_hint
+                .set(crate::modules::LayoutHint::Applied);
         }
         Ok(Expr {
             ty: types.callable(
@@ -186,7 +235,9 @@ impl Function {
             ),
             kind: ExprKind::Callable {
                 function: self.signature.id,
-                receiver: None,
+                receiver: self
+                    .bound_capture
+                    .then(|| Box::new(checker.local(self.captures[0]))),
             },
         })
     }
@@ -212,9 +263,7 @@ impl Checker<'_> {
         if let Some(slot) = binding.value_slot {
             Ok(self.local(slot))
         } else {
-            binding
-                .target(self.source, value)?
-                .callback(self.types, self.source, value)
+            Ok(binding.target(self.source, value)?.callback(self, value)?)
         }
     }
 
@@ -229,23 +278,29 @@ impl Checker<'_> {
         stmts: &[ast::Stmt],
         include_classes: bool,
     ) -> Result<(), String> {
-        let has_candidate = stmts
-            .iter()
-            .filter_map(ast::Stmt::as_function_def_stmt)
-            .any(cmp_keys::can_specialize);
-        let cmp_inputs = if has_candidate {
-            cmp_keys::local_comparators(stmts, |callee| {
-                self.resolve(callee)
-                    == Some(crate::modules::Binding::Intrinsic(Intrinsic::CmpToKey))
-            })
-        } else {
-            HashSet::new()
-        };
+        if self.registered_local_start.is_some() {
+            return Ok(());
+        }
+        let mut cmp_inputs = None;
         let mut suite_functions = HashSet::new();
         for (index, statement) in stmts.iter().enumerate() {
-            let name = match statement {
-                ast::Stmt::ClassDef(class) if include_classes => class.name.as_str(),
-                ast::Stmt::FunctionDef(function) => function.name.as_str(),
+            let (name, cmp_input) = match statement {
+                ast::Stmt::ClassDef(class) if include_classes => (class.name.as_str(), false),
+                ast::Stmt::FunctionDef(function) => {
+                    let name = function.name.as_str();
+                    let cmp_input = cmp_keys::can_specialize(function)
+                        && cmp_inputs
+                            .get_or_insert_with(|| {
+                                cmp_keys::local_comparators(stmts, |callee| {
+                                    self.resolve(callee)
+                                        == Some(crate::modules::Binding::Intrinsic(
+                                            Intrinsic::CmpToKey,
+                                        ))
+                                })
+                            })
+                            .contains(name);
+                    (name, cmp_input)
+                }
                 _ => continue,
             };
             if let ast::Stmt::FunctionDef(function) = statement
@@ -255,7 +310,8 @@ impl Checker<'_> {
                 binding.sites.push_back(Site::new(
                     function,
                     &stmts[index + 1..],
-                    cmp_inputs.contains(name),
+                    cmp_input,
+                    self.graph.modules[self.module].checks_source_contracts(),
                 ));
                 continue;
             }
@@ -292,12 +348,14 @@ impl Checker<'_> {
                     sites: VecDeque::from([Site::new(
                         function,
                         &stmts[index + 1..],
-                        cmp_inputs.contains(name),
+                        cmp_input,
+                        self.graph.modules[self.module].checks_source_contracts(),
                     )]),
                     active_comparator: None,
                     comparators: HashMap::new(),
                     overload_stub: false,
                     function: None,
+                    direct_only: false,
                     generic: None,
                     value_slot: None,
                     instances: HashMap::new(),
@@ -382,6 +440,7 @@ impl Checker<'_> {
         }
         let boxed = callback_parameter(definition);
         if !boxed
+            && definition.type_params.is_none()
             && definition
                 .parameters
                 .iter_non_variadic_params()
@@ -411,22 +470,31 @@ impl Checker<'_> {
             self.local_functions.get_mut(name).unwrap().generic = Some(Rc::new(definition.clone()));
             return Ok(None);
         }
+        if definition.type_params.is_some() {
+            return Err(self.scoped_builtin_error("a generic local function", definition));
+        }
         let policy = self.local_cache_policy(definition)?;
         let decorator = self.local_dispatch_decorator(definition)?;
         let mut raw;
-        let signature_def = if policy.is_some() || decorator.is_some() || wraps.is_some() {
+        let implementation = if wraps.is_some() {
             raw = definition.clone();
             raw.decorator_list.clear();
             &raw
         } else {
             definition
         };
+        // The local cache and dispatch decorators have already been resolved.
+        let decorators = if policy.is_some() || decorator.is_some() {
+            &[]
+        } else {
+            implementation.decorator_list.as_slice()
+        };
         let mut signature = signature(
-            signature_def,
+            implementation,
+            decorators,
             self.graph,
             keyword_forwarding::Defaults::local(self.module),
-            &self.classes.declarations,
-            self.types,
+            self.classes,
             None,
             &inference::Inference::default(),
         )?;
@@ -434,41 +502,35 @@ impl Checker<'_> {
             signature.params[0].ty = self.types.callback_argument();
         }
         let function = self.lift_local(
-            if wraps.is_some() {
-                signature_def
-            } else {
-                definition
-            },
+            implementation,
             signature,
+            site.value_read && !overload && definition.decorator_list.is_empty(),
         )?;
         let value = if let Some(config) = wraps {
             let (scope, wrapped) = self.wraps_config(config)?;
-            let wrapper = function.callback(self.types, self.source, definition)?;
+            let wrapper = function.callback(self, definition)?;
             Some(scope.finish(self.attach_wrapped(wrapper, wrapped, config)?))
         } else if let Some(policy) = policy {
-            let raw = function.callback(self.types, self.source, definition)?;
+            let raw = function.callback(self, definition)?;
             let origin = self.local_annotation_origin(&function);
             Some(self.owned_cache(raw, policy, Some(origin), definition)?)
         } else if let Some(decorator) = decorator {
-            let target = function.callback(self.types, self.source, definition)?;
+            let target = function.callback(self, definition)?;
             Some(self.decorate_dispatch(decorator, target, definition)?)
         } else if site.value_read || overload {
-            function
-                .callback(self.types, self.source, definition)
-                .ok()
-                .map(|value| {
-                    if overload {
-                        Expr {
-                            ty: Type::OverloadStub,
-                            kind: ExprKind::Builtin(
-                                Builtin::Typing(ir::TypingOperation::Register),
-                                vec![value],
-                            ),
-                        }
-                    } else {
-                        value
+            function.callback(self, definition).ok().map(|value| {
+                if overload {
+                    Expr {
+                        ty: Type::OverloadStub,
+                        kind: ExprKind::Builtin(
+                            Builtin::Typing(ir::TypingOperation::Register),
+                            vec![value],
+                        ),
                     }
-                })
+                } else {
+                    value
+                }
+            })
         } else {
             None
         };
@@ -490,6 +552,18 @@ impl Checker<'_> {
             ));
         }
         let binding = self.local_functions.get_mut(name).unwrap();
+        // The Python frame creates the callable and evaluates its defaults.
+        // A direct helper with only constant defaults has no binding effects to carry.
+        binding.direct_only = !site.value_read
+            && object.is_none()
+            && function.captures.is_empty()
+            && !function.signature.asynchronous
+            && definition.decorator_list.is_empty()
+            && function
+                .signature
+                .params
+                .iter()
+                .all(|param| param.default.as_ref().is_none_or(ir::Constant::is_constant));
         binding.function = Some(function);
         binding.value_slot = object.as_ref().map(|(slot, _)| *slot);
         Ok(object.map(|(slot, value)| Statement::Assign(slot, value)))
@@ -524,7 +598,7 @@ impl Checker<'_> {
             })?;
         let key = (left, right);
         if let Some(function) = comparator.instances.get(&key) {
-            return function.callback(self.types, self.source, node);
+            return Ok(function.callback(self, node)?);
         }
         let definition = Rc::clone(&comparator.definition);
         let params = definition
@@ -545,14 +619,17 @@ impl Checker<'_> {
             })
             .collect();
         let signature = Signature {
+            parameter_declarations: Arc::default(),
             id: 0,
+            physical_frame: false,
+            may_have_display: false,
             asynchronous: false,
             method: None,
             returns: Type::None,
             params,
         };
-        let function = self.lift_local(&definition, signature)?;
-        let value = function.callback(self.types, self.source, node)?;
+        let function = self.lift_local(&definition, signature, false)?;
+        let value = function.callback(self, node)?;
         self.local_functions
             .get_mut(&name)
             .unwrap()
@@ -618,7 +695,10 @@ impl Checker<'_> {
             existing.clone()
         } else {
             let signature = Signature {
+                parameter_declarations: Arc::default(),
                 id: 0,
+                physical_frame: false,
+                may_have_display: false,
                 asynchronous: true,
                 method: None,
                 returns: result,
@@ -630,7 +710,7 @@ impl Checker<'_> {
                     sign_only: false,
                 }],
             };
-            let function = self.lift_local(definition, signature)?;
+            let function = self.lift_local(definition, signature, false)?;
             self.local_functions
                 .get_mut(name)
                 .unwrap()
@@ -645,6 +725,7 @@ impl Checker<'_> {
         &mut self,
         definition: &ast::StmtFunctionDef,
         mut signature: Signature,
+        materialize: bool,
     ) -> Result<Function, String> {
         signature.id = self.helpers.reserve();
         self.types.bind_function_site(
@@ -662,6 +743,7 @@ impl Checker<'_> {
             self.helpers,
             self.globals,
         );
+        helper.frame = LexicalFrame::Named(definition.name.id.clone());
         helper.omitted_assert_free = omitted_free;
         helper.inference = self.inference;
         helper.returns = signature.returns;
@@ -669,11 +751,16 @@ impl Checker<'_> {
             (definition.returns.is_none() && !annotations::inert_body(definition)).then(Vec::new);
         helper.asynchronous = signature.asynchronous;
         let mut params = Vec::new();
-        for (parameter, ty) in closed_calls::parameters(&definition.parameters)
-            .zip(signature.params.iter().map(|p| p.ty))
+        for (index, (parameter, layout)) in closed_calls::parameters(&definition.parameters)
+            .zip(&signature.params)
+            .enumerate()
         {
-            let slot = helper.declare(parameter.name().as_str(), ty, parameter)?;
-            helper.assigned.insert(slot);
+            let slot = helper.bind_parameter(
+                parameter,
+                layout.ty,
+                signature.parameter_declaration(index),
+                layout.default.as_ref(),
+            )?;
             params.push(slot);
         }
 
@@ -683,10 +770,27 @@ impl Checker<'_> {
         reads.sort();
         let mut captures = Vec::new();
         let mut slots = HashMap::new();
+        let later_writes = self.local_functions.get(definition.name.as_str());
+        let rebound: HashSet<_> = later_writes
+            .into_iter()
+            .flat_map(|binding| &binding.later_writes)
+            .filter_map(|name| self.names.get(name).copied())
+            .collect();
+        let mut stable_callbacks = HashSet::new();
         let mut capture = |outer: usize, helper: &mut Checker<'_>| -> usize {
             *slots.entry(outer).or_insert_with(|| {
                 let inner = helper.hidden(self.locals[outer]);
                 helper.assigned.insert(inner);
+                // A direct call loads the current cell. A later assignment can replace an aliased value.
+                let source = if rebound.contains(&outer) {
+                    self.declared_slots
+                        .get(&outer)
+                        .copied()
+                        .map(ValueSource::Declaration)
+                } else {
+                    self.assigned.value_source(outer)
+                };
+                helper.assigned.set_value_source(inner, source);
                 params.push(inner);
                 captures.push(outer);
                 inner
@@ -695,6 +799,31 @@ impl Checker<'_> {
         for read in reads {
             if let Some(&outer) = self.names.get(&read) {
                 let inner = capture(outer, &mut helper);
+                if self.loop_breaks.is_empty()
+                    && matches!(self.locals[outer], Type::Callable(_))
+                    && self.assigned.contains(&outer)
+                    && !rebound.contains(&outer)
+                    && self
+                        .graph
+                        .session
+                        .stable_enclosing_binding(self.module, definition, &read)
+                {
+                    stable_callbacks.insert(outer);
+                    if let Some(&ty) = self.narrowed.get(&outer)
+                        && self.types.method_signature(ty) == Some(self.locals[outer])
+                    {
+                        helper.narrowed.insert_mut(inner, ty);
+                    }
+                } else if materialize
+                    && self.narrowed.get(&outer).is_some_and(|&ty| {
+                        self.types.method_signature(ty) == Some(self.locals[outer])
+                            && self.types.source_method_site(ty).is_some()
+                    })
+                {
+                    helper
+                        .assigned
+                        .set_value_source(inner, Some(ValueSource::ReboundMethod));
+                }
                 helper.names.insert(read, inner);
             } else if let Some(binding) = self.local_functions.get(&read) {
                 if binding.function.is_some() && !binding.sites.is_empty() {
@@ -739,7 +868,33 @@ impl Checker<'_> {
                 &format!("asynchronous capture '{name}' may be rebound before the coroutine runs"),
             ));
         }
-        let (mut body, falls) = helper.function_body(&definition.body)?;
+        let capture = match captures.as_slice() {
+            [slot] if materialize && !signature.asynchronous && stable_callbacks.contains(slot) => {
+                Some(*slot)
+            }
+            _ => None,
+        };
+        let bound_capture = capture.is_some()
+            && !self.graph.registered_startup
+            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled;
+        let captured_method = !bound_capture
+            && capture
+                .and_then(|slot| self.narrowed.get(&slot))
+                .and_then(|&ty| self.saved_method(ty))
+                .is_some_and(|(method, _)| !method.asynchronous);
+        let python_frame =
+            self.inference.is_none() && (self.unrepresented.borrow().is_some() || captured_method);
+        let first_helper = self.helpers.len();
+        if python_frame {
+            helper.checked_call_contracts = captured_method;
+            helper.registered = Some(self.graph.modules[self.module].registered_values());
+            helper.registered_local_start = Some(signature.params.len());
+            for &slot in &params {
+                helper.locals[slot] = Type::PythonObject;
+            }
+        }
+        let mut body = self.inference.is_none().then(Vec::new);
+        let falls = helper.function_body(definition, &definition.body, body.as_mut(), None)?;
         if let Some(mut returns) = helper.inferred_returns.take() {
             if falls || returns.is_empty() {
                 returns.push(Type::None);
@@ -755,11 +910,10 @@ impl Checker<'_> {
             signature.returns = result;
         }
         if falls && self.types.payload(signature.returns).is_some() {
-            body.push(Statement::Return(helper.coerce(
-                Expr::none(),
-                signature.returns,
-                definition,
-            )?));
+            let value = helper.coerce(Expr::none(), signature.returns, definition)?;
+            if let Some(body) = &mut body {
+                body.push(Statement::Return(value));
+            }
         } else if falls && signature.returns != Type::None {
             return Err(error(
                 self.source,
@@ -767,27 +921,62 @@ impl Checker<'_> {
                 "not every path returns the declared type",
             ));
         }
-        helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
-        self.helpers.finish(
-            signature.id,
-            comprehensions::Helper {
-                module: self.module,
-                function: ir::Function {
-                    params,
-                    returns: signature.returns,
-                    locals: helper.locals,
-                    body,
+        helper.finish_region(Ok(()))?;
+        if python_frame && let Some(statements) = body.take() {
+            // The Python binder installs only source parameters. Captured names use the
+            // original closure cells each time the checked body reads or assigns them.
+            params.truncate(signature.params.len());
+            let mut names = helper.namespace_bindings;
+            names.extend(helper.names.into_iter().map(|(name, slot)| {
+                (
+                    slot,
+                    registered::LocalBinding {
+                        name,
+                        namespace: None,
+                    },
+                )
+            }));
+            if helper.calls.is_empty()
+                && self.helpers.len() == first_helper
+                && let Some(function) = registered::RegisteredFunction::from_checked_body(
+                    ir::Function {
+                        params,
+                        returns: signature.returns,
+                        locals: helper.locals,
+                        body: statements,
+                    },
+                    names,
+                    helper.frame_arguments,
+                )
+            {
+                self.graph
+                    .register_function(self.module, definition.start(), function);
+            }
+        } else if let Some(mut body) = body {
+            helper.fault_frame(&mut body, definition.name.as_str(), definition.start());
+            if bound_capture {
+                params.rotate_right(1);
+            }
+            self.helpers.finish(
+                signature.id,
+                comprehensions::Helper {
+                    module: self.module,
+                    function: ir::Function {
+                        params,
+                        returns: signature.returns,
+                        locals: helper.locals,
+                        body,
+                    },
+                    calls: helper.calls,
+                    class_reads: helper.class_reads.into_inner(),
+                    source_frame: true,
                 },
-                calls: helper.calls,
-                class_reads: helper.class_reads.into_inner(),
-                source_frame: true,
-                recursion_error: self.graph.modules[self.module]
-                    .error(definition, "recursive local function calls are unsupported"),
-            },
-        );
+            );
+        }
         Ok(Function {
             signature,
             captures,
+            bound_capture,
             definition: Rc::new(definition.clone()),
         })
     }
@@ -818,6 +1007,9 @@ impl Checker<'_> {
             }
             args.order.push(args.values.len());
             args.values.push(self.local(slot));
+        }
+        if function.bound_capture {
+            args.order.rotate_right(1);
         }
         self.calls.insert(function.signature.id);
         Ok(self.call_value(&function.signature, function.signature.returns, args))

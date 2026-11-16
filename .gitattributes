@@ -3,3 +3,7 @@ benchmarks/results/*.json linguist-generated=true
 benchmarks/cpython_stdlib/full/socket/upstream/** linguist-vendored=true whitespace=-blank-at-eol
 # The pinned decimal corpus includes CRLF and intentional whitespace.
 benchmarks/cpython_stdlib/upstream/Lib/test/decimaltestdata/** linguist-vendored=true -text -whitespace
+# Preserve the CPython activation templates' checkout line endings.
+crates/imre-compiler/stdlib/venv/scripts/** text eol=lf
+crates/imre-compiler/stdlib/venv/scripts/common/Activate.ps1 text eol=crlf
+crates/imre-compiler/stdlib/venv/scripts/nt/*.bat text eol=crlf

@@ -9,7 +9,11 @@ from tempfile import TemporaryDirectory
 
 
 PROBE = '''\
+import concurrent
 import sys
+
+print('package', concurrent is sys.modules['concurrent'],
+      hasattr(concurrent, '__path__'), concurrent.__doc__)
 
 # Both candidates have the same module name. Only the first import sees the project file.
 sys.modules.pop('reprlib', None)
@@ -20,6 +24,18 @@ del sys.modules['reprlib']
 import reprlib as bundled
 print('shadow', project.marker(), bundled.Repr().repr([1, 2]), project is bundled)
 print('docs', project.marker.__doc__, bundled.recursive_repr.__doc__, bundled.__doc__ is None)
+
+import os
+import xml
+xml.__path__[0] = os.path.abspath(xml.__path__[0])
+print('before xml.parsers', 'xml.parsers' in sys.modules)
+import xml.parsers
+from xml import parsers
+print('xml', xml.__all__)
+print('parsers', parsers is sys.modules['xml.parsers'], parsers.__doc__ and parsers.__doc__.splitlines()[0])
+
+from importlib.resources._itertools import only
+print('only', only([17]), only([], 41), only.__defaults__)
 
 def dormant():
     import never_loaded
@@ -85,11 +101,23 @@ def main():
         entry = create_project(root)
         env = {'PATH': os.environ['PATH'], 'HOME': temp, 'LC_ALL': 'C.UTF-8'}
         binary = root / 'program'
-        subprocess.run([compiler, 'build', entry, '--runtime-imports', '--opt-level', args.opt_level,
+        subprocess.run([compiler, 'build', entry, '--opt-level', args.opt_level,
                         '--no-cache', '-o', binary], cwd=root, env=env, check=True)
         archives = compiler.parent / 'imre-toolchain' / 'lib' / 'imre-stdlib'
-        assert provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a'), (
-            'no provider from the installed archive was linked')
+        ir = root / 'standalone-ir'
+        subprocess.run([compiler, '--emit-bundled-provider-ir', ir], cwd=root, env=env, check=True)
+        linked = provider_symbols(binary) & provider_symbols(archives / f'O{args.opt_level}/providers.a')
+        origins = (b'reprlib.py', b'xml/__init__.py', b'xml/parsers/__init__.py',
+                   b'importlib/resources/_itertools.py')
+        providers = {origin: [] for origin in origins}
+        for unit in ir.glob('*.ll'):
+            body = unit.read_bytes()
+            assert b'c"<imre stdlib>/concurrent/__init__.py\\00"' not in body, unit
+            for origin in origins:
+                if b'c"<imre stdlib>/' + origin + b'\\00"' in body:
+                    providers[origin].append(unit.stem.encode())
+        for origin, symbols in providers.items():
+            assert len(symbols) == 1 and symbols[0] in linked, (origin, symbols)
 
         env['IMRE_ENCODED_FLAGS'] = '\x1f'.join(['--opt-level', args.opt_level, '--no-cache'])
         for flags, command in [([], [binary]), (['-OO'], [compiler, '-B', '-OO', entry])]:

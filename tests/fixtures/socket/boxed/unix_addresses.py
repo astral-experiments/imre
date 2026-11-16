@@ -4,6 +4,7 @@ import os
 import socket
 import sys
 import tempfile
+from socket import AF_UNIX, SOCK_SEQPACKET, recv_fds, send_fds
 
 
 with tempfile.TemporaryDirectory(dir="/tmp") as directory:
@@ -68,3 +69,28 @@ with tempfile.TemporaryDirectory(dir="/tmp") as directory:
             assert isinstance(source, bytes) and source.startswith(b"\0") and len(source) > 1
             assert client.sendto(b"", abstract) == 0
             assert server.recvfrom(1) == (b"", source)
+
+        path = directory + "/seqpacket"
+        with (
+            socket.socket(AF_UNIX, SOCK_SEQPACKET) as server,
+            socket.socket(AF_UNIX, SOCK_SEQPACKET) as client,
+        ):
+            server.bind(path)
+            server.listen(1)
+            client.connect(path)
+            conn, _ = server.accept()
+            with conn:
+                assert conn.type == socket.SOCK_SEQPACKET
+                with open(directory + "/payload", "w+b") as source:
+                    source.write(b"file contents")
+                    source.seek(0)
+                    assert send_fds(client, [b"first record"], [source.fileno()]) == 12
+                client.sendall(b"next")
+                msg, fds, flags, _ = recv_fds(conn, 5, 1)
+                [fd] = fds
+                try:
+                    assert msg == b"first" and flags & socket.MSG_TRUNC
+                    assert os.read(fd, 32) == b"file contents"
+                    assert conn.recv(32) == b"next"
+                finally:
+                    os.close(fd)

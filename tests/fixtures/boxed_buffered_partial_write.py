@@ -1,6 +1,7 @@
 import errno
 import io
 import os
+import signal
 
 
 def fill(fd):
@@ -111,3 +112,52 @@ def current():
     finally:
         os.close(w)
         os.close(r)
+
+
+def check_signal_during_write(buffering):
+    r, w = os.pipe()
+    marker = RuntimeError("interrupted write")
+    calls = []
+
+    def interrupt(signum, frame):
+        calls.append(signum)
+        raise marker
+
+    previous = signal.signal(signal.SIGALRM, interrupt)
+    try:
+        os.set_blocking(r, False)
+        os.set_blocking(w, False)
+        capacity = fill(w)
+        if buffering:
+            assert drain(r) == b"x" * capacity
+        os.set_blocking(w, True)
+        payload = b"ab" * (capacity + 1)
+        with io.open(w, "wb", buffering=buffering, closefd=False) as stream:
+            signal.alarm(1)
+            try:
+                stream.write(payload)
+            except RuntimeError as error:
+                assert error is marker
+            else:
+                raise AssertionError("handler did not interrupt write")
+            finally:
+                signal.alarm(0)
+            assert calls == [signal.SIGALRM]
+            received = drain(r)
+            if buffering:
+                assert 0 < len(received) < len(payload)
+                assert received == payload[:len(received)]
+            else:
+                assert received == b"x" * capacity
+            assert stream.write(b"!") == 1
+            stream.flush()
+            assert drain(r) == b"!"
+    finally:
+        signal.signal(signal.SIGALRM, previous)
+        os.close(w)
+        os.close(r)
+
+
+if hasattr(signal, "SIGALRM"):
+    check_signal_during_write(16)
+    check_signal_during_write(0)

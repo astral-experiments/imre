@@ -19,9 +19,43 @@ stdlib = sysconfig.get_path("stdlib")
 assert stdlib == sysconfig.get_paths()["stdlib"]
 if sys.implementation.name == "imre":
     version = sysconfig.get_config_var("py_version_short")
-    assert stdlib == sys.base_prefix + "/lib/imre" + version
+    assert stdlib == "/base/lib/imre" + version
+overrides = {"base": "/tmp/install/../staging", "platbase": "/tmp/platform"}
+paths = sysconfig.get_paths(vars=overrides)
+assert paths["scripts"] == sysconfig.get_path("scripts", vars=overrides)
+assert paths["data"] == "/tmp/staging"
+assert paths["platlib"].startswith("/tmp/platform/")
+assert overrides["base"] == "/tmp/install/../staging" and "prefix" in overrides
+assert sysconfig.get_path("data", vars={1: "unused"}) == sysconfig.get_path("data")
+assert sysconfig.get_path("scripts", "posix_user", {"userbase": "/tmp/user"}) == "/tmp/user/bin"
+raw = {}
+assert sysconfig.get_path("scripts", "posix_user", raw, False) == "{userbase}/bin"
+assert raw == {}
+
+from sysconfig import _expand_vars
+original_preference = sysconfig._get_preferred_schemes
+assert all(name in sysconfig._INSTALL_SCHEMES for name in original_preference().values())
+sysconfig._get_preferred_schemes = lambda: {"prefix": "posix_user", "home": "venv"}
+try:
+    assert sysconfig.get_preferred_scheme("home") == "venv"
+    assert sysconfig.get_default_scheme() == ("venv" if sys.prefix != sys.base_prefix else "posix_user")
+finally:
+    sysconfig._get_preferred_schemes = original_preference
+
+scheme = sysconfig.get_default_scheme()
+assert _expand_vars(scheme, None) == sysconfig.get_paths(scheme)
+sysconfig._expand_vars = lambda selected, values: (selected, values)
+try:
+    assert sysconfig.get_paths(scheme, overrides) == (scheme, overrides)
+    assert sysconfig.get_paths(scheme, expand=False) is sysconfig._INSTALL_SCHEMES[scheme]
+finally:
+    sysconfig._expand_vars = _expand_vars
+
 variables = sysconfig.get_config_vars()
 assert sysconfig.get_config_vars() is variables
+if sys.platform in ("linux", "darwin"):
+    assert sysconfig.get_config_var("EXE") == ""
+    assert sysconfig.get_config_vars("EXE", "missing_imre_variable") == ["", None]
 assert sysconfig.get_config_var(name="py_version_short") == variables["py_version_short"]
 variables["imre_mutation_probe"] = 17
 assert sysconfig.get_config_vars("imre_mutation_probe", "missing_imre_variable", "imre_mutation_probe") == [17, None, 17]

@@ -33,6 +33,7 @@ impl Checker<'_> {
                 ir::CallArgs {
                     values,
                     order: vec![0],
+                    site: ir::CallSite::None,
                     exhaustive_enum_match: false,
                 },
             ));
@@ -82,7 +83,7 @@ impl Checker<'_> {
                 if value.ty == Type::Bool {
                     return Ok(Expr {
                         ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                        kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
                     });
                 }
                 return Ok(value);
@@ -94,13 +95,12 @@ impl Checker<'_> {
 
     /// Capture the optional receiver once. Entering None fails before the try;
     /// every exit from the protected body releases exactly the captured lock.
-    pub(super) fn handler_lock_scope(
+    pub(super) fn handler_lock_context<'s>(
         &mut self,
+        out: &'s mut Vec<Statement>,
         item: &ast::WithItem,
-        remaining: &[ast::WithItem],
-        body: &[ast::Stmt],
         manager: Expr,
-    ) -> Result<(Vec<Statement>, bool), String> {
+    ) -> Result<&'s mut Vec<Statement>, String> {
         let ty = self.types.optional(Type::HandlerLock);
         if manager.ty == ty {
             self.graph
@@ -126,27 +126,20 @@ impl Checker<'_> {
             let result = self.hidden(Type::Bool);
             statements.push(Statement::Assign(result, enter));
             clear.push(result);
-            protected.push(self.assign(target, self.local(result))?);
+            self.assign(target, self.local(result), Some(&mut protected))?;
         } else {
             statements.push(Statement::Expr(enter));
         }
-        let (nested, falls) = self.with_items(remaining, body)?;
-        protected.extend(nested);
-        statements.push(Statement::Try {
-            body: protected,
-            handlers: Vec::new(),
-            orelse: Vec::new(),
-            finalbody: vec![Statement::Expr(Expr {
+        Ok(contexts::enter_native(
+            out,
+            statements,
+            protected,
+            Vec::new(),
+            Statement::Expr(Expr {
                 ty: Type::None,
                 kind: ExprKind::Builtin(Builtin::Logging(Op::LockExit), vec![self.local(captured)]),
-            })],
-        });
-        Ok((
-            vec![Statement::Scope {
-                body: statements,
-                clear,
-            }],
-            falls,
+            }),
+            clear,
         ))
     }
 }

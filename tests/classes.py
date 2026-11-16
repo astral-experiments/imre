@@ -13,6 +13,7 @@ import tokenize
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from class_data_sources import write_class_data_sources
+from comprehensions import check_programs
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "classes"
@@ -61,9 +62,9 @@ INVALID_OBJECT_BASES = {
 
 
 REJECTED = {
+    "early_class_alias_default": "class Message: pass\ndef create(factory=Alias): return factory()\nAlias = Message\n",
     "nested_class_bad_return": "class Outer:\n    class Inner:\n        def label(self) -> str:\n            return 42\n",
     "nested_class_with_invalid_sibling": "class Outer:\n    class Inner: pass\n    x: int\n    x: str\n",
-    "nested_class_with_type_params": "class Outer[T]:\n    class Inner: pass\n",
     "nested_class_duplicate_name": "class Outer:\n    class Inner: pass\n    class Inner: pass\n",
     "nested_class_before_invalid_class": "class Outer:\n    class Inner: pass\nclass Bad:\n    x: int\n    x: str\n",
     "nested_class_after_invalid_class": "class Bad:\n    x: int\n    x: str\nclass Outer:\n    class Inner: pass\n",
@@ -112,14 +113,10 @@ class Child(Base):
     "init_hook_super_reads_pending_field": HOOK + "    def read(self) -> int: return self.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = super().read()\n",
     "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
     "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
-    "assign_to_class_string": 'class C:\n    label = "fixed"\nC.label = "new"\n',
     "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
     "incompatible_subclass_class_string": 'class C:\n    label = "first"\nclass D(C):\n    label = 2\n',
     "inherited_name_in_class_expression": 'class C:\n    words = ("a",)\nclass D(C):\n    longer = words + ("b",)\n',
-    "mutable_class_tuple": 'class C:\n    items = (["not fixed"],)\n',
     "copy_hook_wrong_arity": 'import copy\nclass C:\n    def __copy__(self, extra: int) -> int: return extra\ncopy.copy(C())\n',
-    "inherited_copy_reduction": 'import copy\nclass Base:\n    def __reduce_ex__(self, protocol: int) -> int: return 0\nclass Child(Base): pass\ncopy.copy(Child())\n',
-    "copy_custom_getstate": 'import copy\nclass C:\n    def __getstate__(self) -> int: return 0\ncopy.copy(C())\n',
     "overridden_static_binding": "import hashlib\nclass Base:\n    make = staticmethod(hashlib.sha256)\nclass Child(Base):\n    def make(self, x: int) -> int:\n        return x\n",
     "literal_unknown_value": 'from typing import Literal\ndef f(s: Literal["a", "b"]) -> str:\n    return s\nf("c")\n',
     "literal_unproven_string": 'from typing import Literal\ndef f(s: str) -> Literal["a"]:\n    return s\n',
@@ -146,6 +143,10 @@ class Child(Base):
     "wrong_constructor_arity": CELL + "Cell()\n",
     "wrong_method_type": CELL + 'value = Cell(1)\nvalue.add("wrong")\n',
     "wrong_method_arity": CELL + "value = Cell(1)\nvalue.add()\n",
+    "indirect_constructor_unknown_keyword": CELL + """    def copy(self, fields: dict[str, int]):
+        return type(self)(**fields)
+Cell(1).copy({"unknown": 2})
+""",
     "explicit_initializer_call": CELL + "value = Cell(1)\nvalue.__init__(2)\n",
     "missing_method_annotation": CELL.replace("amount: int", "amount"),
     "wrong_method_return": CELL.replace("return self.value", 'return "wrong"'),
@@ -154,11 +155,6 @@ class Child(Base):
     "missing_self": CELL.replace("def add(self, amount: int)", "def add(amount: int)"),
     "method_expression_default": CELL.replace("amount: int)", "amount: int = 1 + 1)"),
     "method_unknown_keyword": CELL + "Cell(1).add(unknown=2)\n",
-    "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
-    "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
-        + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
-    "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
-        + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
     "untyped_constructor": CELL.replace("def __init__(self, value: int)", "def __init__(self, value)"),
     "dynamic_attribute": CELL + "value = Cell(1)\nvalue.extra = 2\n",
     "dynamic_lookup": CELL + 'print(getattr(Cell(1), "value"))\n',
@@ -174,12 +170,12 @@ class Child(Base):
     "constructor_self_escape": CELL.replace("self.value = value", "self.value = escape(self)")
         + "def escape(value: Cell) -> int:\n    return 0\n",
     "constructor_control_flow": CELL.replace("self.value = value", "if value > 0:\n            self.value = value\n        else:\n            self.value = 0"),
+    "constructor_ellipsis_call": CELL.replace("self.value = value", "...()\n        self.value = value"),
     "constructor_side_effect": CELL.replace("self.value = value", "print(value)\n        self.value = value"),
     "constructor_return": CELL.replace("self.value = value", "self.value = value\n        return"),
     "inheritance": CELL + "class Child(Cell):\n    def __init__(self, value: int) -> None:\n        self.value = value\n",
     "metaclass": CELL.replace("class Cell:", "class Cell(metaclass=type):"),
     "unrelated_abc_meta": "class ABCMeta: pass\nclass C(metaclass=ABCMeta): pass\n",
-    "abc_meta_with_keywords": "import abc\nclass C(metaclass=abc.ABCMeta, option=True): pass\n",
     "abc_meta_late_import": "class C(metaclass=ABCMeta): pass\nfrom abc import ABCMeta\n",
     "abc_meta_dataclass_generated": "import abc\nfrom dataclasses import dataclass\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def __init__(self): pass\n@dataclass\nclass B(A):\n    n: int\n",
     "abc_meta_eager_default": "import abc\ndef init() -> int: return 42\nclass A(metaclass=abc.ABCMeta):\n    @abc.abstractmethod\n    def f(self, *, n: int = init()): pass\n",
@@ -195,7 +191,6 @@ class Child(Base):
     "str_static_method": CELL + '    @staticmethod\n    def __str__() -> str:\n        return "Cell"\n',
     "str_wrong_result": CELL + '    def __str__(self) -> int:\n        return self.value\n',
     "str_wrong_body": CELL + '    def __str__(self):\n        return self.value\n',
-    "recursive_str": CELL + '    def __str__(self) -> str:\n        return str(self)\n',
     "finalizer": CELL + "    def __del__(self) -> None:\n        pass\n",
     "private_mangling": CELL.replace("value", "__value"),
     "class_surrogate_docstring": CELL.replace("class Cell:\n", 'class Cell:\n    "\\ud800"\n'),
@@ -213,6 +208,15 @@ class Child(Base):
     "mutual_field_cycle": 'class Left:\n    right: "Right"\n    def __init__(self, right: "Right") -> None:\n        self.right = right\n\nclass Right:\n    left: Left\n    def __init__(self, left: Left) -> None:\n        self.left = left\n',
 }
 
+
+CHECKED = {
+    "recursive_method": CELL.replace("return self.value", "return self.add(amount)"),
+    "mutual_method_recursion": CELL.replace("return self.value", "return self.other(amount)")
+        + "    def other(self, amount: int) -> int:\n        return self.add(amount)\n",
+    "constructor_factory_recursion": CELL.replace("self.value = value", "self.value = construct_value(value)")
+        + "def construct_value(value: int) -> int:\n    return Cell(value).value\n",
+    "recursive_str": CELL + '    def __str__(self) -> str:\n        return str(self)\n',
+}
 
 IMPORTED_REJECTIONS = {
     "imported_nominal_mismatch": {
@@ -328,10 +332,15 @@ def main() -> None:
         shutil.copytree(FIXTURES, project, ignore=shutil.ignore_patterns("__pycache__"))
         verify_upstream_definitions()
         class_sources = write_class_data_sources(project, PROJECT / "benchmarks/cpython_stdlib/full")
-        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "class_namespace.py", "nested_class_body.py", "class_data_setup.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", *class_sources]:
+        runtime_type_errors = ("inherited_copy_reduction.py", "copy_custom_getstate.py", "abc_meta_with_keywords.py")
+        for relative in ["ownership.py", "record_reuse.py", "record_reuse_list.py", "imported/main.py", "string_literals.py", "constant_strings.py", "reassigned_class_string.py", "class_namespace.py", "factory_identity.py", "factory_default.py", "mutable_class_tuple.py", "nested_class_body.py", "class_data_setup.py", "class_scope_default.py", "string_enum_members.py", "string_enum_storage.py", "ordinary_enums.py", "enum_exhaustion.py", "conditional_lists.py", "conditional_methods/main.py", "uv_variant.py", "fixed_lineage.py", "object_base.py", "super_subclass.py", "local_super_subclass.py", "instance_layout.py", "subclass_guard_fields.py", "property_setters.py", "initializer_hook.py", "constructor_fields.py", "constructor_locals.py", "direct_base_initializer.py", "weak_proxy.py", "shallow_copy_protocol.py", "implicit_copy.py", "plain_shallow_copy.py", *runtime_type_errors, "abstract_context_manager.py", "abc_metaclass.py", "mapping_abc.py", "mapping_alias.py", "mapping_class_values.py", "collections_storage_bases.py", "local_collections_storage.py", "nested_class_with_type_params.py", "generic_parameter_tuple.py", *class_sources]:
             source = project / relative
             reference = run([python, "-E", str(source)], temporary)
-            require_success(reference)
+            if relative in runtime_type_errors:
+                assert reference.returncode == 1 and not reference.stdout, reference
+                assert reference.stderr and reference.stderr.splitlines()[-1].startswith("TypeError:"), reference
+            else:
+                require_success(reference)
             require_success(run([compiler, "check", str(source)], temporary))
             for level in args.opt_levels:
                 executable = temporary / f"{source.parent.name}-{source.stem}-O{level}"
@@ -340,14 +349,20 @@ def main() -> None:
                 command += build_flags
                 if args.sanitize:
                     command.append("--sanitize")
-                modes = (False, True) if relative == "weak_proxy.py" else (relative == "implicit_copy.py",)
+                modes = (False, True) if relative == "weak_proxy.py" or relative in runtime_type_errors else (relative == "implicit_copy.py",)
                 for reachable in modes:
                     require_success(run(command + (["--reachable-only"] if reachable else []), temporary))
                     actual = run([str(executable)], temporary)
-                    require_success(actual)
+                    if reference.returncode:
+                        assert actual.returncode == reference.returncode, (relative, level, reachable, actual)
+                        assert actual.stderr.splitlines()[-1:] == reference.stderr.splitlines()[-1:], (actual, reference)
+                    else:
+                        require_success(actual)
                     assert actual.stdout == reference.stdout, (relative, level, reachable, actual.stdout, reference.stdout)
                     checks += 1
+                executable.unlink()
 
+        checks += check_programs(compiler, temporary, CHECKED)
         rejected = {name: {"main.py": source} for name, source in REJECTED.items()}
         rejected.update(IMPORTED_REJECTIONS)
         for name, files in rejected.items():
@@ -362,13 +377,8 @@ def main() -> None:
                 reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
                 for rejection in (result, reachable):
                     assert rejection.returncode and "the base must be a known fixed-layout class" in rejection.stderr, (name, rejection.stderr)
-            if name in {"inherited_copy_reduction", "copy_custom_getstate"}:
-                reachable = run([compiler, "check", str(case / "main.py"), "--reachable-only"], temporary)
-                assert reachable.returncode > 0 and "unsupported reconstruction protocol" in reachable.stderr, (name, reachable.stderr)
             if name in {"direct_field_cycle", "mutual_field_cycle"}:
                 assert "cyclic heap types are unsupported" in result.stderr, (name, result.stderr)
-            if name in {"recursive_method", "mutual_method_recursion", "constructor_factory_recursion"}:
-                assert "recursive calls are unsupported" in result.stderr, (name, result.stderr)
             checks += 1
     print(f"Passed {checks} class checks ({len(REJECTED) + len(IMPORTED_REJECTIONS)} rejections; optimization levels {args.opt_levels}; ASan={args.sanitize})")
 

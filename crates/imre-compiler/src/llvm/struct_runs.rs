@@ -1,5 +1,7 @@
 //! Fold uniform runs and repeated cycles of pure scalar-row projections when binary64 addition is exact.
 use super::*;
+use ruff_python_ast::CmpOp;
+use ruff_python_ast::UnaryOp;
 
 struct RunSum<'a> {
     list: usize,
@@ -24,7 +26,7 @@ fn pure_term(
         ExprKind::Float(_) => true,
         ExprKind::Local(slot) => accumulator.is_some_and(|sum| *slot != sum),
         ExprKind::Field(receiver, _) => row(receiver),
-        ExprKind::Negate(inner) => pure_term(module, inner, row, accumulator),
+        ExprKind::Unary(UnaryOp::USub, inner) => pure_term(module, inner, row, accumulator),
         ExprKind::Binary(Binary::Add | Binary::Subtract | Binary::Multiply, left, right) => {
             pure_term(module, left, row, accumulator) && pure_term(module, right, row, accumulator)
         }
@@ -63,7 +65,7 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
     let ExprKind::Compare(parts, ops) = &test.kind else {
         return None;
     };
-    let ([start, bound], [Compare::Less]) = (parts.as_slice(), ops.as_slice()) else {
+    let ([start, bound], [CmpOp::Lt]) = (parts.as_slice(), ops.as_slice()) else {
         return None;
     };
     let ExprKind::Binary(Binary::Add, old_index, one) = &advance.kind else {
@@ -72,7 +74,8 @@ fn run_sum<'a>(module: &Module, test: &Expr, body: &'a [Statement]) -> Option<Ru
     let ExprKind::Binary(Binary::Add, old_sum, term) = &update.kind else {
         return None;
     };
-    (module.types.is_value_struct(item.ty)
+    (matches!(receiver.ty, Type::List(_))
+        && module.types.is_value_struct(item.ty)
         && local(index, *cursor) && local(start, *cursor) && local(old_index, *cursor)
         && matches!(&bound.kind, ExprKind::Builtin(Builtin::Len, a) if matches!(a.as_slice(), [v] if local(v, list)))
         && matches!(&one.kind, ExprKind::Int(n) if n == "1")
@@ -112,7 +115,7 @@ impl Emitter<'_, '_> {
     /// Field-only methods can use the same projection on their receiver without boxing it.
     fn dictionary_projection(&mut self, term: &Expr, payload: &str) -> Value {
         match &term.kind {
-            ExprKind::Float(_) => self.expr(term),
+            ExprKind::Float(_) | ExprKind::Local(_) => self.expr(term),
             ExprKind::Field(receiver, field) => {
                 let row = Value {
                     ty: receiver.ty,
@@ -122,7 +125,7 @@ impl Emitter<'_, '_> {
                 let pointer = self.field_pointer(&row, *field);
                 self.field_value(&pointer, term.ty)
             }
-            ExprKind::Negate(inner) => {
+            ExprKind::Unary(UnaryOp::USub, inner) => {
                 let value = self.dictionary_projection(inner, payload);
                 Value {
                     operand: self.instruction(format!("fneg double {}", value.operand)),
@@ -225,7 +228,7 @@ impl Emitter<'_, '_> {
         let bounds = self.label();
         self.branch(&present, &bounds, &ordinary);
         self.start(&bounds);
-        let length = self.list_length(&receiver);
+        let length = self.container_length(&receiver);
         let in_bounds = self.instruction(format!("icmp ule i64 {modulus}, {}", length.operand));
         let prepare = self.label();
         self.branch(&in_bounds, &prepare, &ordinary);
@@ -399,6 +402,7 @@ impl Emitter<'_, '_> {
             &plan,
             &list.operand,
             &view.length.operand,
+            &cursor,
             &condition,
             ordinary,
         );
@@ -413,8 +417,7 @@ impl Emitter<'_, '_> {
         self.periodic_struct_sum(&plan, body, &view.length.operand, &index_mask, ordinary);
         self.start(&condition);
         self.check_interrupt();
-        let more = self.while_condition(test, false);
-        self.branch(&more, &visit, exhausted);
+        CheckedBody::native(self).branch_condition(test, &visit, exhausted);
         self.start(&visit);
 
         self.block(&body[..2]);
@@ -468,27 +471,38 @@ impl Emitter<'_, '_> {
         plan: &RunSum<'_>,
         list: &str,
         length: &str,
+        cursor: &str,
         ordered: &str,
         ordinary: &str,
     ) {
         self.check_interrupt();
         let rows = self.entry_alloca("{ [2 x ptr], ptr, i64 }");
-        let ones = self.instruction(format!(
-            "call i64 @imre_struct_binary_prefix(ptr {list}, ptr {rows})"
-        ));
-        let found = self.instruction(format!("icmp sge i64 {ones}, 0"));
-        let check = self.label();
-        self.branch(&found, &check, ordered);
-        self.start(&check);
         let count = self.instruction(format!("lshr i64 {length}, 1"));
         let prefix = self.instruction(format!("sub i64 {count}, 1"));
+        let (bitmap, sparse, check) = (self.label(), self.label(), self.label());
+        self.jump(&bitmap);
+        self.start(&bitmap);
+        let bitmap_count = self.instruction(format!(
+            "call i64 @imre_struct_binary_prefix(ptr {list}, ptr {rows})"
+        ));
+        let has_bitmap = self.instruction(format!("icmp sge i64 {bitmap_count}, 0"));
+        self.branch(&has_bitmap, &check, &sparse);
+        self.start(&sparse);
+        let sparse_count = self.instruction(format!(
+            "call i64 @imre_struct_sparse_prefix(ptr {list}, ptr {rows}, ptr {cursor}, i64 {prefix})"
+        ));
+        let found = self.instruction(format!("icmp sge i64 {sparse_count}, 0"));
+        self.branch(&found, &check, ordered);
+        self.start(&check);
+        let ones = self.instruction(format!(
+            "phi i64 [{bitmap_count}, %{bitmap}], [{sparse_count}, %{sparse}]"
+        ));
         let zeros = self.instruction(format!("sub i64 {prefix}, {ones}"));
         let initial = self.borrow_slot(plan.accumulator);
         let terms = [0, 1].map(|index| {
             let slot = self.instruction(format!("getelementptr ptr, ptr {rows}, i64 {index}"));
             let row = self.instruction(format!("load ptr, ptr {slot}"));
-            self.line(format!("store ptr {row}, ptr %local{}", plan.row));
-            self.expr(plan.term).operand
+            self.dictionary_projection(plan.term, &row).operand
         });
         let mut sum = initial.operand.clone();
         let mut exact = String::from("true");
@@ -503,7 +517,10 @@ impl Emitter<'_, '_> {
             sum = self.instruction(format!("fadd double {sum}, {product}"));
         }
         let (fast, slow, advance) = (self.label(), self.label(), self.label());
-        self.branch(&exact, &fast, &slow);
+        let inexact = self.label();
+        self.branch(&exact, &fast, &inexact);
+        self.start(&inexact);
+        self.branch(&has_bitmap, &slow, ordered);
         self.start(&fast);
         self.jump(&advance);
         self.start(&slow);
@@ -689,6 +706,39 @@ define internal i64 @imre_struct_uniform_end(ptr %span, i64 %next) alwaysinline 
   ret i64 %selected
 }
 
+; Count the two values in a sparse prefix using the existing indexed reduction.
+; A long initial span is cheaper to consume directly. Leave it in the read
+; cursor for the ordinary traversal. Short packed spans indicate scattered edits.
+define internal i64 @imre_struct_sparse_prefix(ptr %list, ptr %rows, ptr %cursor, i64 %prefix) noinline nounwind {
+entry:
+  %short = icmp ult i64 %prefix, 64
+  %large = icmp ugt i64 %prefix, 4294967296
+  %outside = or i1 %short, %large
+  br i1 %outside, label %miss, label %first
+first:
+  call void @imre_struct_seek_span(ptr %list, i64 0, ptr %cursor)
+  %length = getelementptr inbounds {i64,i64,i64,ptr}, ptr %cursor, i32 0, i32 1
+  %end = load i64, ptr %length
+  %threshold = lshr i64 %prefix, 5
+  %long = icmp ugt i64 %end, %threshold
+  br i1 %long, label %miss, label %inspect
+inspect:
+  %mask = getelementptr inbounds {i64,i64,i64,ptr}, ptr %cursor, i32 0, i32 2
+  %initial = load i64, ptr %mask
+  %packed = icmp ne i64 %initial, 0
+  br i1 %packed, label %count, label %second
+second:
+  call void @imre_struct_seek_span(ptr %list, i64 %end, ptr %cursor)
+  %following = load i64, ptr %mask
+  %scattered = icmp ne i64 %following, 0
+  br i1 %scattered, label %count, label %miss
+count:
+  %ones = call i64 @imre_struct_sparse_indexed_count(ptr %list, ptr %rows, i64 %prefix, i64 0, i64 1, i64 %prefix)
+  ret i64 %ones
+miss:
+  ret i64 -1
+}
+
 ; Bound the absolute value of every partial sum for an integral projection.
 ; The strict comparison also rejects a rounded-up or rounded-down boundary.
 define internal i1 @imre_exact_fadd_bound(double %sum, double %term, i64 %count) alwaysinline nounwind {
@@ -807,7 +857,7 @@ print(fallible(rows))
         assert_eq!(llvm.matches("call double @imre_repeat_fadd(").count(), 1);
         // Only the independent projection can query a two-value dictionary.
         assert_eq!(
-            llvm.matches("call i64 @imre_struct_binary_prefix(").count(),
+            llvm.matches("call i64 @imre_struct_sparse_prefix(").count(),
             1
         );
         assert_eq!(llvm.matches("call i1 @imre_exact_fadd_bound(").count(), 5);

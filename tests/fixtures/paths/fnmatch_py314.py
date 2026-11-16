@@ -86,3 +86,9 @@ try:
     print(matched(b"abc", "*"))
 except TypeError as exc:
     print(str(exc))
+
+# Literal affixes may meet but cannot share any bytes of the name.
+for candidate_name, star_pattern in [("test", "tes*est"), ("abc", "a***bc"), ("", "***"),
+                                     ("é/雪", "é*雪"), ("雪", "雪*雪"), ("aXb", "a?*b")]:
+    print(fnmatch.fnmatchcase(candidate_name, star_pattern))
+print(fnmatch.fnmatchcase(b"\xff/\x80", b"\xff**\x80"))

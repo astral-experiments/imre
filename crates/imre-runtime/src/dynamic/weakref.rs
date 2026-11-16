@@ -32,6 +32,7 @@ impl Kind {
 #[derive(Clone, Copy)]
 pub(super) struct Reference {
     pub kind: Kind,
+    pub internal: bool,
     pub target: Option<Id>,
     pub callback: Id,
     pub hash: Option<i64>,
@@ -211,7 +212,7 @@ impl Context {
             return self.native_owns_layout_descriptor(class, "__weakref__");
         };
         if ancestors.iter().any(|&base| {
-            matches!(self.heap.get(base), Value::Native(name) if matches!(name.as_str(), "int" | "tuple" | "bytes"))
+            matches!(self.heap.get(base), Value::Native(name) if super::slot_member::VARIABLE_SIZE_BASES.contains(&name.as_str()))
         }) {
             return false;
         }
@@ -277,7 +278,6 @@ impl Context {
             | Value::Array(_)
             | Value::MemoryView { .. }
             | Value::File(_)
-            | Value::TextFile(_)
             | Value::Partial { .. }
             | Value::Cached { .. }
             | Value::HandlerLock(_)
@@ -364,59 +364,6 @@ pub(super) fn call(
     let error = |s| Error::new("TypeError", s);
     match function {
         REFERENCE_HASH => ctx.reference_hash(args, kwargs),
-        "weakref.descriptor.__get__"
-        | "weakref.descriptor.__set__"
-        | "weakref.descriptor.__delete__" => {
-            let Some((&descriptor, rest)) = args.split_first() else {
-                unreachable!()
-            };
-            let Value::LayoutDescriptor(owner, field) = *ctx.heap.get(descriptor) else {
-                unreachable!()
-            };
-            let name = function.rsplit('.').next().unwrap();
-            if !kwargs.is_empty() {
-                return Err(Error::new(
-                    "TypeError",
-                    format!("wrapper {name}() takes no keyword arguments"),
-                ));
-            }
-            match (name, rest) {
-                ("__get__", [NONE] | [NONE, NONE]) => Err(error("__get__(None, None) is invalid")),
-                ("__get__", [NONE, _]) => Ok(descriptor),
-                ("__get__", [receiver] | [receiver, _]) => {
-                    ctx.read_layout_descriptor(owner, field, *receiver)
-                }
-                ("__set__", [receiver, value]) => {
-                    ctx.write_layout_descriptor(owner, field, *receiver, Some(*value))?;
-                    Ok(NONE)
-                }
-                ("__delete__", [receiver]) => {
-                    ctx.write_layout_descriptor(owner, field, *receiver, None)?;
-                    Ok(NONE)
-                }
-                _ => {
-                    let expected = match name {
-                        "__get__" if rest.is_empty() => "at least 1",
-                        "__get__" => "at most 2",
-                        "__set__" => "2",
-                        _ => "1",
-                    };
-                    Err(Error::new(
-                        "TypeError",
-                        format!(
-                            "{}expected {expected} argument{}, got {}",
-                            match name {
-                                "__get__" => "__get__ ",
-                                "__set__" => "__set__ ",
-                                _ => "",
-                            },
-                            if expected.ends_with('1') { "" } else { "s" },
-                            rest.len()
-                        ),
-                    ))
-                }
-            }
-        }
         "weakref.ProxyType.__bytes__" | "weakref.ProxyType.__reversed__" => {
             let method = function.rsplit('.').next().unwrap();
             let proxy =
@@ -581,7 +528,7 @@ pub(super) fn call(
                     ),
                 ));
             };
-            let refs = ctx.heap.weak_references(*target);
+            let refs = ctx.heap.python_weak_references(*target);
             if function.ends_with("count") {
                 Ok(ctx.int(refs.len() as i64))
             } else {
@@ -624,7 +571,7 @@ pub(super) fn call(
                 };
                 if reference.target.is_none() {
                     // A second key lookup could call Python and replace the dead reference.
-                    super::builtins::remove_table_entry(ctx, dict, index)?;
+                    ctx.heap.remove_table_entry(dict, index)?;
                     ctx.finalize_removed_dict_value(value);
                 }
             }

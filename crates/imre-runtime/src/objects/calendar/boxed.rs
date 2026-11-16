@@ -77,16 +77,16 @@ impl Calendar {
                     zone: None,
                     fold: 0,
                 };
-                (time(0), time(DAY - 1), 1)
+                (time(0), time((DAY - 1) as i64), 1)
             }
             "datetime.timedelta" => (
-                Value::Delta(-999_999_999 * DAY),
-                Value::Delta(1_000_000_000 * DAY - 1),
+                Value::delta(-999_999_999 * DAY),
+                Value::delta(1_000_000_000 * DAY - 1),
                 1,
             ),
             _ => return None,
         };
-        Some([min, max, Value::Delta(resolution)].map(|value| Self(owner(value))))
+        Some([min, max, Value::delta(resolution)].map(|value| Self(owner(value))))
     }
 
     pub(crate) fn zone_limit(max: bool) -> Self {
@@ -139,7 +139,7 @@ impl Calendar {
     /// Subtract two dates by their stored ordinals, independently of Python field overrides.
     pub(crate) fn date_difference(&self, other: &Self) -> Result<Self, Error> {
         let days = self.ordinal() - other.ordinal();
-        try_owner(Value::Delta(i128::from(days) * DAY)).map(Self)
+        try_owner(Value::delta(i128::from(days) * DAY)).map(Self)
     }
 
     /// Subtract two datetimes backed by naive or fixed-offset wall times.
@@ -164,7 +164,7 @@ impl Calendar {
                 ));
             }
         };
-        try_owner(Value::Delta(difference)).map(Self)
+        try_owner(Value::delta(difference)).map(Self)
     }
 
     pub(crate) fn negate_delta(&self) -> Result<Self, Error> {
@@ -253,11 +253,11 @@ impl Calendar {
         civil(self).compare(civil(other))
     }
 
-    pub(crate) fn time_micros(fields: [i32; 5]) -> Result<i128, Error> {
+    pub(crate) fn time_micros(fields: [i32; 5]) -> Result<i64, Error> {
         time_micros(fields)
     }
 
-    pub(crate) fn time(local: i128, fold: i32, zone: Option<&Self>) -> Result<Self, Error> {
+    pub(crate) fn time(local: i64, fold: i32, zone: Option<&Self>) -> Result<Self, Error> {
         try_owner(Value::Time {
             local,
             fold,
@@ -280,7 +280,7 @@ impl Calendar {
     pub(crate) fn wall_microseconds(&self) -> i128 {
         with(&self.0, |value| match value {
             Value::Date { local, .. } => local.micros(),
-            Value::Time { local, .. } => *local,
+            Value::Time { local, .. } => i128::from(*local),
             _ => unreachable!(),
         })
     }
@@ -322,7 +322,7 @@ impl Calendar {
                 unreachable!()
             };
             let micros = conversion::naive_offset(local.micros(), *fold != 0)?;
-            Ok(Self(owner(Value::Delta(micros))))
+            Ok(Self(owner(Value::delta(micros))))
         })
     }
 
@@ -331,7 +331,7 @@ impl Calendar {
         let micros = self.wall_microseconds() - (EPOCH_ORD - 1) * DAY;
         let seconds = (micros.div_euclid(1_000_000)) as i64;
         let parts = super::super::time::ClockParts::from_int(&Int::from(seconds), false)?;
-        let offset = owner(Value::Delta(i128::from(parts.offset) * 1_000_000));
+        let offset = owner(Value::delta(i128::from(parts.offset) * 1_000_000));
         let name = parts.zone.as_ref().map(|name| name.as_str().to_owned());
         Ok((Self(make_zone(offset, parts.zone)?), name))
     }
@@ -451,12 +451,18 @@ impl Calendar {
         if ordinal < 1 {
             return Err(Error::new(Kind::ValueError, "ordinal must be >= 1"));
         }
-        // A subtype constructor can accept a year past 9999. Decode within one
-        // Gregorian cycle, then restore the full year before calling Python.
-        let days = ordinal - 1;
-        let cycles = days / 146_097;
-        let (year, month, day) = ymd(i128::from(days % 146_097 + 1));
-        Ok([year + 400 * cycles, month, day])
+        // Shift to March of year zero: leap day is then the last day of a year.
+        // Complete 400-year cycles make this work for subclass years past 9999 too.
+        let days = ordinal as u32 + 305;
+        let cycle = days / 146_097;
+        let day = days % 146_097;
+        let year = (day - day / 1_460 + day / 36_524 - day / 146_096) / 365;
+        let day = day - (365 * year + year / 4 - year / 100);
+        let month = (5 * day + 2) / 153;
+        let day = day - (153 * month + 2) / 5 + 1;
+        let year = cycle * 400 + year + u32::from(month >= 10);
+        let month = if month < 10 { month + 3 } else { month - 9 };
+        Ok([year as i32, month as i32, day as i32])
     }
 
     /// Convert an ISO week date, including a final week that extends into year 10000.
@@ -526,7 +532,7 @@ impl Calendar {
     }
 
     pub(crate) fn from_delta_microseconds(us: &Int) -> Result<Self, Error> {
-        try_owner(Value::Delta(validate_delta(&us.big())?)).map(Self)
+        try_owner(Value::delta(validate_delta(&us.big())?)).map(Self)
     }
 
     pub(crate) fn delta_parts(&self) -> (i128, i128, i128) {
@@ -542,13 +548,13 @@ impl Calendar {
     /// Timedeltas, zones and aware datetimes hash as their normalized duration.
     pub(crate) fn hash_delta_parts(&self) -> Option<(i128, i128, i128)> {
         with(&self.0, |v| match v {
-            Value::Delta(n) => Some(parts(*n)),
+            Value::Delta(n) => Some(parts(n.micros())),
             Value::Zone { offset, .. } => Some(parts(delta(offset))),
             Value::Time {
                 local,
                 zone: Some(zone),
                 ..
-            } => Some(parts(local - offset(zone))),
+            } => Some(parts(i128::from(*local) - offset(zone))),
             Value::Date {
                 local,
                 zone: Some(zone),

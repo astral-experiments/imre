@@ -42,7 +42,8 @@ There are no additional exclusions.
 The original constructor report replays the cohorts available on `e6fda91`, with the
 [whole-method probe from that compiler](body-probes-segments-linux.json)
 accounting for the remaining occurrences. Seven constructor observations were
-updated on `4375dae` after #995, then two samefile observations on `66ff119`.
+updated on `4375dae` after #995, two samefile observations on `66ff119`,
+and the two complete `test_stat` bodies on `fd047f25`.
 Reproduce the report with the binary and runtime from each revision:
 
 ```sh
@@ -64,6 +65,13 @@ python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/eviden
     --imre-commit 66ff11995e158d982b1a69fbf9e3156f0372c12a --cohort samefile --result /tmp/pathlib-samefile.json
 python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --samefile /tmp/pathlib-samefile.json \
     --baseline /tmp/pathlib-before-samefile.json --imre-commit 66ff11995e158d982b1a69fbf9e3156f0372c12a \
+    --result /tmp/pathlib-before-stat.json
+python -B -X warn_default_encoding benchmarks/cpython_stdlib/full/pathlib/evidence.py \
+    --fixture-dir /dev/shm --imre /path/to/fd047f25/imre --runtime /path/to/fd047f25/libimre_runtime.a \
+    --clang /path/to/clang --imre-commit fd047f254d7ea466d4e8cc62fb5f28f23c1cdd6b \
+    --cohort stat --result /tmp/pathlib-stat.json
+python3 benchmarks/cpython_stdlib/full/pathlib/metadata_receipt.py --stat /tmp/pathlib-stat.json \
+    --baseline /tmp/pathlib-before-stat.json --imre-commit fd047f254d7ea466d4e8cc62fb5f28f23c1cdd6b \
     --result /tmp/pathlib-current.json
 ```
 
@@ -93,7 +101,7 @@ python3 benchmarks/cpython_stdlib/suite_evidence.py \
 
 The historical walking baseline used `906b10a`; six Path.info methods were
 first verified on `13b6945`, four link methods on `ad70f73`, and ten stat/lstat
-methods on `6c448e3`. The current replay verifies those roles again. The four
+methods on `6c448e3`. The current replay verifies the roles recorded for each method. The four
 recursive symlink glob methods still pass with native iterators; their recorded
 numbers of yielded loop paths can differ before the original bodies filter them.
 
@@ -132,10 +140,11 @@ For the ten original stat/lstat occurrences, run the same evidence command
 with `--cohort stat --result /tmp/pathlib-stat.json`, then run
 `metadata_receipt.py --stat /tmp/pathlib-stat.json`. For both `Path` and
 `PosixPath`, four complete methods compare followed and unfollowed results
-natively under the original CPython filesystem fixtures. In `test_stat`
-CPython runs the body and its eleven assertions; Imre constructs three paths,
-joins them, calls stat three times and reads 19 integer fields. The adapter
-rejects any host pathlib, `os.stat` or `os.lstat` call in those bodies.
+natively under the original CPython filesystem fixtures. In the fifth method,
+`test_stat`, Imre executes the original three stat calls and eleven assertions
+on `st_mode`, `st_ino` and `st_dev`. CPython supplies setup and teardown.
+Use `--fixture-dir /dev/shm` so all three paths reside on the same device,
+as the original method requires.
 
 The constructor cohort (`--cohort segments`) measures seven original methods
 on `e6fda91` and again on `4375dae`. The two concrete classes run their complete unexpected-keyword
@@ -288,3 +297,15 @@ With [the inherited exception layout change](https://github.com/astral-sh/imre/p
 reachable-only entries still stopped on line 1613. The coordinator's source root
 and the shared runner with verified vendored files gave identical diagnostics.
 None of these startup checks executed an upstream method.
+
+## Original CPython 3.14.5 methods on public #8087
+
+The Linux comparison used the original seven test modules and all 1,369 distinct test IDs. CPython passed 978 and skipped 391 in the matched environment. Its frozen regression-runner environment passed 963 and skipped 406.
+
+The explicitly linked unittest runner used groups of original IDs. At both O0 and O3 it passed 962, skipped 392 and errored on 15. The two saved executables repeated all 1,369 outcomes after the test sources and original compiler cache were hidden. All 962 native passes were also stock passes. Across all dispositions, each native route matched 1,353 of the 1,369 stock outcomes. The [per-method ledger](public-8087-originals.tsv) preserves both stock environments.
+
+Twelve path representation methods reach a runtime `eval` of their constructed representation, and three methods start threads while inspecting `Path.parts`. The remaining stock difference is the CPython-only lazy import test, which the native runs skipped.
+
+The package has no `__main__`. Without explicitly linking the package and its children, the ordinary named unittest launcher stopped before running a method. After source withdrawal, directory discovery also stopped before the first method. The saved runner used the original explicit IDs. One uninterrupted package invocation reached 225 terminal outcomes before its 240-second guard stopped it in the next method. That method also passed in a separate run.
+
+The uninterrupted direct FILE command executes the upstream `test_pathlib.py` module and covers 1,139 methods. Both native tiers completed it with exit 1. Unittest printed 75 error entries across 15 parent methods. The historical 968/1,369 cumulative figure includes earlier configurations.

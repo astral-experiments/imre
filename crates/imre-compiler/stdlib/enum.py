@@ -1,7 +1,7 @@
 """Global enum helpers from CPython 3.14.5 Lib/enum.py. See stdlib/docstrings/LICENSE."""
 
 import sys as _sys
-from enum import Enum as _Enum, Flag as _Flag, IntEnum as _IntEnum, IntFlag as _IntFlag, StrEnum as _StrEnum
+from enum import Enum, Flag as _Flag, IntEnum as _IntEnum, IntFlag as _IntFlag, StrEnum as _StrEnum
 
 
 def __dir__(self):
@@ -29,8 +29,24 @@ def __dir__(self):
     return sorted(names)
 
 
-_Enum.__dir__ = __dir__
+Enum.__dir__ = __dir__
 del __dir__
+
+
+def _iter_bits_lsb(num):
+    # num must be a positive integer
+    original = num
+    if isinstance(num, Enum):
+        num = num.value
+    if num < 0:
+        raise ValueError('%r is not a positive integer' % original)
+    while num:
+        b = num & (~num + 1)
+        yield b
+        num ^= b
+
+def show_flag_values(value):
+    return list(_iter_bits_lsb(value))
 
 
 def _install_flag_methods(methods):
@@ -55,25 +71,15 @@ class Flag:
 
     def __iter__(self):
         bits = self._value_ & self._flag_mask_
-        if bits < 0:
-            raise ValueError(f"{bits!r} is not a positive integer")
         members = []
-        while bits:
-            bit = bits & -bits
+        for bit in _iter_bits_lsb(bits):
             members.append(self._value2member_map_.get(bit))
-            bits ^= bit
         if self._flag_definition_order:
             members.sort(key=lambda member: member._sort_order_)
         yield from members
 
     def __len__(self):
-        # Count the set bits without allocating a textual representation.
-        bits = abs(self._value_)
-        count = 0
-        while bits:
-            bits &= bits - 1
-            count += 1
-        return count
+        return self._value_.bit_count()
 
     def __str__(self):
         cls_name = self.__class__.__name__
@@ -129,13 +135,36 @@ class Flag:
         value = self._value_
         if value is None:
             raise TypeError(f"'{self}' cannot be inverted")
-        if isinstance(self, _IntFlag):
-            return self.__class__(~value)
-        return self.__class__(self._singles_mask_ & ~value)
+        if self._inverted_ is None:
+            if self._boundary_ in (EJECT, KEEP):
+                self._inverted_ = self.__class__(~value)
+            else:
+                self._inverted_ = self.__class__(self._singles_mask_ & ~value)
+        return self._inverted_
 
     __ror__ = __or__
     __rand__ = __and__
     __rxor__ = __xor__
+
+
+class FlagBoundary(_StrEnum):
+    """
+    control how out of range values are handled
+    "strict" -> error is raised             [default for Flag]
+    "conform" -> extra bits are discarded
+    "eject" -> lose flag status
+    "keep" -> keep flag status and all bits [default for IntFlag]
+    """
+    STRICT = "strict"
+    CONFORM = "conform"
+    EJECT = "eject"
+    KEEP = "keep"
+
+
+STRICT, CONFORM, EJECT, KEEP = FlagBoundary
+_Flag._inverted_ = None
+_Flag._boundary_ = STRICT
+_IntFlag._boundary_ = KEEP
 
 
 def global_enum_repr(self):
@@ -190,6 +219,22 @@ def global_enum(cls, update_str=False):
     return cls
 
 
+def unique(enumeration):
+    """
+    Class decorator for enumerations ensuring unique member values.
+    """
+    duplicates = []
+    for name, member in enumeration.__members__.items():
+        if name != member.name:
+            duplicates.append((name, member.name))
+    if duplicates:
+        alias_details = ', '.join(
+                ["%s -> %s" % (alias, name) for (alias, name) in duplicates])
+        raise ValueError('duplicate values found in %r: %s' %
+                (enumeration, alias_details))
+    return enumeration
+
+
 _not_given = object()
 
 
@@ -216,8 +261,8 @@ def _functional_members(base, names, start):
 
 def _prepare_functional_enum(base, value, names=_not_given, *values, module=None,
                              qualname=None, type=None, start=1, boundary=None):
-    if type is not None or boundary is not None:
-        raise NotImplementedError("functional enum mixins and boundary options are unsupported")
+    if type is not None:
+        raise NotImplementedError("functional enum mixins are unsupported")
     if names is _not_given:
         raise TypeError(f"{base} has no members; specify `names=()` if you meant to create a new, empty, enum")
-    return value, _functional_members(base, names, start), module, qualname
+    return value, _functional_members(base, names, start), module, qualname, boundary

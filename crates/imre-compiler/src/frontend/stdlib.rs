@@ -2,6 +2,63 @@
 
 use super::*;
 
+/// These calls bind the original string method and its operands in the Python frame.
+pub(super) fn registered_string_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
+    let method = call.func.as_attribute_expr()?;
+    let args = &call.arguments;
+    let supported = match method.attr.as_str() {
+        "removeprefix" | "format_map" => {
+            matches!(args.args.as_slice(), [arg] if !arg.is_starred_expr())
+                && args.keywords.is_empty()
+        }
+        "format" => {
+            !method.value.is_string_literal_expr()
+                && !args.args.is_empty()
+                && !args.args.iter().any(ast::Expr::is_starred_expr)
+                && args.keywords.iter().all(|kw| kw.arg.is_some())
+        }
+        _ => false,
+    };
+    supported.then_some(method)
+}
+
+fn replace_arguments(call: &ast::ExprCall) -> Option<(&ast::Expr, &ast::Expr, Option<&ast::Expr>)> {
+    match (&*call.arguments.args, &*call.arguments.keywords) {
+        ([old, new], []) => Some((old, new, None)),
+        ([old, new, count], []) => Some((old, new, Some(count))),
+        ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => {
+            Some((old, new, Some(&kw.value)))
+        }
+        _ => None,
+    }
+}
+
+/// The receiver fixes the method, and the completed operand has a builtin non-string class.
+fn fixed_replace_operand(call: &ast::ExprCall, operand: &ast::Expr) -> bool {
+    let Some(method) = call.func.as_attribute_expr() else {
+        return false;
+    };
+    if method.attr.as_str() != "replace" || !method.value.is_string_literal_expr() {
+        return false;
+    }
+    match operand {
+        ast::Expr::List(_) | ast::Expr::Tuple(_) | ast::Expr::Set(_) | ast::Expr::Dict(_) => true,
+        ast::Expr::UnaryOp(op) => {
+            matches!(op.op, ast::UnaryOp::UAdd | ast::UnaryOp::USub)
+                && op.operand.is_number_literal_expr()
+        }
+        _ => operand.is_literal_expr() && !operand.is_string_literal_expr(),
+    }
+}
+
+/// Select an existing ty overload diagnostic after the typed frontend stopped lowering.
+pub(crate) fn literal_replace_mismatch(call: &ast::ExprCall) -> bool {
+    !call.arguments.args.iter().any(ast::Expr::is_starred_expr)
+        && replace_arguments(call).is_some_and(|(old, new, _)| {
+            fixed_replace_operand(call, old) || fixed_replace_operand(call, new)
+        })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum JoinStyle {
     Plain,
@@ -13,6 +70,26 @@ pub(super) enum JoinStyle {
 pub(super) enum ReverseSequence {
     List,
     Deque,
+}
+
+/// Lower a unary math operation when the argument has a native numeric representation.
+pub(super) fn unary_float_builtin(builtin: Builtin, value: Expr) -> Option<Expr> {
+    let (builtin, conversion, ty) = match (builtin, value.ty) {
+        // A Python int can have a finite logarithm even when float(int) overflows.
+        (Builtin::FloatLog10, Type::Int | Type::Bool) => {
+            (Builtin::IntLog10, Builtin::Int(None), Type::Int)
+        }
+        (op, Type::Float | Type::Int | Type::Bool) => (op, Builtin::Float(None), Type::Float),
+        _ => return None,
+    };
+    let number = Expr {
+        ty,
+        kind: ExprKind::Builtin(conversion, vec![value]),
+    };
+    Some(Expr {
+        ty: Type::Float,
+        kind: ExprKind::Builtin(builtin, vec![number]),
+    })
 }
 
 /// All leaves must be plain local reads so no later operand can change the
@@ -64,6 +141,127 @@ fn positional_template(mut rest: &str, arguments: usize) -> Option<String> {
 }
 
 impl Checker<'_> {
+    pub(super) fn math_fmod(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        calls::reject_unpacking(call, self.source)?;
+        let args = &call.arguments;
+        if !args.keywords.is_empty() || args.args.len() != 2 {
+            let message = if args.keywords.is_empty() {
+                format!("fmod expected 2 arguments, got {}", args.args.len())
+            } else {
+                "math.fmod() takes no keyword arguments".to_owned()
+            };
+            return self.positional_argument_error(
+                call,
+                &["x", "y"],
+                Type::Float,
+                unpacking::string(message),
+            );
+        }
+        let mut values = Vec::with_capacity(2);
+        for arg in &args.args {
+            let value = powers::integer(self.expr(arg)?);
+            if !matches!(value.ty, Type::Int | Type::Float) {
+                return Err(error(
+                    self.source,
+                    arg,
+                    "math.fmod requires an integer or float",
+                ));
+            }
+            values.push(value);
+        }
+        Ok(Expr {
+            ty: Type::Float,
+            kind: ExprKind::Builtin(Builtin::FloatFmod, values),
+        })
+    }
+
+    /// Keep argument evaluation ahead of index conversion, including when k evaluates to None.
+    pub(super) fn math_perm(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
+        let args = &call.arguments;
+        if !self
+            .graph
+            .session
+            .is_stdlib_function(self.module, &call.func, "math", "perm")
+        {
+            return Err(error(
+                self.source,
+                call,
+                "checked permutation requires a resolved math.perm call",
+            ));
+        }
+        let message = if !args.keywords.is_empty() {
+            Some("math.perm() takes no keyword arguments".into())
+        } else {
+            match args.args.len() {
+                0 => Some("perm expected at least 1 argument, got 0".into()),
+                1 | 2 => None,
+                count => Some(format!("perm expected at most 2 arguments, got {count}")),
+            }
+        };
+        self.graph.checked_overload(self.module, call.range());
+        if let Some(message) = message {
+            return self.positional_argument_error(
+                call,
+                &["n", "k"],
+                Type::Int,
+                unpacking::string(message),
+            );
+        }
+
+        let mut scope = calls::ArgumentScope::default();
+        let n_node = &args.args[0];
+        let n = self.expr(n_node)?;
+        let n = scope.hold(self, n);
+        let k = if let Some(node) = args.args.get(1) {
+            let value = self.expr(node)?;
+            Some((node, scope.hold(self, value)))
+        } else {
+            None
+        };
+        let n = self.index_word(n, n_node, false)?;
+        self.graph
+            .checked_argument_type(self.module, n_node.range());
+        let factorial = |n| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathFactorial, vec![n]),
+        };
+        let perm = |n, k| Expr {
+            ty: Type::Int,
+            kind: ExprKind::Builtin(Builtin::MathPerm, vec![n, k]),
+        };
+        let value = match k {
+            None => factorial(n),
+            Some((_, k)) if k.ty == Type::None => factorial(n),
+            Some((node, k)) => {
+                self.graph.checked_argument_type(self.module, node.range());
+                if let Some(ty) = self.types.payload(k.ty) {
+                    let n = scope.hold(self, n);
+                    let absent = Expr {
+                        ty: Type::Bool,
+                        kind: ExprKind::Builtin(Builtin::IsNone, vec![k.clone()]),
+                    };
+                    let value = Expr {
+                        ty,
+                        kind: ExprKind::Unwrap(Box::new(k)),
+                    };
+                    let k = self.index_word(value, node, false)?;
+                    Expr {
+                        ty: Type::Int,
+                        kind: ExprKind::Conditional(
+                            Box::new(absent),
+                            Box::new(factorial(n.clone())),
+                            Box::new(perm(n, k)),
+                        ),
+                    }
+                } else {
+                    let k = self.index_word(k, node, false)?;
+                    perm(n, k)
+                }
+            }
+        };
+        Ok(scope.finish(value))
+    }
+
     /// Captures arguments before acquisition, materializes the source before key
     /// calls, and keeps the source argument rooted until the sorted result escapes.
     pub(super) fn sorted_call(
@@ -101,41 +299,31 @@ impl Checker<'_> {
             }
         }
         let input = self.capture_consumer_input(input, &mut body, &mut clear);
-        let mut input = self.prepare_iteration(input, call, false)?;
+        let input = self.prepare_iteration(input, call, false)?;
         self.hint_empty_iteration(&input, Some(element.unwrap_or(Type::Int)));
         let element = self.locals[input.value];
-        body.append(&mut input.evaluate);
-        clear.extend(&input.clear);
 
         let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
-        let result_type = self.types.list(element);
-        let result = self.hidden(result_type);
-        clear.push(result);
-        body.push(Statement::Assign(
-            result,
-            Expr {
-                ty: result_type,
-                kind: ExprKind::List(Vec::new()),
-            },
-        ));
-        body.extend(
-            self.expand_items(Iteration::Prepared(input), call, |checker, value| {
+        if callback.is_none() {
+            // The surrounding check can continue after a refused sort.
+            self.sortable_key(element, call)
+                .inspect_err(|_| self.forget_pull_writes(&input))?;
+        }
+        let (collection, result) = self.collect_list_body(
+            Iteration::Prepared(input),
+            element,
+            call,
+            |checker, result, value| {
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(result), value]),
                 })])
-            })?,
-        );
-
-        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
-        Ok(Expr {
-            ty: result_type,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(self.local(result)),
-                clear,
             },
-        })
+        )?;
+        body.extend(collection);
+        clear.push(result);
+        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
+        Ok(Expr::scope(body, self.local(result), clear))
     }
 
     /// Bind reverse on an instance or as a descriptor. The receiver and
@@ -294,6 +482,7 @@ impl Checker<'_> {
                 })],
             });
         } else {
+            self.sortable_key(element, call)?;
             self.sort_values(call, target, callback, reverse, &mut body, &mut clear)?;
         }
         Ok(Expr {
@@ -413,7 +602,6 @@ impl Checker<'_> {
             )?);
             keys
         } else {
-            self.sortable_key(element, call)?;
             result
         };
         body.push(Statement::Expr(Expr {
@@ -458,6 +646,8 @@ impl Checker<'_> {
     fn sortable_key(&self, ty: Type, node: &impl Ranged) -> Result<(), String> {
         if self.types.ordered_key(ty) {
             Ok(())
+        } else if ty == Type::PythonObject || ty.is_path() {
+            Err(self.scoped_builtin_error("comparing Python sort keys", node))
         } else {
             Err(error(
                 self.source,
@@ -500,14 +690,10 @@ impl Checker<'_> {
         style: JoinStyle,
     ) -> Result<Expr, String> {
         let input = if style == JoinStyle::WindowsCommand
-            && let ast::Expr::List(display) = source
-            && !display
-                .elts
-                .iter()
-                .any(|item| matches!(item, ast::Expr::Starred(_)))
+            && let Some(iterable) = self.command_list(source)?
         {
             Iteration::Container {
-                iterable: self.process_argument_list(display)?,
+                iterable,
                 items: false,
                 start: None,
             }
@@ -533,71 +719,53 @@ impl Checker<'_> {
                 format!("'{name}' object is not iterable"),
             );
         }
-        if let Iteration::Container {
-            iterable,
-            items: false,
-            start: None,
-        } = &input
-            && style == JoinStyle::Plain
-            && matches!(
-                self.types.element(iterable.ty),
-                Some(Type::Str | Type::StrLiteral(_))
-            )
-        {
-            // Exact lists have no iteration callbacks; the runtime can borrow
-            // their complete string buffer after both call arguments finish.
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::StringJoin, vec![receiver, iterable.clone()]),
-            });
-        }
-        let separator = self.hidden(Type::Str);
-        let list = self.types.list(Type::Str);
-        let parts = self.hidden(list);
-        let mut body = vec![
-            Statement::Assign(separator, receiver),
-            Statement::Assign(
-                parts,
-                Expr {
-                    ty: list,
-                    kind: ExprKind::List(Vec::new()),
-                },
-            ),
-        ];
-        body.extend(self.expand_items(input, call, |checker, value| {
-            let value = match style {
-                JoinStyle::Plain => checker.coerce(value, Type::Str, call)?,
-                JoinStyle::Shell => checker.shlex_quote_value(value, call)?,
-                JoinStyle::WindowsCommand => {
-                    let path = Self::string_value(checker.fspath(value, source)?);
-                    Expr {
-                        ty: Type::Str,
-                        kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::QuoteCommandArgument),
-                            vec![path],
-                        ),
-                    }
-                }
-            };
-            Ok(vec![Statement::Expr(Expr {
-                ty: Type::None,
-                kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(parts), value]),
-            })])
-        })?);
-        Ok(Expr {
+        let mut scope = calls::ArgumentScope::default();
+        let (separator, parts) = match input {
+            Iteration::Container {
+                iterable,
+                items: false,
+                start: None,
+            } if style == JoinStyle::Plain
+                && matches!(
+                    self.types.element(iterable.ty),
+                    Some(Type::Str | Type::StrLiteral(_))
+                ) =>
+            {
+                (receiver, iterable)
+            }
+            input => {
+                // Pool roots live for the program. Hold any computed separator before pulling.
+                let separator = if matches!(receiver.kind, ExprKind::Str(_)) {
+                    receiver
+                } else {
+                    scope.hold(self, receiver)
+                };
+                let parts =
+                    self.collect_list_with(input, Some(Type::Str), call, |checker, value| {
+                        match style {
+                            JoinStyle::Plain => Ok(value),
+                            JoinStyle::Shell => checker.shlex_quote_value(value, call),
+                            JoinStyle::WindowsCommand => {
+                                let path = Self::string_value(checker.fspath(value, source)?);
+                                Ok(Expr {
+                                    ty: Type::Str,
+                                    kind: ExprKind::Builtin(
+                                        Builtin::process(
+                                            ir::ProcessOperation::QuoteCommandArgument,
+                                        ),
+                                        vec![path],
+                                    ),
+                                })
+                            }
+                        }
+                    })?;
+                (separator, parts)
+            }
+        };
+        Ok(scope.finish(Expr {
             ty: Type::Str,
-            kind: ExprKind::Scope {
-                body,
-                value: Box::new(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(
-                        Builtin::StringJoin,
-                        vec![self.local(separator), self.local(parts)],
-                    ),
-                }),
-                clear: vec![separator, parts],
-            },
-        })
+            kind: ExprKind::Builtin(Builtin::StringJoin, vec![separator, parts]),
+        }))
     }
 
     /// Evaluate every argument before rendering any field, including unused
@@ -670,18 +838,22 @@ impl Checker<'_> {
         receiver: Expr,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let (old, new, count) = match (&*call.arguments.args, &*call.arguments.keywords) {
-            ([old, new], []) => (old, new, None),
-            ([old, new, count], []) => (old, new, Some(count)),
-            ([old, new], [kw]) if kw.arg.as_deref() == Some("count") => (old, new, Some(&kw.value)),
-            _ => return Err(self.object_builtin_error("str.replace", call)),
+        let Some((old, new, count)) = replace_arguments(call) else {
+            return Err(self.object_builtin_error("str.replace", call));
         };
-        let old = self
-            .expr_expected(old, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
-        let new = self
-            .expr_expected(new, Type::Str)
-            .map_err(|_| self.object_builtin_error("str.replace", call))?;
+        let mut string_argument = |node: &ast::Expr| {
+            if self.graph.session.explicit_check && fixed_replace_operand(call, node) {
+                let value = self
+                    .expr(node)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))?;
+                self.coerce(value, Type::Str, node)
+            } else {
+                self.expr_expected(node, Type::Str)
+                    .map_err(|_| self.object_builtin_error("str.replace", call))
+            }
+        };
+        let old = string_argument(old)?;
+        let new = string_argument(new)?;
         let mut args = vec![receiver, old, new];
         if let Some(count) = count {
             let count = powers::integer(self.expr(count)?);
@@ -705,7 +877,7 @@ impl Checker<'_> {
         if value.ty == Type::Bool {
             value = Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             };
         }
         if !matches!(value.ty, Type::Int | Type::Float) {
@@ -717,49 +889,247 @@ impl Checker<'_> {
         })
     }
 
-    /// Decimal integer fields keep their full precision. Fixed-point and
-    /// percentage fields use Python's checked integer-to-float conversion.
-    pub(super) fn formatted_scalar(
+    /// Evaluate the prompt before selecting stdout, then run its Python string conversion.
+    pub(super) fn input_prompt(
         &mut self,
-        field: &ast::InterpolatedElement,
+        prompt: Expr,
+        call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        if field.debug_text.is_some() {
-            return Err(error(
-                self.source,
-                field,
-                "debug f-string fields are unsupported",
+        let mut scope = calls::ArgumentScope::default();
+        let prompt = scope.hold(self, prompt);
+        let output = scope.hold(
+            self,
+            Expr {
+                ty: Type::TextIO,
+                kind: ExprKind::Builtin(Builtin::InputSelectStdout, vec![]),
+            },
+        );
+        let prompt = if matches!(prompt.ty, Type::StrLiteral(_)) {
+            literals::view(prompt, Type::Str)
+        } else {
+            prompt
+        };
+        let text = self.checked_string(prompt, call, false)?;
+        Ok(scope.finish(Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(Builtin::InputFinish, vec![output, text]),
+        }))
+    }
+
+    /// Render one checked value with builtin str, independent of a local binding named str.
+    pub(super) fn checked_string(
+        &mut self,
+        value: Expr,
+        at: &ast::ExprCall,
+        explicit: bool,
+    ) -> Result<Expr, String> {
+        let ty = value.ty;
+        if !explicit && ty == Type::PythonObject {
+            self.require_registered_operation(at)?;
+            return Ok(super::fstrings::object_conversion(value, 's'));
+        }
+        if matches!(ty, Type::Calendar(_)) {
+            return Ok(calendar::format_builtin("str", vec![value]));
+        }
+        if let Some(text) = self.patch_builtin("str", &value) {
+            return Ok(text);
+        }
+        if matches!(self.types.payload(ty), Some(Type::Str | Type::Class(_))) {
+            return self.optional_text(value, at);
+        }
+        if ty.is_path() || ty == Type::PathInfo {
+            let op = if ty == Type::PathInfo {
+                ir::PathOperation::InfoRepr
+            } else {
+                ir::PathOperation::Text
+            };
+            return Ok(paths::operation(op, Type::Str, vec![value]));
+        }
+        if ty == Type::LogRecord {
+            return Ok(logging_records::op(
+                ir::LogRecordOperation::Repr,
+                Type::Str,
+                vec![value],
             ));
         }
+        let op = match ty {
+            Type::Enum(_) => Builtin::EnumString,
+            Type::StrEnum(_) | Type::IntEnum(_) => Builtin::StrEnumValue,
+            Type::BuiltinClass
+            | Type::PlainObject
+            | Type::StrDescriptor(_)
+            | Type::Placeholder(_) => Builtin::Repr,
+            Type::Int
+            | Type::Float
+            | Type::Bool
+            | Type::Str
+            | Type::Bytes
+            | Type::None
+            | Type::ObjectValue
+            | Type::Exception
+            | Type::NamedException(_)
+            | Type::ImportException
+            | Type::TimeoutExpired => Builtin::Str,
+            _ => {
+                return match self.structured_display("str", &value, at)? {
+                    Some(text) => Ok(text),
+                    None => self.positional_builtin_fallback(at, "str", vec![value]),
+                };
+            }
+        };
+        let text = Expr {
+            ty: Type::Str,
+            kind: ExprKind::Builtin(op, vec![value]),
+        };
+        if explicit {
+            self.record_named_call(at, &text);
+        }
+        Ok(text)
+    }
+
+    fn checked_repr(
+        &mut self,
+        ty: Type,
+        at: &impl Ranged,
+        diagnostic: &str,
+    ) -> Result<Builtin, String> {
+        if dataclass_values::can_format(ty, self.types, self.classes) {
+            return Ok(Builtin::Repr);
+        }
+        let methods = self
+            .field_repr_methods(ty)
+            .ok_or_else(|| error(self.source, at, diagnostic))?;
+        self.calls.extend(&methods);
+        Ok(Builtin::ReprWithMethods(methods))
+    }
+
+    /// Preserve the checked representation and field checks of lists, tuples and records.
+    pub(super) fn structured_display(
+        &mut self,
+        name: &str,
+        value: &Expr,
+        at: &impl Ranged,
+    ) -> Result<Option<Expr>, String> {
+        let ty = value.ty;
+        if self.types.element(ty) == Some(Type::ObjectValue) {
+            return Ok(Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::Repr, vec![value.clone()]),
+            }));
+        }
+        if !dataclass_values::repr_supported(ty, self.types) {
+            return Ok(None);
+        }
+        let list = self.types.element(ty).is_some();
+        if name == "repr" || (matches!(name, "str" | "print") && list) {
+            let diagnostic = if name == "print" {
+                "generated repr cannot format resource, callable, or custom-repr fields"
+            } else {
+                "generated repr cannot format resource or callable fields"
+            };
+            return Ok(Some(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(
+                    self.checked_repr(ty, at, diagnostic)?,
+                    vec![value.clone()],
+                ),
+            }));
+        }
+        if matches!(
+            ty,
+            Type::Class(_)
+                | Type::Hash
+                | Type::SysImplementation
+                | Type::CompletedProcess(..)
+                | Type::Context
+                | Type::ContextMissing
+                | Type::ContextVar(_)
+                | Type::ContextToken(_)
+                | Type::ForwardRef(_)
+                | Type::ModuleSpec(_)
+                | Type::SimpleNamespace(_)
+                | Type::Dict(_)
+                | Type::Tuple(_)
+                | Type::VarTuple(_)
+                | Type::StringIterable
+        ) || self.types.payload(ty) == Some(Type::Int)
+        {
+            return self.record_text(value.clone(), at).map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Decimal integer fields keep their full precision. Fixed-point and
+    /// percentage fields use Python's checked integer-to-float conversion.
+    pub(super) fn prepare_field(
+        &mut self,
+        field: &ast::InterpolatedElement,
+        conversion: ast::ConversionFlag,
+    ) -> Result<fstrings::FieldValue, String> {
+        use fstrings::FieldValue::{Formatted, Operand};
+        let operand = |checker: &mut Self| checker.expr(&field.expression).map(Operand);
         let mut specification = String::new();
         if let Some(spec) = &field.format_spec {
             for part in &spec.elements {
                 let ast::InterpolatedStringElement::Literal(literal) = part else {
-                    return Err(error(
-                        self.source,
-                        field,
-                        "f-string format specifications must be literal",
-                    ));
+                    return operand(self);
                 };
                 specification.push_str(&literal.value);
             }
         }
-        if field.conversion == ast::ConversionFlag::Ascii {
-            if !specification.is_empty() {
-                return Err(error(
-                    self.source,
-                    field,
-                    "formatted strings support !a with an empty format specification",
-                ));
-            }
-            return self.ascii_expr(&field.expression);
+        if conversion == ast::ConversionFlag::Ascii {
+            return if specification.is_empty() {
+                self.ascii_expr(&field.expression, None).map(Formatted)
+            } else {
+                operand(self)
+            };
         }
-        if specification.is_empty()
+        let format = if specification.is_empty() {
+            None
+        } else if let Some(numeric) = NumericField::parse(&specification) {
+            Some(numeric)
+        } else {
+            return operand(self);
+        };
+        if format.is_none()
             && let Some(text) = self.unittest_failure_repr(&field.expression)?
         {
-            return Ok(text);
+            return Ok(Formatted(text));
         }
-        let mut value = self.expr(&field.expression)?;
-        if field.conversion != ast::ConversionFlag::Repr {
+        let value = self.expr(&field.expression)?;
+        if value.ty == Type::Str
+            && conversion == ast::ConversionFlag::None
+            && field.format_spec.is_none()
+        {
+            if let Some(result) = self.discarded_call(value.ty) {
+                return Ok(Formatted(result));
+            }
+            let formatted = Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(Builtin::FormatField(Default::default()), vec![value]),
+            };
+            if let Some(sites) = &mut self.fixed_sites {
+                sites.checked_expression(field.range(), &formatted);
+                self.frame_arguments = FrameArguments::Python;
+            }
+            return Ok(Formatted(formatted));
+        }
+        if value.ty == Type::PythonObject {
+            self.require_registered_operation(field)?;
+            return Ok(Operand(value));
+        }
+        self.scalar_field(field, conversion, format, value)
+            .map(Formatted)
+    }
+
+    fn scalar_field(
+        &mut self,
+        field: &ast::InterpolatedElement,
+        conversion: ast::ConversionFlag,
+        format: Option<NumericField<'_>>,
+        mut value: Expr,
+    ) -> Result<Expr, String> {
+        if conversion != ast::ConversionFlag::Repr {
             value = if matches!(value.ty, Type::Enum(_)) {
                 Expr {
                     ty: Type::Str,
@@ -769,100 +1139,71 @@ impl Checker<'_> {
                 Self::enum_text(value)
             };
         }
-        if !specification.is_empty() {
-            if let Some(digits) = specification.strip_suffix(['x', 'X'])
-                && digits.bytes().all(|b| b.is_ascii_digit())
-                && let Some(width) = if digits.is_empty() {
-                    Some(0)
-                } else {
-                    digits.parse::<u32>().ok()
-                }
-                && width <= 1000
-            {
-                if field.conversion != ast::ConversionFlag::None
-                    || !matches!(value.ty, Type::Int | Type::Bool)
+        if let Some(format) = format {
+            match &format {
+                NumericField::Decimal(_) | NumericField::Hex { .. }
+                    if conversion != ast::ConversionFlag::None
+                        || !matches!(value.ty, Type::Int | Type::Bool) =>
                 {
-                    return Err(error(
-                        self.source,
-                        field,
-                        "hexadecimal formats require an unconverted int or bool",
-                    ));
-                }
-                if value.ty == Type::Bool {
-                    value = Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                    let reason = match format {
+                        NumericField::Decimal(_) => {
+                            "decimal integer formats require an unconverted int or bool"
+                        }
+                        _ => "hexadecimal formats require an unconverted int or bool",
                     };
+                    return Err(error(self.source, field, reason));
                 }
-                return Ok(Expr {
-                    ty: Type::Str,
-                    kind: ExprKind::Builtin(
-                        Builtin::HexFormat {
-                            width,
-                            zero: digits.starts_with('0'),
-                            upper: specification.ends_with('X'),
-                        },
-                        vec![value],
-                    ),
-                });
-            }
-            let sign = specification.strip_suffix('d').unwrap_or(&specification);
-            if matches!(sign, "" | "-" | "+" | " ") {
-                if field.conversion != ast::ConversionFlag::None
-                    || !matches!(value.ty, Type::Int | Type::Bool)
+                NumericField::Float { .. }
+                    if conversion != ast::ConversionFlag::None
+                        || !matches!(value.ty, Type::Int | Type::Float | Type::Bool) =>
                 {
                     return Err(error(
                         self.source,
                         field,
-                        "decimal integer formats require an unconverted int or bool",
+                        "numeric format specifications require an unconverted int, float, or bool",
                     ));
                 }
-                return Ok(self.formatted_integer(value, sign));
+                _ => {}
             }
-            let (positive_sign, unsigned) = match specification.as_bytes().first() {
-                Some(&sign @ (b'+' | b' ')) => (sign, &specification[1..]),
-                Some(b'-') => (0, &specification[1..]),
-                _ => (0, specification.as_str()),
-            };
-            let (precision, percent) = numeric_format(unsigned).ok_or_else(|| {
-                error(
-                    self.source,
-                    field,
-                    "numeric formats support signed decimal integers or f and % with literal precision from 0 through 1000",
-                )
-            })?;
-            if field.conversion != ast::ConversionFlag::None
-                || !matches!(value.ty, Type::Int | Type::Float | Type::Bool)
-            {
-                return Err(error(
-                    self.source,
-                    field,
-                    "numeric format specifications require an unconverted int, float, or bool",
-                ));
-            }
-            if value.ty != Type::Float {
-                value = Expr {
-                    ty: Type::Float,
-                    kind: ExprKind::Builtin(Builtin::Float, vec![value]),
-                };
-            }
-            return Ok(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Builtin(
+            let op = match format {
+                NumericField::Decimal(sign) => return Ok(self.formatted_integer(value, sign)),
+                NumericField::Hex { width, zero, upper } => {
+                    if value.ty == Type::Bool {
+                        value = Expr {
+                            ty: Type::Int,
+                            kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
+                        };
+                    }
+                    Builtin::HexFormat { width, zero, upper }
+                }
+                NumericField::Float {
+                    precision,
+                    percent,
+                    positive_sign,
+                } => {
+                    if value.ty != Type::Float {
+                        value = Expr {
+                            ty: Type::Float,
+                            kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
+                        };
+                    }
                     Builtin::FloatFormat {
                         precision,
                         percent,
                         positive_sign,
-                    },
-                    vec![value],
-                ),
+                    }
+                }
+            };
+            return Ok(Expr {
+                ty: Type::Str,
+                kind: ExprKind::Builtin(op, vec![value]),
             });
         }
         if matches!(
             value.ty,
             Type::Exception | Type::ImportException | Type::NamedException(_)
         ) {
-            let op = if field.conversion == ast::ConversionFlag::Repr {
+            let op = if conversion == ast::ConversionFlag::Repr {
                 Builtin::ExceptionRepr
             } else {
                 Builtin::ExceptionMessage
@@ -873,44 +1214,44 @@ impl Checker<'_> {
             });
         }
         if matches!(value.ty, Type::Calendar(_)) {
-            let name = if field.conversion == ast::ConversionFlag::Repr {
+            let name = if conversion == ast::ConversionFlag::Repr {
                 "repr"
             } else {
                 "str"
             };
             return Ok(calendar::format_builtin(name, vec![value]));
         }
-        if field.conversion != ast::ConversionFlag::Repr
+        if conversion != ast::ConversionFlag::Repr
             && matches!(value.ty, Type::Class(_) | Type::CompletedProcess(..))
         {
             return self.record_text(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
+        if conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Class(_)) {
             return self.record_repr(value, field);
         }
-        if field.conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
+        if conversion == ast::ConversionFlag::Repr && value.ty == Type::ObjectValue {
             return Ok(Expr {
                 ty: Type::Str,
                 kind: ExprKind::Builtin(Builtin::ExceptionFieldRepr, vec![value]),
             });
         }
-        if field.conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
+        if conversion == ast::ConversionFlag::Repr && matches!(value.ty, Type::Document(_)) {
             return Ok(documents::op(ir::DocumentOp::Repr, Type::Str, vec![value]));
         }
-        if field.conversion == ast::ConversionFlag::Repr
+        if conversion == ast::ConversionFlag::Repr
             || self.types.element(value.ty).is_some()
             || matches!(value.ty, Type::Set(_))
         {
-            if !dataclass_values::can_format(value.ty, self.types, self.classes) {
-                return Err(error(
-                    self.source,
-                    field,
-                    "repr does not support resource or callable values",
-                ));
-            }
             return Ok(Expr {
                 ty: Type::Str,
-                kind: ExprKind::Builtin(Builtin::Repr, vec![value]),
+                kind: ExprKind::Builtin(
+                    self.checked_repr(
+                        value.ty,
+                        field,
+                        "repr does not support resource or callable values",
+                    )?,
+                    vec![value],
+                ),
             });
         }
         if value.ty.is_path() {
@@ -984,7 +1325,7 @@ impl Checker<'_> {
         if value.ty == Type::Bool {
             value = Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             };
         }
         let digits = |value| Expr {
@@ -1019,6 +1360,55 @@ impl Checker<'_> {
     }
 }
 
+enum NumericField<'a> {
+    Decimal(&'a str),
+    Hex {
+        width: u32,
+        zero: bool,
+        upper: bool,
+    },
+    Float {
+        precision: u32,
+        percent: bool,
+        positive_sign: u8,
+    },
+}
+
+impl<'a> NumericField<'a> {
+    fn parse(specification: &'a str) -> Option<Self> {
+        if let Some(digits) = specification.strip_suffix(['x', 'X'])
+            && digits.bytes().all(|b| b.is_ascii_digit())
+            && let Some(width) = if digits.is_empty() {
+                Some(0)
+            } else {
+                digits.parse().ok()
+            }
+            && width <= 1000
+        {
+            return Some(Self::Hex {
+                width,
+                zero: digits.starts_with('0'),
+                upper: specification.ends_with('X'),
+            });
+        }
+        let sign = specification.strip_suffix('d').unwrap_or(specification);
+        if matches!(sign, "" | "-" | "+" | " ") {
+            return Some(Self::Decimal(sign));
+        }
+        let (positive_sign, unsigned) = match specification.as_bytes().first() {
+            Some(&sign @ (b'+' | b' ')) => (sign, &specification[1..]),
+            Some(b'-') => (0, &specification[1..]),
+            _ => (0, specification),
+        };
+        let (precision, percent) = numeric_format(unsigned)?;
+        Some(Self::Float {
+            precision,
+            percent,
+            positive_sign,
+        })
+    }
+}
+
 fn numeric_format(specification: &str) -> Option<(u32, bool)> {
     let (prefix, percent) = if let Some(prefix) = specification.strip_suffix('f') {
         (prefix, false)
@@ -1040,6 +1430,26 @@ fn numeric_format(specification: &str) -> Option<(u32, bool)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sorted_accepts_the_bound_binary_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("main.py");
+        std::fs::write(
+            &path,
+            r#"from io import BytesIO
+from typing import BinaryIO
+
+def key(stream: BinaryIO) -> int:
+    return len(stream.read())
+
+for stream in sorted((BytesIO(data) for data in [b'ab', b'c']), key=key, reverse=True):
+    print(stream.tell())
+"#,
+        )
+        .unwrap();
+        crate::check_file(&path, None).unwrap();
+    }
 
     #[test]
     fn numeric_formats_are_literal_and_bounded() {

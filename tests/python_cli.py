@@ -10,9 +10,416 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
+
+from fixture_entry import imported_fixture
+
+
+def check_reassigned_callable_operand(imre, root, run):
+    (root / "reassigned_worker.py").write_text(
+        "def scale(x: int) -> int:\n    print('scale called', x)\n    return 9\n"
+        "def replacement(x):\n    print('replacement called', x)\n    return 41\n"
+        "def compute(v: int) -> int:\n    callee = scale\n    callee = replacement\n    return callee(True)\n"
+    )
+    scores = root / "reassigned_scores.py"
+    model = "def model() -> int:\n    items: list[int] = [3]\n    items.append(True)\n    return items[0]\n"
+    scores.write_text(model)
+    (root / "checked_replacement.py").write_text(
+        "from reassigned_worker import compute\nimport reassigned_scores\n"
+        "print(compute(1))\nprint('scores result', reassigned_scores.model())\n"
+    )
+    result = run(imre, "-m", "checked_replacement")
+    expected = f"{scores}:3:18: Imre: expected int, got bool; annotations are enforced contracts\n".encode()
+    assert (result.returncode, result.stdout, result.stderr) == (1, b"", expected), result
+    scores.write_text(model.replace("append(True)", "append(3)"))
+    result = run(imre, "-m", "checked_replacement")
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, b"replacement called True\n41\nscores result 3\n", b""
+    ), result
+
+
+def check_imported_call_arguments(imre, root, run):
+    project = root / "imported_arguments"
+    project.mkdir()
+    (project / "provider.py").write_text(
+        "import sys, changed_provider\n"
+        "def render(indent: str | None = None) -> int: return 3\n"
+        "sys.modules[__name__] = changed_provider\n"
+    )
+    (project / "changed_provider.py").write_text(
+        "import sys\n"
+        "def again(value): return value\n"
+        "def first():\n"
+        "    sys.modules['__main__'].render = again\n"
+        "    return 'ab'\n"
+        "def __getattr__(name):\n"
+        "    if name == 'render':\n"
+        "        print('member', name)\n"
+        "        return first\n"
+        "    raise AttributeError(name)\n"
+    )
+    entry = project / "main.py"
+    script = 'from provider import render\nprint(render())\nprint(render("four"))\n'
+    for source, first in [(script, b"ab"), (script.replace("render())", "render() * 2)"), b"abab")]:
+        entry.write_text(source)
+        result = run(imre, "-B", entry, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"member render\n" + first + b"\nfour\n", b""), result
+    entry.write_text(script + "\ndef fixed(n: int) -> int: return n\nif False:\n    fixed('wrong')\n")
+    rejected = run(imre, "-B", entry)
+    assert rejected.returncode == 1 and not rejected.stdout, rejected
+    assert b"main.py:7:11: Imre: expected int, got str" in rejected.stderr, rejected
+
+    entry.write_text(
+        "def number(left: int = 6, right: int = 7) -> int: return left * 10 + right\n"
+        "print(number(right=number(), left=2))\n"
+    )
+    fixed = run(imre, "-B", entry)
+    assert (fixed.returncode, fixed.stdout, fixed.stderr) == (0, b"87\n", b""), fixed
+
+
+def check_registered_entry_operand(imre, root, run):
+    entry = root / "checked_operand.py"
+    guard = (
+        "def checked(x: int) -> None: print(x)\n"
+        'if __name__ == "__main__":\n'
+        "    x: list[int] = [3]; "
+    )
+    entry.write_text(guard + "x.append(True); print(x)")
+    result = run(imre, "-m", entry.stem)
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:3:34: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(guard + 'globals()["x"] = ["changed"]; x.append(True); print(x)')
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"['changed', True]\n", b""), result
+
+    functions = (
+        "def publish(a: int, b: int, send):\n    send(a + b)\n"
+        "def report(value):\n    print(value)\n"
+    )
+    (root / "checked_result.py").write_text(
+        "def stop() -> int: print(input()); raise SystemExit(13)\n"
+        "def replacement() -> int: return 2\n"
+        "def compute(value: int) -> int:\n    if value: return stop()\n    return value\n"
+    )
+    entry.write_text("import checked_result as m\nm.stop = m.replacement\nprint(m.compute(1))\n")
+    result = run(imre, "-m", entry.stem, stdin=b"hello\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
+
+    entry.write_text(
+        "def model() -> int:\n"
+        "    items: list[int] = [3]\n"
+        "    items.append(True)\n"
+        "    return items[0]\n"
+        "print('reached')\nprint(model())\n"
+    )
+    for argv in ((entry,), ("-m", entry.stem)):
+        result = run(imre, *argv)
+        assert result.returncode and not result.stdout, result
+        assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result
+
+    saved = (
+        "def model(value: int) -> int:\n"
+        "    items = [3]\n    items.append(True)\n    return items[0] + value\n"
+        "def stop() -> int:\n    print('stopped')\n    raise SystemExit(13)\n"
+        "saved = stop\ndef stop() -> int:\n    return 7\n"
+    )
+    entry.write_text(saved + "print(model(saved()))\n")
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (13, b"stopped\n", b""), result
+    entry.write_text(saved + "print(model(stop()))\n")
+    result = run(imre, "-m", entry.stem)
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:3:18: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(
+        "def show(): print(1)\n"
+        "def model():\n    items: list[int] = []\n    items.append(True)\n"
+        "show()\nmodel()\n"
+    )
+    result = run(imre, "-m", entry.stem)
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:4:18: Imre: expected int, got bool" in result.stderr, result
+
+    setup = "send = {'send': report}[input()]\npublish(3, 5, send)\n"
+    before = functions + setup + "values: list[int] = [3]\noffset = 17\n"
+    for use in ("values.append(True)", "result = values.append(True)", "print(values.append(True))"):
+        entry.write_text(before + use + "\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        column = use.index("True") + 1
+        assert result.returncode and result.stdout == b"", result
+        assert f"checked_operand.py:9:{column}: Imre: expected int, got bool".encode() in result.stderr, result
+    entry.write_text(before + "if False:\n    values.append(True)\nprint(values)\n")
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"8\n[3]\n", b""), result
+
+    # The ordinary checker owns the error even when the entry lives in an archive.
+    archive = root / "checked_operand.pyz"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("__main__.py", before + "values.append(True)\n")
+    result = run(imre, archive, stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"__main__.py:9:15: Imre: expected int, got bool" in result.stderr, result
+
+    program = (
+        functions
+        + "def install(unused): globals()['values'] = destination\n"
+        + "def accept(self, value): print('accepted', value)\n"
+        + setup
+        + "destination = type('Destination', (), {'append': accept})()\n"
+        + "previous = type('Previous', (), {'__del__': install})\n"
+        + "values: list[int] = [3]\n"
+    )
+    for call in ("install(None)", "{'install': install}['install'](None)"):
+        entry.write_text(program + call + "\nvalues.append(True)\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert (result.returncode, result.stdout) == (0, b"8\naccepted True\n"), result
+
+    # Selecting object operations for an imported module leaves this local contract intact.
+    (root / "checked_sibling.py").write_text(
+        "import socket, threading\n"
+        "def worker():\n"
+        "    sock = socket.socket()\n"
+        "    threading.Thread(target=sock.close).start()\n"
+    )
+    entry.write_text(
+        "import checked_sibling\n"
+        "def observe(value): pass\n"
+        "values: list[int] = []\n"
+        "observe(None)\n"
+        "values.append(True)\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"")
+    assert result.returncode and not result.stdout, result
+    assert b"checked_operand.py:5:15: Imre: expected int, got bool" in result.stderr, result
+
+    # Inference can discover this file's concrete error before it solves the
+    # signature for the later callback.
+    entry.write_text(
+        functions + "def observe(value): pass\n"
+        "values: list[int] = [3]\nobserve(None)\nvalues.append(True)\n" + setup
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"Imre: expected int, got bool" in result.stderr, result
+
+    bad_body = functions.replace("    send(a + b)", "    values: list[int] = [3]\n    values.append(True)\n    send(a + b)")
+    replacements = (
+        "def replacement(a: int, b: int, send):\n    print('replacement')\n    send(a + b)\n"
+        "def install(callback):\n    globals()['publish'] = replacement\n    return callback\n"
+        "send = {'send': report}[input()]\n"
+    )
+    for invocation in ("publish(3, 5, send)", "publish(3, 5, install(send))"):
+        entry.write_text(bad_body + replacements + invocation + "\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert result.returncode and not result.stdout, result
+        assert b"checked_operand.py:3:19: Imre: expected int, got bool" in result.stderr, result
+    entry.write_text(bad_body + replacements + "install(send)\npublish(3, 5, send)\n")
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"replacement\n8\n", b""), result
+
+    worker = root / "checked_worker.py"
+    worker.write_text(bad_body)
+    receive = "def report(value): print(value)\nsend = {'send': report}[input()]\n"
+    for import_line, publish in (
+        ("from checked_worker import publish as deliver", "deliver"),
+        ("import checked_worker", "checked_worker.publish"),
+    ):
+        entry.write_text(import_line + "\n" + receive + f"{publish}(3, 5, send)\n")
+        result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+        assert result.returncode and not result.stdout, result
+        assert b"checked_worker.py:3:19: Imre: expected int, got bool" in result.stderr, result
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("__main__.py", entry.read_text())
+        zipped.writestr(worker.name, bad_body)
+    result = run(imre, archive, stdin=b"send\n")
+    assert result.returncode and b"checked_worker.py:3:19" in result.stderr, result
+
+    entry.write_text(
+        "import checked_worker\n" + receive
+        + "def replacement(a, b, send): send(a - b)\n"
+        "checked_worker.publish = replacement\nchecked_worker.publish(5, 3, send)\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"2\n", b""), result
+
+    # Moving an inert function declaration past a store changes which initializer
+    # lowers the store, while Python still looks up the callee before its arguments.
+    entry.write_text(
+        "import checked_worker\n"
+        "def replacement(a, b, send): send(a - b)\n"
+        "def report(value): print(value)\n"
+        "handlers = {'send': report}\nsend = handlers[input()]\n"
+        "def install(f):\n    checked_worker.publish = replacement\n    return f\n"
+        "checked_worker.publish(3, 5, install(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode and not result.stdout, result
+    assert b"checked_worker.py:3:19: Imre: expected int, got bool" in result.stderr, result
+
+    entry.write_text(
+        bad_body + "def abort(_): raise LookupError('argument stopped')\n"
+        "send = {'send': report}[input()]\npublish(3, 5, abort(send))\n"
+    )
+    result = run(imre, "-m", "checked_operand", stdin=b"send\n")
+    assert result.returncode == 1 and b"LookupError: argument stopped" in result.stderr, result
+
+
+    # Replacing a published annotation must still let a Python method receiver reach its body.
+    entry.write_text(
+        "START = 'a'\nEND = 'b'\n"
+        "def pair(readme: str) -> int:\n"
+        "    start = readme.find(START)\n    return readme.find(END, start)\n"
+        "print(pair('ab'))\n"
+        "def startup(source: str) -> None: exec(source)\n"
+        "exec(\"pair.__annotations__ = {'readme': int}\\ntry: pair(12)\\n"
+        "except Exception as exc: print(type(exc).__name__)\")\n"
+    )
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"1\nAttributeError\n", b""), result
+
+    entry.write_text(
+        "def label(value: str) -> str: return f'L:{value}'\n"
+        "print(label('ab'))\n"
+        "def startup(source: str) -> None: exec(source)\n"
+        "exec(" + repr(
+            "label.__annotations__ = {'value': int}\nprint(label(12))\n"
+            "del label.__annotations__\nprint(label(13))"
+        ) + ")\n"
+    )
+    result = run(imre, "-m", entry.stem)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"L:ab\nL:12\nL:13\n", b""), result
+
+
+def check_installed_package_data(imre, root, run):
+    site = root / "invoice-site"
+    package = site / "prices"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("from .rates import price\n")
+    (package / "rates.py").write_text("price = 63\n")
+    data = package / "currency"
+    data.write_bytes(b"EUR")
+    metadata = site / "prices-1.0.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("prices/__init__.py,,\nprices/rates.py,,\nprices/currency,,\n")
+    entry = root / "read_price.py"
+    entry.write_text(
+        "from importlib.resources import files\nimport prices\n"
+        "print(prices.price)\nprint(files(prices).joinpath('currency').read_bytes())\n"
+    )
+    exe = root / "read-price"
+    built = run(imre, "build", entry, "--extension-path", site, "--opt-level", "0", "-o", exe,
+                "--no-cache", timeout=300)
+    assert built.returncode == 0, built.stderr
+    entry.unlink()
+    shutil.rmtree(site)
+    missing = run(exe)
+    assert (missing.returncode, missing.stdout) == (1, b"63\n"), missing
+    assert b"FileNotFoundError" in missing.stderr and os.fsencode(data) in missing.stderr, missing
+    package.mkdir(parents=True)
+    data.write_bytes(b"USD")
+    result = run(exe)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"63\nb'USD'\n", b""), result
+
+
+def check_module_search_root(imre, root, run):
+    dormant = root / "dormant.py"
+    for operand in ("'bad'", "text"):
+        dormant.write_text(
+            "import argparse\ndef unused(text: str) -> int:\n    return 7\n"
+            f"    return {operand}\nprint('entered')\n"
+        )
+        for args in ((dormant,), ("-m", "dormant")):
+            result = run(imre, "-B", *args)
+            assert result.returncode and not result.stdout, result
+            assert os.fsencode(dormant) + b":4:12: Imre: expected int, got str" in result.stderr, result
+
+    app = root / "application"
+    app.mkdir()
+    (app / "wheel_module.py").write_text(
+        "def twice(n: int) -> int: return n * 2\n"
+        "def unused() -> int: return twice('x')\n"
+        "scope = {}\n"
+        "exec('def echo(n: int): return n', scope)\n"
+        "assert scope['echo']('text') == 'text'\n"
+    )
+    distribution = app / "wheel_module-1.dist-info"
+    distribution.mkdir()
+    (distribution / "RECORD").write_text("wheel_module.py,,\n")
+    scores = app / "scores.py"
+    scores.write_text(
+        "def take(n: int, other: int) -> int: return n + other\n"
+        "def later(): raise LookupError('second argument')\n"
+        "try: take('x', later())\n"
+        "except LookupError as error: print(error.args[0])\n"
+    )
+    entry = app / "launch.py"
+    entry.write_text("import scores, wheel_module\nprint(wheel_module.twice(scores.take(1, 2)))\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"second argument\n6\n", b""), result
+
+    model = "def model() -> int:\n    values: list[int] = [3]\n    values.append('bad')\n    return values[0]\n"
+    entry.write_text(model + "print('reached')\nprint(model())\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"reached\n3\n", b""), result
+
+    entry.write_text(model + "print(model())\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert result.returncode and not result.stdout, result
+    assert os.fsencode(entry) + b":3:19: Imre: expected int, got str" in result.stderr, result
+
+    scores.write_text("def take(n: int): return n\ntake('wrong')\n")
+    entry.write_text("import scores\n" + model + "print('reached')\nprint(model())\n")
+    result = run(imre, "-B", "-m", "launch", extra={"PYTHONPATH": str(app)})
+    assert result.returncode and not result.stdout, result
+    assert os.fsencode(scores) + b":2:6: Imre: expected int, got str" in result.stderr, result
+
+    # The entry comes from app even when the ordinary lookup of scores prefers the wheel.
+    wheel = root / "score-wheel"
+    wheel.mkdir()
+    (wheel / "scores.py").write_text("def take(n: int): return n\n")
+    metadata = wheel / "scores-1.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("scores.py,,\n")
+    scores.write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nsys.path.insert(0, sys.argv[1])\nfrom scores import take\n"
+        "try: print(take(sys.argv[2]))\nexcept TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (wheel, app)))}
+    for selected, expected in ((app, b'take argument "n" requires int\n'), (wheel, b"x\n")):
+        result = run(imre, "-B", "-m", "launch", str(selected), "x", extra=search)
+        assert (result.returncode, result.stdout, result.stderr) == (0, expected, b""), result
+
+    # Overlapping roots expose the same file as an application module and as a provider.
+    back = app / "back"
+    back.mkdir()
+    (back / "scores.py").write_text("def take(n: int): return n\n")
+    entry.write_text(
+        "import sys\nfrom back import scores as nested\n"
+        "sys.path.insert(0, sys.argv[1])\nimport scores\n"
+        "for module in (nested, scores):\n"
+        "    try: print(module.take(sys.argv[2]))\n"
+        "    except TypeError as error: print(error)\n"
+    )
+    search = {"PYTHONPATH": os.pathsep.join(map(str, (app, back)))}
+    result = run(imre, "-B", "-m", "launch", str(back), "x", extra=search)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b'take argument "n" requires int\nx\n', b""), result
+
+    # runpy imports the parent into its own namespace before entering the body.
+    package = app / "entry_package"
+    package.mkdir()
+    (package / "__init__.py").write_text(
+        "def __getattribute__(n: int): return n\n"
+        "from __main__ import __getattribute__ as loaded\n"
+        "print(loaded('__name__'))\n"
+    )
+    (package / "__main__.py").write_text("print(__spec__.name)\n")
+    result = run(imre, "-B", "-m", "entry_package", extra={"PYTHONPATH": str(app)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"__main__\nentry_package.__main__\n", b""), result
 
 
 def check_command_stdin(imre, run):
@@ -79,7 +486,7 @@ def check_command_stdin(imre, run):
 
 def check_installed_site(imre, root, run):
     # A real relocated launcher keeps this test independent of the developer's installation.
-    prefix = root / "prefix"
+    prefix = root.resolve() / "prefix"
     install = prefix / "bin"
     install.mkdir(parents=True)
     launcher = Path(shutil.copy2(imre, install / "imre"))
@@ -87,23 +494,89 @@ def check_installed_site(imre, root, run):
         companion = imre.with_name(name)
         if companion.exists():
             (install / name).symlink_to(companion, target_is_directory=companion.is_dir())
+    credentials = root / "credentials.netrc"
+    credentials.write_text("machine example.test login user password sample\n")
+    authenticated = run(
+        launcher, "-IB", "-c",
+        "import netrc, sys; print(netrc.netrc(sys.argv[1]).authenticators('example.test'))",
+        credentials, timeout=300,
+    )
+    assert (authenticated.returncode, authenticated.stdout, authenticated.stderr) == (
+        0, b"('user', '', 'sample')\n", b"",
+    ), authenticated
     name = "xml.etree.ElementTree"
-    use_xml = "import importlib, sys; print(importlib.import_module(sys.argv[1]).Element('root').tag)"
+    sample = root / "sample.tar"
+    member = root / "payload"
+    member.write_bytes(b"archive member")
+    with tarfile.open(sample, "w", format=tarfile.PAX_FORMAT, pax_headers={"comment": "sample"}) as tar:
+        tar.add(member, arcname="payload")
+    use_sources = (
+        "import getpass, importlib, os, sys, tarfile\n"
+        "os.environ['LOGNAME'] = 'archive-user'\n"
+        "assert getpass.getuser() == 'archive-user'\n"
+        "print(importlib.import_module(sys.argv[1]).Element('root').tag)\n"
+        "sorter = importlib.import_module(sys.argv[3]).TopologicalSorter\n"
+        "assert importlib.import_module(sys.argv[4]).mean([2, 3, 4]) == 3\n"
+        "assert importlib.import_module(sys.argv[5]).unescape('&lt;&amp;&gt;') == '<&>'\n"
+        "assert importlib.import_module(sys.argv[6]).Wave_read.__name__ == 'Wave_read'\n"
+        "address = importlib.import_module(sys.argv[7]).ip_address('2001:0db8::1')\n"
+        "assert str(address) == '2001:db8::1'\n"
+        "cookie = importlib.import_module(sys.argv[8]).SimpleCookie('session=abc; Path=/')\n"
+        "assert cookie['session'].value == 'abc' and cookie['session']['path'] == '/'\n"
+        "cookie['note'] = 'a,b'\n"
+        "assert cookie['note'].coded_value == r'\"a\\054b\"'\n"
+        "assert list(sorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
+        "with tarfile.open(sys.argv[2], 'r:') as tar:\n"
+        "    with tar.extractfile('payload') as member:\n"
+        "        assert member.read() == b'archive member'\n"
+    )
+    source_args = (name, sample, "graphlib", "statistics", "html", "wave", "ipaddress", "http.cookies")
     archive = install / "imre-stdlib.zip"
     # The relocated launcher works both on its own and in a release installation.
-    bare = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    bare = run(launcher, "-IB", "-c", use_sources, *source_args, timeout=300)
     assert (bare.returncode, bare.stdout, bare.stderr) == (0, b"root\n", b""), bare
     opaque = run(
         launcher, "-IB", "-c", "import _imp, sys; exec(sys.argv[1])",
         "import xml; print(xml.__name__)", timeout=300,
     )
     assert (opaque.returncode, opaque.stdout, opaque.stderr) == (0, b"xml\n", b""), opaque
+    fallback = run(
+        launcher, "-IB", "-c",
+        "import sys; sys.modules['_datetime'] = None; from datetime import date; "
+        "print(date(2000, 2, 29).isoformat())", timeout=300,
+    )
+    assert (fallback.returncode, fallback.stdout, fallback.stderr) == (0, b"2000-02-29\n", b""), fallback
     assert not archive.exists()
     exported = run(launcher, "--emit-bundled-stdlib")
     assert exported.returncode == 0 and not exported.stderr, exported
     archive.write_bytes(exported.stdout)
-    packaged = run(launcher, "-IB", "-c", use_xml, name, timeout=300)
+    packaged = run(launcher, "-IB", "-c", use_sources, *source_args, timeout=300)
     assert (packaged.returncode, packaged.stdout, packaged.stderr) == (0, b"root\n", b""), packaged
+    words = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; lexer = importlib.import_module(sys.argv[1]); "
+        "print(lexer.join(lexer.split(sys.argv[2])))",
+        "shlex", "'two words' tail", timeout=300,
+    )
+    assert (words.returncode, words.stdout, words.stderr) == (0, b"'two words' tail\n", b""), words
+    command = run(
+        launcher, "-IB", "-c",
+        "import importlib, sys; shell = importlib.import_module(sys.argv[1]).Cmd(); "
+        "print(shell.parseline('?hello'))",
+        "cmd", timeout=300,
+    )
+    assert (command.returncode, command.stdout, command.stderr) == (0, b"('help', 'hello', 'help hello')\n", b""), command
+    reader = root / "read_tar_entry.py"
+    reader.write_text(
+        "from graphlib import TopologicalSorter\n"
+        "from tarfile import open as open_archive\n"
+        "assert list(TopologicalSorter({'test': ('build',)}).static_order()) == ['build', 'test']\n"
+        f"with open_archive({str(sample.resolve())!r}, 'r:') as archive:\n"
+        "    with archive.extractfile('payload') as member:\n"
+        "        print(member.read().decode('ascii'))\n"
+    )
+    direct = run(launcher, "-B", reader, timeout=300)
+    assert (direct.returncode, direct.stdout, direct.stderr) == (0, b"archive member\n", b""), direct
     shadow = root / "shadow_xml"
     shadow.mkdir()
     (shadow / "xml.py").write_text("marker = 73\n")
@@ -111,6 +584,22 @@ def check_installed_site(imre, root, run):
     probe.write_text("import importlib, sys\nprint(importlib.import_module(sys.argv[1]).marker)\n")
     local = run(launcher, "-B", probe, "xml", timeout=300)
     assert (local.returncode, local.stdout, local.stderr) == (0, b"73\n", b""), local
+    # The absent registered child must not pull its sibling into the local package.
+    etree = root / "regular_parent" / "xml" / "etree"
+    etree.mkdir(parents=True)
+    (etree.parent / "__init__.py").write_text("")
+    (etree / "__init__.py").write_text("")
+    (etree / "ElementPath.py").write_text("def select(\n")
+    consumer = etree.parent.parent / "read_xml.py"
+    consumer.write_text(
+        "print('start', flush=True)\n"
+        "try:\n"
+        "    import xml.etree.ElementTree\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    missing = run(launcher, "-B", consumer, timeout=300)
+    assert (missing.returncode, missing.stdout, missing.stderr) == (0, b"start\nxml.etree.ElementTree\n", b""), missing
     target = run(launcher, "build-target")
     assert target.returncode == 0, target.stderr
     version = json.loads(target.stdout)["python_version"]
@@ -120,6 +609,7 @@ def check_installed_site(imre, root, run):
         "decimal = importlib.import_module(sys.argv[1]); "
         "second = importlib.util.module_from_spec(decimal.__spec__); "
         "decimal.__loader__.exec_module(second); "
+        "assert (decimal.Decimal('1') == '1') is False and (second.Decimal('1') != '1') is True; "
         "print(decimal.Decimal(10), second.Decimal(11), Fraction.from_decimal(10))"
     )
     for installed in (False, True):
@@ -137,19 +627,137 @@ def check_installed_site(imre, root, run):
     for args in (("-B", "-c", script.read_text()), ("-IB", script), ("-IB", "-m", package.name)):
         result = run(launcher, *args, timeout=300)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"17\n", b""), result
+    no_site = (
+        "import sys\n"
+        "print(sys.flags.no_site, sys.argv[1] in sys.path, sys.argv[2] in sys.path)\n"
+        "try:\n"
+        "    import installed_example\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    result = run(launcher, "-IS", "-c", no_site, str(site), str(launcher / "<imre stdlib>"), timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"1 False True\ninstalled_example\n", b""), result
     init.write_text("def value(): return 23\n")
     result = run(launcher, "-B", "-c", script.read_text(), timeout=300)
     assert (result.returncode, result.stdout, result.stderr) == (0, b"23\n", b""), result
+    # Files installed in the standard library are available before site runs.
+    tariff = site.parent / "installed_tariff.py"
+    tariff.write_text("def freight(weight: int) -> int: return weight * 2\n")
+    static = "from installed_tariff import freight; print(freight(3))"
+    runtime = "import importlib, sys; print(importlib.import_module(sys.argv[1]).freight(3))"
+    for args in (("-ESB", "-c", static), ("-ISB", "-c", runtime, tariff.stem)):
+        result = run(launcher, *args, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"6\n", b""), result
+    check_symlinked_venv(launcher, site, root.resolve(), run)
+    check_copied_venv(launcher, root.resolve(), run)
+    # Discovering a filesystem library must not switch a checked program's backend.
+    (site.parent / "sitecustomize.py").write_text("print('stdlib hook')\n")
+    checked = run(launcher, "-EB", "-c", static, timeout=300)
+    assert (checked.returncode, checked.stdout, checked.stderr) == (0, b"6\n", b""), checked
+    # An object program already starts the shared interpreter, so its hook runs once.
+    boxed = run(launcher, "-EB", "-c", runtime, tariff.stem, timeout=300)
+    assert (boxed.returncode, boxed.stdout, boxed.stderr) == (0, b"stdlib hook\n6\n", b""), boxed
+
+
+def check_copied_venv(launcher, root, run):
+    def create(executable, target):
+        result = run(executable, "-B", "-m", "venv", "--without-pip", "--copies", target, timeout=300)
+        assert result.returncode == 0, result.stderr
+        assert not (target / "bin" / "python").is_symlink()
+
+    def check(env):
+        python = env / "bin" / "python"
+        result = run(
+            python, "-B", "-c",
+            "import sys; print(sys.implementation.name, sys.executable, sys._base_executable, "
+            "sys.prefix, sys.base_prefix, sep='\\n')", timeout=300,
+        )
+        assert result.returncode == 0, result.stderr
+        expected = ["imre", str(python), str(launcher), str(env), str(launcher.parent.parent)]
+        assert result.stdout.decode().splitlines() == expected
+
+    copied = root / "copied-venv"
+    create(launcher, copied)
+    check(copied)
+    alias = root / "copied-venv-link"
+    alias.symlink_to(copied, target_is_directory=True)
+    check(alias)
+    nested = root / "nested-copied-venv"
+    create(copied / "bin" / "python", nested)
+    copied.rename(root / "moved-outer-venv")
+    check(nested)
+
+
+def check_symlinked_venv(launcher, base_site, root, run):
+    base = launcher.parent.parent
+    venv = root / "symlink-venv"
+    link = venv / "bin" / "venv-python"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(launcher)
+    local_site = venv / base_site.relative_to(base)
+    local_site.mkdir(parents=True)
+    decoy = root / "decoy-bin"
+    decoy.mkdir()
+    (decoy / link.name).write_text("not executable\n")
+    env = {"PATH": os.pathsep.join([str(decoy), str(link.parent), os.environ["PATH"]])}
+    code = (
+        "import importlib.util, site, sys\n"
+        "print(sys.executable == sys.argv[1], sys._base_executable == sys.argv[2], "
+        "sys.prefix == sys.exec_prefix == sys.argv[3], sys.base_prefix == sys.base_exec_prefix == sys.argv[4])\n"
+        "print(site.getsitepackages() == sys.argv[5:], site.ENABLE_USER_SITE, "
+        "importlib.util.find_spec('installed_example') is not None)\n"
+    )
+    for enabled, flag in [(True, "-sB"), (False, "-B")]:
+        (venv / "pyvenv.cfg").write_text(
+            f"home = {launcher.parent}\ninclude-system-site-packages = {str(enabled).lower()}\n"
+        )
+        expected_sites = [local_site, base_site] if enabled else [local_site]
+        result = run(link.name, flag, "-c", code, link, launcher, venv, base, *expected_sites,
+                     extra=env, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True True True\nTrue False " + str(enabled).encode() + b"\n", b"",
+        ), result
+    for name, answer in [("earlier", 41), ("later", 99)]:
+        source = local_site / name
+        source.mkdir()
+        (source / "editable_console.py").write_text(f"def answer():\n    return {answer}\n")
+    (local_site / "20-later.pth").write_text("later\n")
+    (local_site / "10-earlier.pth").write_text("earlier\n", encoding="utf-8-sig")
+    mixed = local_site / "05-mixed.pth"
+    mixed.write_text("later\nimport sys; sys.mixed_pth_called = True\n")
+    code = (
+        "import editable_console, sys\n"
+        "print(editable_console.answer(), hasattr(sys, 'mixed_pth_called'))\n"
+    )
+    result = run(link, "-B", "-c", code, timeout=300)
+    assert (result.returncode, result.stdout) == (0, b"99 False\n"), result
+    assert result.stderr.count(f"Error processing line 2 of {mixed}".encode()) == 2, result
+    assert b"NotImplementedError: no compiled Python body for <module> (<string>:1)" in result.stderr, result
+
+    # -S suppresses site-packages but preserves the base standard library in a venv.
+    code = (
+        "import sysconfig; from installed_tariff import freight; "
+        "print(sysconfig.get_path('stdlib'), freight(4))"
+    )
+    result = run(link, "-ISB", "-c", code, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, f"{base_site.parent} 8\n".encode(), b"",
+    ), result
 
 
 def check_sysconfig_build(imre, root, run):
     by_name = (
         "import _imp, importlib, sys\n"
         "mod = importlib.import_module(sys.argv[1])\n"
+        "config_vars = mod._CONFIG_VARS\n"
+        "version = mod.get_python_version()\n"
+        "assert version == '%d.%d' % sys.version_info[:2]\n"
+        "assert mod.get_python_version() is version\n"
+        "assert mod._CONFIG_VARS is config_vars\n"
         "assert mod.get_config_var('EXT_SUFFIX') in _imp.extension_suffixes()\n"
         "assert mod.get_config_vars() is mod.get_config_vars()\n"
     )
-    flags = "\x1f".join(["--runtime-imports", "--no-cache", "--opt-level", "0"])
+    flags = "\x1f".join(["--no-cache", "--opt-level", "0"])
     for executable in (sys.executable, imre):
         result = run(executable, "-B", "-c", by_name, "sysconfig",
                      extra={"IMRE_ENCODED_FLAGS": flags}, timeout=180)
@@ -167,6 +775,248 @@ def check_sysconfig_build(imre, root, run):
         (modules / "Setup.local").touch()
         result = run(imre, "-B", fixture, project, home, empty, extra=extra)
         assert (result.returncode, result.stdout, result.stderr) == (0, b"build markers passed\n", b""), result
+
+
+def check_user_site(imre, root, run):
+    root = root.resolve()
+    version = json.loads(run(imre, "build-target").stdout)["python_version"]
+    base = root / "user_base"
+    packages = base / "lib" / f"python{version}" / "site-packages"
+    packages.mkdir(parents=True)
+    (packages / "user_site_probe.py").write_text("value = 73\n")
+    extras = root / "user_extras"
+    extras.mkdir()
+    (extras / "pth_probe.py").write_text("value = 51\n")
+    (packages / "extras.pth").write_text(str(extras) + "\n")
+    extra = {"PYTHONUSERBASE": str(base)}
+    code = (
+        "import sys\n"
+        "assert 'site' in sys.modules\n"
+        "prefix = sys.prefix\n"
+        "sys.prefix = 'after startup'\n"
+        "import site\n"
+        "assert site.PREFIXES[:2] == [prefix, sys.exec_prefix]\n"
+        "sys.prefix = prefix\n"
+        "import importlib.util\n"
+        "print(site.USER_BASE == site.getuserbase() == sys.argv[1], "
+        "site.USER_SITE == site.getusersitepackages() == sys.argv[2])\n"
+        "print(site.ENABLE_USER_SITE, sys.flags.no_user_site, "
+        "importlib.util.find_spec('user_site_probe') is not None, "
+        "importlib.util.find_spec('pth_probe') is not None)\n"
+    )
+    for flags, expected in [("-B", b"True 0 True True"), ("-sB", b"False 1 False False")]:
+        result = run(imre, flags, "-c", code, str(base), str(packages), extra=extra, timeout=300)
+        assert (result.returncode, result.stdout, result.stderr) == (
+            0, b"True True\n" + expected + b"\n", b"",
+        ), result
+    imported = run(imre, "-B", "-c", "import user_site_probe; print(user_site_probe.value)", extra=extra, timeout=300)
+    assert (imported.returncode, imported.stdout, imported.stderr) == (0, b"73\n", b""), imported
+    lazy = run(
+        imre, "-SB", "-c",
+        "import sys\n"
+        "assert 'site' not in sys.modules\n"
+        "sys.prefix = 'before import'\n"
+        "import site\n"
+        "sys.prefix = 'after import'\n"
+        "assert site.PREFIXES == ['before import', sys.exec_prefix]\n"
+        "print(site.USER_BASE, site.USER_SITE, site.ENABLE_USER_SITE)\n"
+        "print(site.getuserbase() == sys.argv[1], site.getusersitepackages() == sys.argv[2], sys.argv[2] in sys.path)",
+        str(base), str(packages), extra=extra, timeout=300,
+    )
+    assert (lazy.returncode, lazy.stdout, lazy.stderr) == (0, b"None None None\nTrue True False\n", b""), lazy
+
+
+def check_startup_main_frame(imre, root, run):
+    hooks = root / "warning-hooks"
+    hooks.mkdir()
+    script = root / "entry.py"
+    # A warning category can hold the actual entry module before site runs.
+    (hooks / "category.py").write_text(
+        "import builtins, sys\n"
+        "class Early(Warning): pass\n"
+        "entry = sys.modules['__main__']\n"
+        "def second(arg): return 91\n"
+        "def render():\n"
+        "    entry.render = second\n"
+        "    return 37\n"
+        "def importing(name, globals, locals, fromlist, level):\n"
+        "    assert globals is entry.__dict__ and locals is globals\n"
+        "    assert name == 'provider' and fromlist == ('render',) and level == 0\n"
+        "    return sys.modules[__name__]\n"
+        "entry.__builtins__ = dict(vars(builtins), __import__=importing)\n"
+    )
+    (hooks / "sitecustomize.py").write_text("import category\n")
+    (hooks / "provider.py").write_text("def render(arg=None): return 3\n")
+    script.write_text('from provider import render\nprint(render())\nprint(render("four"))\n')
+    result = run(
+        imre, "-B", "-W", "ignore::category.Early", script,
+        extra={"PYTHONPATH": str(hooks)}, timeout=300,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"37\n91\n", b""), result
+
+    # The FILE owns its interpreter module even when site exposes a different public mapping.
+    (hooks / "sitecustomize.py").write_text(
+        "import atexit, builtins, sys\n"
+        "entry = sys.modules['__main__']\n"
+        "class Key:\n"
+        "    def __hash__(self): return hash('__builtins__')\n"
+        "    def __eq__(self, name):\n"
+        "        print('lookup', name)\n"
+        "        return name == '__builtins__'\n"
+        "class Loader:\n"
+        "    def __del__(self):\n"
+        "        print('loader', type(entry.__loader__).__name__)\n"
+        "        del entry.__builtins__\n"
+        "        entry.__dict__[Key()] = dict(vars(builtins), print=display)\n"
+        "def display(*args): print('frame', *args)\n"
+        "entry.__loader__ = Loader()\n"
+        "sys.modules = dict(sys.modules, __main__=type(sys)('__main__'))\n"
+        "def after(): print('after', hasattr(entry, '__file__'), hasattr(entry, '__cached__'))\n"
+        "atexit.register(after)\n"
+    )
+    metadata = root / "metadata.py"
+    metadata.write_text("import sys\nprint('body')\n")
+    result = run(imre, "-B", metadata, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0, b"loader SourceFileLoader\nlookup __builtins__\nlookup __builtins__\nframe body\nafter False False\n", b"",
+    ), result
+
+    # A successful from-import store survives failure on the next member of the same object.
+    (hooks / "sitecustomize.py").write_text(
+        "import builtins, gc, weakref\n"
+        "events = []\n"
+        "refs = []\n"
+        "class Member:\n"
+        "    def __del__(self): events.append('released')\n"
+        "class Returned:\n"
+        "    def __getattr__(self, name):\n"
+        "        events.append(name)\n"
+        "        if name == 'kept': return object()\n"
+        "        if name == 'first':\n"
+        "            member = Member()\n"
+        "            refs.append(weakref.ref(member))\n"
+        "            return member\n"
+        "        gc.collect()\n"
+        "        events.append(refs[0]() is None)\n"
+        "        raise LookupError(name)\n"
+        "class Locals(dict):\n"
+        "    def __setitem__(self, key, value):\n"
+        "        gc.collect()\n"
+        "        events.append(key)\n"
+        "        super().__setitem__(key, None if key == 'chosen' else value)\n"
+        "def importing(*args):\n"
+        "    events.append('import')\n"
+        "    return Returned()\n"
+        "namespace = Locals()\n"
+        "try:\n"
+        "    exec('from provider import kept as saved, first as chosen, second, third', "
+        "{'__builtins__': dict(vars(builtins), __import__=importing)}, namespace)\n"
+        "except LookupError as error:\n"
+        "    print(events, str(error), list(namespace), type(namespace['saved']).__name__, namespace['chosen'])\n"
+    )
+    result = run(imre, "-B", metadata, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        b"['import', 'kept', 'saved', 'first', 'chosen', 'released', 'second', True] "
+        b"second ['saved', 'chosen'] object None\nbody\n",
+        b"",
+    ), result
+
+
+def check_script_sitecustomize(imre, root, run):
+    root = root.resolve()
+    app = root / "script-app"
+    hooks = root / "startup-hooks"
+    packages = root / "startup-packages"
+    for directory in (app, hooks, packages):
+        directory.mkdir()
+    # The hook runs before the script directory enters sys.path. After a failed
+    # import the script can import a different file under the same module name.
+    (app / "sitecustomize.py").write_text("print('script local')\n")
+    (app / "startup_helper.py").write_text("def (\n")
+    (hooks / "startup_helper.py").write_text("print('installed helper')\n")
+    (hooks / "sitecustomize.py").write_text(
+        "import startup_helper\nraise RuntimeError('setup failed')\n"
+    )
+    script = app / "reimport.py"
+    script.write_text("import sitecustomize\nprint('entry')\n")
+    result = run(imre, "-B", script, extra={"PYTHONPATH": str(hooks)}, timeout=300)
+    assert (result.returncode, result.stdout) == (0, b"installed helper\nscript local\nentry\n"), result
+    assert b"RuntimeError: setup failed" in result.stderr, result
+
+    (app / "sitecustomize.py").write_text("print('script-local hook ran')\n")
+    (hooks / "sitecustomize.py").write_text(f"import sys\nsys.path.insert(0, {str(packages)!r})\n")
+    (packages / "startup_plugin.py").write_text("value = 'plugin loaded'\n")
+    script = app / "entry.py"
+    script.write_text(
+        "import importlib, sys\n"
+        "print(sys.path[0] == sys.argv[1], sys.argv[2] in sys.path)\n"
+        "try:\n"
+        "    print(importlib.import_module(sys.argv[3]).value)\n"
+        "except ModuleNotFoundError as error:\n"
+        "    print(error.name)\n"
+    )
+    env = {"PYTHONPATH": str(hooks)}
+    for flag, stdout in [
+        ("-B", b"True True\nplugin loaded\n"),
+        ("-BS", b"True True\nstartup_plugin\n"),
+        ("-BE", b"True False\nstartup_plugin\n"),
+    ]:
+        result = run(
+            imre, flag, script, app, hooks, "startup_plugin", extra=env, timeout=300,
+        )
+        assert (result.returncode, result.stdout, result.stderr) == (0, stdout, b""), result
+
+    unfrozen = root / "unfrozen-providers"
+    unfrozen.mkdir()
+    (unfrozen / "stat.py").write_text("raise AssertionError('unexpected startup import')\n")
+    invoice = app / "invoice.py"
+    invoice.write_text("import sys\nprint('site' in sys.modules, 'stat' in sys.modules)\n")
+    result = run(
+        imre, "-B", "-X", "frozen_modules=off", invoice,
+        extra={"PYTHONPATH": str(unfrozen)}, timeout=300,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"False False\n", b""), result
+
+    literal = app / "literal_import.py"
+    literal.write_text("from startup_plugin import value\nprint(value)\n")
+    result = run(imre, "-B", literal, extra=env, timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"plugin loaded\n", b""), result
+
+    invalid = app / "typed_argument.py"
+    invalid.write_text(
+        "def take(value: int) -> int:\n    return value\n"
+        "\ndef dormant() -> int:\n    return take('bad')\n"
+        "\nprint(1)\n"
+    )
+    result = run(imre, "-B", invalid, extra=env)
+    assert result.returncode > 0 and not result.stdout and b"expected int, got str" in result.stderr, result
+
+    # The hook fails during site initialization, before application shutdown is available.
+    (hooks / "sitecustomize.py").write_text("print('starting')\nraise SystemExit(19)\n")
+    script.write_text("import sitecustomize\nprint('application')\n")
+    fatal = run(imre, "-B", script, extra=env)
+    assert fatal.returncode == 1 and fatal.stdout == b"starting\n", fatal
+    assert b"Fatal Python error: init_import_site:" in fatal.stderr, fatal
+    assert fatal.stderr.endswith(b"SystemExit: 19\n"), fatal
+
+
+def check_explicit_site_directory(imre, root, run):
+    site_dir = root / "extra-site"
+    plugins = site_dir / "plugins"
+    plugins.mkdir(parents=True)
+    (plugins / "activated_plugin.py").write_text("value = 41\n")
+    (site_dir / "plugins.pth").write_text("plugins\nimport sys; sys.pth_increment = 1\n")
+    source = (
+        "import importlib, sys\n"
+        "site = importlib.import_module(sys.argv[1])\n"
+        "known = set()\n"
+        "assert site.addsitedir(sys.argv[2], known_paths=known) is known\n"
+        "import activated_plugin\n"
+        "print(activated_plugin.value + sys.pth_increment)\n"
+    )
+    result = run(imre, "-B", "-c", source, "site", str(site_dir), timeout=300)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"42\n", b""), result
 
 
 def check_io_compaction_allocation(imre, root, run):
@@ -308,7 +1158,7 @@ def check_select_result_allocation(imre, root, run):
     source = fixtures / "boxed_select_result_allocation.py"
     for optimization in (0, 3):
         executable = root / f"select-result-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", imported_fixture(root, source), "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for shape in range(4):
@@ -335,7 +1185,7 @@ def check_poll_result_allocation(imre, root, run):
     source = fixtures / "boxed_poll_result_allocation.py"
     for optimization in (0, 3):
         executable = root / f"poll-result-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", source, "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for count in (1, 2, 7):
@@ -361,7 +1211,7 @@ def check_select_input_root_allocation(imre, root, run):
     source = fixtures / "boxed_select_input_root_allocation.py"
     for optimization in (0, 3):
         executable = root / f"select-input-roots-O{optimization}"
-        built = run(imre, "build", source, "--runtime-imports", "--no-cache", "--opt-level", str(optimization), "-o", executable,
+        built = run(imre, "build", imported_fixture(root, source), "--no-cache", "--opt-level", str(optimization), "-o", executable,
                     extra={"IMRE_ENCODED_FLAGS": flags})
         assert built.returncode == 0, built
         for shape in (1, 2):
@@ -382,7 +1232,7 @@ def check_raise_site_allocation(imre, root, run):
     subprocess.run(["cc", "-c", fixture, "-o", wrapper], check=True)
     flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_exception_with_origin,--wrap=malloc",
+        "-C", "link-arg=-Wl,--wrap=imre_exception_at_frame,--wrap=malloc",
     ])
     source = "try:\n    raise ValueError('original')\nexcept ValueError as error:\n    print(error)\nprint('later')"
     for ordinal in (0, 1, 2):
@@ -407,7 +1257,7 @@ def check_boxed_json_callback_allocation(imre, root, run):
     source = root / "json_callback_probe.py"
     source.write_text(imports + "fixture.current(int(sys.argv[1]))\n")
     executable = root / "json_callback_probe"
-    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable, extra={
+    built = run(imre, "build", source, "--no-cache", "-o", executable, extra={
         "IMRE_ENCODED_FLAGS": flags,
     })
     assert built.returncode == 0, built.stderr
@@ -484,7 +1334,7 @@ def call_allocation_flags(root):
     subprocess.run(["cc", "-c", fixtures / "itemgetter_refuse.c", "-o", wrapper], check=True)
     return "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_scoped_call_at,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lookup,--wrap=imre_dyn_assign_target,--wrap=malloc,--wrap=realloc,--wrap=imre_dyn_lit,--wrap=imre_dyn_linked_string",
     ])
 
 
@@ -601,16 +1451,17 @@ def check_boxed_call_allocation(imre, run, flags):
         for size in (0, 56):
             result = run(imre, "-B", "-c", source, extra={
                 "IMRE_ENCODED_FLAGS": flags,
-                "IMRE_TEST_CALL_OP": operation,
+                "IMRE_TEST_CALL_OP": "assign_target" if operation == "assign" else operation,
                 "IMRE_TEST_CALL_SIZE": str(size),
                 "IMRE_TEST_GETTER_ALLOCATION": "1",
             })
+            # Both operations borrow the linked identifier without allocating a copy.
             if operation == "lookup":
-                expected = (b"caught ()\n" if size else b"value 3\n") + b"retry 3\n"
+                expected = b"value 3\nretry 3\n"
             else:
-                expected = (b"caught () True\n" if size else b"value 7\n") + b"preserved True\nretry 3\n"
+                expected = b"value 7\npreserved True\nretry 3\n"
             assert (result.returncode, result.stdout, result.stderr) == (
-                0, expected, b"refused\n" if size else b"",
+                0, expected, b"",
             ), (operation, size, result)
 
     # Refuse the dictionary snapshot and the equally sized sort buffer separately.
@@ -834,16 +1685,15 @@ def check_ffi_result_roots(imre, root, run):
     subprocess.run(["cc", "-c", fixtures / "ffi_result_roots_refuse.c", "-o", wrapper], check=True)
     result_flags = "\x1f".join([
         "-C", f"link-arg={wrapper}",
-        "-C", "link-arg=-Wl,--wrap=imre_dyn_op_at,--wrap=imre_dyn_lit,--wrap=malloc,--wrap=realloc,--wrap=calloc",
+        "-C", "link-arg=-Wl,--wrap=imre_dyn_lookup,--wrap=realloc",
     ])
     import_path = f"import sys; sys.path.insert(0, {str(fixtures)!r}); "
     source = import_path + "import boxed_ffi_result_roots as fixture; fixture.allocation()"
     for ordinal in (0, 1):
         result = run(imre, "-B", "-c", source, extra={
             "IMRE_ENCODED_FLAGS": result_flags,
-            "IMRE_TEST_CALL_SIZE": "128",
             "IMRE_TEST_GETTER_ALLOCATION": str(ordinal),
-        })
+        }, timeout=300)
         expected = (b"caught ()\n" if ordinal else b"value 3\n") + b"retry 3 True\n"
         assert (result.returncode, result.stdout, result.stderr) == (
             0, expected, b"refused\n" if ordinal else b"",
@@ -1048,6 +1898,109 @@ def check_tracemalloc_startup(imre, run):
     assert (traced.returncode, traced.stdout, traced.stderr) == (0, b"sample\n", b"")
 
 
+def check_registered_run_path(imre, root, run):
+    project = root / "reexecute"
+    for name, rate in (("wholesale", 7), ("retail", 11)):
+        package = project / name
+        package.mkdir(parents=True)
+        (package / "__init__.py").touch()
+        (package / "rates.py").write_text(f"rate = {rate}\n")
+    invoice = project / "wholesale" / "invoice.py"
+    invoice.write_text(
+        "from __future__ import annotations\n"
+        "from .rates import rate\n"
+        "def quote() -> int:\n"
+        "    assert 'annotations' in globals()\n"
+        "    return rate * globals().get('quantity', 1)\n"
+    )
+    entry = project / "report.py"
+    entry.write_text(
+        "import sys\n"
+        "from importlib import import_module\n"
+        "import wholesale.invoice\n"
+        "import retail.rates\n"
+        "def veto(name, g, local, fromlist, level):\n"
+        "    seen.append((name, fromlist, level))\n"
+        "    if name == '__future__': return __import__(name, g, local, fromlist, level)\n"
+        "    raise PermissionError(name)\n"
+        "runpy = import_module('runpy')\n"
+        "quotes = []\n"
+        "for package, quantity in [(wholesale.invoice.__package__, 2), (retail.rates.__package__, 3)]:\n"
+        f"    result = runpy.run_path({str(invoice)!r}, {{'quantity': quantity}}, package + '.report')\n"
+        "    quotes.append(result['quote'])\n"
+        "assert quotes[0].__code__ is not quotes[1].__code__\n"
+        "seen = []\n"
+        f"try: runpy.run_path({str(invoice)!r}, {{'__builtins__': {{'__import__': veto}}}}, 'retail.report')\n"
+        "except PermissionError as exc: assert exc.args == ('rates',)\n"
+        "assert seen == [('__future__', ('annotations',), 0), ('rates', ('rate',), 1)]\n"
+        "print(wholesale.invoice.quote(), quotes[0](), quotes[1]())\n"
+    )
+    application = project / "report"
+    build = run(imre, "build", entry, "--module-root", project, "-o", application, timeout=300)
+    assert build.returncode == 0, build
+    for command in ((sys.executable, "-BS", entry), (application,)):
+        result = run(*command)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"7 14 33\n", b""), result
+
+    declared = project / "declared"
+    build = run(imre, "build", entry, "--module-root", project,
+                "--include-module", "wholesale.invoice", "-o", declared, timeout=300)
+    assert build.returncode == 0, build
+    invoice.unlink()
+    result = run(declared)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"7 14 33\n", b""), result
+    missing = run(application)
+    assert missing.returncode == 1 and b"FileNotFoundError" in missing.stderr, missing
+
+
+def check_frozen_modules_startup(imre, root, run):
+    provider = root / "frozen_provider"
+    provider.mkdir()
+    (provider / "__hello__.py").write_text("initialized = 73\ndef origin(): return __file__\n")
+    entry = provider / "entry.py"
+    entry.write_text(
+        "import _imp, importlib, sys\n"
+        "from importlib.machinery import FrozenImporter\n"
+        "name = '__hello__'\n"
+        "for override in (0, 1, -1, 0):\n"
+        "    _imp._override_frozen_modules_for_tests(override)\n"
+        "    sys.modules.pop(name, None)\n"
+        "    import __hello__\n"
+        "    assert importlib.import_module(name) is __hello__ is sys.modules[name]\n"
+        "    frozen = _imp.is_frozen(name)\n"
+        "    assert (__hello__.__loader__ is FrozenImporter) == frozen\n"
+        "    assert __hello__.__spec__.loader is __hello__.__loader__\n"
+        "    assert _imp.is_frozen('_frozen_importlib')\n"
+        "    if not frozen:\n"
+        "        assert __hello__.origin() == __hello__.origin.__code__.co_filename == __hello__.__file__\n"
+        "    print(frozen, sys._xoptions)\n"
+    )
+    for flags, setting in (
+        (("-X", "frozen_modules=off"), "on"),
+        (("-Xfrozen_modules=off", "-Xfrozen_modules=on"), "off"),
+        ((), "off"),
+        (("-E",), "invalid"),
+    ):
+        extra = {"PYTHON_FROZEN_MODULES": setting}
+        expected = run(sys.executable, "-B", *flags, entry, extra=extra)
+        actual = run(imre, "-B", *flags, entry, extra=extra, timeout=300)
+        assert expected.returncode == actual.returncode == 0, (expected, actual)
+        assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
+
+    # A scalar from-import also resolves the local file through the checked source graph.
+    direct = provider / "direct.py"
+    direct.write_text("from __hello__ import initialized\nprint(initialized)\n")
+    result = run(imre, "-BS", "-Xfrozen_modules=off", direct)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"73\n", b""), result
+
+    # The module-mode entry point imports runpy before invoking the target.
+    (provider / "runpy.py").write_text(
+        "def _run_module_as_main(name, alter_argv=True): print(name, alter_argv)\n"
+    )
+    result = run(imre, "-BS", "-Xfrozen_modules=off", "-m", "direct", extra={"PYTHONPATH": str(provider)})
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"direct True\n", b""), result
+
+
 def check_faulthandler(imre, root, env):
     import resource
     import select
@@ -1099,13 +2052,59 @@ def check_faulthandler(imre, root, env):
             # The signal may arrive during the PID write or the blocking input.
             assert any(f'File "{source}", line {n} in wait_for_signal\n'.encode() in err for n in (7, 8)), err
 
+    source = root / "user-fault.py"
+    source.write_text(
+        "import faulthandler, os, signal\n"
+        "calls = []\n"
+        "def previous(sig, frame): calls.append(sig)\n"
+        "def deliver(): os.kill(os.getpid(), signal.SIGUSR1)\n"
+        "signal.signal(signal.SIGUSR1, previous)\n"
+        "faulthandler.register(signal.SIGUSR1, all_threads=False, chain=True)\n"
+        "assert not faulthandler.is_enabled()\n"
+        "deliver()\n"
+        "assert faulthandler.unregister(signal.SIGUSR1)\n"
+        "assert not faulthandler.unregister(signal.SIGUSR1)\n"
+        "deliver()\n"
+        "assert calls == [signal.SIGUSR1, signal.SIGUSR1]\n"
+    )
+    user = subprocess.run([imre, "-I", source], cwd=root, env=env, capture_output=True, timeout=600)
+    assert user.returncode == 0 and not user.stdout, user
+    assert user.stderr.count(b"Stack (most recent call first):") == 1, user.stderr
+    assert f'File "{source}", line 4 in deliver\n'.encode() in user.stderr, user.stderr
+
+
+def check_forked_fault_frames(imre, root, run):
+    fixture = Path(__file__).with_name("fixtures") / "fork_fault_frames.c"
+    probe = root / "fork_fault_frames"
+    subprocess.run(
+        ["cc", fixture, imre.with_name("libimre_runtime.a"), "-pthread", "-Wl,--wrap=realloc", "-o", probe],
+        check=True,
+    )
+    result = run(probe)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        0,
+        b'Stack (most recent call first):\n  File "child.py", line 30 in child\n'
+        b'Stack (most recent call first):\n  File "parent.py", line 20 in inner\n'
+        b'  File "parent.py", line 10 in outer\n',
+        b"",
+    ), result
+
+    fixture = fixture.with_name("fork_fault_registration.c")
+    probe = root / "fork_fault_registration"
+    subprocess.run(
+        ["cc", fixture, imre.with_name("libimre_runtime.a"), "-pthread", "-Wl,--wrap=sigaction", "-o", probe],
+        check=True,
+    )
+    result = run(probe)
+    assert (result.returncode, result.stdout, result.stderr) == (0, b"", b""), result
+
 
 def check_pending_signals(imre, root, env):
     import signal
 
     fixture = Path(__file__).resolve().with_name("fixtures") / "boxed_signal_pending.py"
     native = root / "signal-pending"
-    subprocess.run([imre, "build", fixture, "--runtime-imports", "-o", native], check=True, env=env)
+    subprocess.run([imre, "build", fixture, "-o", native], check=True, env=env)
     for delivered, expected in (
         (0, 0),
         (signal.SIGUSR1, signal.SIGUSR1),
@@ -1168,7 +2167,7 @@ def check_pickle_reductions(imre, root, run):
         )
         for optimization in (0, 3):
             executable = work / f"pickle-O{optimization}"
-            build = run(imre, "build", entry, "--module-root", work, "--runtime-imports",
+            build = run(imre, "build", entry, "--module-root", work,
                         "--no-cache", "--opt-level", str(optimization), "-o", executable)
             assert build.returncode == 0, build
             result = run(executable)
@@ -1219,13 +2218,10 @@ def check_boxed_unittest_main_reporting(imre, root, run):
         "        with self.subTest(item=1): self.fail('intentional failure')\n"
         "unittest.main()\n"
     )
-    executable = root / "reporting_tests"
-    built = run(imre, "build", source, "--runtime-imports", "--no-cache", "-o", executable)
-    assert built.returncode == 0, built
-    passed = run(executable, "-v", "Cases.test_pass")
+    passed = run(imre, "-B", "-m", source.stem, "-v", "Cases.test_pass")
     assert passed.returncode == 0, passed
     assert b"test_pass (__main__.Cases.test_pass) ... ok" in passed.stderr.splitlines(), passed
-    failed = run(executable, "-v", "Cases.test_failure")
+    failed = run(imre, "-B", "-m", source.stem, "-v", "Cases.test_failure")
     assert failed.returncode == 1 and b"(item=1) ... FAIL" in failed.stderr, failed
     assert failed.stderr.rstrip().endswith(b"FAILED (failures=1)"), failed
 
@@ -1242,10 +2238,11 @@ def check_unittest_main_names(imre, root, run):
         "unittest.main()\n"
     )
     executable = root / "selected_tests"
-    built = run(imre, "build", source, "--module-root", root, "--runtime-imports", "--no-cache", "-o", executable)
+    built = run(imre, "build", source, "--module-root", root, "--no-cache", "-o", executable)
     assert built.returncode == 0, built
     for args, output in [((), b"a\nb\n"), (("Cases.test_b", "Cases.test_a"), b"b\na\n"),
-                         (("-vk", "test_b", "Cases"), b"b\n")]:
+                         (("-vk", "test_b", "Cases"), b"b\n"),
+                         (("-vbk", "test_b", "Cases"), b""), (("--buf", "Cases.test_a"), b"")]:
         result = run(executable, *args)
         assert result.returncode == 0 and result.stdout == output, result
     for flags, progress in [((), b".\n"), (("-v",), b"test_b (__main__.Cases.test_b) ... ok\n\n"),
@@ -1284,28 +2281,36 @@ def check_unittest_module_main(imre, root, run):
         "        failure_reason = 'deliberate failure'\n"
         "        self.fail(failure_reason)\n"
     )
+    declared = {"IMREFLAGS": f"--include-module {package.name}.sample"}
     passing = "cli_test_package.sample.Passing"
-    ok = run(imre, "-m", "unittest", "-v", passing, passing + ".test_one")
+    ok = run(imre, "-B", "--include-module", f"{package.name}.sample", "-m", "unittest", "-v", passing, passing + ".test_one")
     assert ok.returncode == 0 and ok.stdout == (passing + ".test_one\n").encode() * 2, ok
     assert ok.stderr.count(f"test_one ({passing}.test_one) ... ok".encode()) == 2, ok
     failing = "cli_test_package.sample.Failing.test_one"
-    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing")
+    errors = run(imre, "-m", "unittest", "-v", failing, passing + ".test_missing", extra=declared)
     assert errors.returncode == 1 and b"Ran 2 tests" in errors.stderr, errors
     assert f"FAIL: test_one ({failing})".encode() in errors.stderr, errors
     assert b"ERROR: test_missing (unittest.loader._FailedTest.test_missing)" in errors.stderr, errors
     assert b"FAILED (failures=1, errors=1)" in errors.stderr, errors
     local_line = b"    failure_reason = 'deliberate failure'"
     assert local_line not in errors.stderr.splitlines(), errors
-    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing")
+    with_locals = run(imre, "-m", "unittest", "--locals", "-v", failing, passing + ".test_missing", extra=declared)
     assert with_locals.returncode == 1 and b"FAILED (failures=1, errors=1)" in with_locals.stderr, with_locals
     assert local_line in with_locals.stderr.splitlines(), with_locals
 
     (package / "other.py").write_text("raise AssertionError('outside discovery pattern')\n")
-    discovered = run(imre, "-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
-                     "-p", "sample.py", "-k", "Passing.test_one")
+    discovery = ("-m", "unittest", "discover", "-v", "-s", package.name, "-t", ".",
+                 "-p", "sample.py", "-k", "Passing.test_one")
+    discovered = run(imre, *discovery, extra=declared)
     assert discovered.returncode == 0 and discovered.stdout == (passing + ".test_one\n").encode(), discovered
     assert f"test_one ({passing}.test_one) ... ok".encode() in discovered.stderr.splitlines(), discovered
     assert b"Ran 1 test in " in discovered.stderr, discovered
+
+    metadata = root / "cli_test_package-1.dist-info"
+    metadata.mkdir()
+    (metadata / "RECORD").write_text("cli_test_package/__init__.py,,\ncli_test_package/sample.py,,\n")
+    installed = run(imre, "--include-module", package.name, *discovery)
+    assert installed.returncode == 0 and installed.stdout == discovered.stdout, installed
 
 
 def check_unittest_file_discovery(imre, root, run):
@@ -1322,7 +2327,7 @@ def check_unittest_file_discovery(imre, root, run):
         directory = root / ("late_tests_" + optimization)
         directory.mkdir()
         executable = root / ("discover_" + optimization)
-        built = run(imre, "build", entry, "--runtime-imports", "--no-cache",
+        built = run(imre, "build", imported_fixture(root, entry), "--no-cache",
                     "--opt-level", optimization, "-o", executable)
         assert built.returncode == 0, built
         # The compiler has already linked the binary when this module first appears.
@@ -1389,12 +2394,24 @@ def main():
                 timeout=timeout,
             )
 
+        check_installed_package_data(imre, root, run)
+        check_module_search_root(imre, root, run)
+        check_reassigned_callable_operand(imre, root, run)
+        check_registered_entry_operand(imre, root, run)
+        check_imported_call_arguments(imre, root, run)
         check_tracemalloc_startup(imre, run)
+        check_registered_run_path(imre, root, run)
+        check_frozen_modules_startup(imre, root, run)
         if sys.platform == "darwin" or sys.platform.startswith("linux"):
             check_installed_site(imre, root, run)
             check_faulthandler(imre, root, env)
             check_python_process_identity(imre, root, env)
+            check_user_site(imre, root, run)
+            check_script_sitecustomize(imre, root, run)
+            check_startup_main_frame(imre, root, run)
+            check_explicit_site_directory(imre, root, run)
         if sys.platform.startswith("linux"):
+            check_forked_fault_frames(imre, root, run)
             check_os_abort(imre, run)
             check_os_execvpe(imre, root, run)
             check_pending_signals(imre, root, env)
@@ -1420,6 +2437,16 @@ def main():
         check_boxed_json_callback_allocation(imre, root, run)
         check_pickle_reductions(imre, root, run)
 
+        marker = root / "retired-flag-ran"
+        valid = root / "retired_flag.py"
+        valid.write_text(f"open({str(marker)!r}, 'w').close()\n")
+        image = root / "retired-flag-image"
+        for command, extra in (("check", []), ("build", ["-o", image]), ("run", [])):
+            refused = run(imre, command, valid, "--runtime-imports", *extra)
+            assert refused.returncode != 0 and refused.stdout == b"", refused
+            assert b"Usage: imre check" in refused.stderr, refused.stderr
+            assert not marker.exists() and not image.exists()
+
         entry = root / "serve.py"
         entry.write_text("from application import make_endpoint\nprint(__name__, make_endpoint('ready')())\n")
         (root / "application.py").write_text(
@@ -1429,9 +2456,9 @@ def main():
         )
         reference = run(sys.executable, "-B", entry)
         assert (reference.returncode, reference.stdout) == (0, b"__main__ ready\n"), reference.stderr
-        opted_in = run(imre, "run", entry, "--runtime-imports", "--quiet")
-        assert (opted_in.returncode, opted_in.stdout) == (0, reference.stdout), opted_in.stderr
-        # A cached object-runtime executable cannot satisfy a subsequent static build.
+        # The module launcher executes this closed local package with its Python closure.
+        launched = run(imre, "-B", "-m", entry.stem)
+        assert (launched.returncode, launched.stdout) == (0, reference.stdout), launched.stderr
         ordinary = run(imre, "run", entry, "--quiet")
         assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
 
@@ -1443,8 +2470,8 @@ def main():
             "    spec = ModuleSpec('pkg', None, origin='memory', is_package=True)\n"
             "    print(spec.name, spec.origin, spec.submodule_search_locations)\n"
         )
-        opted_in = run(imre, "run", spec_entry, "--runtime-imports", "--quiet")
-        assert (opted_in.returncode, opted_in.stdout) == (0, b"pkg memory []\n"), opted_in.stderr
+        launched = run(imre, "-B", "-m", spec_entry.stem)
+        assert (launched.returncode, launched.stdout) == (0, b"pkg memory []\n"), launched.stderr
 
         (root / "reader.py").write_text(
             "for _ in range(3):\n    print(repr(input()))\n"
@@ -1505,10 +2532,17 @@ def main():
         streams = root / "streams.py"
         streams.write_bytes((Path(__file__).with_name("fixtures") / "boxed_sys_output.py").read_bytes())
         expected = run(sys.executable, "-B", streams)
-        actual = run(imre, "run", streams, "--runtime-imports", "--quiet")
+        actual = run(imre, "-B", "-m", streams.stem)
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
-        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\n".encode()
+        assert actual.stdout == expected.stdout == "stdout π\nraw:then:text\nAoldB\\xe9C".encode()
         assert actual.stderr == expected.stderr == "stderr 🌍\nrestored\nbinary stderr\n".encode()
+
+        shutdown = Path(__file__).with_name("fixtures") / "boxed_stdio_shutdown.py"
+        for mode, code in (("broken-pipe", 120), ("detached", 120), ("rewrapped", 0)):
+            reference = run(sys.executable, "-B", shutdown, mode)
+            result = run(imre, "-B", "-m", shutdown.stem, mode, extra={"PYTHONPATH": str(shutdown.parent)})
+            assert result.returncode == reference.returncode == code, result.stderr
+            assert (result.stdout, result.stderr) == (reference.stdout, reference.stderr)
 
         text_close = run(imre, "-B", "-c", "import streams", "close-text")
         assert text_close.returncode == 0, text_close.stderr
@@ -1546,21 +2580,21 @@ def main():
             "    raise OSError(28, 'outer') from exc\n"
         )
         expected = run(sys.executable, "-B", chained)
-        actual = run(imre, "run", chained, "--runtime-imports", "--quiet")
+        actual = run(imre, "-B", "-m", chained.stem)
         assert expected.returncode == actual.returncode == 1
         assert actual.stderr == expected.stderr, (actual.stderr, expected.stderr)
 
         string_io = root / "string_io.py"
         string_io.write_bytes((Path(__file__).with_name("fixtures") / "boxed_string_io.py").read_bytes())
         expected = run(sys.executable, "-B", string_io)
-        actual = run(imre, "run", string_io, "--runtime-imports", "--quiet")
+        actual = run(imre, "run", string_io, "--quiet")
         assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
         assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
-        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py"):
-            exit_stack = Path(__file__).with_name("fixtures") / fixture
-            expected = run(sys.executable, "-B", exit_stack)
-            actual = run(imre, "run", exit_stack, "--runtime-imports", "--quiet")
+        for fixture in ("boxed_exit_stack.py", "boxed_async_exit_stack.py", "boxed_pydoc.py", "io_dict_descriptor.py"):
+            script = Path(__file__).with_name("fixtures") / fixture
+            expected = run(sys.executable, "-B", script)
+            actual = run(imre, "-B", "-m", script.stem, extra={"PYTHONPATH": str(script.parent)})
             assert expected.returncode == actual.returncode == 0, (expected.stderr, actual.stderr)
             assert actual.stdout == expected.stdout and actual.stderr == expected.stderr == b""
 
@@ -1635,6 +2669,32 @@ def main():
                 expected.stderr,
             )
 
+        def compare_module(source):
+            compare("-B", "-m", source.stem, extra={"PYTHONPATH": str(source.parent)})
+
+        late_future = root / "late_future.py"
+        for prefix, line in (("import __future__\n", 2),
+                             ("def f():\n    class C[T](x): pass\n    global x\n", 4)):
+            late_future.write_text(prefix + "from __future__ import annotations\n")
+            rejected = run(imre, "check", late_future)
+            assert rejected.returncode == 1, rejected
+            assert f"late_future.py:{line}:1".encode() in rejected.stderr, rejected
+
+        future_caller = root / "future_caller.py"
+        future_caller.write_text(
+            "print('before')\ntry:\n    import future_dependency\n"
+            "except SyntaxError as exc:\n    print(exc.lineno, exc.offset)\n"
+            "with open('future_dependency.py', 'w') as f:\n    f.write('value = 37\\n')\n"
+            "try:\n    import future_dependency\n    print(future_dependency.value)\n"
+            "except SyntaxError:\n    print('stale source')\n"
+        )
+        for exe in (sys.executable, imre):
+            (root / "future_dependency.py").write_text(
+                "print('dependency ran')\nfrom __future__ import annotations\n"
+            )
+            retried = run(exe, "-B", future_caller)
+            assert (retried.returncode, retried.stdout, retried.stderr) == (0, b"before\n2 1\n37\n", b""), retried
+
         module_pkg = root / "module_pkg"
         module_pkg.mkdir()
         (module_pkg / "__init__.py").write_text("import sys\nassert sys.argv[0] == '-m'\n")
@@ -1652,8 +2712,17 @@ def main():
             "assert __name__ == '__main__' and __file__ == sys.argv[0]\n"
             "print(__package__, sys.argv[1:])\n"
         )
-        compare("-Bm", "module_pkg.child", "-m", "tail")
+        compare("-Bm", "module_pkg.child", "-m", "tail", "--include-module", "untouched")
         compare("-B", "-mmodule_pkg", "tail")
+
+        script_spec = root / "script_spec.py"
+        script_spec.write_text(
+            "import builtins, sys\n"
+            "assert sys.modules['__main__'].__dict__['__spec__'] is __spec__\n"
+            "print(getattr(__spec__, 'name', None), builtins.__spec__.name)\n"
+        )
+        compare("-B", script_spec)
+        compare_module(script_spec)
 
         json_input = root / "input.json"
         json_input.write_text('{"items": [1, 2]}')
@@ -1741,6 +2810,67 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("application", "tail")
         compare("-I", "./application/sub", "-h")
 
+        site = root / "build-site"
+        site.mkdir()
+        dependency = site / "installed_price.py"
+        dependency.write_text("def price(n: int) -> int: return n * 7\n")
+        caller = root / "invoice.py"
+        caller.write_text("from installed_price import price\nprint(price(9))\n")
+        invoice = root / "invoice"
+        built = run(imre, "build", caller, "-o", invoice, extra={"PYTHONPATH": str(site)})
+        assert built.returncode == 0, built.stderr
+        dependency.unlink()
+        caller.unlink()
+        result = run(invoice)
+        assert (result.returncode, result.stdout, result.stderr) == (0, b"63\n", b""), result
+
+        namespace_package = root / "namespace_plugin"
+        namespace_package.mkdir()
+        (namespace_package / "helper.py").write_text("globals()['answer'] = 42\n")
+        (namespace_package / "entry.py").write_text("from .helper import answer\nprint(answer)\n")
+        compare("-B", "-m", "namespace_plugin.entry")
+
+        # Both namespace portions supply the same module and its relative dependency.
+        roots = [root / "first_portion", root / "second_portion"]
+        for portion in roots:
+            package = portion / "backends"
+            package.mkdir(parents=True)
+            (package / "adapter.py").write_text("from .settings import label\n")
+            (package / "settings.py").write_text(f"label = {portion.name!r}\n")
+        chooser = root / "choose_backend.py"
+        chooser.write_text(
+            "import sys\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "from backends.adapter import label\n"
+            "print(label)\n"
+        )
+        search = {"PYTHONPATH": os.pathsep.join(map(str, roots))}
+        for portion in roots:
+            compare("-B", "-m", "choose_backend", str(portion), extra=search)
+
+        (roots[1] / "backends" / "adapter.py").write_text("from . import optional\n")
+        (roots[1] / "backends" / "optional.py").write_text("invalid syntax!\n")
+        compare("-B", "-m", "choose_backend", str(roots[0]), extra=search)
+
+        bad = roots[1] / "backends" / "adapter.py"
+        bad.write_bytes(b"# coding: latin-1\r\n\xe9 = )\r\n")
+        cache = root / "backend-cache"
+        saved = root / "choose-backend"
+        built = run(imre, "build", chooser, "-o", saved, "--opt-level", "0",
+                    extra={**search, "IMRE_CACHE_DIR": str(cache)}, timeout=300)
+        assert built.returncode == 0, built.stderr
+        chooser.unlink()
+        for portion in roots:
+            for source in portion.rglob("*.py"):
+                source.unlink()
+        if cache.exists():
+            shutil.rmtree(cache)
+        first = run(saved, str(roots[0]), extra=search)
+        assert (first.returncode, first.stdout, first.stderr) == (0, b"first_portion\n", b""), first
+        second = run(saved, str(roots[1]), extra=search)
+        assert (second.returncode, second.stdout) == (1, b""), second
+        assert b"SyntaxError" in second.stderr and os.fsencode(bad) in second.stderr, second
+
         # An ordinary module under the first root wins over a package in a later root.
         (root / "preferred.py").write_text("print('file wins')\n")
         (root / "preferred").mkdir()
@@ -1749,6 +2879,58 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         later.mkdir(parents=True)
         (later / "__init__.py").write_text("invalid syntax!\n")
         compare("-B", "-m", "preferred", extra={"PYTHONPATH": str(later.parent)})
+
+        # All three entry points must search the same module suppliers in order.
+        mailapp = root / "mailapp.py"
+        mail_command = "import quopri\nprint(quopri.encodestring(b'A=B'))\n"
+        mail_module = mail_command + "print(__spec__.origin)\n"
+        mailapp.write_text(mail_command)
+        codec = "def encodestring(data: bytes) -> bytes:\n    return %r + data\n"
+        with zipfile.ZipFile(archive, "a") as app:
+            app.writestr("quopri.py", codec % b"archive:")
+            app.writestr("mailcli.py", mail_module)
+        (later.parent / "quopri.py").write_text(codec % b"directory:")
+        (later.parent / "mailcli.py").write_text(mail_module)
+        for roots in ((archive, archive, later.parent), (later.parent, archive)):
+            for args in ((mailapp,), ("-c", mail_command), ("-m", "mailcli")):
+                compare("-B", *args, extra={"PYTHONPATH": os.pathsep.join(map(str, roots))},
+                        native_timeout=300)
+
+        # The same module has a native body at both ZIP origins. The active finder
+        # selects it after sys.path changes, without initializing the dormant module.
+        archives = [root / "first.whl", root / "second.whl"]
+        for index, wheel in enumerate(archives):
+            with zipfile.ZipFile(wheel, "w") as app:
+                app.writestr("choices/__init__.py", "")
+                app.writestr("choices/pick.py", f"def pick(data: bytes): return {index}, bytes(data)\n")
+                app.writestr("choices/dormant.py", "raise AssertionError('initialized')\n")
+                app.writestr("docs/sample.py", b"print('documentation example')\n")
+        selector = root / "choose.py"
+        selector.write_text(
+            "import sys\nfrom importlib import import_module\n"
+            "first, second, module = sys.argv[1:]\n"
+            "a, b = sys.path.index(first), sys.path.index(second)\n"
+            "sys.path[a], sys.path[b] = sys.path[b], sys.path[a]\n"
+            "chosen = import_module(module)\n"
+            "print(chosen.pick(bytearray(b'zip')), chosen.__spec__.origin, chosen.__loader__.get_data(chosen.__file__))\n"
+            "print(chosen.__loader__.get_data(chosen.__loader__.archive + '/docs/sample.py'))\n"
+            "assert 'choices.dormant' not in sys.modules\n"
+        )
+        compare("-B", selector, *archives, "choices.pick",
+                extra={"PYTHONPATH": os.pathsep.join(map(str, archives))}, native_timeout=300)
+        ir = root / "choose.ll"
+        built = run(imre, "build", selector, "--extension-path", archives[0],
+                    "--extension-path", archives[1], "--emit-llvm", ir, "-o", root / "choose", timeout=300)
+        assert built.returncode == 0, built.stderr
+        with ir.open() as stream:
+            llvm = [line for line in stream if ".whl/" in line or "call void @imre_dyn_register_zip_source(" in line]
+        registrations = [line for line in llvm if "call void @imre_dyn_register_zip_source(" in line]
+        for wheel in archives:
+            assert all(str(wheel / "docs/sample.py") not in line for line in llvm)
+            for name in ("choices/pick.py", "choices/dormant.py"):
+                path = str(wheel / name)
+                origin = next(line.split()[0] for line in llvm if f'c"{path}\\00"' in line)
+                assert any(f", ptr {origin}, ptr @" in line for line in registrations), path
 
         helper = root / "request_support.py"
         helper.write_text("from importlib.machinery import ModuleSpec\nspec = ModuleSpec('sample', None)\n")
@@ -1803,6 +2985,28 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             "print(sorted(counts.counts.items()))\n"
         )
         compare("-B", "-m", "merge_counts")
+
+        module_doc = root / "module_doc.py"
+        module_doc.write_text(
+            '" original"\ndef get():\n    return __doc__\n'
+            'print(get())\n__doc__ = 37\nprint(get())\n'
+        )
+        compare(module_doc)
+        compare("-OO", module_doc)
+
+        module_doc.write_text(
+            '"initial"\ndef take(x: int): return x\n__doc__ = 37\nprint(take(__doc__))\n'
+        )
+        compare(module_doc)
+
+        document_class = root / "document_class.py"
+        document_class.write_text(
+            '"module"\nclass C:\n    " class"\n    before = __doc__\n'
+            "    __doc__ = 37\n    after = __doc__\n"
+            "print(C.before, C.after, C.__doc__)\n"
+        )
+        compare(document_class)
+        compare("-OO", document_class)
 
         tokenize_script = root / "tokenize_entry.py"
         tokenize_script.write_text(
@@ -1894,7 +3098,12 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         tuple_dir = root / "tuple_dir.py"
         for source in (
             "print(dir((1, 2)))",
-            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)))",
+            "from collections import namedtuple\nT = namedtuple('T', 'x')\nprint('x' in dir(T(1)), tuple(vars(T)))",
+            "from typing import NamedTuple\n"
+            "class Row(NamedTuple):\n    value: int | None\n"
+            "print(tuple(vars(Row)))\n"
+            "assert Row.__annotations__ == {'value': int | None}\n"
+            "print(Row.__slots__, Row.__doc__, hasattr(Row(1), '__dict__'))",
         ):
             tuple_dir.write_text(source + "\n")
             compare("-B", tuple_dir, native_args=("run", tuple_dir, "--quiet"))
@@ -2225,7 +3434,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             array_import.write_text(
                 statement + '\nvalues = cls("i", [7])\nprint(type(values) is cls, list(values))\n'
             )
-            compare("-B", array_import, native_args=("run", array_import, "--runtime-imports", "--quiet"))
+            compare("-B", "-m", array_import.stem)
 
         zoneinfo_entry = root / "zoneinfo_entry.py"
         (root / "zoneinfo_helper.py").write_text("import zoneinfo as provider\n")
@@ -2328,14 +3537,39 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         compare("-B", getters / "main.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_attrgetter.py")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_itemgetter.py")
+        compare("-IB", Path(__file__).with_name("fixtures") / "boxed_methodcaller.py")
+        symbolic_defaults = Path(__file__).with_name("fixtures") / "inspect_symbolic_defaults.py"
+        compare("-IB", symbolic_defaults)
+        compare("-IB", "-O", symbolic_defaults)
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_inspect_signature.py")
+        (root / "weather_report.py").write_text("def report(temp):\n    return f'{temp} C'\n")
+        compare("-Bm", "inspect", "weather_report:report")
+        (root / "weather_metadata.py").write_text("import weather_report\nprint(weather_report.__spec__.cached)\n")
+        metadata = run(imre, "-Bm", "weather_metadata")
+        details = run(imre, "-Bm", "inspect", "--details", "weather_report:report")
+        assert metadata.returncode == details.returncode == 0, (metadata.stderr, details.stderr)
+        assert details.stdout.splitlines()[2:4] == [b"Cached: " + metadata.stdout.rstrip(b"\n"), b"Line: 0"]
+        (root / "station_cache.py").write_text("__cached__ = 'project cache'\ndef report(): pass\n")
+        compare("-Bm", "inspect", "--details", "station_cache:report")
+        compare("-Bm", "inspect", "sys", status=1, stderr=b"Can't get info for builtin modules.\n")
+        local_inspect = root / "inspect.py"
+        local_inspect.write_text("origin = 'local inspect'\nif __name__ == '__main__': print(origin)\n")
+        try:
+            compare("-Bm", "inspect", "sys")
+            compare("-B", "-c", "import inspect; print(inspect.origin)")
+            (root / "local_inspect_api.py").write_text(
+                "import inspect\nprint(inspect.origin, hasattr(inspect, '_signature_layout'))\n"
+            )
+            compare("-Bm", "local_inspect_api")
+        finally:
+            local_inspect.unlink()
         static_fixture = Path(__file__).with_name("fixtures") / "boxed_getattr_static.py"
-        compare("-IB", static_fixture, native_args=("run", static_fixture, "--runtime-imports", "--quiet"))
+        compare_module(static_fixture)
         inspect_fixture = Path(__file__).with_name("fixtures") / "boxed_inspect_coroutine.py"
         (root / "view_inspection.py").write_bytes(inspect_fixture.read_bytes())
         inspect_entry = root / "inspect_views.py"
         inspect_entry.write_text("import view_inspection\n")
-        compare("-B", inspect_entry, native_args=("run", inspect_entry, "--runtime-imports", "--quiet"))
+        compare_module(inspect_entry)
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_proxy_operators.py")
         compare("-IB", "-c", "from operator import __getitem__; print(__getitem__((11,), 0))")
         compare("-IB", Path(__file__).with_name("fixtures") / "boxed_update_wrapper.py")
@@ -2381,6 +3615,7 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         mixed = run(imre, "-uc", mixed_writes)
         assert (mixed.returncode, mixed.stdout, mixed.stderr) == (0, b"ab\xff", b"cd\xfe")
         compare("-IBc" + flags_code)
+        compare("-ISSc", "import sys\nprint(sys.flags.no_site)\nprint(sys.flags.no_user_site)\n")
         compare("-c", flags_code, extra={"PYTHONDONTWRITEBYTECODE": "1"})
         compare(
             "-c",
@@ -2484,15 +3719,54 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
         )
         if os.name == "posix":
             immediate_exit = Path(__file__).resolve().parent / "fixtures/os_immediate_exit.py"
-            for flags in ((), ("--runtime-imports",)):
-                compare("-IB", immediate_exit, status=37,
-                        native_args=("run", immediate_exit, "--quiet", "--opt-level", "0", *flags),
-                        native_timeout=300)
+            compare("-IB", immediate_exit, status=37,
+                    native_args=("run", immediate_exit, "--quiet", "--opt-level", "0"),
+                    native_timeout=300)
         compare("-IB", "-c", "raise SystemExit")
         compare("-IB", "-c", "from sys import exit\nexit(None)")
+        compare(
+            "-IB", "-c",
+            "cause = ValueError()\n"
+            "class Exit(SystemExit):\n"
+            "    @property\n"
+            "    def code(self): return 23 if self is saved and self.__context__ is cause else 99\n"
+            "saved = Exit()\n"
+            "try: raise cause\n"
+            "except ValueError: raise saved",
+            status=23,
+        )
+        compare(
+            "-IB", "-c",
+            "phase = 'alive'\n"
+            "class Code:\n"
+            "    def __str__(self): return phase\n"
+            "class Exit(SystemExit):\n"
+            "    @property\n"
+            "    def code(self):\n"
+            "        return Code()\n"
+            "    def __del__(self):\n"
+            "        global phase\n"
+            "        phase = 'released'\n"
+            "raise Exit()\n",
+            status=1, stderr=b"released\n",
+        )
         for source in ('import sys\nsys.exit("7")', 'raise SystemExit("7")'):
             actual = run(imre, "-IB", "-c", source)
             assert (actual.returncode, actual.stdout, actual.stderr) == (1, b"", b"7\n")
+        compare(
+            "-IB", "-c",
+            "import sys\n"
+            "class Result:\n"
+            "    def __del__(self): sys.stderr = sys.__stderr__\n"
+            "class Stream:\n"
+            "    def write(self, text): print(repr(text)); return Result()\n"
+            "    def flush(self): pass\n"
+            "sys.stderr = Stream()\n"
+            "raise SystemExit('payload')",
+            status=1, stderr=b"\n",
+        )
+        compare("-IB", "-c", r"import sys; sys.stderr = None; raise SystemExit('\udc80')",
+                status=1, stderr=b"\n")
         cleanup = Path(__file__).resolve().parent / "fixtures/exceptions/boxed_finally.py"
         compare(cleanup, extra={"PYTHONWARNINGS": "ignore::SyntaxWarning"})
 
@@ -2631,7 +3905,7 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
         ):
             result = run(imre, "-B", "-c", code)
             assert result.returncode != 0 and not result.stdout, result
-        for flags, extra in (("-B", {"PYTHONSAFEPATH": "1"}), ("-IB", {})):
+        for flags, extra in (("-B", {"PYTHONSAFEPATH": "1"}), ("-EPB", {}), ("-IB", {})):
             result = run(imre, flags, "-c", "print('before'); import neighbor", extra=extra, timeout=180)
             assert result.returncode == 1 and result.stdout == b"before\n" and b"neighbor" in result.stderr, result
         compare("-B", "pkg/app.py")
@@ -2656,10 +3930,38 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
             byte_dir.mkdir()
             (byte_dir / "main.py").write_text("import sys\nprint(sys.path[0])\n")
             (root / "ascii-alias").symlink_to(byte_dir.name, target_is_directory=True)
-            result = run(imre, "-B", "ascii-alias/main.py")
-            assert (result.returncode, result.stdout, result.stderr) == (
-                0, os.fsencode(root.resolve() / "ascii-alias") + b"\n", b"",
-            ), result
+            compare("-B", "ascii-alias/main.py")
+
+            # The loader and the import error must agree on the physical directory.
+            (byte_dir / "local_owner.py").write_text("value = 41\n")
+            probe = (
+                "import importlib, os, sys\n"
+                "owner = importlib.import_module('local_owner')\n"
+                "origin = owner.__spec__.origin\n"
+                "print(os.fsencode(sys.path[0]), os.fsencode(origin), origin == owner.__file__)\n"
+                "class Spec:\n    has_location = True\n    origin = origin\n"
+                "    @property\n    def _initializing(self): raise RuntimeError('unexpected flag lookup')\n"
+                "def missing(name):\n"
+                "    if name == 'leaf': owner.__name__, owner.__spec__ = 'json', Spec()\n"
+                "    raise AttributeError(name)\n"
+                "owner.__getattr__ = missing\n"
+                "try:\n    exec('from local_owner import leaf')\n"
+                "except ImportError as exc:\n    print(owner.value, exc.path is origin, exc.name_from)\n"
+            )
+            (byte_dir / "main.py").write_text(probe)
+            compare("-B", "ascii-alias/main.py")
+            compare("-B", "-c", "import os\nos.chdir('ascii-alias')\n" + probe)
+
+            (byte_dir / "trace_owner.py").write_text("def fail(): raise ValueError('traceback sentinel')\n")
+            (byte_dir / "main.py").write_text(
+                "import importlib, os, traceback\n"
+                "owner = importlib.import_module('trace_owner')\n"
+                "try:\n    owner.fail()\n"
+                "except ValueError as exc: print(owner.__file__ in ''.join(traceback.format_exception(exc)))\n"
+                "filename = os.fsdecode(b'bad-\\xfe.py')\n"
+                "print(filename in str(SyntaxError('bad', (filename, 2, 1, ''))))\n"
+            )
+            compare("-B", "ascii-alias/main.py", native_timeout=180)
         assert (
             run(imre, "-B", "pkg/app.py", extra={"PYTHONSAFEPATH": "1"}).returncode
             != 0
@@ -2703,7 +4005,7 @@ assert namespace["found"] is import_members.found is sys.modules["import_members
             "    assert (child.stdout, child.stderr, child.returncode) == (b'child\\n', b'', 47)\n"
         )
         image = root / "boxed-executable"
-        built = run(imre, "build", "--runtime-imports", source, "-o", image)
+        built = run(imre, "build", source, "-o", image)
         assert built.returncode == 0, built.stderr
         helper_dir = root / "python-helpers"
         helper_dir.mkdir()
@@ -2766,6 +4068,21 @@ def report(text):
             "from report import report\nreport('a\\x1c  b\\r\\nc')\n",
         )
 
+        invoice = Path(__file__).resolve().with_name("fixtures") / "decimal_invoice.py"
+        # Cold optimized builds include the CPython decimal implementation.
+        compare("-IB", invoice, native_args=("run", invoice, "--quiet"), native_timeout=300)
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nsys.path.insert(0, sys.argv[1])\nimportlib.import_module(sys.argv[2])",
+            invoice.parent, invoice.stem, native_timeout=300,
+        )
+        compare(
+            "-IB", "-c",
+            "import importlib, sys\nD = importlib.import_module(sys.argv[1]).Decimal\n"
+            "print((D('-4.225') * D('3.5')).quantize(D('0.01')))",
+            "decimal", native_timeout=300,
+        )
+
         decimal_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\n"
         (helpers / "decimal_values.py").write_text(
             "from decimal import Decimal\n"
@@ -2787,12 +4104,20 @@ def report(text):
         comparisons = Path(__file__).with_name("fixtures") / "text" / "decimal_comparison.py"
         (helpers / "decimal_comparison.py").write_bytes(comparisons.read_bytes())
         compare("-IB", "-c", decimal_import + "import decimal_comparison")
-        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1"):
+        (helpers / "decimal_reflected.py").write_text(
+            "from decimal import Decimal\n"
+            "class Peer:\n"
+            "    def __eq__(self, other): return 'reflected equality'\n"
+            "    def __gt__(self, other): return 'reflected ordering'\n"
+            "value = Decimal('1')\n"
+            "print(value == Peer(), value < Peer())\n"
+        )
+        compare("-IB", "-c", decimal_import + "import decimal_reflected")
+        for expression in ("Decimal('1.00') < Decimal(1)", "Decimal('1.00') == 1.0"):
             (helpers / "decimal_boundary.py").write_text(
                 f"from decimal import Decimal\nprint({expression})\n"
             )
-            unsupported = run(imre, "-IB", "-c", decimal_import + "import decimal_boundary")
-            assert unsupported.returncode and b"native Decimal numeric comparisons are unsupported" in unsupported.stderr
+            compare("-IB", "-c", decimal_import + "import decimal_boundary")
 
         (helpers / "decimal.py").write_text("class Decimal:\n    def __init__(self, value): self.value = value\n")
         compare("-IB", "-c", decimal_import + "from decimal import Decimal\nprint(Decimal(False).value is False)")
@@ -2801,7 +4126,7 @@ def report(text):
         for limit in ("640", "0"):
             digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
             compare("-B", token_limit, extra=digit_env)
-            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--runtime-imports", "--quiet"))
+            compare("-B", token_limit, extra=digit_env, native_args=("run", token_limit, "--quiet"))
 
         compare(
             "-B", "-c",
@@ -2813,6 +4138,19 @@ def report(text):
             extra={"IMREFLAGS": "--opt-level 0"},
             native_timeout=300,
         )
+        if sys.version_info >= (3, 14):
+            compare(
+                "-B", "-c",
+                "from uuid import uuid1\n"
+                "from uuid import uuid6\n"
+                "from uuid import uuid7\n"
+                "from uuid import uuid8\n"
+                "print(uuid1(1, 2).version)\n"
+                "print(uuid6(1, 2).version)\n"
+                "print(uuid7().version)\n"
+                "print(uuid8(1, 2, 3).version)\n",
+                native_timeout=300,
+            )
         (helpers / "uuid").mkdir()
         uuid_import = f"import sys\nsys.path.insert(0, {str(helpers)!r})\nimport uuid\n"
         compare("-IB", "-c", uuid_import + "print(hasattr(uuid, '__path__'), str(uuid.UUID(int=0)))")
@@ -2902,6 +4240,55 @@ def report(text):
         (resource_package / "__init__.py").write_text("print('resource package initialized')\n")
         (resource_package / "payload.bin").write_bytes(b"\x00\xff\r\n")
         fixtures = Path(__file__).with_name("fixtures")
+        (root / "sign_parameters.py").write_bytes(
+            (fixtures / "floats" / "sign_parameters.py").read_bytes()
+        )
+        compare("-B", "-m", "sign_parameters")
+        (root / "scalar_returns.py").write_bytes(
+            (fixtures / "boxed_scalar_return_bindings.py").read_bytes()
+        )
+        result = run(imre, "-B", "-m", "scalar_returns")
+        assert result.returncode == 0 and not result.stderr, result
+
+        scalar_parameters = root / "scalar_parameters.py"
+        scalar_parameters.write_text(
+            (fixtures / "registered_reduction_callback.py").read_text()
+            + """
+def invoke(function, value):
+    try:
+        function(value, value, send)
+    except TypeError as error:
+        print(error)
+
+publish.__annotations__["a"] = str
+print(publish.__annotations__["a"] is str)
+invoke(publish, 3)
+invoke(publish, "bad")
+
+invoke(publish, True)
+"""
+        )
+        for args in [(scalar_parameters,), ("-m", "scalar_parameters")]:
+            result = run(imre, "-B", *args, stdin=b"first\n3\n4\n12\n")
+            assert result.returncode == 0 and not result.stderr, result
+            assert result.stdout == b'first 7\n8\nTrue\nfirst 6\npublish argument "a" requires int\nfirst 2\n'
+
+        (root / "matched_parameter.py").write_text("""
+def label(change: float, neutral: bool) -> str:
+    value = change > 0
+    quiet = not neutral
+    match (value, quiet):
+        case (True, True):
+            return "yes"
+        case _:
+            return "no"
+
+label.__annotations__["change"] = str
+print(globals()["label"](2.0, True))
+""")
+        error = run(imre, "-B", "-m", "matched_parameter")
+        assert error.returncode == 1 and not error.stdout, error
+        assert error.stderr.endswith(b'TypeError: label argument "change" requires str\n'), error
 
         served = root / "served"
         served.mkdir()
@@ -2921,6 +4308,9 @@ def report(text):
 
         compare("-B", "-c", "from typing import Protocol as P; print(P.__name__)")
         compare("-B", fixtures / "typing_protocol_import.py")
+        compare("-B", fixtures / "boxed_conditional_class_type_alias.py",
+                extra={"IMREFLAGS": "--opt-level 0"}, native_timeout=300)
+        compare("-B", fixtures / "boxed_list_finalization.py")
         compare(
             "-IB", "-c",
             "from datetime import datetime, timezone\n"
@@ -2953,6 +4343,7 @@ def report(text):
         if Path("/usr/share/zoneinfo/America/New_York").is_file():
             compare("-IB", fixtures / "boxed_zoneinfo.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pyexpat.py", native_timeout=300)
+        compare("-B", fixtures / "html_parser_feed.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_pickle_writer.py")
         for first in ("_pickle", "pickle"):
             compare("-IB", fixtures / "pickle_accelerator_writer.py", first, native_timeout=600)
@@ -2968,7 +4359,7 @@ def report(text):
             "    return P._is_protocol\nprint(build())",
         )
         final_fixture = fixtures / "boxed_typing_final.py"
-        compare("-IB", final_fixture, native_args=("run", final_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", final_fixture, native_args=("run", final_fixture, "--quiet"))
         # Check each call in its own module so one object input cannot mask another.
         ini = "[formatters]\nkeys=\n[handlers]\nkeys=\n[loggers]\nkeys=root\n[logger_root]\nlevel=INFO\nhandlers=\n"
         config_path = root / "logging.ini"
@@ -3015,7 +4406,7 @@ def report(text):
         io_registration = fixtures / "io_abc_registration.py"
         compare("-IB", io_registration, native_args=("run", io_registration, "--quiet"))
         override_fixture = fixtures / "boxed_typing_override.py"
-        compare("-IB", override_fixture, native_args=("run", override_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", override_fixture, native_args=("run", override_fixture, "--quiet"))
         reader_fixture = fixtures / "io_buffered_reader_type.py"
         compare("-IB", reader_fixture, native_args=("run", reader_fixture, "--quiet"))
         compare(
@@ -3082,11 +4473,29 @@ def report(text):
                 flags = fixtures / "ssl_verify_flags.py"
                 compare("-IB", flags, native_args=("run", flags, "--quiet"), native_timeout=600)
                 certdata = fixtures.parents[1] / "benchmarks/cpython_stdlib/full/shared/upstream/Lib/test/certdata"
+                alpn = fixtures / "ssl_alpn.py"
+                compare(
+                    "-IB", alpn, certdata,
+                    native_args=("run", alpn, "--quiet", "--", certdata), native_timeout=600,
+                )
+                sni = fixtures / "ssl_sni.py"
+                compare(
+                    "-IB", sni, certdata,
+                    native_args=("run", sni, "--quiet", "--", certdata), native_timeout=600,
+                )
                 dh_params = fixtures / "ssl_dh_params.py"
                 compare(
                     "-IB", dh_params, certdata,
                     native_args=("run", dh_params, "--quiet", "--", certdata), native_timeout=600,
                 )
+                handshake = fixtures / "ssl_socket_handshake.py"
+                compare(
+                    "-IB", handshake, certdata,
+                    native_args=("run", handshake, "--quiet", "--", certdata), native_timeout=600,
+                )
+                failed_shutdown = fixtures / "ssl_socket_failed_shutdown.py"
+                guarded = run(imre, "run", failed_shutdown, "--quiet", "--", certdata, timeout=600)
+                assert guarded.returncode == 0, guarded.stderr
                 object_io = fixtures / "ssl_object_io.py"
                 compare(
                     "-IB", object_io, certdata,
@@ -3137,6 +4546,22 @@ def report(text):
             "print(address.addr_spec, options)\n",
             "email._header_value_parser", native_timeout=300,
         )
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "parser = importlib.import_module(sys.argv[1]).OptionParser()\n"
+            "parser.add_option('--file', action='append')\n"
+            "options, args = parser.parse_args(['--file=a', '--file', 'b', 'rest'])\n"
+            "print(options.file, args, '--file' in parser.format_help())\n",
+            "optparse", native_timeout=300,
+        )
+        compare(
+            "-B", "-c",
+            "import importlib, sys\n"
+            "colors = importlib.import_module(sys.argv[1])\n"
+            "print(colors.rgb_to_hls(0.25, 0.5, 0.75))\n",
+            "colorsys", native_timeout=300,
+        )
         # A from-import elsewhere in the same program would already select the boxed runtime.
         queue_lookup = root / "queue_lookup.py"
         for statement, name in (("import logging.handlers", "logging.handlers"),
@@ -3163,12 +4588,12 @@ def report(text):
         bad_alias = run(imre, "check", socket_alias)
         assert bad_alias.returncode != 0 and b"expected int" in bad_alias.stderr, bad_alias.stderr
         io_fixture = fixtures / "boxed_io_indirect_import.py"
-        compare("-IB", io_fixture, native_args=("run", io_fixture, "--runtime-imports", "--quiet"))
+        compare_module(io_fixture)
         for name in ("boxed_prelinked_coroutine.py", "boxed_coroutine_origin.py"):
             coroutine_fixture = fixtures / name
-            compare("-IB", coroutine_fixture, native_args=("run", coroutine_fixture, "--runtime-imports", "--quiet"))
+            compare_module(coroutine_fixture)
         builtins_fixture = fixtures / "boxed_builtins_module.py"
-        compare("-IB", builtins_fixture, native_args=("run", builtins_fixture, "--runtime-imports", "--quiet"))
+        compare_module(builtins_fixture)
         compare(
             "-I", "-c",
             "import atexit, threading\n"
@@ -3192,38 +4617,57 @@ def report(text):
             "boxed_threading_condition_event.py", "boxed_threading_timer.py",
             "boxed_thread_captured_lock.py",
             "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
-            "boxed_thread_captured_acquire.py",
+            "boxed_thread_captured_acquire.py", "boxed_thread_method_closure.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",
         ):
             thread_fixture = fixtures / name
-            compare("-IB", thread_fixture, native_args=("run", thread_fixture, "--runtime-imports", "--quiet"))
+            compare_module(thread_fixture)
         metaclass_new = fixtures / "ordinary_metaclass_new.py"
-        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--runtime-imports", "--quiet"))
+        compare("-IB", metaclass_new, native_args=("run", metaclass_new, "--quiet"))
         class_locals = fixtures / "boxed_class_locals.py"
-        compare("-IB", class_locals, native_args=("run", class_locals, "--runtime-imports", "--quiet"))
+        compare_module(class_locals)
+        # An unused generic in the entry must preserve first-party argument diagnostics.
+        generic_scope = root / "generic-scope-contract"
+        generic_scope.mkdir()
+        (generic_scope / "scores.py").write_text(
+            "def take(n: int) -> int:\n    return 7\n\nscore = take('x')\n"
+        )
+        caller = generic_scope / "entry.py"
+        caller.write_text(
+            "import sys\nfrom scores import score\nprint(score)\n"
+            "if False:\n    def unused[T](): pass\n"
+        )
+        rejected = run(imre, "check", caller)
+        assert rejected.returncode == 1, rejected
+        assert b"scores.py:4:14: Imre: expected int, got str" in rejected.stderr, rejected
+
+        caller.write_text(
+            "def keep(fn): return fn\ndef parent(original):\n"
+            "    @keep\n    def show[T: int](value: T = original) -> T: return value\n"
+            "    return show\nfn = parent(17)\n"
+            "print(fn(), fn.__type_params__[0].__name__)\n"
+        )
+        compare("-IB", caller, native_args=(caller,))
         for name in ("module_generic_function.py", "postponed_generic_method.py"):
             generic = fixtures / name
             compare("-IB", generic, native_args=("run", generic, "--quiet"))
-            compare("-IB", generic, native_args=("run", generic, "--runtime-imports", "--quiet"))
         compare("-IB", "-c", "import typing; from typing import Text; print(Text is typing.Text is str)")
         reveal = fixtures / "typing_reveal_type.py"
         for command in ((sys.executable, "-IB", reveal),
-                        (imre, "run", reveal, "--quiet"),
-                        (imre, "run", reveal, "--runtime-imports", "--quiet")):
+                        (imre, "run", reveal, "--quiet")):
             result = run(*command)
             assert (result.returncode, result.stdout, result.stderr) == (
                 0, b"", b"Runtime type is 'Marker'\nRuntime type is 'type'\n",
             ), result
         introspection = fixtures / "typing_introspection_functions.py"
         compare("-IB", introspection, native_args=("run", introspection, "--quiet"))
-        compare("-IB", introspection, native_args=("run", introspection, "--runtime-imports", "--quiet"))
         hints_fixture = fixtures / "boxed_typing_get_type_hints.py"
-        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--runtime-imports", "--quiet"))
+        compare("-IB", hints_fixture, native_args=("run", hints_fixture, "--quiet"))
         if sys.platform == "linux":
             exe = root / "marshal-allocation"
-            built = run(imre, "build", fixtures / "boxed_marshal_allocation.py",
-                        "--quiet", "--no-cache", "--runtime-imports", "-o", exe)
+            built = run(imre, "build", imported_fixture(root, fixtures / "boxed_marshal_allocation.py"),
+                        "--quiet", "--no-cache", "-o", exe)
             assert built.returncode == 0, built.stderr
             check_marshal_allocation(exe)
         if sys.platform == "linux":
@@ -3232,7 +4676,7 @@ def report(text):
             source = root / "nested.py"
             source.write_text("".join(" " * i + "if True:\n" for i in range(96)) + " " * 96 + "result = 7\n")
             executable = root / "source-branches"
-            built = run(imre, "build", fixtures / "boxed_source_lower_stack.py", "--runtime-imports", "-o", executable)
+            built = run(imre, "build", imported_fixture(root, fixtures / "boxed_source_lower_stack.py"), "-o", executable)
             assert built.returncode == 0, built.stderr
 
             def small_stack():
@@ -3273,6 +4717,12 @@ def report(text):
             compare("-IB", regex_entry, native_args=("run", regex_entry, "--quiet"))
         radix_entry = root / "radix_entry.py"
         for program in (
+            "def binary(value: int) -> str:\n    return bin(value)\n"
+            "print(binary(0), binary(-(1 << 150) + 1))",
+            "import builtins\nfrom builtins import bin as formatter\n"
+            "class Number:\n    def __index__(self): return -33\n"
+            "print(formatter is builtins.bin is bin, formatter(Number()), formatter(True))\n"
+            "try: formatter(number=1)\nexcept TypeError as error: print(error)",
             "class Offset:\n    def __index__(self): return -(1 << 100)\nprint(hex(Offset()))",
             "formatter = hex\nprint(formatter(31))",
             "formatter = oct\nprint(formatter(0), oct(-(1 << 150)), oct(True))",
@@ -3318,7 +4768,7 @@ def report(text):
         local_hmac = shadow / "hmac.py"
         compare(
             "-IB", shadow_entry, local_hmac,
-            native_args=("run", shadow_entry, "--module-root", shadow, "--runtime-imports", "--quiet", "--", local_hmac),
+            native_args=("run", shadow_entry, "--module-root", shadow, "--quiet", "--", local_hmac),
         )
 
         # Only exercise legacy-provider policy when the host OpenSSL can load it.
@@ -3352,18 +4802,34 @@ for name in ("md4", "ripemd160"):
                 hmac_entry = fixtures / "bytes/hmac_digest.py"
                 compare(
                     "-IB", hmac_entry, "legacy-policy", extra=policy_env,
-                    native_args=("run", hmac_entry, "--runtime-imports", "--quiet", "--", "legacy-policy"),
+                    native_args=("run", hmac_entry, "--quiet", "--", "legacy-policy"),
                 )
 
+        compare("-B", fixtures / "boxed_unittest_result_registry.py", native_timeout=300)
         compare("-IB", fixtures / "boxed_unittest_named_loader.py")
+        compare("-IB", fixtures / "unawaited_coroutine.py")
         async_case = fixtures / "unittest_isolated_asyncio.py"
         compare("-IB", async_case, native_args=("run", async_case, "--quiet"), native_timeout=600)
         compare("-IB", fixtures / "boxed_unittest_patch.py")
+        compare("-IB", fixtures / "unittest_mock_recording_order.py")
         call_args = fixtures / "unittest_mock_call_args.py"
         compare("-IB", call_args, native_args=("run", call_args, "--quiet"))
         boxed_call_args = fixtures / "boxed_unittest_call_args.py"
-        compare("-IB", boxed_call_args, native_args=("run", boxed_call_args, "--runtime-imports", "--quiet"))
+        compare_module(boxed_call_args)
+        compare_module(fixtures / "boxed_doctest_results.py")
+        compare_module(fixtures.parents[1] / "benchmarks/cpython_stdlib/full/doctest/controls/prompt_imports.py")
+        compare_module(fixtures / "boxed_doctest_bundled.py")
+        compare_module(fixtures / "boxed_decorator_operand_lifetime.py")
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
+        patch_multiple = root / "patch_multiple.py"
+        for call in ("with patch.multiple", "replace = patch.multiple\nwith replace"):
+            patch_multiple.write_text(
+                "from unittest.mock import patch\n"
+                "class Service:\n    port = 1\n"
+                f"{call}(Service, port=2):\n    assert Service.port == 2\n"
+                "assert Service.port == 1\n"
+            )
+            compare("-B", patch_multiple, extra=mock_compile_flags, native_timeout=300)
         compare(
             "-B", "-c",
             "from unittest.mock import Mock\n"
@@ -3377,28 +4843,44 @@ for name in ("md4", "ripemd160"):
             "-B", "-c", "from unittest.mock import Mock\nm = Mock(['close'])\nm.close()\nassert not hasattr(m, 'read')\n",
             extra=mock_compile_flags, native_timeout=300,
         )
-        for name in ("boxed_unittest_mock_open.py", "boxed_unittest_autospec.py"):
+        for name in (
+            "boxed_unittest_mock_open.py", "boxed_unittest_autospec_function.py",
+            "boxed_unittest_autospec.py", "unittest_mock_callable_spec.py",
+        ):
             fixture = fixtures / name
-            for import_flags in ((), ("--runtime-imports",)):
-                compare(
-                    "-IB", fixture, extra=mock_compile_flags,
-                    native_args=("run", fixture, *import_flags, "--quiet"),
-                    native_timeout=300,
-                )
+            compare(
+                "-IB", fixture, extra=mock_compile_flags,
+                native_args=("run", fixture, "--quiet"),
+                native_timeout=300,
+            )
         compare(
             "-B", "-c",
             "from ast import BinOp, ClassDef\nimport ast\n"
             "assert BinOp is ast.BinOp and ClassDef is ast.ClassDef\n",
         )
+        compare("-IB", fixtures / "boxed_unittest_threadingmock.py", extra=mock_compile_flags, native_timeout=300)
         for name in ("boxed_unittest_mock_any.py", "boxed_unittest_mock_side_effect.py", "boxed_unittest_mock_call.py"):
             fixture = fixtures / name
             compare("-IB", fixture, native_args=("run", fixture, "--quiet"))
-            compare("-IB", fixture, native_args=("run", fixture, "--runtime-imports", "--quiet"))
+        method_entry = root / "scalar_method.py"
+        for body in (
+            "assert b'xy'.rjust(3, b'.') == b'.xy'",
+            "pad = bytes.rjust\nassert pad(b'xy', 3, b'.') == b'.xy'",
+            "assert ' '.isprintable() and not '\\u00a0'.isprintable()",
+            "printable = str.isprintable\n"
+            "assert printable('') and printable('A\\u0301')\n"
+            "assert not printable('\\n') and not printable('\\u20c1') and not printable(chr(0xd800))",
+        ):
+            method_entry.write_text(body + "\n")
+            compare("-B", method_entry)
+        plugin.write_bytes((fixtures / "boxed_zstd.py").read_bytes())
+        compare("-B", "-c", imports + "arithmetic.current()", extra={"IMREFLAGS": "--opt-level 0"})
         for fixture in (
             "boxed_ast.py",
             "boxed_ast_compound.py",
             "boxed_ast_encoded_source.py",
             "boxed_ast_visitors.py",
+            "boxed_ast_unparse.py",
             "boxed_ast_literal_eval.py",
             "boxed_code_objects.py",
             "boxed_inspect_getmembers.py",
@@ -3410,8 +4892,12 @@ for name in ("md4", "ripemd160"):
             "boxed_inspect_isabstract.py",
             "boxed_numeric_repr.py",
             "boxed_decimal_hash.py",
+            "boxed_decimal_arithmetic.py",
             "boxed_recursive_repr.py",
             "boxed_bound_method_repr.py",
+            "boxed_scalar_parameter_defaults.py",
+            "boxed_positional_builtin_methods.py",
+            "boxed_positional_string_methods.py",
             "boxed_simple_namespace.py",
             "boxed_namedtuple_repr.py",
             "boxed_namedtuple_factory.py",
@@ -3424,6 +4910,7 @@ for name in ("md4", "ripemd160"):
             "boxed_interactive.py",
             "boxed_relative_package_imports.py",
             "boxed_sys_getframe.py",
+            "boxed_sys_gettrace.py",
             "boxed_sys_getsizeof.py",
             "boxed_sys_audit.py",
             "boxed_sys_asyncgen_hooks.py",
@@ -3431,6 +4918,7 @@ for name in ("md4", "ripemd160"):
             "boxed_sys_recursion_limit.py",
             "boxed_sys_intern.py",
             "boxed_sys_byteorder.py",
+            "boxed_sys_stdlib_module_names.py",
             "boxed_sys_float_info.py",
             "boxed_sys_hash_info.py",
             "boxed_sys_thread_info.py",
@@ -3441,6 +4929,8 @@ for name in ("md4", "ripemd160"):
             "boxed_binary_iterators.py",
             "boxed_array.py",
             "boxed_bytearray_memoryview.py",
+            "boxed_bytearray_insert.py",
+            "boxed_bytearray_pop.py",
             "boxed_fileio_buffer_export.py",
             "boxed_bytes_io.py",
             "boxed_io_newline_decoder.py",
@@ -3448,19 +4938,51 @@ for name in ("md4", "ripemd160"):
             "boxed_text_io_wrapper.py",
             "boxed_platform_version.py",
             "boxed_int_to_bytes.py",
+            "boxed_int_bit_count.py",
             "boxed_int_rational_fields.py",
             "boxed_int_from_bytes.py",
+            "boxed_ipaddress.py",
             "boxed_int_conversion.py",
             "boxed_comparison_wrappers.py",
             "boxed_divmod_slots.py",
+            "boxed_integer_division_slots.py",
+            "boxed_integer_shift_slots.py",
+            "boxed_integer_operator_descriptors.py",
             "boxed_complex.py",
             "boxed_float.py",
             "boxed_round.py",
             "boxed_math_rounding.py",
             "boxed_math_acosh.py",
+            "boxed_math_asin.py",
+            "boxed_math_angles.py",
+            "boxed_math_fmod.py",
+            "boxed_math_atan.py",
+            "boxed_math_comb.py",
+            "boxed_math_factorial.py",
+            "boxed_math_perm.py",
+            "boxed_math_dist.py",
+            "boxed_math_fabs.py",
             "boxed_math_fma.py",
+            "boxed_math_log1p.py",
+            "boxed_math_pow.py",
+            "boxed_math_remainder.py",
+            "boxed_math_frexp.py",
+            "boxed_statistics_correlation.py",
+            "boxed_statistics_covariance.py",
+            "boxed_statistics_linear_regression.py",
+            "boxed_statistics_mean.py",
+            "boxed_statistics_harmonic_mean.py",
+            "boxed_statistics_decimal_ratio.py",
+            "boxed_math_fsum.py",
             "boxed_math_gcd.py",
+            "boxed_math_hyperbolic.py",
+            "boxed_math_hypot.py",
+            "boxed_math_prod.py",
+            "boxed_math_sumprod.py",
             "boxed_math_isclose.py",
+            "boxed_math_log2.py",
+            "boxed_math_ldexp.py",
+            "boxed_math_nextafter.py",
             "boxed_float_arithmetic.py",
             "boxed_bytes_fields.py",
             "boxed_binary_subclass_lengths.py",
@@ -3479,6 +5001,7 @@ for name in ("md4", "ripemd160"):
             "boxed_tempfile_default_directory.py",
             "boxed_tempfile_mktemp.py",
             "boxed_tempfile_wrapper.py",
+            "boxed_operator_identity.py",
             "boxed_random.py",
             "boxed_secrets.py",
             "boxed_pkgutil.py",
@@ -3489,6 +5012,7 @@ for name in ("md4", "ripemd160"):
             "boxed_functools_singledispatch.py",
             "boxed_functools_partialmethod.py",
             "boxed_functools_partial_state.py",
+            "boxed_functools_partial_generic_alias.py",
             "boxed_asynccontextmanager_protocol.py",
             "boxed_contextmanager.py",
             "boxed_contextlib_aclosing.py",
@@ -3496,6 +5020,7 @@ for name in ("md4", "ripemd160"):
             "boxed_cmp_to_key.py",
             "boxed_lru_insert_eviction.py",
             "boxed_lru_insert_same.py",
+            "boxed_forward_ref_syntax.py",
             "boxed_annotationlib_refs.py",
             "boxed_class_annotation_sites.py",
             "boxed_future_module_annotations.py",
@@ -3531,6 +5056,8 @@ for name in ("md4", "ripemd160"):
             "boxed_typing_regex_aliases.py",
             "boxed_pprint.py",
             "boxed_formatter.py",
+            "boxed_template_client.py",
+            "boxed_fstring_join.py",
             "boxed_template_literals.py",
             "boxed_re_ascii.py",
             "boxed_re_numeric_escapes.py",
@@ -3560,13 +5087,19 @@ for name in ("md4", "ripemd160"):
             "boxed_make_dataclass.py",
             "boxed_dataclass_slots.py",
             "boxed_dataclass_init_annotations.py",
+            "boxed_dataclass_direct_initializer.py",
             "boxed_dataclass_classvars.py",
             "boxed_email_dates.py",
             "boxed_email_addresses.py",
+            "boxed_html.py",
+            "boxed_wave.py",
+            "boxed_xmlrpc_client.py",
             "boxed_http_message.py",
             "boxed_time.py",
+            "boxed_timeit.py",
             "boxed_time_timezone.py",
             "boxed_time_strftime.py",
+            "time_strptime.py",
             "boxed_codecs.py",
             "boxed_codec_registry.py",
             "boxed_wide_decode.py",
@@ -3591,6 +5124,7 @@ for name in ("md4", "ripemd160"):
             "boxed_select_selector.py",
             "boxed_pipe_flags.py",
             "boxed_os_environb.py",
+            "boxed_os_exports.py",
             "boxed_os_python_fspath.py",
             "boxed_os_file_descriptors.py",
             "boxed_os_fdopen.py",
@@ -3613,6 +5147,7 @@ for name in ("md4", "ripemd160"):
             "boxed_posix_session.py",
             "boxed_os_stat.py",
             "boxed_os_terminal_size.py",
+            "boxed_termios_attributes.py",
             "boxed_os_fchmod.py",
             "boxed_os_makedirs.py",
             "boxed_os_walk.py",
@@ -3635,8 +5170,10 @@ for name in ("md4", "ripemd160"):
             "boxed_email_parser.py",
             "boxed_unicodedata.py",
             "boxed_descriptors.py",
+            "boxed_attribute_name_keys.py",
             "boxed_exception_repr.py",
             "boxed_exception_notes.py",
+            "boxed_exception_normalization.py",
             "boxed_exception_groups.py",
             "boxed_warning_categories.py",
             "boxed_warnings.py",
@@ -3650,8 +5187,11 @@ for name in ("md4", "ripemd160"):
             "boxed_singleton_subclass.py",
             "boxed_function_closure_cells.py",
             "boxed_function_closure_edges.py",
+            "boxed_nested_callable_scope.py",
             "boxed_function_annotation_closure.py",
             "boxed_functiontype.py",
+            "boxed_function_defining_globals.py",
+            "boxed_module_function_builtins.py",
             "boxed_function_call.py",
             "boxed_any_generator.py",
             "boxed_global.py",
@@ -3688,6 +5228,7 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_not_equal.py",
             "boxed_unittest_ordering.py",
             "boxed_unittest_assert_raises.py",
+            "boxed_unittest_format_message.py",
             "boxed_unittest_assert_warns.py",
             "boxed_unittest_assert_logs.py",
             "boxed_unittest_assert_regex.py",
@@ -3696,6 +5237,10 @@ for name in ("md4", "ripemd160"):
             "boxed_unittest_seal.py",
             "boxed_frozenset.py",
             "boxed_attribute_deletion.py",
+            "boxed_mixed_delete.py",
+            "boxed_delete_eager_key.py",
+            "boxed_delete_operand_lifetime.py",
+            "boxed_store_operand_lifetime.py",
             "boxed_recursion.py",
             "boxed_function_defaults.py",
             "boxed_reprlib.py",
@@ -3703,6 +5248,7 @@ for name in ("md4", "ripemd160"):
             "boxed_multiprocessing_context.py",
             "boxed_textwrap.py",
             "boxed_set_ordering.py",
+            "boxed_set_iteration.py",
             "boxed_dict_view_equality.py",
             "boxed_set_issubset.py",
             "boxed_set_operator_descriptors.py",
@@ -3712,6 +5258,11 @@ for name in ("md4", "ripemd160"):
             "boxed_set_symmetric_difference_update.py",
             "boxed_set_difference.py",
             "boxed_set_intersection.py",
+            "boxed_starred_call_order.py",
+            "boxed_fixed_keyword_calls.py",
+            "boxed_tuple_membership.py",
+            "boxed_set_intersection_lifetime.py",
+            "boxed_partition_field.py",
             "boxed_set_pop.py",
             "boxed_set_clear.py",
             "boxed_set_remove.py",
@@ -3721,6 +5272,10 @@ for name in ("md4", "ripemd160"):
             "boxed_gc_collect.py",
             "boxed_gc_controls.py",
             "boxed_gc_finalizers.py",
+            "boxed_gc_generator_loop.py",
+            "boxed_gc_generator_resurrection.py",
+            "boxed_gc_returned_stream.py",
+            "boxed_weak_frame_return.py",
             "boxed_weakref_subclass.py",
             "boxed_proxy_truth.py",
             "boxed_setattr.py",
@@ -3734,6 +5289,7 @@ for name in ("md4", "ripemd160"):
             "boxed_fnmatch.py",
             "boxed_unittest_cleanup.py",
             "boxed_unittest_result_format.py",
+            "boxed_unittest_program_options.py",
             "boxed_unittest_result_buffer.py",
             "boxed_unittest_result_registry.py",
             "boxed_unittest_get_description.py",
@@ -3754,6 +5310,7 @@ for name in ("md4", "ripemd160"):
             "boxed_global_enum.py",
             "boxed_float_enum.py",
             "boxed_print_streams.py",
+            "boxed_input_callbacks.py",
             "boxed_redirect_streams.py",
             "boxed_with_lookup.py",
             "boxed_itertools_repeat.py",
@@ -3796,10 +5353,13 @@ for name in ("md4", "ripemd160"):
             "boxed_structural_hooks.py",
             "boxed_list_pop.py",
             "boxed_list_iter_descriptor.py",
+            "boxed_list_setitem.py",
             "boxed_sequence_repeat.py",
+            "boxed_primitive_sequence_literals.py",
             "boxed_sequence_order.py",
             "boxed_tuple_iter_descriptor.py",
             "boxed_tuple_index.py",
+            "boxed_tuple_slice_identity.py",
             "boxed_json_containers.py",
             "boxed_json_scanner.py",
             "boxed_json_decoder.py",
@@ -3818,6 +5378,7 @@ for name in ("md4", "ripemd160"):
             "boxed_zip.py",
             "boxed_map.py",
             "boxed_python_iterators.py",
+            "boxed_filter_reduction.py",
             "boxed_float_sum.py",
             "boxed_complex_sum.py",
             "boxed_enumerate_methods.py",
@@ -3825,21 +5386,32 @@ for name in ("md4", "ripemd160"):
             "boxed_sorted.py",
             "boxed_max.py",
             "boxed_min.py",
+            "boxed_comprehension_outer_yield.py",
             "boxed_generator_delegation.py",
+            "boxed_suspended_operand_positions.py",
+            "boxed_lambda_default_positions.py",
+            "boxed_mixed_lambda_defaults.py",
             "boxed_source_coroutine.py",
             "boxed_coroutine_origin.py",
             "boxed_anext.py",
             "boxed_async_generator.py",
+            "boxed_comprehension_plan.py",
+            "boxed_comprehension_operands.py",
             "boxed_source_async_generator.py",
             "boxed_source_async_with.py",
             "boxed_with_control.py",
             "boxed_short_circuit.py",
+            "boxed_while_truth.py",
+            "boxed_positional_class_match.py",
+            "boxed_pattern_field_lifetime.py",
             "boxed_doctest_suite.py",
+            "boxed_doctest_hooks.py",
             "boxed_doctest_files.py",
             "boxed_slice.py",
             "boxed_binascii.py",
             "boxed_zlib.py",
             "boxed_gzip_decompress.py",
+            "boxed_bz2.py",
             "boxed_lzma.py",
             "boxed_hashlib_names.py",
             "bytes/hashlib_md5_provider.py",
@@ -3863,6 +5435,7 @@ for name in ("md4", "ripemd160"):
             "boxed_reversed_list.py",
             "boxed_reversed_range.py",
             "boxed_heapq.py",
+            "boxed_pydoc.py",
             "boxed_queue.py",
             "boxed_shutil.py",
             "boxed_difflib.py",
@@ -3879,10 +5452,23 @@ for name in ("md4", "ripemd160"):
             plugin.write_bytes((fixtures / fixture).read_bytes())
             if fixture == "boxed_slice_deep_repr.py":
                 check_slice_stack(imre, imports, root, env)
-            elif fixture == "boxed_codec_registry.py":
+            elif fixture in (
+                "boxed_nested_callable_scope.py",
+                "boxed_mixed_lambda_defaults.py",
+                "boxed_starred_call_order.py",
+                "boxed_codec_registry.py",
+                "boxed_gc_generator_loop.py",
+                "boxed_gc_generator_resurrection.py",
+                "boxed_gc_returned_stream.py",
+                "boxed_weak_frame_return.py",
+            ):
                 compare("-IB", "-c", imports)
             else:
                 compare("-IB", "-c", imports + "arithmetic.current()")
+            if fixture == "boxed_generator_delegation.py":
+                named = root / fixture
+                named.write_text(plugin.read_text() + "\ncurrent()")
+                compare("-IB", named, native_args=("run", named, "--quiet"))
             if fixture == "boxed_json_module_doc.py":
                 compare("-IOOB", "-c", imports + "arithmetic.current()")
             if fixture == "boxed_interactive.py":
@@ -4046,8 +5632,24 @@ else:
             compare("-B", "-c", imports + "arithmetic.current()",
                     extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
         if sys.platform == "linux":
+            plugin.write_bytes((fixtures / "boxed_os_waitpid.py").read_bytes())
+            child = run(imre, "-IB", "-c", imports + "arithmetic.pidfd()")
+            assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
+            plugin.write_bytes((fixtures / "boxed_os_system_queries.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
             plugin.write_bytes((fixtures / "boxed_os_getrandom.py").read_bytes())
             compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", str(fixtures / "epoll_descriptors.py"))
+            plugin.write_bytes((fixtures / "boxed_mmap_integer.py").read_bytes())
+            child = run(imre, "-IB", "-c", imports + "arithmetic.current()")
+            assert (child.returncode, child.stdout, child.stderr) == (0, b"", b""), child
+            plugin.write_bytes((fixtures / "boxed_mmap.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current()")
+            compare("-IB", "-c", imports + "arithmetic.assignment_callbacks()")
+            compare("-IB", "-c", imports + "arithmetic.limits()")
+            plugin.write_bytes((fixtures / "boxed_epoll_capability.py").read_bytes())
+            compare("-IB", "-c", imports + "arithmetic.current(False)")
+            compare("-IB", "-c", imports + "arithmetic.current(True)")
             execve = str(fixtures / "boxed_os_execve.py")
             compare("-IB", execve, "exports", "os")
             for mode in ("path", "fd"):
@@ -4099,7 +5701,7 @@ else:
             assert oracle.returncode == 0 and oracle.stdout.startswith(b"OSError (5,") and not oracle.stderr, oracle
             for opt in ("0", "3"):
                 binary = root / f"entropy-O{opt}"
-                build = run(imre, "build", probe, "--runtime-imports", "--opt-level", opt, "-o", binary)
+                build = run(imre, "build", imported_fixture(root, probe), "--opt-level", opt, "-o", binary)
                 assert build.returncode == 0, build.stderr
                 fault = run(binary, extra=injected)
                 assert (fault.returncode, fault.stdout, fault.stderr) == (0, oracle.stdout, b""), fault
@@ -4108,7 +5710,7 @@ else:
         # A nested declaration is invalid even if the surrounding function is never called.
         source = root / "generic-nonlocal.py"
         source.write_text("def factory():\n    class Box[T]:\n        def f(self):\n            nonlocal T\n")
-        invalid = run(imre, "build", source, "--runtime-imports", "-o", root / "invalid-nonlocal")
+        invalid = run(imre, "build", source, "-o", root / "invalid-nonlocal")
         assert invalid.returncode and b"SyntaxError: nonlocal binding not allowed for type parameter 'T'" in invalid.stderr, invalid
 
         for fixture in ("boxed_typing_generics.py", "boxed_typing_list.py",
@@ -4122,7 +5724,7 @@ else:
             source.write_text("".join(" " * i + "def f():\n" for i in range(64)) + " " * 64 + "pass\n")
             executable = root / "walk-statements"
             fixture = fixtures / "boxed_ast_statement_stack.py"
-            built = run(imre, "build", fixture, "--runtime-imports", "-o", executable)
+            built = run(imre, "build", fixture, "-o", executable)
             assert built.returncode == 0, built.stderr
 
             def small_stack():
@@ -4211,7 +5813,7 @@ except ImportError:
         for limit in ("640", "0"):
             digit_env = {"PYTHONINTMAXSTRDIGITS": limit}
             compare("-B", digits, extra=digit_env)
-            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--runtime-imports", "--quiet"))
+            compare("-B", digits, extra=digit_env, native_args=("run", digits, "--quiet"))
 
         checked = run(
             imre,

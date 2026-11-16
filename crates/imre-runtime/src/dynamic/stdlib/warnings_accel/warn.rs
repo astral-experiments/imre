@@ -89,7 +89,7 @@ pub(in crate::dynamic) fn warn(
             let Value::Module { scope, .. } = *ctx.heap.get(sys) else {
                 unreachable!("interpreter sys module")
             };
-            (ctx.text("<sys>"), 0, ctx.module_globals(scope)?)
+            (ctx.text("<sys>"), 0, ctx.module_globals_storage(scope)?)
         }
     };
     let registry = ctx.emission_warning_registry(globals)?;
@@ -157,5 +157,5 @@ fn caller(ctx: &Context, level: isize, prefixes: &[Id]) -> Option<(Location, Id)
             })
             .nth((steps - 1) as usize)?
     };
-    Some((frame.0.clone(), frame.1))
+    Some(frame)
 }

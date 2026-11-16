@@ -1,8 +1,8 @@
-from email import message_from_binary_file, message_from_bytes, message_from_string
+from email import message_from_binary_file, message_from_bytes, message_from_file, message_from_string
 from email.errors import MissingHeaderBodySeparatorDefect
 from email.feedparser import FeedParser
 from email.message import Message
-from io import BytesIO
+from io import BytesIO, StringIO
 
 
 def current():
@@ -11,6 +11,11 @@ def current():
     assert type(msg) is Message
     assert msg.get_all("X-Trace") == ["one", "two\r\n\tcontinued"]
     print(msg.items(), msg.get_payload())
+    with StringIO(text) as fp:
+        parsed = message_from_file(fp)
+        assert parsed.items() == msg.items()
+        assert parsed.get_payload() == msg.get_payload()
+        assert fp.read() == ""
     msg = message_from_bytes(b"X-Trace: wire\r\n\r\nbody\xff")
     assert msg.items() == [("X-Trace", "wire")]
     assert msg.get_payload(decode=True) == b"body\xff"
@@ -26,8 +31,38 @@ def current():
     assert msg["X-Trace"] == "wire"
     assert msg.get_payload(decode=True) == b"broken\nbody\xff"
     assert [type(defect) for defect in msg.defects] == [MissingHeaderBodySeparatorDefect]
+
+    # BaseException saves the caller's positional arguments before __init__.
+    assert MissingHeaderBodySeparatorDefect().args == ()
+    assert MissingHeaderBodySeparatorDefect(line=None).args == ()
+    defect = MissingHeaderBodySeparatorDefect(None)
+    assert defect.args == (None,)
+    defect.__init__("first")
+    defect.__init__(None)
+    try:
+        raise defect
+    except MissingHeaderBodySeparatorDefect as caught:
+        assert caught is defect and caught.line is None and caught.args == ("first",)
     parser = FeedParser()
     parser.feed("broken head")
     parser.feed("er\r\nbody")
     msg = parser.close()
     print([type(defect).__name__ for defect in msg.defects], msg.get_payload())
+
+    from email import policy
+    from email.parser import BytesParser
+
+    wire = (
+        b"Subject: =?utf-8?q?caf=C3=A9?=\r\n"
+        b'Content-Type: multipart/mixed; boundary="parts"\r\n\r\n'
+        b"--parts\r\nContent-Type: text/plain\r\n\r\nhello\r\n"
+        b"--parts\r\nContent-Type: application/octet-stream\r\n"
+        b"Content-Disposition: attachment; filename*=utf-8''caf%C3%A9.bin\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\nAP8=\r\n--parts--\r\n"
+    )
+    message = BytesParser(policy=policy.default).parsebytes(wire)
+    assert str(message["Subject"]) == "café"
+    body, attachment = message.iter_parts()
+    assert body.get_content() == "hello"
+    assert attachment.get_filename() == "café.bin"
+    assert attachment.get_payload(decode=True) == b"\x00\xff"

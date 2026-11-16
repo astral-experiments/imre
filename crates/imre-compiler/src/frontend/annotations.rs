@@ -51,6 +51,22 @@ pub(super) fn class_value(name: &str) -> Expr {
     }
 }
 
+/// Fixed class bindings whose annotation and runtime instance test use the same type.
+pub(super) fn fixed_instance_type(binding: Option<Binding>) -> Option<Type> {
+    let Binding::Intrinsic(intrinsic) = binding? else {
+        return None;
+    };
+    Some(match intrinsic {
+        Intrinsic::BytesIo => Type::BytesIO,
+        Intrinsic::StringIo => Type::StringIO,
+        Intrinsic::Context => Type::Context,
+        Intrinsic::ClockTime => Type::ClockTime,
+        Intrinsic::Path => Type::Path,
+        Intrinsic::LogRecord => Type::LogRecord,
+        _ => return None,
+    })
+}
+
 /// Both annotations describe the same item interface; their class values differ.
 pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
     matches!(
@@ -62,10 +78,8 @@ pub(super) fn sequence_annotation(binding: Option<Binding>) -> bool {
 }
 
 impl Checker<'_> {
-    /// Resolve the class object exported by collections, collections.abc or array.
-    /// A local with the same name takes precedence over the module binding.
-    pub(super) fn collection_class_name(&self, expression: &ast::Expr) -> Option<&'static str> {
-        match self.collection_binding(expression) {
+    pub(super) fn collection_class_name(binding: Option<Binding>) -> Option<&'static str> {
+        match binding {
             Some(Binding::Intrinsic(Intrinsic::NominalClass(name))) => Some(name),
             Some(Binding::Intrinsic(Intrinsic::WeakProxyClass { callable })) => {
                 Some(Self::weak_proxy_type_name(callable))
@@ -76,16 +90,18 @@ impl Checker<'_> {
         }
     }
 
-    /// Resolve an imported collections class only when no local shadows its root.
-    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
+    pub(super) fn local_collection_root(&self, expression: &ast::Expr) -> bool {
         let mut root = expression;
         while let ast::Expr::Attribute(attribute) = root {
             root = &attribute.value;
         }
-        if root
-            .as_name_expr()
+        root.as_name_expr()
             .is_some_and(|name| self.names.contains_key(name.id.as_str()))
-        {
+    }
+
+    /// Resolve an imported collections class only when no local shadows its root.
+    pub(super) fn collection_binding(&self, expression: &ast::Expr) -> Option<Binding> {
+        if self.local_collection_root(expression) {
             return None;
         }
         self.resolve(expression)
@@ -100,13 +116,13 @@ pub(super) fn type_name(value: Expr) -> Expr {
 }
 
 fn function_entries(function: &ast::StmtFunctionDef) -> Vec<(&str, &ast::Expr)> {
-    parameter_annotations(&function.parameters, function.returns.as_deref())
+    parameter_annotations(&function.parameters, function.returns.as_deref()).collect()
 }
 
 pub(crate) fn parameter_annotations<'a>(
     p: &'a ast::Parameters,
     returns: Option<&'a ast::Expr>,
-) -> Vec<(&'a str, &'a ast::Expr)> {
+) -> impl Iterator<Item = (&'a str, &'a ast::Expr)> {
     // CPython emits ordinary arguments before the separate positional-only group.
     p.args
         .iter()
@@ -117,7 +133,6 @@ pub(crate) fn parameter_annotations<'a>(
         .chain(p.kwarg.as_deref())
         .filter_map(|p| p.annotation.as_deref().map(|a| (p.name.as_str(), a)))
         .chain(returns.map(|a| ("return", a)))
-        .collect()
 }
 
 /// Undeclared names may still be provided by the Python 3.14 builtin namespace.
@@ -390,11 +405,7 @@ impl Checker<'_> {
         let (format, eval_str) = options;
         let dict = |types: &Types, value: Type, entries| Expr {
             ty: types.dict(Type::Str, value),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         let error_ty = self.types.dict(Type::Str, Type::Str);
 

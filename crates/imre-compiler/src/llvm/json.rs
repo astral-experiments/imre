@@ -11,7 +11,7 @@ impl Emitter<'_, '_> {
         let payload = self.module.types.payload(result);
         let concrete = payload.unwrap_or(result);
         let tag = match concrete {
-            Type::JsonValue => 0,
+            Type::JsonRoot | Type::JsonValue => 0,
             Type::JsonObject => 1,
             Type::Str => 2,
             Type::Int => 3,
@@ -140,27 +140,13 @@ fn schema_name(ty: Type) -> String {
     }
 }
 
-struct Schemas<'a> {
+struct Schemas<'a, 'units> {
     module: &'a Module,
     seen: HashSet<Type>,
-    output: &'a mut Output,
+    output: &'a mut Output<'units>,
 }
 
-impl Schemas<'_> {
-    fn bytes(&mut self, name: &str, value: &str) {
-        let output = self.output.entry_buffer();
-        write!(
-            output,
-            "@{name} = private unnamed_addr constant [{} x i8] c\"",
-            value.len()
-        )
-        .unwrap();
-        for byte in value.bytes() {
-            write!(output, "\\{byte:02X}").unwrap();
-        }
-        output.push_str("\"\n");
-    }
-
+impl Schemas<'_, '_> {
     fn schema(&mut self, ty: Type) -> String {
         let ty = match ty {
             Type::StrLiteral(_) => Type::Str,
@@ -231,13 +217,21 @@ impl Schemas<'_> {
                 {
                     let child = self.schema(self.module.class_fields[class][index]);
                     let prefix = format!("json_field_{class}_{index}");
-                    self.bytes(&format!("{prefix}_name"), &field.name);
+                    write_private_bytes(
+                        self.output.entry_buffer(),
+                        &format!("{prefix}_name"),
+                        &field.name,
+                    );
                     let (default_kind, default_pointer, default_len) = match &field.default {
                         None => (0, "null".to_owned(), 0),
                         Some(JsonDefault::EmptyList) => (2, "null".to_owned(), 0),
                         Some(value) => {
                             let value = literal(value);
-                            self.bytes(&format!("{prefix}_default"), &value);
+                            write_private_bytes(
+                                self.output.entry_buffer(),
+                                &format!("{prefix}_default"),
+                                &value,
+                            );
                             (1, format!("@{prefix}_default"), value.len())
                         }
                     };
@@ -247,6 +241,26 @@ impl Schemas<'_> {
                     ));
                 }
                 let count = fields.len();
+                // A narrow record needs only a few comparisons on a name miss. Wider
+                // records carry declaration indices in name order for binary search.
+                let name_order = record
+                    .filter(|_| count >= 8 && u32::try_from(count).is_ok())
+                    .map(|record| {
+                        let name = format!("{name}_field_order");
+                        let mut order: Vec<_> = (0..count).collect();
+                        order.sort_unstable_by(|&a, &b| {
+                            record.fields[a].name.cmp(&record.fields[b].name)
+                        });
+                        let indices: Vec<_> = order.iter().map(|i| format!("i32 {i}")).collect();
+                        writeln!(
+                            self.output.entry_buffer(),
+                            "@{name} = private constant [{count} x i32] [{}]",
+                            indices.join(", ")
+                        )
+                        .unwrap();
+                        name
+                    });
+
                 let fields_name = format!("json_fields_{class}");
                 writeln!(
                     self.output.entry_buffer(),
@@ -256,7 +270,7 @@ impl Schemas<'_> {
                 .unwrap();
                 (
                     7,
-                    None,
+                    name_order,
                     Some(self.output.record_layout(Type::Class(class))),
                     count,
                     Some(fields_name),

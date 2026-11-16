@@ -1,4 +1,4 @@
-//! Boxed callers share the typed process control, communication cursor and file owners.
+//! Boxed callers share the typed process control and file owners.
 use super::*;
 use crate::objects::Words;
 
@@ -89,11 +89,6 @@ impl From<Error> for BoxedLaunchError {
             direct: false,
         }
     }
-}
-
-pub(crate) struct BoxedCommunication {
-    pub(crate) streams: [Option<Vec<u8>>; 2],
-    pub(crate) timed_out: bool,
 }
 
 impl PreparedHandles {
@@ -260,9 +255,8 @@ impl BoxedPopen {
             directory: site.map(|(site, _)| matches!(site, launch_error::Site::Directory)),
             direct: site.is_some_and(|(_, direct)| direct),
         })?;
-        // The boxed Python owner emits the warning. Drop still reaps or defers
-        // the child if that owner's finalizer raises or releases a live handle.
-        process.native_finalizer_pending = false;
+        // Python owns finalization. Keep the native fallback until its finalizer completes.
+        process.drop_action = DropAction::Poll;
         owner.write(RefCell::new(process));
         // SAFETY: write initialized the unique allocation; sharing it performs no allocation.
         Ok(Self(
@@ -287,83 +281,38 @@ impl BoxedPopen {
         self.0.borrow().control.pid
     }
 
-    pub(crate) fn poll(&self) -> Result<Option<i32>> {
-        Ok(self.0.borrow().control.poll()?.map(ReturnCode::kernel))
+    pub(crate) fn poll(&self) -> Result<std::task::Poll<Option<i32>>> {
+        use std::task::Poll;
+        Ok(match self.0.borrow().control.take_observation()? {
+            None => Poll::Pending,
+            Some(status) => Poll::Ready(status.observed()),
+        })
     }
 
+    /// A handler may already have consumed the child's exit while the wait was interrupted.
     pub(crate) fn wait<E: From<Error>>(
         &self,
         check: impl FnMut() -> std::result::Result<(), E>,
     ) -> std::result::Result<Option<i32>, E> {
         let control = self.0.borrow().control.clone();
-        Ok(control.wait_with(None, check)?.map(ReturnCode::kernel))
-    }
-
-    /// Only an observed child status updates returncode when the constructor raises.
-    /// A signal handler may already have consumed the status through os.waitpid.
-    pub(crate) fn wait_failed_exec<E: From<Error>>(
-        &self,
-        check: impl FnMut() -> std::result::Result<(), E>,
-    ) -> std::result::Result<Option<i32>, E> {
-        let control = self.0.borrow().control.clone();
         Ok(control
-            .wait_with(None, check)?
-            .and_then(|status| match status {
-                ReturnCode::NoChild => None,
-                observed => Some(observed.kernel()),
-            }))
+            .wait_polling(None, check, ChildControl::take_observation)?
+            .and_then(ReturnCode::observed))
     }
 
     pub(crate) fn signal(&self, number: i32) -> Result<()> {
-        self.0.borrow().signal(|| Ok(number))
+        // The Python owner already called its virtual poll method.
+        self.0.borrow().control.signal_after_poll(|| Ok(number))
     }
 
-    pub(crate) fn close_wait(&self) -> Result<()> {
-        self.0.borrow_mut().close_wait()
+    pub(crate) fn finalized(&self) {
+        // Python retained a live owner in _active or accepted a returncode (possibly
+        // its error fallback). Releasing this handle must not perform another wait.
+        self.0.borrow_mut().drop_action = DropAction::Release;
     }
+
     pub(crate) fn cleanup() {
         cleanup()
-    }
-
-    pub(crate) fn begin_communication(
-        &self,
-        input: &[u8],
-        seconds: Option<f64>,
-        select: bool,
-    ) -> Result<communicate::PendingExchange> {
-        self.0.borrow_mut().begin_exchange(
-            communicate::Input::Live(input),
-            seconds.map(Deadline::Float).as_ref(),
-            false,
-            select,
-        )
-    }
-
-    pub(crate) fn resume_communication(
-        &self,
-        pending: &mut communicate::PendingExchange,
-        input: &[u8],
-    ) -> Result<()> {
-        pending.resume(&mut self.0.borrow_mut(), communicate::Input::Live(input))
-    }
-
-    pub(crate) fn finish_communication(
-        &self,
-        pending: communicate::PendingExchange,
-    ) -> BoxedCommunication {
-        let exchange = pending.finish();
-        let process = self.0.borrow();
-        let (streams, timed_out) = match exchange {
-            communicate::Exchange::Done([out, err]) => (
-                [
-                    process.pipes[1].as_ref().map(|_| out),
-                    process.pipes[2].as_ref().map(|_| err),
-                ],
-                false,
-            ),
-            communicate::Exchange::Timeout(streams, _) => (streams, true),
-        };
-        BoxedCommunication { streams, timed_out }
     }
 }
 
@@ -381,8 +330,8 @@ impl BoxedPipe {
         self.with_file(|file| file.is_raw())
     }
 
-    pub(crate) fn close_raw(&self) -> Result<()> {
-        self.with_file(|file| file.close_raw_pipe().map_err(errno_error))
+    pub(crate) fn take_raw_fd(&self) -> Option<std::os::fd::RawFd> {
+        self.with_file(FileState::take_raw_pipe_fd)
     }
 
     pub(crate) fn read(&self, size: Option<usize>, line: bool) -> Result<Vec<u8>> {
@@ -393,6 +342,10 @@ impl BoxedPipe {
                 file.read_bytes(size)
             }
         })
+    }
+
+    pub(crate) fn take_input_buffer(&self) -> Result<Vec<u8>> {
+        self.with_file(FileState::take_pipe_buffer)
     }
 
     pub(crate) fn take_read_ahead(&self) -> Result<Vec<u8>> {

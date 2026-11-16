@@ -87,6 +87,21 @@ def current():
             print(type(error).__name__, str(error))
     module = __import__(__name__)
     mapping = globals()
+
+    class Collision:
+        def __hash__(self):
+            return hash("naïve")
+
+    blocker = Collision()
+    mapping[blocker] = None
+    mapping["naïve"] = 41
+    assert getattr(module, "naïve") == 41
+    del mapping[blocker]
+    mapping["naïve"] += 1
+    assert getattr(module, "naïve") == 42
+    del mapping["naïve"]
+    assert not hasattr(module, "naïve")
+
     fetch = nested(23)
     captured, value = fetch()
     print(type(mapping) is dict, mapping is module.__dict__, mapping is current.__globals__)
@@ -138,3 +153,20 @@ def current():
 
 if __name__ == '__main__':
     current()
+
+    class Key:
+        def __hash__(self):
+            return hash("globals")
+
+        def __eq__(self, other):
+            return other == "globals"
+
+    def read_globals():
+        return globals()
+
+    owner = globals()
+    key = Key()
+    owner[key] = lambda: 37
+    print(globals(), read_globals())
+    del owner[key]
+    print(globals() is owner, read_globals() is owner)

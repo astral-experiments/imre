@@ -25,8 +25,8 @@ void *__wrap_realloc(void *p, size_t n) { return refuse() ? NULL : __real_reallo
 
 uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
     static const char marker[] = "start formatter allocation probe 2332";
-    static const char name[] = "parameter_for_call_storage_with_a_deliberately_long_name";
-    int probe = ready && !refused && kind == 6 && len == sizeof(name)-1 && !memcmp(data,name,len);
+    static const char name[] = "repeated_interned_string_literal";
+    int probe = ready && !refused && kind == 1 && len == sizeof(name)-1 && !memcmp(data,name,len);
     if (probe) {
         const char *ordinal = getenv("IMRE_TEST_GETTER_ALLOCATION");
         remaining = ordinal ? (unsigned)strtoul(ordinal,NULL,10) : 0;

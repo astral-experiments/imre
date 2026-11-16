@@ -100,7 +100,7 @@ impl Checker<'_> {
         name: &str,
         param: &str,
         ty: Type,
-    ) -> Result<Result<&'e ast::Expr, Expr>, String> {
+    ) -> Result<std::result::Result<&'e ast::Expr, Expr>, String> {
         let args = &call.arguments;
         if args.args.is_empty() || !args.keywords.is_empty() {
             self.graph
@@ -140,7 +140,7 @@ impl Checker<'_> {
             .iter()
             .chain(args.keywords.iter().map(|kw| &kw.value))
             .map(|arg| self.cmp_callback_value(arg).map(|(value, _)| value))
-            .collect::<Result<_, _>>()?;
+            .collect::<std::result::Result<_, _>>()?;
         Ok(Err(raised(ty, "TypeError", &message, used)))
     }
 
@@ -240,7 +240,7 @@ impl Checker<'_> {
         let cell = self.cmp_field(key, frame, 1);
         Expr {
             ty: self.types.element(cell.ty).unwrap(),
-            kind: ExprKind::Builtin(Builtin::ListGet, vec![cell, Expr::integer(0)]),
+            kind: ExprKind::Builtin(Builtin::ListGet(None), vec![cell, Expr::integer(0)]),
         }
     }
 
@@ -341,21 +341,8 @@ impl Checker<'_> {
         op: ast::CmpOp,
         site: &impl Ranged,
     ) -> Result<Expr, String> {
-        let operation = match op {
-            ast::CmpOp::Lt => Compare::Less,
-            ast::CmpOp::LtE => Compare::LessEqual,
-            ast::CmpOp::Eq => Compare::Equal,
-            ast::CmpOp::NotEq => Compare::NotEqual,
-            ast::CmpOp::Gt => Compare::Greater,
-            ast::CmpOp::GtE => Compare::GreaterEqual,
-            _ => {
-                return Err(error(
-                    self.source,
-                    site,
-                    "unsupported comparator-key comparison",
-                ));
-            }
-        };
+        let operation = Compare::from_operator(op)
+            .ok_or_else(|| error(self.source, site, "unsupported comparator-key comparison"))?;
         let (Type::CmpKey(l, lb), Type::CmpKey(r, rb)) = (left.ty, right.ty) else {
             return Ok(raised(
                 Type::Bool,

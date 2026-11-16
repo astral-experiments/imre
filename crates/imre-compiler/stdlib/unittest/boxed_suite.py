@@ -1,19 +1,22 @@
-# The boxed runtime can validate and call bound methods on the actual instance.
 def _validateCaseMethod(case, methodName):
+    case._outcome = None
+    case._testMethodDoc = "No test"
     try:
         method = getattr(case, methodName)
     except AttributeError:
         if methodName != "runTest":
-            raise ValueError("no such test method in " + str(type(case)) + ": " + methodName)
-        case._testMethodDoc = "No test"
+            raise ValueError("no such test method in %s: %s" % (case.__class__, methodName))
     else:
-        case._testMethodDoc = getattr(method, "__doc__", None)
+        case._testMethodDoc = method.__doc__
     case._cleanups = []
-    case._type_equality_funcs = {
-        str: "assertMultiLineEqual",
-        set: "assertSetEqual",
-        frozenset: "assertSetEqual",
-    }
+    case._subtest = None
+    case._type_equality_funcs = {}
+    case.addTypeEqualityFunc(dict, "assertDictEqual")
+    case.addTypeEqualityFunc(list, "assertListEqual")
+    case.addTypeEqualityFunc(tuple, "assertTupleEqual")
+    case.addTypeEqualityFunc(set, "assertSetEqual")
+    case.addTypeEqualityFunc(frozenset, "assertSetEqual")
+    case.addTypeEqualityFunc(str, "assertMultiLineEqual")
 
 
 def _boxedCheckFixtures(cls):
@@ -111,7 +114,6 @@ def _boxedSubTestExit(self, typ, value, tb):
         self.case._subtest = self.parent
 
 
-TestCase._subtest = None
 _SubTestContext.__enter__ = _boxedSubTestEnter
 _SubTestContext.__exit__ = _boxedSubTestExit
 

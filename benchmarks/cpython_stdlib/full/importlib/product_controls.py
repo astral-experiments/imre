@@ -87,7 +87,7 @@ def check(lang, root):
         else:
             raise AssertionError(f"lost explicit unsupported operation: {source}")
 
-    # The object runtime answers machinery's installation query for this target.
+    # Machinery reports import precedence. The SDK's singular suffix names its build output.
     directory = root / "native-suffix"
     directory.mkdir()
     binary = lang.build(
@@ -96,7 +96,7 @@ def check(lang, root):
     )
     target = json.loads(subprocess.check_output([lang.imre, "build-target"]))
     actual = subprocess.run([binary], check=True, capture_output=True, text=True)
-    assert (actual.stdout, actual.stderr) == (target["archive_suffix"] + "\n", "")
+    assert (actual.stdout, actual.stderr) == (target["archive_suffixes"][0] + "\n", "")
 
     # Imre has no native bytecode, so select the same tag for the peer processes.
     source = "import sys\nfrom importlib.util import cache_from_source\n" + prefix + """sys.implementation.cache_tag = None

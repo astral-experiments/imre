@@ -1,3 +1,9 @@
+    terminator = "\n"
+
+    def __init__(self, stream: _TextOutput | None = None) -> None:
+        super().__init__()
+        self.stream = sys.stderr if stream is None else stream
+
     # Runtime-loaded streams can expose arbitrary Python name attributes.
     def __repr__(self) -> str:
         level = getLevelName(self.level)

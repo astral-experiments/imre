@@ -109,6 +109,60 @@ def mapping_conversion():
         collections.defaultdict = defaultdict
 
 
+def field_insertion_order():
+    from dataclasses import make_dataclass
+
+    reads = []
+
+    class Name(str):
+        def __hash__(self):
+            if reads:
+                raise LookupError(self)
+            return str.__hash__(self)
+
+    def read(self, name):
+        if name in ('first', 'second'):
+            reads.append(str(name))
+        return object.__getattribute__(self, str(name))
+
+    first = Name('first')
+    row = make_dataclass('Row', [(first, int), ('second', int)],
+                         namespace={'__getattribute__': read})(1, 2)
+    try:
+        asdict(row)
+    except LookupError as exc:
+        assert exc.args[0] is first
+    else:
+        raise AssertionError("missing field insertion error")
+    assert reads == ['first']
+    assert asdict(row, dict_factory=list) == [(first, 1), ('second', 2)]
+
+
+def signature_docstrings():
+    from inspect import Signature
+
+    class Unrenderable(Signature):
+        def __str__(self):
+            raise ValueError("cannot render")
+
+    class Text(str):
+        def replace(self, old, new):
+            raise ValueError("cannot strip")
+
+    class Unstrippable(Signature):
+        def __str__(self):
+            return Text("(value: int) -> None")
+
+    for signature in (Unrenderable(), Unstrippable()):
+        @dataclass
+        class Request:
+            __signature__ = signature
+            value: int
+
+        assert Request.__doc__ == "Request"
+        assert Request(4).value == 4
+
+
 def abstract_refresh():
     import abc
     import inspect
@@ -308,4 +362,6 @@ def current():
 
     replacement()
     mapping_conversion()
+    field_insertion_order()
+    signature_docstrings()
     print("boxed dataclasses")

@@ -231,7 +231,8 @@ fn components(ctx: &mut Context, [start, stop, step]: [Id; 3]) -> Result<[Option
     Ok([part(start)?, part(stop)?, step])
 }
 
-pub(super) fn normalize<T: Signed + Ord + Clone>(
+/// Adjusts decoded, nonzero-step slice bounds against a nonnegative sequence length.
+pub(crate) fn normalize<T: Signed + Ord + Clone>(
     [start, stop, step]: [Option<T>; 3],
     length: T,
 ) -> [T; 3] {

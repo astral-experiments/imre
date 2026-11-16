@@ -11,6 +11,9 @@ class _DocTestSuite:
     def __init__(self) -> None:
         self._tests = []
 
+    def addTest(self, case: DocTestCase) -> None:
+        self._tests.append(case)
+
     def __iter__(self) -> Iterator[DocTestCase]:
         yield from self._tests
 
@@ -23,28 +26,30 @@ class _DocTestSuite:
 
 
 class _ModuleDocs:
-    _docs: list[tuple[str, str]]
+    _filename: str | None
+    _docs: list[tuple[str, str, int | None]]
 
-    def __init__(self, docs: list[tuple[str, str]]) -> None:
+    def __init__(self, filename: str | None, docs: list[tuple[str, str, int | None]]) -> None:
+        self._filename = filename
         self._docs = docs
 
 
 _modules: dict[str, _ModuleDocs] = {}
 
 
-def _module_docs(name: str, docs: list[tuple[str, str]]) -> _ModuleDocs:
+def _module_docs(name: str, filename: str | None, docs: list[tuple[str, str, int | None]]) -> _ModuleDocs:
     if name not in _modules:
-        _modules[name] = _ModuleDocs(docs)
+        _modules[name] = _ModuleDocs(filename, docs)
     return _modules[name]
 
 
+def _default_case(test: DocTest) -> DocTestCase:
+    return DocTestCase(test)
+
+
 def DocTestSuite(module: _ModuleDocs) -> _DocTestSuite:
-    # The compiler supplies the selected module's own docstrings in name order.
-    # Parsing and building cases happen at the point of the Python call.
-    suite = _DocTestSuite()
     parser = DocTestParser()
-    for name, docstring in module._docs:
-        examples = parser.get_examples(docstring, name)
-        if examples:
-            suite._tests.append(DocTestCase(DocTest(name, docstring, examples)))
-    return suite
+    tests: list[DocTest] = []
+    for name, docstring, lineno in module._docs:
+        tests.append(parser.get_doctest(docstring, {}, name, module._filename, lineno))
+    return _suite_from_tests(tests, _default_case)

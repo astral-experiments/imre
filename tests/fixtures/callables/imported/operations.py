@@ -15,3 +15,6 @@ def apply(fn: Callable[[int], int], value: int) -> int:
 
 def choose(flag: bool) -> Callable[[int], int]:
     return increment if flag else decrement
+
+
+callback: Callable[[int], int] = increment

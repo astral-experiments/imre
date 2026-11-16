@@ -101,8 +101,7 @@ pub(super) fn setrlimit(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)])
     audit::event(ctx, "resource.setrlimit", &[number, limits])?;
 
     // Keep the full snapshot alive across iteration and both __index__ callbacks.
-    let iterator = ctx.iterator(limits)?;
-    let snapshot = ctx.collect_generator(iterator, true)?;
+    let snapshot = ctx.collect_iterable(limits, true)?;
     let Value::Tuple(items) = ctx.heap.get(snapshot) else {
         unreachable!()
     };

@@ -68,6 +68,45 @@ finally:
     sys.modules = modules
 assert 'only_in_copy' not in modules
 
+parent_keys = []
+
+class ObservedModules(dict):
+    def __getitem__(self, key):
+        if key == 'pkg':
+            parent_keys.append(key)
+        return super().__getitem__(key)
+
+try:
+    sys.modules = ObservedModules(modules)
+    import pkg.keep
+    assert len(parent_keys) == 2 and parent_keys[0] is parent_keys[1]
+finally:
+    sys.modules = modules
+
+published = ModuleType('pkg.keep')
+
+class PublishingParent:
+    __name__ = 'pkg'
+    __spec__ = original.__spec__
+
+    @property
+    def __path__(self):
+        modules['pkg.keep'] = published
+        return original.__path__
+
+modules['pkg'] = PublishingParent()
+try:
+    assert import_module('pkg.keep') is published
+    del modules['pkg.keep']
+    import pkg.keep as selected
+    assert selected is published
+    del modules['pkg.keep']
+    from pkg import keep
+    assert keep is published
+finally:
+    modules.pop('pkg.keep', None)
+    modules['pkg'] = original
+
 try:
     import pkg.retry
 except ValueError as exc:

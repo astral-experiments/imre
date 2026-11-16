@@ -15,7 +15,7 @@ fn builtin(ty: Type, kind: Builtin, args: Vec<Expr>) -> Expr {
 fn comparison(left: Expr, op: Compare, right: Expr) -> Expr {
     Expr {
         ty: Type::Bool,
-        kind: ExprKind::Compare(vec![left, right], vec![op]),
+        kind: ExprKind::Compare(vec![left, right], vec![op.operator()]),
     }
 }
 
@@ -31,212 +31,612 @@ pub(super) fn string(value: impl Into<String>) -> Expr {
 pub(super) fn concat(left: Expr, right: Expr) -> Expr {
     Expr {
         ty: Type::Str,
-        kind: ExprKind::Binary(Binary::Concat, Box::new(left), Box::new(right)),
+        kind: ExprKind::Binary(Binary::Add, Box::new(left), Box::new(right)),
     }
 }
 
 /// Uses the sealed ValueError category so ordinary handlers catch arity errors.
 fn unpack_error(message: Expr) -> Statement {
-    Statement::Raise(Some(Expr {
+    Statement::raise(Expr {
         ty: Type::Exception,
         kind: ExprKind::Exception {
             kind: exception_kind("ValueError").unwrap(),
             message: Some(Box::new(message)),
         },
-    }))
+    })
+}
+
+/// Target traversal and operand lifetimes are shared by checked and namespace suites.
+/// A checked sequence can specialize its arity checks and element projections.
+pub(super) trait PatternBinder {
+    type Error;
+
+    fn pattern_hidden(&mut self, ty: Type) -> usize;
+    fn pattern_local(&self, slot: usize) -> Expr;
+    fn pattern_store(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        output: &mut Vec<Statement>,
+    ) -> StdResult<(), Self::Error>;
+    fn multiple_stars(&self, target: &ast::Expr) -> Self::Error;
+
+    fn pattern_snapshot(
+        &mut self,
+        target: &ast::Expr,
+        elements: &[ast::Expr],
+        star: Option<usize>,
+        value: Expr,
+        row: Option<Row>,
+    ) -> StdResult<PatternSnapshot, Self::Error> {
+        Ok(protocol_snapshot(
+            self,
+            target.range(),
+            elements.iter().map(|_| Type::PythonObject),
+            star,
+            value,
+            Type::PythonObject,
+            row,
+        ))
+    }
+}
+
+pub(super) struct PatternSnapshot {
+    body: Vec<Statement>,
+    // Captured target slots follow the temporaries used to evaluate and check the input.
+    clear: Vec<usize>,
+}
+
+impl PatternSnapshot {
+    fn from_items(binder: &mut (impl PatternBinder + ?Sized), items: Vec<Expr>) -> Self {
+        let mut snapshot = Self {
+            body: Vec::with_capacity(items.len()),
+            clear: Vec::with_capacity(items.len()),
+        };
+        for item in items {
+            snapshot.capture(binder, item);
+        }
+        snapshot
+    }
+
+    fn capture(&mut self, binder: &mut (impl PatternBinder + ?Sized), item: Expr) {
+        let slot = binder.pattern_hidden(item.ty);
+        self.body.push(Statement::Assign(slot, item));
+        self.clear.push(slot);
+    }
+}
+
+/// Take the original operands of a fixed tuple through its diagnostic source positions.
+fn tuple_operands(mut value: &mut Expr, count: usize) -> Option<Vec<Expr>> {
+    loop {
+        match &mut value.kind {
+            ExprKind::Builtin(Builtin::RegisteredLocation(..), args) => {
+                let [inner] = args.as_mut_slice() else {
+                    return None;
+                };
+                value = inner;
+            }
+            ExprKind::Tuple(items)
+                if items.len() == count
+                    && items.iter().all(|item| item.spread_operand().is_none())
+                    && !items.iter().all(ir::Constant::is_constant) =>
+            {
+                return Some(std::mem::take(items));
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn protocol_snapshot(
+    binder: &mut (impl PatternBinder + ?Sized),
+    target: TextRange,
+    item_types: impl ExactSizeIterator<Item = Type>,
+    star: Option<usize>,
+    mut value: Expr,
+    sequence_type: Type,
+    mut row: Option<Row>,
+) -> PatternSnapshot {
+    if row.is_none()
+        && star.is_none()
+        && (1..=3).contains(&item_types.len())
+        && let Some(items) = tuple_operands(&mut value, item_types.len())
+    {
+        return PatternSnapshot::from_items(binder, items);
+    }
+    // Project directly into the two output slots of the prepared pull. Keep its
+    // cursor and its original exhaustion edge, including after generator startup.
+    if item_types.len() == 2
+        && star.is_none()
+        && let Some(Row::Pulled(scope)) = &mut row
+        && let [
+            Statement::Clear(clear),
+            Statement::IterNext {
+                kind,
+                iterator,
+                key,
+                value: second_slot @ None,
+                ready,
+            },
+            exhausted,
+        ] = scope.body.as_mut_slice()
+        && *kind == ir::IterNextKind::Generic
+        && *key == *clear
+        && scope.clear.as_slice() == [*clear]
+        && exhausted.branches_for_flag(*ready).is_some()
+        && binder.pattern_local(*iterator).ty == Type::PythonObject
+    {
+        let mut slots = item_types.map(|ty| binder.pattern_hidden(ty));
+        let first = slots.next().unwrap();
+        let second = slots.next().unwrap();
+        *kind = ir::IterNextKind::Pair(target);
+        *key = first;
+        *second_slot = Some(second);
+        scope.body.remove(0);
+        return PatternSnapshot {
+            body: std::mem::take(&mut scope.body),
+            clear: vec![first, second],
+        };
+    }
+    let sequence = builtin(
+        sequence_type,
+        Builtin::RegisteredUnpack {
+            count: item_types.len(),
+            star,
+            target: Some(target),
+        },
+        vec![value],
+    );
+    let root = binder.pattern_hidden(sequence.ty);
+    let mut snapshot = PatternSnapshot {
+        body: vec![Statement::Assign(root, consume_row(sequence, row))],
+        clear: vec![root],
+    };
+    for (index, ty) in item_types.enumerate() {
+        // Python packs the starred remainder into a list even when its items are opaque.
+        let item = builtin(
+            if star == Some(index) {
+                sequence_type
+            } else {
+                ty
+            },
+            Builtin::ListGet(None),
+            vec![binder.pattern_local(root), Expr::integer(index)],
+        );
+        snapshot.capture(binder, item);
+    }
+    snapshot
+}
+
+pub(super) fn take_pattern_temporary(value: Expr, slot: usize) -> Expr {
+    Expr {
+        ty: value.ty,
+        kind: ExprKind::Scope {
+            body: Vec::new(),
+            value: Box::new(value),
+            clear: vec![slot],
+        },
+    }
+}
+
+/// Evaluate a shared RHS once, then bind each target from left to right.
+/// The last target takes the temporary before its receiver or index runs.
+pub(super) fn bind_assignment<B: PatternBinder>(
+    binder: &mut B,
+    targets: &[ast::Expr],
+    value: Expr,
+    output: &mut Vec<Statement>,
+) -> StdResult<(), B::Error> {
+    if let [target] = targets {
+        bind_input(binder, target, value, None, output)?;
+        return Ok(());
+    }
+    let slot = binder.pattern_hidden(value.ty);
+    let mut body = vec![Statement::Assign(slot, value)];
+    for (index, target) in targets.iter().enumerate() {
+        let value = binder.pattern_local(slot);
+        let value = if index + 1 == targets.len() {
+            take_pattern_temporary(value, slot)
+        } else {
+            value
+        };
+        bind_input(binder, target, value, None, &mut body)?;
+    }
+    output.push(Statement::Scope {
+        body,
+        clear: vec![slot],
+    });
+    Ok(())
+}
+
+/// A projected fixed tuple or a checked Python pull that owns the source row.
+pub(super) enum Row {
+    Projected(usize),
+    Pulled(calls::ArgumentScope),
+}
+
+/// Only the expression consuming the pull can release its source temporaries.
+fn consume_row(value: Expr, row: Option<Row>) -> Expr {
+    match row {
+        Some(Row::Pulled(scope)) => scope.finish(value),
+        _ => value,
+    }
+}
+
+/// Append one target's store or its scoped unpack to the receiving suite.
+pub(super) fn bind_input<B: PatternBinder>(
+    binder: &mut B,
+    target: &ast::Expr,
+    value: Expr,
+    row: Option<Row>,
+    output: &mut Vec<Statement>,
+) -> StdResult<(), B::Error> {
+    let Some(targets) = pattern_elements(target) else {
+        binder.pattern_store(target, consume_row(value, row), output)?;
+        return Ok(());
+    };
+    let mut stars = targets
+        .iter()
+        .enumerate()
+        .filter(|(_, target)| matches!(target, ast::Expr::Starred(_)));
+    let star = stars.next().map(|(index, _)| index);
+    if stars.next().is_some() {
+        return Err(binder.multiple_stars(target));
+    }
+    let PatternSnapshot { mut body, clear } =
+        binder.pattern_snapshot(target, targets, star, value, row)?;
+    let (temporaries, items) = clear.split_at(clear.len() - targets.len());
+    if let Some(&root) = temporaries.first() {
+        body.push(Statement::Clear(root));
+    }
+    for (target, &item) in targets.iter().zip(items) {
+        let target = if let ast::Expr::Starred(starred) = target {
+            &starred.value
+        } else {
+            target
+        };
+        let value = take_pattern_temporary(binder.pattern_local(item), item);
+        bind_input(binder, target, value, None, &mut body)?;
+    }
+    output.push(Statement::Scope { body, clear });
+    Ok(())
 }
 
 impl Checker<'_> {
+    /// Store a row from a Python cursor using the ordinary two-target unpack.
+    pub(super) fn store_object_pair(
+        &mut self,
+        target: usize,
+        item: Expr,
+        site: TextRange,
+    ) -> Statement {
+        let sequence = self.types.list(Type::PythonObject);
+        let PatternSnapshot { mut body, clear } = protocol_snapshot(
+            self,
+            site,
+            [Type::PythonObject; 2].into_iter(),
+            None,
+            item,
+            sequence,
+            None,
+        );
+        let &[key, value] = clear.last_chunk().expect("captured both pair items");
+        body.push(Statement::assign_item(
+            self.local(target),
+            self.local(key),
+            self.local(value),
+        ));
+        Statement::Scope { body, clear }
+    }
+
     /// Finds a target's storage without executing its receiver or index.
-    fn target_context(&self, target: &ast::Expr, rhs: Option<&ast::Expr>) -> Option<Type> {
+    pub(super) fn target_context(
+        &self,
+        target: &ast::Expr,
+        rhs: Option<&ast::Expr>,
+    ) -> Option<Type> {
+        self.target_expectation(target, rhs).map(|(ty, _)| ty)
+    }
+
+    fn target_expectation(
+        &self,
+        target: &ast::Expr,
+        rhs: Option<&ast::Expr>,
+    ) -> Option<(Type, Option<TypeDeclaration>)> {
         if let ast::Expr::Name(name) = target {
             self.names
                 .get(name.id.as_str())
-                .map(|&slot| self.locals[slot])
+                .filter(|slot| !self.unstored_targets.contains(slot))
+                .map(|&slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
+        } else if self.registered.is_some() && target.is_attribute_expr() {
+            None
         } else {
             self.assignment_context(target, rhs)
         }
     }
 
-    /// Yields the captured value and clears its slot before evaluating the next target.
-    fn take_temporary(&self, slot: usize) -> Expr {
-        Expr {
-            ty: self.locals[slot],
-            kind: ExprKind::Scope {
-                body: Vec::new(),
-                value: Box::new(self.local(slot)),
-                clear: vec![slot],
-            },
+    fn assignment_rhs(
+        &mut self,
+        target: &ast::Expr,
+        value: &ast::Expr,
+        (expected, declaration): (Type, Option<TypeDeclaration>),
+    ) -> Result<Expr, String> {
+        if self.inference.is_some() && expected == Type::JsonObject && target.is_attribute_expr() {
+            // Keep a mutable owner until the resolved target decides its storage.
+            self.document_annotation_value(value, expected, documents::MAP)
+        } else {
+            self.expr_in_context(
+                value,
+                expected,
+                |checker, ty| {
+                    ty == Type::PythonObject
+                        && target
+                            .as_name_expr()
+                            .and_then(|name| checker.names.get(name.id.as_str()))
+                            .is_some_and(|&slot| checker.can_widen_unbound_python_local(slot))
+                },
+                Self::coerce_supplied_result,
+                declaration,
+            )
         }
+    }
+
+    /// Keep a terminating RHS and any fresh name declarations, without evaluating its targets.
+    pub(super) fn ends_before_assignment(
+        &mut self,
+        value: &Expr,
+        targets: &[ast::Expr],
+    ) -> Result<bool, String> {
+        if !self.terminating_call(value)
+            || targets
+                .iter()
+                .any(|target| pattern_elements(target).is_some())
+        {
+            return Ok(false);
+        }
+        for target in targets {
+            if let Some(name) = target.as_name_expr()
+                && !self.names.contains_key(name.id.as_str())
+            {
+                let slot = self.declare(name.id.as_str(), value.ty, target)?;
+                // A checked unbound read can already refer to its original slot and flag.
+                if !self.bound_flags.contains_key(name.id.as_str()) {
+                    self.unstored_targets.insert(slot);
+                }
+            }
+        }
+        Ok(true)
     }
 
     /// A chain shares one RHS object and visits targets in source order. A later
     /// annotated target can supply the type of an otherwise empty literal.
     pub(super) fn assignment_statement(
         &mut self,
-        assignment: &ast::StmtAssign,
-    ) -> Result<Vec<Statement>, String> {
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
-            && let Some(field) = self.mime_attribute(attribute)
-        {
-            let mut state_assignment = assignment.clone();
-            state_assignment.targets[0] = ast::Expr::Attribute(field);
-            return self.assignment_statement(&state_assignment);
+        targets: &[ast::Expr],
+        rhs: &ast::Expr,
+        output: &mut Vec<Statement>,
+    ) -> Result<bool, String> {
+        // The live namespace owns later lookups. An enclosing call may already
+        // have loaded its callable before an argument mutates this attribute.
+        for target in targets {
+            if self.registered.is_none()
+                && let ast::Expr::Attribute(attribute) = target
+                && matches!(attribute.attr.as_str(), "compile" | "MULTILINE" | "M")
+                && self
+                    .graph
+                    .session
+                    .is_stdlib_module(self.module, &attribute.value, "re")
+                && match self.resolve(&attribute.value) {
+                    Some(Binding::IntrinsicModule(crate::modules::IntrinsicModule::Re)) => true,
+                    Some(Binding::Module(module)) => self.graph.modules[module].is_bundled("re"),
+                    _ => false,
+                }
+            {
+                return Err(self.scoped_builtin_error("the mutable re module binding", attribute));
+            }
         }
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+        let fixed_field = match targets {
+            [ast::Expr::Attribute(field)] if self.registered.is_none() => Some(field),
+            _ => None,
+        };
+        if let Some(attribute) = fixed_field
+            && let Some(field) = self.mime_attribute(attribute, self.resolve(&attribute.value))
+        {
+            return self.assignment_statement(&[ast::Expr::Attribute(field)], rhs, output);
+        }
+        if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "default_factory"
-            && (matches!(&*assignment.value, ast::Expr::NoneLiteral(_))
-                || self.unshadowed_builtin(&assignment.value, "list"))
+            && (matches!(rhs, ast::Expr::NoneLiteral(_)) || self.unshadowed_builtin(rhs, "list"))
         {
             let receiver = self.expr(&attribute.value)?;
             if self.types.is_default_list_dict(receiver.ty) {
-                let enabled = !matches!(&*assignment.value, ast::Expr::NoneLiteral(_));
-                return Ok(vec![Statement::Expr(Expr {
+                let enabled = !matches!(rhs, ast::Expr::NoneLiteral(_));
+                output.push(Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::DefaultFactorySet { enabled }, vec![receiver]),
-                })]);
+                }));
+                return Ok(true);
             }
         }
-        if let [ast::Expr::Attribute(attribute)] = assignment.targets.as_slice()
+        if let Some(attribute) = fixed_field
             && attribute.attr.as_str() == "converter"
-            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) =
-                self.resolve(&assignment.value)
+            && let Some(Binding::Intrinsic(Intrinsic::ClockConverter(utc))) = self.resolve(rhs)
         {
             let receiver = self.expr(&attribute.value)?;
             if receiver.ty == Type::LogFormatter {
-                return Ok(vec![self.formatter_set(
-                    receiver,
-                    attribute,
-                    Expr::boolean(utc),
-                )?]);
+                output.push(self.formatter_set(receiver, attribute, Expr::boolean(utc))?);
+                return Ok(true);
             }
         }
-        // A literal tuple assigned to plain locals can stage its elements in native
-        // slots. This also permits unpacking a typed callable without storing it
-        // in a heap object. All RHS expressions still precede all target writes.
-        if let [ast::Expr::Tuple(targets)] = assignment.targets.as_slice()
-            && let ast::Expr::Tuple(values) = &*assignment.value
-            && targets.elts.len() == values.elts.len()
-            && targets
-                .elts
-                .iter()
-                .all(|target| matches!(target, ast::Expr::Name(_)))
-            && !values
-                .elts
-                .iter()
-                .any(|value| matches!(value, ast::Expr::Starred(_)))
-        {
-            let mut body = Vec::new();
-            let mut slots = Vec::new();
-            for (target, source) in targets.elts.iter().zip(&values.elts) {
-                let value = self.unpacking_value(target, source)?;
-                let slot = self.hidden(value.ty);
-                body.push(Statement::Assign(slot, value));
-                slots.push(slot);
-            }
-            for (target, &slot) in targets.elts.iter().zip(&slots) {
-                let value = self.take_temporary(slot);
-                body.push(self.assign_value(target, value)?);
-            }
-            return Ok(vec![Statement::Scope { body, clear: slots }]);
-        }
-        if let [target] = assignment.targets.as_slice() {
+        if let [target] = targets {
             if pattern_elements(target).is_some() {
-                let value = self.unpacking_value(target, &assignment.value)?;
-                return self.bind_pattern(target, value);
+                let value = self.unpacking_value(target, rhs)?;
+                bind_assignment(self, targets, value, output)?;
+                return Ok(true);
             }
-            let local = target.as_name_expr().filter(|_| {
-                !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
-            });
-            let previous = local.and_then(|name| {
-                let slot = *self.names.get(name.id.as_str())?;
-                self.inferred_containers
-                    .contains(&slot)
-                    .then_some((name.id.as_str(), slot))
-            });
-            let context = self.target_context(target, Some(&assignment.value));
+            let local = target
+                .as_name_expr()
+                .filter(|_| {
+                    !self.module_scope && self.block_depth == 1 && self.local_functions.is_empty()
+                })
+                .and_then(|name| Some((name.id.as_str(), *self.names.get(name.id.as_str())?)));
+            let previous = local.filter(|(_, slot)| self.inferred_containers.contains(slot));
+            let mut context = self.target_expectation(target, Some(rhs));
+            if matches!(context, Some((Type::Callable(_), None)))
+                && let Some((_, slot)) = local
+                && let Some(ValueSource::Function(prior)) = self.assigned.value_source(slot)
+                && let Some(Binding::Definition(owner)) = self.resolve(rhs)
+                && self
+                    .functions
+                    .get(&owner)
+                    .is_some_and(|next| next.id != prior)
+            {
+                // A previous function in an unannotated slot does not declare
+                // the next function's parameter types.
+                context = None;
+            }
+            let scalar_item = context
+                .filter(|(ty, _)| target.is_subscript_expr() && ty.builtin_scalar_name().is_some());
             let value = if let Some((_, old)) = previous {
                 // An empty literal still needs the old context. Other container
                 // expressions can determine their own concrete result type.
-                self.expr_expected_if(
-                    &assignment.value,
-                    self.locals[old],
-                    Self::rebindable_container,
-                )?
+                self.expr_expected_if(rhs, self.locals[old], Self::rebindable_container)?
+            } else if let Some((expected, _)) = scalar_item {
+                // Keep the scalar operand. Its RHS can change which container receives the store.
+                self.expr_expected_if(rhs, expected, |_, _| true)?
             } else if let Some(expected) = context {
-                self.expr_expected(&assignment.value, expected)?
+                self.assignment_rhs(target, rhs, expected)?
             } else {
-                self.typed_expr(&assignment.value)?
+                self.typed_expr(rhs)?
             };
+            if self.ends_before_assignment(&value, targets)? {
+                output.push(self.statement_at(rhs, Statement::Expr(value)));
+                return Ok(false);
+            }
             if let Some((name, old)) = previous
                 && value.ty != self.locals[old]
             {
-                return Ok(self.replace_local(name, old, value.ty, value));
+                statements::append_block(output, self.replace_local(name, old, value.ty, value));
+                return Ok(true);
             }
-            let statement = self.assign_value(target, value)?;
-            return Ok(vec![statement]);
+            let value = if context.is_none()
+                && let ast::Expr::Name(name) = target
+                && !self.names.contains_key(name.id.as_str())
+            {
+                let value = self.consuming_lists.capture_split(target.range(), value);
+                // A refused Python operand still establishes its local binding during discovery.
+                if self.inference.is_some()
+                    && self.discarded_function_body()
+                    && value.ty == Type::PythonObject
+                    && matches!(
+                        value.kind,
+                        ExprKind::Builtin(Builtin::Unrepresented | Builtin::UnrepresentedCall, _)
+                    )
+                {
+                    self.assign(target, value, None)?;
+                    return Ok(true);
+                }
+                value
+            } else {
+                value
+            };
+            let value_site = scalar_item.map(|_| rhs);
+            let start = output.len();
+            self.store_value(target, value, value_site, Some(output))?;
+            if let Some(sites) = &mut self.fixed_sites
+                && let Some(name) = target.as_name_expr()
+                && let [statement @ Statement::Assign(slot, _)] = &output[start..]
+                && self.names.get(name.id.as_str()) == Some(slot)
+            {
+                sites.statement(rhs.range(), statement);
+            } else if let Some(sites) = &mut self.fixed_sites
+                && let ast::Expr::Attribute(attribute) = target
+                && let [Statement::SetField(_, field, _)] = &mut output[start..]
+            {
+                sites.store_field(attribute, rhs.range(), field, None);
+            }
+            return Ok(true);
         }
-        let context = assignment
-            .targets
-            .iter()
-            .find_map(|target| self.target_context(target, Some(&assignment.value)));
-        let value = if let Some(expected) = context {
-            assignments::unpromoted(self.expr_expected(&assignment.value, expected)?)
+        let context = targets.iter().find_map(|target| {
+            self.target_expectation(target, Some(rhs))
+                .map(|ty| (target, ty))
+        });
+        let value = if let Some((target, expected)) = context {
+            assignments::unpromoted(self.assignment_rhs(target, rhs, expected)?)
         } else {
-            let target = assignment
-                .targets
+            let target = targets
                 .iter()
                 .find(|target| pattern_elements(target).is_some())
-                .unwrap_or(&assignment.targets[0]);
-            self.unpacking_value(target, &assignment.value)?
+                .unwrap_or(&targets[0]);
+            self.unpacking_value(target, rhs)?
         };
-        let captured = self.hidden(value.ty);
-        let mut body = vec![Statement::Assign(captured, value)];
-        for (index, target) in assignment.targets.iter().enumerate() {
-            let value = if index + 1 == assignment.targets.len() {
-                self.take_temporary(captured)
-            } else {
-                self.local(captured)
-            };
-            body.extend(self.bind_pattern(target, value)?);
+        if self.ends_before_assignment(&value, targets)? {
+            output.push(self.statement_at(rhs, Statement::Expr(value)));
+            return Ok(false);
         }
-        Ok(vec![Statement::Scope {
-            body,
-            clear: vec![captured],
-        }])
+        bind_assignment(self, targets, value, output)?;
+        Ok(true)
     }
 
-    /// Receivers and indices are checked after the RHS and preceding targets.
-    /// SetItem/SetField preserve this same RHS-first order in generated code.
-    pub(super) fn assign_value(
+    pub(super) fn store_value(
         &mut self,
         target: &ast::Expr,
         value: Expr,
-    ) -> Result<Statement, String> {
-        match target {
-            ast::Expr::Name(_) => self.assign(target, value),
-            ast::Expr::Subscript(subscript) => {
+        value_site: Option<&ast::Expr>,
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<(), String> {
+        if target.is_name_expr() {
+            self.assign(target, value, output)
+        } else {
+            self.store_place(target, value, value_site, output)
+        }
+    }
+
+    /// Receivers and indices are checked after the RHS and preceding targets.
+    fn store_place(
+        &mut self,
+        target: &ast::Expr,
+        value: Expr,
+        value_site: Option<&ast::Expr>,
+        output: Option<&mut Vec<Statement>>,
+    ) -> Result<(), String> {
+        let statement = 'place: {
+            if let ast::Expr::Subscript(subscript) = target {
                 if let Some(ty) = self.environ_item_type(&subscript.value) {
                     let bytes = ty == Type::Bytes;
                     let value = self.coerce(value, ty, target)?;
                     let key = self.expr_expected(&subscript.slice, ty)?;
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::EnvironSet { bytes }),
+                        Builtin::process(ir::ProcessOperation::EnvironSet { bytes }),
                         vec![value, key],
-                    )));
+                    ));
                 }
                 let receiver = self.expr(&subscript.value)?;
+                self.keep_module_list_layout(&receiver);
+                if receiver.ty == Type::PythonObject {
+                    let index = if self.registered.is_some() {
+                        registered::values::index_key(&subscript.slice, &mut |expr| {
+                            self.expr(expr)
+                        })?
+                    } else {
+                        self.expr(&subscript.slice)?
+                    };
+                    if self.module_scope && self.is_module_namespace(&receiver) {
+                        self.namespace_item_store(&index, &value);
+                    }
+                    break 'place Statement::assign_item(receiver, index, value);
+                }
                 if let Some((key, element)) = self.types.chainmap_entries(receiver.ty) {
                     let value = self.coerce(value, element, target)?;
                     let key = self.expr_expected(&subscript.slice, key)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
                             Builtin::ChainMapSetItem,
                             vec![value, receiver, key],
                         ),
-                    }));
+                    });
                 }
                 if let Type::Class(class) = receiver.ty
                     && self.classes.methods[class].contains_key("__setitem__")
@@ -249,7 +649,7 @@ impl Checker<'_> {
                     let key = scope.hold(self, key);
                     let assigned =
                         self.record_primitive(receiver, "__setitem__", &[key, value], target)?;
-                    return Ok(Statement::Expr(scope.finish(assigned)));
+                    break 'place Statement::Expr(scope.finish(assigned));
                 }
                 if matches!(receiver.ty, Type::Document(_)) {
                     if let ast::Expr::Slice(slice) = &*subscript.slice {
@@ -266,21 +666,22 @@ impl Checker<'_> {
                             value
                         };
                         let value = self.coerce(value, self.types.list(documents::ANY), target)?;
-                        return Ok(Statement::Expr(documents::op(
+                        break 'place Statement::Expr(documents::op(
                             ir::DocumentOp::ReplaceItems,
                             Type::None,
                             vec![value, receiver],
-                        )));
+                        ));
                     }
                     let value = self.coerce(value, documents::ANY, target)?;
                     let key = self.expr_expected(&subscript.slice, Type::Str)?;
-                    return Ok(Statement::Expr(documents::op(
+                    break 'place Statement::Expr(documents::op(
                         ir::DocumentOp::SetItem,
                         Type::None,
                         vec![value, receiver, key],
-                    )));
+                    ));
                 }
                 let receiver = self.json_mutation_receiver(receiver, subscript)?;
+                let declaration = self.value_declaration(&receiver);
                 let (key, element) = self
                     .types
                     .mapping(receiver.ty)
@@ -296,51 +697,84 @@ impl Checker<'_> {
                             "indexed assignment requires a mutable typed list or dictionary",
                         )
                     })?;
+                let site = value_site.unwrap_or(target);
+                let value = self
+                    .coerce(value, element, site)
+                    .map_err(|error| error.expected_from(declaration, site.range()));
+                // A direct RHS owns its error before the key. An unpacked value is placed after its key.
+                if value_site.is_some()
+                    && let Err(error) = value
+                {
+                    return Err(error);
+                }
                 let index = if matches!(receiver.ty, Type::Deque(_)) {
                     self.integer_index(&subscript.slice)?
                 } else {
-                    self.expr_expected(&subscript.slice, key)?
+                    self.expr_expected_from(&subscript.slice, key, declaration)?
                 };
-                let value = self.coerce(value, element, target)?;
-                Ok(Statement::SetItem(receiver, index, value))
-            }
-            ast::Expr::Attribute(attribute) => {
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
+                Statement::assign_item(receiver, index, value?)
+            } else if let ast::Expr::Attribute(attribute) = target {
+                if self.registered.is_some() {
+                    let receiver = self.expr(&attribute.value)?;
+                    let method_receiver = registered::values::method_receiver(
+                        self.registered_local_start,
+                        self.class,
+                        &attribute.value,
+                        &receiver,
+                    );
+                    if receiver.ty != Type::PythonObject && !method_receiver {
+                        return Err(error(
+                            self.source,
+                            attribute,
+                            "expected a Python object target",
+                        ));
+                    }
+                    if method_receiver {
+                        self.frame_arguments = FrameArguments::Python;
+                    }
+                    break 'place registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    );
+                }
+                let binding = self.resolve(target);
+                if binding == Some(Binding::Intrinsic(Intrinsic::PopenSelector)) {
                     let value = self.coerce(value, Type::ProcessSelectorClass, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
-                            Builtin::Process(ir::ProcessOperation::SetSelector),
+                            Builtin::process(ir::ProcessOperation::SetSelector),
                             vec![value],
                         ),
-                    }));
+                    });
                 }
-                if self.cache_config(target) == Some(true) {
+                if cache_paths::config(attribute, binding, || self.resolve(&attribute.value))
+                    == Some(true)
+                {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
-                    return Ok(Statement::Expr(cache_paths::op(
+                    break 'place Statement::Expr(cache_paths::op(
                         ir::CachePathOperation::Set(true),
                         Type::None,
                         vec![value],
-                    )));
+                    ));
                 }
-                if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) =
-                    self.resolve(target)
-                {
+                if let Some(Binding::Intrinsic(Intrinsic::LogRecordFlag(mask))) = binding {
                     let value = self.coerce(value, Type::Bool, target)?;
-                    return Ok(Statement::Expr(logging_records::op(
+                    break 'place Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::SetFlag,
                         Type::None,
                         vec![Expr::integer(mask), value],
-                    )));
+                    ));
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsLen)) {
                     let value = self.coerce(value, self.builtin_len().ty, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLen, vec![value]),
-                    }));
+                    });
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::Stdout)) {
                     if !matches!(
                         self.types.payload(value.ty).unwrap_or(value.ty),
                         Type::TextIO | Type::StringIO | Type::None
@@ -351,12 +785,12 @@ impl Checker<'_> {
                             "sys.stdout requires None or a native text stream",
                         ));
                     }
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::SysStdoutSet, vec![value]),
-                    }));
+                    });
                 }
-                if self.resolve(target) == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
+                if binding == Some(Binding::Intrinsic(Intrinsic::BuiltinsLast)) {
                     if !sys::displayable(value.ty) {
                         return Err(error(
                             self.source,
@@ -364,10 +798,10 @@ impl Checker<'_> {
                             "builtins._ requires a supported display value",
                         ));
                     }
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::BuiltinsSetLast, vec![value]),
-                    }));
+                    });
                 }
                 if let Some(class) = self.class_reference(&attribute.value)
                     && matches!(
@@ -377,26 +811,57 @@ impl Checker<'_> {
                         Some(crate::classes::ClassValue::Runtime { .. })
                     )
                 {
-                    return self.store_class_data(class, attribute, value);
+                    break 'place self.store_class_data(class, attribute, value)?;
                 }
                 let receiver = Self::weak_target(self.expr(&attribute.value)?);
+                if self.types.payload(receiver.ty).unwrap_or(receiver.ty) == Type::PythonObject {
+                    break 'place registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    );
+                }
+                if attribute.attr.as_str() == "__wrapped__"
+                    && (self.types.cache_declaration(receiver.ty).is_some()
+                        || self.types.cached_function(receiver.ty).is_some())
+                    && self.types.wrapped_link_type(value.ty)
+                        == self.types.wrapped_link_type(receiver.ty)
+                {
+                    // Assignment evaluates the RHS before the receiver. The public link
+                    // owns this reference independently of the cache's invocation target.
+                    let mut scope = calls::ArgumentScope::default();
+                    let value = scope.hold(self, value);
+                    let store = self.attach_wrapped(receiver, value, attribute)?;
+                    break 'place Statement::Expr(scope.finish(store));
+                }
+                if matches!(receiver.ty, Type::Callable(_))
+                    && attribute.attr.as_str() == "__defaults__"
+                {
+                    self.require_registered_operation(attribute)?;
+                    break 'place registered::attribute_statement(
+                        ir::AttributeAction::Store,
+                        attribute,
+                        vec![value, receiver],
+                    );
+                }
                 if receiver.ty == Type::SysImplementation && attribute.attr.as_str() == "cache_tag"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Str), target)?;
-                    return Ok(Statement::Expr(cache_paths::op(
+                    break 'place Statement::Expr(cache_paths::op(
                         ir::CachePathOperation::Set(false),
                         Type::None,
                         vec![value, receiver],
-                    )));
+                    ));
                 }
-                if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "returncode"
+                if matches!(receiver.ty, Type::Popen(..) | Type::ActivePopen)
+                    && attribute.attr.as_str() == "returncode"
                 {
                     let value = self.coerce(value, self.types.optional(Type::Int), target)?;
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::PopenSetStatus),
+                        Builtin::process(ir::ProcessOperation::PopenSetStatus),
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if matches!(receiver.ty, Type::Popen(..)) && attribute.attr.as_str() == "poll" {
                     let Some((params, returns)) = self.types.signature(value.ty) else {
@@ -416,31 +881,31 @@ impl Checker<'_> {
                             "Popen.poll needs a zero-argument callable returning int or None",
                         ));
                     }
-                    return Ok(Statement::Expr(builtin(
+                    break 'place Statement::Expr(builtin(
                         Type::None,
-                        Builtin::Process(ir::ProcessOperation::PopenSetPoll {
+                        Builtin::process(ir::ProcessOperation::PopenSetPoll {
                             returns_none: returns == Type::None,
                         }),
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if let Some(class) =
                     self.mutable_instance_data(receiver.ty, attribute.attr.as_str())
                 {
-                    return self.store_instance_data(class, attribute, receiver, value);
+                    break 'place self.store_instance_data(class, attribute, receiver, value)?;
                 }
                 if self.types.has_reflected_functions()
                     && matches!(receiver.ty, Type::FunctionRef | Type::Callable(_))
                     && let Some(index) = typing::attribute_index(attribute.attr.as_str())
                 {
                     let value = self.coerce(value, Type::Str, target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(
                             Builtin::Typing(ir::TypingOperation::SetAttr(index)),
                             vec![value, receiver],
                         ),
-                    }));
+                    });
                 }
                 if matches!(receiver.ty, Type::CodecWriterClass | Type::CodecWriter) {
                     let op = match (receiver.ty, attribute.attr.as_str()) {
@@ -455,14 +920,14 @@ impl Checker<'_> {
                         }
                     };
                     let value = self.coerce(value, Type::Str, target)?;
-                    return Ok(Statement::Expr(codecs::writer(
+                    break 'place Statement::Expr(codecs::writer(
                         op,
                         Type::None,
                         vec![value, receiver],
-                    )));
+                    ));
                 }
                 if receiver.ty == Type::LogManager && attribute.attr.as_str() == "disable" {
-                    return self.set_manager_disable(receiver, value, target);
+                    break 'place self.set_manager_disable(receiver, value, target)?;
                 }
                 if receiver.ty == Type::Logger
                     && let Some(op) = match attribute.attr.as_str() {
@@ -473,67 +938,67 @@ impl Checker<'_> {
                 {
                     let value = self.coerce(value, Type::Bool, target)?;
                     // The RHS precedes evaluation of the assignment target.
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::Logging(op), vec![value, receiver]),
-                    }));
+                    });
                 }
                 if receiver.ty == Type::LogFormatter {
-                    return self.formatter_set(receiver, attribute, value);
+                    break 'place self.formatter_set(receiver, attribute, value)?;
                 }
                 if let Type::CmpKey(frame, true) = receiver.ty
                     && attribute.attr.as_str() == "obj"
                 {
                     let cell = self.cmp_field(receiver, frame, 1);
                     let value = self.coerce(value, self.types.element(cell.ty).unwrap(), target)?;
-                    return Ok(Statement::SetItem(cell, Expr::integer(0), value));
+                    break 'place Statement::assign_item(cell, Expr::integer(0), value);
                 }
                 if let Type::SimpleNamespace(id) = receiver.ty {
                     let name = self.namespace_attr_name(attribute)?;
                     let item = self.types.mapping(Type::Dict(id)).unwrap().1;
                     let value = self.coerce(value, item, target)?;
-                    return Ok(Statement::SetItem(
+                    break 'place Statement::assign_item(
                         super::namespaces::backing(receiver, id),
                         name,
                         value,
-                    ));
+                    );
                 }
                 if matches!(receiver.ty, Type::ModuleSpec(_))
                     && attribute.attr.as_str() == "has_location"
                 {
-                    return self.set_module_spec_location(attribute, receiver, value);
+                    break 'place self.set_module_spec_location(attribute, receiver, value)?;
                 }
                 if receiver.ty == Type::LogRecord {
                     let value = self.check_record_value(value, target)?;
-                    return Ok(Statement::Expr(logging_records::op(
+                    break 'place Statement::Expr(logging_records::op(
                         ir::LogRecordOperation::Put,
                         Type::None,
                         vec![receiver, string(attribute.attr.as_str()), value],
-                    )));
+                    ));
                 }
 
                 if attribute.attr.as_str() == "MIN_READ_SIZE" && receiver.ty == Type::BinaryIO {
                     let value = self.coerce(value, Type::Int, target)?;
                     // Assignment evaluates the RHS before the receiver.
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ZipMinReadSize, vec![value, receiver]),
-                    }));
+                    });
                 }
                 if let Type::ChainMap(id) = receiver.ty
                     && attribute.attr.as_str() == "maps"
                 {
                     let maps = self.coerce(value, self.types.list(Type::Dict(id)), target)?;
-                    return Ok(Statement::Expr(Expr {
+                    break 'place Statement::Expr(Expr {
                         ty: Type::None,
                         kind: ExprKind::Builtin(Builtin::ChainMapSetMaps, vec![maps, receiver]),
-                    }));
+                    });
                 }
-                if let Some(class) = self.writable_property(receiver.ty, attribute) {
-                    return self.set_property(class, attribute, receiver, value);
+                if let Some(property) = self.writable_property(receiver.ty, attribute) {
+                    break 'place self.set_property(property, attribute, receiver, value)?;
                 }
                 if let Some(field) = self.setup_field(receiver.ty, attribute.attr.as_str()) {
-                    return self.store_setup_field(receiver, value, attribute, field);
+                    break 'place self.store_setup_field(receiver, value, attribute, field)?;
                 }
                 if let Type::Class(id) = receiver.ty
                     && let class = &self.classes.declarations.definitions[id]
@@ -550,24 +1015,32 @@ impl Checker<'_> {
                         "'{}' object has no attribute '{}' and no __dict__ for setting new attributes",
                         class.name, attribute.attr
                     );
-                    return Ok(Statement::Scope {
+                    break 'place Statement::Scope {
                         body: vec![
                             Statement::Expr(value),
                             Statement::Expr(receiver),
-                            Statement::Raise(Some(Expr {
+                            Statement::raise(Expr {
                                 ty: Type::Exception,
                                 kind: ExprKind::Exception {
                                     kind: exception_kind("AttributeError").unwrap(),
                                     message: Some(Box::new(string(message))),
                                 },
-                            })),
+                            }),
                         ],
                         clear: vec![],
-                    });
+                    };
                 }
                 let mock_effect = self.native_mock_instance(receiver.ty)
                     && attribute.attr.as_str() == "side_effect";
-                let (receiver, field, ty) = self.writable_field_value(attribute, receiver)?;
+                let (receiver, field, mut ty) = self.writable_field_value(attribute, receiver)?;
+                if let Some(inference) = self.inference
+                    && let Type::Class(class) = receiver.ty
+                    && ty == Type::JsonObject
+                    && matches!(value.ty, documents::ANY | documents::MAP)
+                {
+                    inference.document_field(class, field);
+                    ty = documents::MAP;
+                }
                 let value = self.coerce(value, ty, target).map_err(|error| {
                     if mock_effect {
                         self.object_runtime_export(
@@ -578,10 +1051,15 @@ impl Checker<'_> {
                         error
                     }
                 })?;
-                Ok(Statement::SetField(receiver, field, value))
+                Statement::set_field(receiver, field, value)
+            } else {
+                return Err(error(self.source, target, "unsupported assignment target"));
             }
-            _ => Err(error(self.source, target, "unsupported assignment target")),
+        };
+        if let Some(output) = output {
+            output.push(statement);
         }
+        Ok(())
     }
 
     /// Literal context is discovered before any target binding is published.
@@ -648,7 +1126,7 @@ impl Checker<'_> {
                     let values = values
                         .into_iter()
                         .map(|item| self.coerce(item, element, value))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
                     return Ok(Expr {
                         ty: self.types.list(element),
                         kind: ExprKind::List(values),
@@ -694,7 +1172,7 @@ impl Checker<'_> {
                                 self.expr_expected(value, element)
                                     .map(assignments::unpromoted)
                             })
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         let mut actual = values.first().map_or(element, |value| value.ty);
                         for value in &values {
                             actual = self.types.join(actual, value.ty).ok_or_else(|| {
@@ -708,7 +1186,7 @@ impl Checker<'_> {
                         let values = values
                             .into_iter()
                             .map(|value| self.coerce(value, actual, list))
-                            .collect::<Result<Vec<_>, _>>()?;
+                            .collect::<std::result::Result<Vec<_>, _>>()?;
                         return Ok(Expr {
                             ty: self.types.list(actual),
                             kind: ExprKind::List(values),
@@ -718,59 +1196,72 @@ impl Checker<'_> {
                 }
             }
         }
-        if let Some(expected) = self.target_context(target, Some(value)) {
+        if let Some(expected) = self.target_expectation(target, Some(value)) {
             return self
-                .expr_expected(value, expected)
+                .assignment_rhs(target, value, expected)
                 .map(assignments::unpromoted);
         }
         self.expr(value)
     }
+}
 
-    /// Each sequence level is checked and captured before its target stores;
-    /// nested levels are entered only when their target is reached.
-    pub(super) fn bind_pattern(
+impl PatternBinder for Checker<'_> {
+    type Error = Failure<String>;
+
+    fn pattern_hidden(&mut self, ty: Type) -> usize {
+        self.hidden(ty)
+    }
+    fn pattern_local(&self, slot: usize) -> Expr {
+        if self.registered.is_some()
+            && self.locals[slot] == Type::PythonObject
+            && let Some(&element) = self.narrowed.get(&slot)
+        {
+            return Expr::local(slot, element);
+        }
+        self.local(slot)
+    }
+    fn pattern_store(
         &mut self,
         target: &ast::Expr,
         value: Expr,
-    ) -> Result<Vec<Statement>, String> {
-        self.bind_pattern_with_root(target, value, None)
+        output: &mut Vec<Statement>,
+    ) -> StdResult<(), Self::Error> {
+        self.store_value(target, value, None, Some(output))
+    }
+    fn multiple_stars(&self, target: &ast::Expr) -> Self::Error {
+        error(
+            self.source,
+            target,
+            "an unpacking target may contain only one starred target",
+        )
     }
 
-    /// An iterator's private fixed tuple cannot be rebound by source targets.
-    /// Reuse that root while snapshotting all fields before user stores, making
-    /// the aggregate projection-only and eligible for scalar replacement.
-    pub(super) fn bind_iterator_pattern(
+    fn pattern_snapshot(
         &mut self,
         target: &ast::Expr,
-        source: usize,
-    ) -> Result<Vec<Statement>, String> {
-        let stable = matches!(self.locals[source], Type::Tuple(_)).then_some(source);
-        self.bind_pattern_with_root(target, self.local(source), stable)
-    }
-
-    /// A supplied root belongs exclusively to compiler iteration state; ordinary
-    /// source assignments retain a separate snapshot through target effects.
-    fn bind_pattern_with_root(
-        &mut self,
-        target: &ast::Expr,
+        targets: &[ast::Expr],
+        star: Option<usize>,
         value: Expr,
-        stable: Option<usize>,
-    ) -> Result<Vec<Statement>, String> {
-        let Some(targets) = pattern_elements(target) else {
-            return Ok(vec![self.assign_value(target, value)?]);
-        };
-        let mut stars = targets
-            .iter()
-            .enumerate()
-            .filter(|(_, target)| matches!(target, ast::Expr::Starred(_)));
-        let star = stars.next().map(|(index, _)| index);
-        if stars.next().is_some() {
-            return Err(error(
-                self.source,
-                target,
-                "an unpacking target may contain only one starred target",
+        row: Option<Row>,
+    ) -> StdResult<PatternSnapshot, Self::Error> {
+        if value.ty == Type::PythonObject
+            && (self.registered.is_some() || self.graph.modules[self.module].is_program_source())
+        {
+            if self.registered.is_none() {
+                self.require_registered_operation(target)?;
+            }
+            let sequence = self.types.list(Type::PythonObject);
+            return Ok(protocol_snapshot(
+                self,
+                target.range(),
+                targets.iter().map(|_| Type::PythonObject),
+                star,
+                value,
+                sequence,
+                row,
             ));
         }
+
         let fixed = targets.len() - usize::from(star.is_some());
         let fields = self.types.fields(value.ty);
         let element = self.types.element(value.ty).or(match value.ty {
@@ -794,11 +1285,47 @@ impl Checker<'_> {
                 "unpacking target has the wrong number of fields",
             ));
         }
-        let (captured, mut body) = if let Some(captured) = stable {
+        // A Python cursor yields a handle even when its element contract is a tuple.
+        // Unpack that handle once, then check each target with its declared field type.
+        if let Some(Row::Projected(slot)) = row
+            && self.registered.is_some()
+            && self.locals[slot] == Type::PythonObject
+            && star.is_none()
+            && let Some(fields) = fields.as_ref()
+        {
+            return Ok(protocol_snapshot(
+                self,
+                target.range(),
+                fields.iter().copied(),
+                None,
+                self.local(slot),
+                self.types.list(Type::PythonObject),
+                None,
+            ));
+        }
+        // A tuple display already evaluates these operands in snapshot order.
+        if star.is_none()
+            && row.is_none()
+            && matches!(value.ty, Type::Tuple(_))
+            && let ExprKind::Tuple(items) = value.kind
+        {
+            return Ok(PatternSnapshot::from_items(self, items));
+        }
+        // A successful builtin split returns at most maxsplit + 1 fields.
+        let split_fits = row.is_none()
+            && value
+                .split_operands()
+                .and_then(|(_, [_, _, limit])| limit.tagged_integer_literal())
+                .and_then(|limit| usize::try_from(limit).ok())
+                .is_some_and(|limit| limit < fixed);
+        let (captured, mut body) = if let Some(Row::Projected(captured)) = row {
             (captured, Vec::new())
         } else {
             let captured = self.hidden(value.ty);
-            (captured, vec![Statement::Assign(captured, value)])
+            (
+                captured,
+                vec![Statement::Assign(captured, consume_row(value, row))],
+            )
         };
         let mut clear = vec![captured];
         if fields.is_none() && (fixed != 0 || star.is_none()) {
@@ -829,7 +1356,7 @@ impl Checker<'_> {
                     Vec::new(),
                 ));
             }
-            if star.is_none() {
+            if star.is_none() && !split_fits {
                 body.push(Statement::If(
                     comparison(self.local(length), Compare::Greater, Expr::integer(fixed)),
                     vec![unpack_error(string(format!(
@@ -839,7 +1366,7 @@ impl Checker<'_> {
                 ));
             }
         }
-        let mut items = Vec::with_capacity(targets.len());
+        let mut snapshot = PatternSnapshot { body, clear };
         for (index, target) in targets.iter().enumerate() {
             let item = if let ast::Expr::Starred(starred) = target {
                 let suffix = targets.len() - index - 1;
@@ -873,7 +1400,7 @@ impl Checker<'_> {
                 let kind = match self.locals[captured] {
                     Type::Str => Builtin::StringGet,
                     Type::Bytes => Builtin::BytesGet,
-                    _ => Builtin::ListGet,
+                    _ => Builtin::ListGet(None),
                 };
                 builtin(
                     element.unwrap(),
@@ -881,23 +1408,13 @@ impl Checker<'_> {
                     vec![self.local(captured), Expr::integer(position)],
                 )
             };
-            let slot = self.hidden(item.ty);
-            body.push(Statement::Assign(slot, item));
-            clear.push(slot);
-            items.push(slot);
+            snapshot.capture(self, item);
         }
-        body.push(Statement::Clear(captured));
-        for (target, item) in targets.iter().zip(items) {
-            let target = if let ast::Expr::Starred(starred) = target {
-                &starred.value
-            } else {
-                target
-            };
-            body.extend(self.bind_pattern(target, self.take_temporary(item))?);
-        }
-        Ok(vec![Statement::Scope { body, clear }])
+        Ok(snapshot)
     }
+}
 
+impl Checker<'_> {
     /// A tuple remainder has one concrete element layout, including optional
     /// promotion. Empty remainders inherit a declared destination list type.
     fn tuple_rest(
@@ -937,7 +1454,7 @@ impl Checker<'_> {
                     target,
                 )
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(Expr {
             ty: self.types.list(element),
             kind: ExprKind::List(values),
@@ -992,15 +1509,17 @@ impl Checker<'_> {
             items: false,
             start: None,
         };
-        let (iteration, _) = self.lower_iteration(&item_target, input, &[], |checker| {
-            let item = checker.local(checker.names[&name]);
-            let item = checker.coerce(item, expected, target)?;
-            Ok(vec![Statement::Expr(builtin(
-                Type::None,
-                Builtin::Append,
-                vec![checker.local(result), item],
-            ))])
-        })?;
+        let (iteration, _) =
+            self.lower_iteration_after(&item_target, input, &[], Vec::new(), |checker, body| {
+                let item = checker.local(checker.names[&name]);
+                let item = checker.coerce(item, expected, target)?;
+                body.push(Statement::Expr(builtin(
+                    Type::None,
+                    Builtin::Append,
+                    vec![checker.local(result), item],
+                )));
+                Ok(true)
+            })?;
         let item = self.names.remove(&name).unwrap();
         let mut body = vec![Statement::Assign(
             result,

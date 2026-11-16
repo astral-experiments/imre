@@ -1,12 +1,13 @@
 //! Sealed POSIX readiness operations for integer file descriptors.
 use super::*;
 use crate::ir::{ProcessOperation, Readiness};
+use ruff_python_ast::CmpOp;
 
 fn op(operation: Readiness, ty: Type, args: Vec<Expr>) -> Expr {
     Expr {
         ty,
         kind: ExprKind::Builtin(
-            Builtin::Process(ProcessOperation::Readiness(operation)),
+            Builtin::process(ProcessOperation::Readiness(operation)),
             args,
         ),
     }
@@ -23,7 +24,7 @@ impl Checker<'_> {
         let value = if value.ty == Type::Bool {
             Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }
         } else {
             value
@@ -31,14 +32,11 @@ impl Checker<'_> {
         let value = scope.hold(self, value);
         let positive = Expr {
             ty: Type::Bool,
-            kind: ExprKind::Compare(
-                vec![value.clone(), Expr::integer(0)],
-                vec![ir::Compare::Greater],
-            ),
+            kind: ExprKind::Compare(vec![value.clone(), Expr::integer(0)], vec![CmpOp::Gt]),
         };
         let seconds = Expr {
             ty: Type::Float,
-            kind: ExprKind::Builtin(Builtin::Float, vec![value]),
+            kind: ExprKind::Builtin(Builtin::Float(None), vec![value]),
         };
         let zero = Expr {
             ty: Type::Float,

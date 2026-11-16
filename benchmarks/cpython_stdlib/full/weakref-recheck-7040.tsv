@@ -1,0 +1,184 @@
+ordinal	canonical_id	occurrence	historical_credit	frozen_stock	O0	O3	final_credit	observation	declared_default_O0	declared_default_O3
+1	test.test_weakref.FinalizeTestCase.test_all_freed	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+2	test.test_weakref.FinalizeTestCase.test_arg_errors	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+3	test.test_weakref.FinalizeTestCase.test_atexit	1	1	addSuccess	addSuccess	addSuccess	1	isolated child compiled at O3 under both parents	ok	ok
+4	test.test_weakref.FinalizeTestCase.test_finalize	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+5	test.test_weakref.FinalizeTestCase.test_order	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+6	test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_dict	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+7	test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_from_weak_keyed_dict	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+8	test.test_weakref.MappingTestCase.test_make_weak_keyed_dict_repr	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+9	test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_dict	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+10	test.test_weakref.MappingTestCase.test_make_weak_valued_dict_from_weak_valued_dict	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+11	test.test_weakref.MappingTestCase.test_make_weak_valued_dict_misc	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+12	test.test_weakref.MappingTestCase.test_make_weak_valued_dict_repr	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+13	test.test_weakref.MappingTestCase.test_remove_closure	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	skipped	skipped
+14	test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_copy	1	0	addSkip	addSkip	addSkip	0	resource 'cpu' is not enabled	interrupted	interrupted
+15	test.test_weakref.MappingTestCase.test_threaded_weak_key_dict_deepcopy	1	0	addSkip	addSkip	addSkip	0	resource 'cpu' is not enabled	unobserved	unobserved
+16	test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_copy	1	0	addSkip	addSkip	addSkip	0	resource 'cpu' is not enabled	unobserved	unobserved
+17	test.test_weakref.MappingTestCase.test_threaded_weak_value_dict_deepcopy	1	0	addSkip	addSkip	addSkip	0	resource 'cpu' is not enabled	unobserved	unobserved
+18	test.test_weakref.MappingTestCase.test_threaded_weak_valued_consistency	1	0	addSuccess	addError	addError	0	this thread target cannot run independently of the boxed Python heap	unobserved	unobserved
+19	test.test_weakref.MappingTestCase.test_threaded_weak_valued_pop	1	0	addSuccess	addError	addError	0	this thread target cannot run independently of the boxed Python heap	unobserved	unobserved
+20	test.test_weakref.MappingTestCase.test_threaded_weak_valued_setdefault	1	0	addSuccess	addError	addError	0	this thread target cannot run independently of the boxed Python heap	unobserved	unobserved
+21	test.test_weakref.MappingTestCase.test_weak_keyed_bad_delitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+22	test.test_weakref.MappingTestCase.test_weak_keyed_cascading_deletes	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+23	test.test_weakref.MappingTestCase.test_weak_keyed_delitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+24	test.test_weakref.MappingTestCase.test_weak_keyed_dict_popitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+25	test.test_weakref.MappingTestCase.test_weak_keyed_dict_setdefault	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+26	test.test_weakref.MappingTestCase.test_weak_keyed_dict_update	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+27	test.test_weakref.MappingTestCase.test_weak_keyed_iters	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+28	test.test_weakref.MappingTestCase.test_weak_keyed_len_cycles	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+29	test.test_weakref.MappingTestCase.test_weak_keyed_len_race	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+30	test.test_weakref.MappingTestCase.test_weak_keyed_union_operators	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+31	test.test_weakref.MappingTestCase.test_weak_keys	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+32	test.test_weakref.MappingTestCase.test_weak_keys_destroy_while_iterating	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+33	test.test_weakref.MappingTestCase.test_weak_valued_consistency	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+34	test.test_weakref.MappingTestCase.test_weak_valued_delitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+35	test.test_weakref.MappingTestCase.test_weak_valued_dict_popitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+36	test.test_weakref.MappingTestCase.test_weak_valued_dict_setdefault	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+37	test.test_weakref.MappingTestCase.test_weak_valued_dict_update	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+38	test.test_weakref.MappingTestCase.test_weak_valued_iters	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+39	test.test_weakref.MappingTestCase.test_weak_valued_len_cycles	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+40	test.test_weakref.MappingTestCase.test_weak_valued_len_race	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+41	test.test_weakref.MappingTestCase.test_weak_valued_union_operators	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+42	test.test_weakref.MappingTestCase.test_weak_values	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+43	test.test_weakref.MappingTestCase.test_weak_values_destroy_while_iterating	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+44	test.test_weakref.ModuleTestCase.test_names	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+45	test.test_weakref.ReferencesTestCase.test_basic_callback	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+46	test.test_weakref.ReferencesTestCase.test_basic_proxy	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+47	test.test_weakref.ReferencesTestCase.test_basic_ref	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+48	test.test_weakref.ReferencesTestCase.test_callable_proxy	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+49	test.test_weakref.ReferencesTestCase.test_callback_attribute	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+50	test.test_weakref.ReferencesTestCase.test_callback_attribute_after_deletion	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+51	test.test_weakref.ReferencesTestCase.test_callback_different_classes	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+52	test.test_weakref.ReferencesTestCase.test_callback_gcs	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+53	test.test_weakref.ReferencesTestCase.test_callback_in_cycle	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+54	test.test_weakref.ReferencesTestCase.test_callback_in_cycle_resurrection	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+55	test.test_weakref.ReferencesTestCase.test_callback_reachable_one_way	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+56	test.test_weakref.ReferencesTestCase.test_callbacks_on_callback	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+57	test.test_weakref.ReferencesTestCase.test_callbacks_protected	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+58	test.test_weakref.ReferencesTestCase.test_cfunction	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+59	test.test_weakref.ReferencesTestCase.test_classes	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+60	test.test_weakref.ReferencesTestCase.test_constructor_kwargs	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+61	test.test_weakref.ReferencesTestCase.test_equality	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+62	test.test_weakref.ReferencesTestCase.test_gc_during_proxy_creation	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+63	test.test_weakref.ReferencesTestCase.test_gc_during_ref_creation	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+64	test.test_weakref.ReferencesTestCase.test_getweakrefcount	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+65	test.test_weakref.ReferencesTestCase.test_getweakrefs	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+66	test.test_weakref.ReferencesTestCase.test_hashing	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+67	test.test_weakref.ReferencesTestCase.test_init	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+68	test.test_weakref.ReferencesTestCase.test_multiple_callbacks	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+69	test.test_weakref.ReferencesTestCase.test_multiple_selfref_callbacks	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+70	test.test_weakref.ReferencesTestCase.test_newstyle_number_ops	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+71	test.test_weakref.ReferencesTestCase.test_no_memory_when_clearing	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+72	test.test_weakref.ReferencesTestCase.test_ordering	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+73	test.test_weakref.ReferencesTestCase.test_proxy_bad_next	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+74	test.test_weakref.ReferencesTestCase.test_proxy_bool	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+75	test.test_weakref.ReferencesTestCase.test_proxy_deletion	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+76	test.test_weakref.ReferencesTestCase.test_proxy_div	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+77	test.test_weakref.ReferencesTestCase.test_proxy_hash	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+78	test.test_weakref.ReferencesTestCase.test_proxy_index	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+79	test.test_weakref.ReferencesTestCase.test_proxy_iter	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+80	test.test_weakref.ReferencesTestCase.test_proxy_matmul	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+81	test.test_weakref.ReferencesTestCase.test_proxy_next	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+82	test.test_weakref.ReferencesTestCase.test_proxy_ref	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+83	test.test_weakref.ReferencesTestCase.test_proxy_repr	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+84	test.test_weakref.ReferencesTestCase.test_proxy_reuse	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+85	test.test_weakref.ReferencesTestCase.test_proxy_reversed	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+86	test.test_weakref.ReferencesTestCase.test_proxy_unicode	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+87	test.test_weakref.ReferencesTestCase.test_ref_created_during_del	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+88	test.test_weakref.ReferencesTestCase.test_ref_repr	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+89	test.test_weakref.ReferencesTestCase.test_ref_reuse	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+90	test.test_weakref.ReferencesTestCase.test_repr_failure_gh99184	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+91	test.test_weakref.ReferencesTestCase.test_set_callback_attribute	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+92	test.test_weakref.ReferencesTestCase.test_sf_bug_840829	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+93	test.test_weakref.ReferencesTestCase.test_shared_proxy_without_callback	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+94	test.test_weakref.ReferencesTestCase.test_shared_ref_without_callback	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+95	test.test_weakref.ReferencesTestCase.test_trashcan_16602	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+96	test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+97	test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_conflate_callbacks	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+98	test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_dont_replace_standard_refs	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+99	test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_cycle	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+100	test.test_weakref.SubclassableWeakrefTestCase.test_subclass_refs_with_slots	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+101	test.test_weakref.WeakKeyDictionaryTestCase.test_bool	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+102	test.test_weakref.WeakKeyDictionaryTestCase.test_constructor	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+103	test.test_weakref.WeakKeyDictionaryTestCase.test_get	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+104	test.test_weakref.WeakKeyDictionaryTestCase.test_getitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+105	test.test_weakref.WeakKeyDictionaryTestCase.test_items	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+106	test.test_weakref.WeakKeyDictionaryTestCase.test_keys	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+107	test.test_weakref.WeakKeyDictionaryTestCase.test_len	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+108	test.test_weakref.WeakKeyDictionaryTestCase.test_pop	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+109	test.test_weakref.WeakKeyDictionaryTestCase.test_popitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+110	test.test_weakref.WeakKeyDictionaryTestCase.test_read	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+111	test.test_weakref.WeakKeyDictionaryTestCase.test_setdefault	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+112	test.test_weakref.WeakKeyDictionaryTestCase.test_update	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+113	test.test_weakref.WeakKeyDictionaryTestCase.test_values	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+114	test.test_weakref.WeakKeyDictionaryTestCase.test_write	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+115	test.test_weakref.WeakMethodTestCase.test_alive	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+116	test.test_weakref.WeakMethodTestCase.test_callback_when_method_dead	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+117	test.test_weakref.WeakMethodTestCase.test_callback_when_object_dead	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+118	test.test_weakref.WeakMethodTestCase.test_equality	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+119	test.test_weakref.WeakMethodTestCase.test_hashing	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+120	test.test_weakref.WeakMethodTestCase.test_method_dead	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+121	test.test_weakref.WeakMethodTestCase.test_no_cycles	1	0	addSuccess	addSkip	addSkip	0	implementation detail specific to cpython	unobserved	unobserved
+122	test.test_weakref.WeakMethodTestCase.test_object_dead	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+123	test.test_weakref.WeakValueDictionaryTestCase.test_bool	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+124	test.test_weakref.WeakValueDictionaryTestCase.test_constructor	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+125	test.test_weakref.WeakValueDictionaryTestCase.test_get	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+126	test.test_weakref.WeakValueDictionaryTestCase.test_getitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+127	test.test_weakref.WeakValueDictionaryTestCase.test_items	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+128	test.test_weakref.WeakValueDictionaryTestCase.test_keys	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+129	test.test_weakref.WeakValueDictionaryTestCase.test_len	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+130	test.test_weakref.WeakValueDictionaryTestCase.test_pop	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+131	test.test_weakref.WeakValueDictionaryTestCase.test_popitem	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+132	test.test_weakref.WeakValueDictionaryTestCase.test_read	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+133	test.test_weakref.WeakValueDictionaryTestCase.test_setdefault	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+134	test.test_weakref.WeakValueDictionaryTestCase.test_update	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+135	test.test_weakref.WeakValueDictionaryTestCase.test_values	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+136	test.test_weakref.WeakValueDictionaryTestCase.test_write	1	1	addSuccess	addSuccess	addSuccess	1		unobserved	unobserved
+137	test.test_weakref.__test__.libreftest	1	1	addSuccess	addFailure	addFailure	0	35 doctest examples lacked compiled bodies	unobserved	unobserved
+138	test.test_weakset.TestWeakSet.test_abc	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+139	test.test_weakset.TestWeakSet.test_add	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+140	test.test_weakset.TestWeakSet.test_and	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+141	test.test_weakset.TestWeakSet.test_clear	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+142	test.test_weakset.TestWeakSet.test_constructor_identity	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+143	test.test_weakset.TestWeakSet.test_contains	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+144	test.test_weakset.TestWeakSet.test_copy	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+145	test.test_weakset.TestWeakSet.test_copying	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+146	test.test_weakset.TestWeakSet.test_difference	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+147	test.test_weakset.TestWeakSet.test_difference_update	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+148	test.test_weakset.TestWeakSet.test_discard	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+149	test.test_weakset.TestWeakSet.test_eq	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+150	test.test_weakset.TestWeakSet.test_gc	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+151	test.test_weakset.TestWeakSet.test_gt	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+152	test.test_weakset.TestWeakSet.test_hash	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+153	test.test_weakset.TestWeakSet.test_iand	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+154	test.test_weakset.TestWeakSet.test_init	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+155	test.test_weakset.TestWeakSet.test_inplace_on_self	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+156	test.test_weakset.TestWeakSet.test_intersection	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+157	test.test_weakset.TestWeakSet.test_intersection_update	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+158	test.test_weakset.TestWeakSet.test_ior	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+159	test.test_weakset.TestWeakSet.test_isdisjoint	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+160	test.test_weakset.TestWeakSet.test_isub	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+161	test.test_weakset.TestWeakSet.test_ixor	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+162	test.test_weakset.TestWeakSet.test_len	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+163	test.test_weakset.TestWeakSet.test_len_cycles	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+164	test.test_weakset.TestWeakSet.test_len_race	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+165	test.test_weakset.TestWeakSet.test_lt	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+166	test.test_weakset.TestWeakSet.test_methods	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+167	test.test_weakset.TestWeakSet.test_ne	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+168	test.test_weakset.TestWeakSet.test_new_or_init	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+169	test.test_weakset.TestWeakSet.test_or	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+170	test.test_weakset.TestWeakSet.test_pop	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+171	test.test_weakset.TestWeakSet.test_remove	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+172	test.test_weakset.TestWeakSet.test_repr	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+173	test.test_weakset.TestWeakSet.test_sub	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+174	test.test_weakset.TestWeakSet.test_sub_and_super	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+175	test.test_weakset.TestWeakSet.test_subclass_with_custom_hash	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+176	test.test_weakset.TestWeakSet.test_symmetric_difference	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+177	test.test_weakset.TestWeakSet.test_symmetric_difference_update	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+178	test.test_weakset.TestWeakSet.test_union	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+179	test.test_weakset.TestWeakSet.test_update	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+180	test.test_weakset.TestWeakSet.test_update_set	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+181	test.test_weakset.TestWeakSet.test_weak_destroy_and_mutate_while_iterating	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+182	test.test_weakset.TestWeakSet.test_weak_destroy_while_iterating	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok
+183	test.test_weakset.TestWeakSet.test_xor	1	1	addSuccess	addSuccess	addSuccess	1		ok	ok

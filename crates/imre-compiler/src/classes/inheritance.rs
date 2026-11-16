@@ -3,28 +3,35 @@
 use super::*;
 use ruff_text_size::Ranged;
 
-pub(super) fn resolve(
+pub(super) fn resolve<'syntax>(
     graph: &SourceGraph,
-    nodes: &[(DefinitionId, &ast::StmtClassDef)],
-    ids: &HashMap<DefinitionId, usize>,
+    nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
+    ids: &mut HashMap<DefinitionId, usize>,
     exceptions: &exceptions::Declarations,
-) -> Result<Vec<Class>, String> {
-    fn build(
+    registered: HashSet<DefinitionId>,
+    first_layout: Option<&mut Option<Diagnostic>>,
+) -> Result<(Vec<Class<'syntax>>, HashSet<DefinitionId>), Diagnostic> {
+    struct Layouts<'syntax> {
+        fixed: Vec<Option<Class<'syntax>>>,
+        registered: HashSet<DefinitionId>,
+    }
+    fn build<'syntax>(
         id: usize,
         graph: &SourceGraph,
-        nodes: &[(DefinitionId, &ast::StmtClassDef)],
+        nodes: &[(DefinitionId, Cow<'syntax, ast::StmtClassDef>)],
         ids: &HashMap<DefinitionId, usize>,
         exceptions: &exceptions::Declarations,
-        classes: &mut [Option<Class>],
+        layouts: &mut Layouts<'syntax>,
         path: &mut Vec<usize>,
-    ) -> Result<(), String> {
-        if classes[id].is_some() {
+    ) -> Result<(), Diagnostic> {
+        if layouts.fixed[id].is_some() || layouts.registered.contains(&nodes[id].0) {
             return Ok(());
         }
-        let (definition, node) = nodes[id];
+        let (definition, ref source) = nodes[id];
+        let node = source.as_ref();
         let module = &graph.modules[definition.module];
         if path.contains(&id) || path.len() >= 64 {
-            return Err(module.error(node, "cyclic or too deeply nested class lineage"));
+            return Err(module.diagnostic(node, "cyclic or too deeply nested class lineage"));
         }
         path.push(id);
         let mut base: Option<usize> = None;
@@ -34,7 +41,9 @@ pub(super) fn resolve(
             for argument in &args.args {
                 if graph.is_protocol_base(definition.module, argument) {
                     graph.needs_object_runtime.set(true);
-                    return Err(module.error(argument, "Protocol bases require object lowering"));
+                    return Err(
+                        module.diagnostic(argument, "Protocol bases require object lowering")
+                    );
                 }
                 if mapping_base(graph, definition.module, argument)
                     || (args.args.len() == 1
@@ -57,14 +66,14 @@ pub(super) fn resolve(
                     Some(Binding::Intrinsic(Intrinsic::PICKLER)) => {
                         graph.needs_object_runtime.set(true);
                         return Err(
-                            module.error(argument, "pickle.Pickler requires object lowering")
+                            module.diagnostic(argument, "pickle.Pickler requires object lowering")
                         );
                     }
                     Some(Binding::Intrinsic(Intrinsic::ObjectRuntimeExport(
                         "contextlib.ContextDecorator",
                     ))) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(module.error(
+                        return Err(module.diagnostic(
                             argument,
                             "ContextDecorator subclasses require object lowering",
                         ));
@@ -73,9 +82,8 @@ pub(super) fn resolve(
                         "codecs.IncrementalDecoder" | "codecs.CodecInfo",
                     ))) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "codec base class requires object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "codec base class requires object lowering"));
                     }
                     Some(Binding::Intrinsic(
                         Intrinsic::IO_BASE
@@ -98,36 +106,46 @@ pub(super) fn resolve(
                         ),
                     )) => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "I/O base subclasses require object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "I/O base subclasses require object lowering"));
                     }
                     Some(Binding::Intrinsic(base)) if base.is_subclassable_calendar() => {
                         graph.needs_object_runtime.set(true);
-                        return Err(
-                            module.error(argument, "calendar subclasses require object lowering")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "calendar subclasses require object lowering"));
                     }
                     Some(Binding::Intrinsic(Intrinsic::StrEnum | Intrinsic::StandardEnum))
                         if args.args.len() == 1 && args.keywords.is_empty() => {}
                     Some(Binding::Intrinsic(Intrinsic::Abc)) => {}
                     Some(Binding::Definition(source)) if ids.contains_key(&source) => {
+                        if source.module != definition.module
+                            && let Some(name) = graph.modules[source.module].python_subclasses()
+                        {
+                            graph.needs_object_runtime.set(true);
+                            return Err(module
+                                .diagnostic(argument, &format!("{name} require object lowering")));
+                        }
                         if source.module == definition.module
                             && source.statement >= definition.statement
                         {
                             return Err(
-                                module.error(argument, "a base class must already be defined")
+                                module.diagnostic(argument, "a base class must already be defined")
                             );
                         }
                         let next = ids[&source];
-                        build(next, graph, nodes, ids, exceptions, classes, path)?;
+                        build(next, graph, nodes, ids, exceptions, layouts, path)?;
+                        if layouts.registered.contains(&source) {
+                            layouts.registered.insert(definition);
+                            path.pop();
+                            return Ok(());
+                        }
                         if let Some(first) = base {
-                            let parent: &Class = classes[first].as_ref().unwrap();
+                            let parent: &Class = layouts.fixed[first].as_ref().unwrap();
                             if parent.bases.contains(&next) {
                                 continue;
                             }
                             if args.args.len() == 2 && first != next {
-                                let second = classes[next].as_ref().unwrap();
+                                let second = layouts.fixed[next].as_ref().unwrap();
                                 if method_only_mixin(graph, second) {
                                     mixin = Some(next);
                                     continue;
@@ -141,13 +159,28 @@ pub(super) fn resolve(
                                     continue;
                                 }
                             }
-                            return Err(module.error(
+                            return Err(module.diagnostic(
                                 argument,
                                 "multiple independent base classes are unsupported",
                             ));
                         } else {
                             base = Some(next);
                         }
+                    }
+                    binding
+                        if matches!(binding, Some(Binding::RegisteredClass(_)))
+                            || argument.is_call_expr()
+                            || (!graph.entry_profile.requires_fixed_entry()
+                                && graph.session.is_special_form(
+                                    definition.module,
+                                    argument,
+                                    ty_python_semantic::types::SpecialFormType::NamedTuple,
+                                )) =>
+                    {
+                        // The Python class statement consumes the evaluated base object.
+                        layouts.registered.insert(definition);
+                        path.pop();
+                        return Ok(());
                     }
                     _ => {
                         let origin = match argument {
@@ -167,16 +200,11 @@ pub(super) fn resolve(
                             )
                         {
                             let error = module
-                                .error(argument, "native base class requires object lowering");
-                            graph
-                                .object_builtin_errors
-                                .borrow_mut()
-                                .insert(error.clone());
-                            return Err(error);
+                                .diagnostic(argument, "native base class requires object lowering");
+                            return Err(error.classified(Kind::ScopedObject));
                         }
-                        return Err(
-                            module.error(argument, "the base must be a known fixed-layout class")
-                        );
+                        return Err(module
+                            .diagnostic(argument, "the base must be a known fixed-layout class"));
                     }
                 }
             }
@@ -186,8 +214,8 @@ pub(super) fn resolve(
             graph,
             module,
             definition,
-            node,
-            [base, mixin].map(|parent| parent.map(|id| (id, classes[id].as_ref().unwrap()))),
+            source,
+            [base, mixin].map(|parent| parent.map(|id| (id, layouts.fixed[id].as_ref().unwrap()))),
             exceptions,
             &mut decorators,
         );
@@ -196,7 +224,11 @@ pub(super) fn resolve(
         {
             return Err(error);
         }
-        let mut class = class?;
+        let Some(mut class) = class? else {
+            layouts.registered.insert(definition);
+            path.pop();
+            return Ok(());
+        };
         if leading_mixin {
             // The independent root has no ancestors. It precedes the entire storage lineage.
             class.bases.rotate_right(1);
@@ -209,7 +241,7 @@ pub(super) fn resolve(
                 .iter()
                 .find(|field| exceptions::inherited_descriptor(&field.name, mro))
             {
-                return Err(module.error(
+                return Err(module.diagnostic(
                     node,
                     &format!(
                         "a record field cannot store the inherited exception descriptor '{}'",
@@ -221,16 +253,50 @@ pub(super) fn resolve(
                 exceptions::install_argument_slot(&mut class, module);
             }
         }
-        classes[id] = Some(class);
+        layouts.fixed[id] = Some(class);
         path.pop();
         Ok(())
     }
-    let mut classes = (0..nodes.len()).map(|_| None).collect::<Vec<_>>();
+    let mut layouts = Layouts {
+        fixed: (0..nodes.len()).map(|_| None).collect(),
+        registered,
+    };
     let mut path = Vec::new();
     for id in 0..nodes.len() {
-        build(id, graph, nodes, ids, exceptions, &mut classes, &mut path)?;
+        if let Err(error) = build(id, graph, nodes, ids, exceptions, &mut layouts, &mut path) {
+            if error.kind == Kind::ClassLayout
+                && graph.class_layout_error.borrow().is_none()
+                && let Some(first_layout) = first_layout
+                // Exception identities and their descendants share the complete payload layouts.
+                && exceptions.layouts.iter().all(|owner| {
+                    layouts.registered.contains(owner)
+                        || ids.get(owner).is_some_and(|&id| layouts.fixed[id].is_some())
+                })
+            {
+                *first_layout = Some(error);
+                break;
+            }
+            return Err(error);
+        }
     }
-    Ok(classes.into_iter().map(Option::unwrap).collect())
+    let mut fixed = layouts.fixed.into_iter().flatten().collect::<Vec<_>>();
+    if fixed.len() != nodes.len() {
+        ids.clear();
+        ids.extend(
+            fixed
+                .iter()
+                .enumerate()
+                .map(|(id, class)| (class.definition, id)),
+        );
+        let native = |id: usize| ids[&nodes[id].0];
+        for class in &mut fixed {
+            class.storage_base = class.storage_base.map(native);
+            for base in &mut class.bases {
+                *base = native(*base);
+            }
+        }
+    }
+    Ok((fixed, layouts.registered))
 }
 
 /// A root mixin supplies ordinary methods without declaring receiver storage.
@@ -320,15 +386,18 @@ pub(crate) fn direct_base_init(
         .parameters
         .iter()
         .any(|p| p.name() == root.id.as_str())
-        && !ast::helpers::any_over_body(
-            &initializer.body,
-            |expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load),
-        )
+        && !initializer.body.iter().any(|stmt| {
+            let rebinds = |expr: &ast::Expr| matches!(expr, ast::Expr::Name(n) if n.id == root.id && n.ctx != ast::ExprContext::Load);
+            if let Some((targets, rhs)) = initializer_assignment(initializer, stmt) {
+                targets.iter().chain([rhs]).any(|expr| ast::helpers::any_over_expr(expr, rebinds))
+            } else {
+                ast::helpers::any_over_body(std::slice::from_ref(stmt), rebinds)
+            }
+        })
 }
 
-/// Infer storage from an exact builtin value. The constructor still evaluates
-/// the original expression, including every format argument and its errors.
-fn literal_field_annotation(
+/// Infer scalar field storage without changing how the constructor evaluates its value.
+fn scalar_field_annotation(
     graph: &SourceGraph,
     module: usize,
     value: &ast::Expr,
@@ -343,6 +412,7 @@ fn literal_field_annotation(
         {
             "str"
         }
+        _ if graph.session.has_string_layout(module, value) => "str",
         _ => return None,
     };
     let annotation = ast::Expr::Name(ast::ExprName {
@@ -363,7 +433,7 @@ fn literal_field_annotation(
 pub(super) fn annotated_fields(
     graph: &SourceGraph,
     module: usize,
-    init: &mut ast::StmtFunctionDef,
+    init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
 ) {
     let Some(receiver) = init.parameters.iter_non_variadic_params().next() else {
@@ -375,22 +445,16 @@ pub(super) fn annotated_fields(
         .map(|p| (p.name().as_str(), p.annotation()))
         .collect::<HashMap<_, _>>();
     let locals = crate::narrowing::assigned_names(&init.body);
-    for statement in &mut init.body {
-        let (target, value, annotation) = match &*statement {
-            ast::Stmt::AnnAssign(a)
-                if let (ast::Expr::Attribute(target), Some(value)) = (&*a.target, &a.value) =>
-            {
-                (target, &**value, Some(&*a.annotation))
-            }
-            ast::Stmt::Assign(a) if let [ast::Expr::Attribute(target)] = a.targets.as_slice() => {
-                (target, &*a.value, None)
-            }
-            _ => continue,
-        };
-        if !matches!(&*target.value, ast::Expr::Name(n) if n.id.as_str() == receiver.name().as_str())
-        {
+    for statement in &init.body {
+        let Some(([target], value)) = imre_ast::assignment_parts(statement) else {
             continue;
-        }
+        };
+        let Some(name) = receiver_field(target, receiver.name().as_str()) else {
+            continue;
+        };
+        let annotation = statement
+            .as_ann_assign_stmt()
+            .map(|a| a.annotation.as_ref());
         let proxy_arg = if let ast::Expr::Call(call) = value
             && graph.resolve(module, &call.func) == Some(Binding::Intrinsic(Intrinsic::WeakProxy))
         {
@@ -404,7 +468,7 @@ pub(super) fn annotated_fields(
         } else {
             None
         };
-        if let Some(field) = fields.iter_mut().find(|f| f.name == target.attr.as_str()) {
+        if let Some(field) = fields.iter_mut().find(|f| f.name == name) {
             field.weak_proxy |= proxy_arg.is_some();
         } else if let Some(annotation) = annotation.or_else(|| {
             let name = proxy_arg?.as_name_expr()?.id.as_str();
@@ -412,7 +476,7 @@ pub(super) fn annotated_fields(
         }) {
             fields.push(Field {
                 module,
-                name: target.attr.to_string(),
+                name: name.to_owned(),
                 annotation: annotation.clone(),
                 weak_proxy: proxy_arg.is_some(),
                 default: None,
@@ -421,29 +485,21 @@ pub(super) fn annotated_fields(
                 compare: true,
             });
         }
-        if let ast::Stmt::AnnAssign(assign) = statement
-            && let Some(value) = &assign.value
-        {
-            *statement = ast::Stmt::Assign(ast::StmtAssign {
-                node_index: ast::AtomicNodeIndex::NONE,
-                range: assign.range,
-                targets: vec![(*assign.target).clone()],
-                value: value.clone(),
-            });
-        }
     }
 }
 
+/// Returns whether an unannotated argument supplies an instance field.
 pub(super) fn infer_fields(
     graph: &SourceGraph,
     module: usize,
     init: &ast::StmtFunctionDef,
     fields: &mut Vec<Field>,
-) {
+) -> bool {
+    let mut open_parameter_field = false;
     let params = init
         .parameters
         .iter_non_variadic_params()
-        .filter_map(|p| p.annotation().map(|ann| (p.name().as_str(), ann)))
+        .map(|p| (p.name().as_str(), p.annotation()))
         .collect::<HashMap<_, _>>();
     for stmt in &init.body {
         let ast::Stmt::Assign(assign) = stmt else {
@@ -460,7 +516,13 @@ pub(super) fn infer_fields(
             continue;
         }
         let ann = match &*assign.value {
-            ast::Expr::Name(name) => params.get(name.id.as_str()).map(|&ann| ann.clone()),
+            ast::Expr::Name(name) if let Some(annotation) = params.get(name.id.as_str()) => {
+                open_parameter_field |= annotation.is_none();
+                annotation.cloned()
+            }
+            value if let Some(annotation) = scalar_field_annotation(graph, module, value) => {
+                Some(annotation)
+            }
             ast::Expr::Call(call)
                 if matches!(&*call.func, ast::Expr::Name(name) if name.id == "list")
                     && graph.resolve(module, &call.func).is_none()
@@ -469,7 +531,9 @@ pub(super) fn infer_fields(
                 let [ast::Expr::Name(input)] = call.arguments.args.as_ref() else {
                     continue;
                 };
-                let Some(ast::Expr::Subscript(annotated)) = params.get(input.id.as_str()) else {
+                let Some(ast::Expr::Subscript(annotated)) =
+                    params.get(input.id.as_str()).copied().flatten()
+                else {
                     continue;
                 };
                 let mut list = annotated.clone();
@@ -503,7 +567,7 @@ pub(super) fn infer_fields(
                         && matches!(&*list.slice, ast::Expr::Name(ty) if matches!(ty.id.as_str(), "str" | "bytes")));
                 preserving.then(|| field.annotation.clone())
             }
-            value => literal_field_annotation(graph, module, value),
+            _ => None,
         };
         if let Some(annotation) = ann {
             fields.push(Field {
@@ -516,6 +580,175 @@ pub(super) fn infer_fields(
                 repr: true,
                 compare: true,
             });
+        }
+    }
+    open_parameter_field
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_enum_layout_depends_on_its_member_values() {
+        let graph = SourceGraph::single(
+            r#"from enum import Enum
+class Text(Enum):
+    word = "word"
+class Mixed(Enum):
+    word = "word"
+    count = 0
+    empty = None
+"#,
+        )
+        .unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert!(classes.ids.contains_key(&id(1)));
+        assert!(classes.registered_classes.contains(&id(2)));
+    }
+
+    #[test]
+    fn object_fields_keep_native_and_python_bases_distinct() {
+        let source = r#"class Open:
+    def __init__(self, value):
+        self.value = value
+
+class Fixed:
+    value: int
+    def __init__(self, value: int):
+        self.value = value
+
+class OpenChild(Open):
+    pass
+
+class FixedChild(Fixed):
+    pass
+
+assert issubclass(OpenChild, Open)
+assert not issubclass(Open, OpenChild)
+"#;
+        crate::compile(source, &crate::CompileOptions::default()).unwrap();
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: 0,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(0), id(2)]));
+        assert_eq!(classes.ids[&id(1)], 0);
+        let child = &classes.definitions[classes.ids[&id(3)]];
+        assert_eq!(child.storage_base, Some(0));
+        assert_eq!(child.bases, [0]);
+    }
+
+    #[test]
+    fn property_uses_its_module_functions_or_its_instance_methods() {
+        let graph = SourceGraph::single(
+            r#"def read(owner): return owner.stored
+def write(owner, value): owner.stored = value
+
+class Captured:
+    def __init__(self, value: int): self.stored = value
+    item = property(read, write)
+
+class WriteOnly:
+    def __init__(self, value: int): self.stored = value
+    def set(self, value: int): self.stored = value
+    item = property(None, set)
+
+class Fixed:
+    def __init__(self, value: int): self.stored = value
+    def get(self) -> int: return self.stored
+    item = property(get)
+
+class Child(Fixed):
+    def get(self) -> int: return 23
+"#,
+        )
+        .unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(2), id(3)]));
+        let fixed = &classes.definitions[classes.ids[&id(4)]];
+        let child = &classes.definitions[classes.ids[&id(5)]];
+        let method = |class: &super::Class, name: &str| {
+            class
+                .methods
+                .iter()
+                .position(|method| method.name.as_str() == name)
+                .unwrap()
+        };
+        let get = &fixed.methods[method(fixed, "get")].function;
+        let property = &fixed.methods[method(fixed, "item")].function;
+        let inherited = &child.methods[method(child, "item")].function;
+        let source = &graph.modules[fixed.definition.module].parsed.syntax().body
+            [fixed.definition.statement];
+        let original = source.as_class_def_stmt().unwrap().body[1]
+            .as_function_def_stmt()
+            .unwrap();
+        assert!(std::ptr::eq(&**get, original));
+        assert!(std::ptr::eq(&**property, original));
+        assert!(std::ptr::eq(&**inherited, original));
+        let overriding = &child.methods[method(child, "get")].function;
+        assert!(!std::ptr::eq(&**overriding, original));
+    }
+
+    #[test]
+    fn async_iterator_registers_only_its_class_and_subclasses() {
+        let source = r#"from typing import AsyncIterator
+
+class Stream:
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        raise NotImplementedError
+        yield b""
+    async def aclose(self) -> None:
+        pass
+
+class Scalar:
+    def add(self, value: int) -> int:
+        return value + 1
+
+class Derived(Stream):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield b"child"
+"#;
+        let graph = SourceGraph::single(source).unwrap();
+        let classes = Classes::collect(&graph).unwrap();
+        let id = |statement| DefinitionId {
+            module: graph.entry,
+            statement,
+        };
+        assert_eq!(classes.registered_classes, HashSet::from([id(1), id(3)]));
+        let scalar = &classes.definitions[classes.ids[&id(2)]];
+        assert!(
+            scalar
+                .methods
+                .iter()
+                .any(|method| method.name.as_str() == "add")
+        );
+    }
+
+    #[test]
+    fn async_iterator_keeps_sibling_diagnostics_in_source() {
+        let iterator = "    async def __aiter__(self): yield 1\n";
+        let invalid = "    def __unknown__(self): pass\n";
+        for (methods, position) in [([iterator, invalid], 1), ([invalid, iterator], 0)] {
+            let source = format!("class Stream:\n{}", methods.concat());
+            let graph = SourceGraph::single(&source).unwrap();
+            let module = &graph.modules[graph.entry];
+            let class = module.parsed.suite()[0].as_class_def_stmt().unwrap();
+            let expected = module.diagnostic(
+                &class.body[position],
+                "unsupported special method on a fixed-layout class",
+            );
+            assert_eq!(Classes::collect(&graph).err(), Some(expected));
         }
     }
 }

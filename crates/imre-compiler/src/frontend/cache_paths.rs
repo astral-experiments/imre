@@ -19,25 +19,21 @@ fn choose(test: Expr, yes: Expr, no: Expr) -> Expr {
     }
 }
 
-impl Checker<'_> {
-    pub(super) fn cache_config(&self, node: &ast::Expr) -> Option<bool> {
-        match node {
-            ast::Expr::Attribute(a)
-                if a.attr.as_str() == "cache_tag"
-                    && self.resolve(&a.value)
-                        == Some(Binding::Intrinsic(Intrinsic::SysImplementation)) =>
-            {
-                Some(false)
-            }
-            ast::Expr::Attribute(_)
-                if self.resolve(node) == Some(Binding::Intrinsic(Intrinsic::SysPycachePrefix)) =>
-            {
-                Some(true)
-            }
-            _ => None,
-        }
+pub(super) fn config(
+    field: &ast::ExprAttribute,
+    binding: Option<Binding>,
+    base: impl FnOnce() -> Option<Binding>,
+) -> Option<bool> {
+    if field.attr.as_str() == "cache_tag"
+        && base() == Some(Binding::Intrinsic(Intrinsic::SysImplementation))
+    {
+        Some(false)
+    } else {
+        (binding == Some(Binding::Intrinsic(Intrinsic::SysPycachePrefix))).then_some(true)
     }
+}
 
+impl Checker<'_> {
     fn cache_is_none(&self, value: Expr) -> Expr {
         if self.types.payload(value.ty).is_some() {
             Expr {

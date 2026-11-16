@@ -4,17 +4,19 @@
 use super::*;
 use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 
-pub(super) fn only_compares_zero(function: &ast::StmtFunctionDef, parameter: &str) -> bool {
-    if narrowing::assigned_names(&function.body).contains(parameter) {
-        return false;
-    }
+pub(crate) fn only_compares_zero(body: &[ast::Stmt], parameter: &str) -> bool {
     let mut reads = Reads {
         parameter,
         compared: false,
         other: false,
     };
-    reads.visit_body(&function.body);
-    reads.compared && !reads.other
+    for statement in body {
+        reads.visit_stmt(statement);
+        if reads.other {
+            return false;
+        }
+    }
+    reads.compared && !narrowing::assigned_names(body).contains(parameter)
 }
 
 struct Reads<'a> {
@@ -59,8 +61,7 @@ impl<'a> Visitor<'a> for Reads<'_> {
             | ast::Expr::ListComp(_)
             | ast::Expr::SetComp(_)
             | ast::Expr::DictComp(_) => {
-                self.other |=
-                    comprehensions::free_reads(expr, HashSet::new()).contains(self.parameter);
+                self.other |= function_scope::expression_reads(expr).contains(self.parameter);
             }
             _ => walk_expr(self, expr),
         }
@@ -74,11 +75,7 @@ impl Checker<'_> {
         ty: Type,
         sign_only: bool,
     ) -> Result<Expr, String> {
-        if !sign_only {
-            return self.expr_expected(argument, ty);
-        }
-        let value = self.expr(argument)?;
-        self.direct_value(value, argument, ty, true)
+        calls::Supplied::Source(argument).checked(self, ty, sign_only, None)
     }
 
     pub(super) fn direct_value(
@@ -115,7 +112,7 @@ impl Checker<'_> {
                 }
             }
         };
-        let if_none = |v: &Expr, absent: Expr, present: Expr| {
+        fn if_none(v: &Expr, absent: impl FnOnce() -> Expr, present: Expr) -> Expr {
             if v.ty == Type::Int {
                 present
             } else {
@@ -127,12 +124,12 @@ impl Checker<'_> {
                     ty: Type::Int,
                     kind: ExprKind::Conditional(
                         Box::new(test),
-                        Box::new(absent),
+                        Box::new(absent()),
                         Box::new(present),
                     ),
                 }
             }
-        };
+        }
         let error = |l, r| {
             calls::type_error(
                 Type::Int,
@@ -148,12 +145,14 @@ impl Checker<'_> {
                 Box::new(integer(&right)),
             ),
         };
-        let absent = if_none(
-            &right,
-            error("NoneType", "NoneType"),
-            error("NoneType", "int"),
-        );
-        let present = if_none(&right, error("int", "NoneType"), sum);
+        let absent = || {
+            if_none(
+                &right,
+                || error("NoneType", "NoneType"),
+                error("NoneType", "int"),
+            )
+        };
+        let present = if_none(&right, || error("int", "NoneType"), sum);
         scope.finish(if_none(&left, absent, present))
     }
 }

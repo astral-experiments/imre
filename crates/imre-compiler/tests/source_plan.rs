@@ -1,0 +1,83 @@
+use imre_compiler::{CompileOptions, check, check_file, compile, compile_file};
+
+#[test]
+fn callback_uses_a_registered_entry_from_source_and_file() {
+    let source = r#"def deliver(n: int, send):
+    send(n + 1)
+
+def first(value):
+    print(value)
+
+def second(value):
+    print(value + 2)
+
+deliver(4, {"one": first, "two": second}[input()])
+"#;
+    let options = CompileOptions::default();
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("callback.py");
+    std::fs::write(&file, source).unwrap();
+
+    check(source).unwrap();
+    check_file(&file, None).unwrap();
+    let memory = compile(source, &options).unwrap();
+    let physical = compile_file(&file, None, &options).unwrap();
+    assert!(memory.contains("call ptr @imre_dyn_new("));
+    assert!(physical.source_inputs.boxed_imports);
+
+    let invalid = source.replace("deliver(4,", "deliver('x',");
+    let expected =
+        "/input.py:10:9: Imre: expected int, got str; annotations are enforced contracts";
+    assert_eq!(check(&invalid).unwrap_err(), expected);
+    assert_eq!(compile(&invalid, &options).unwrap_err(), expected);
+    std::fs::write(&file, invalid).unwrap();
+    assert_eq!(
+        check_file(&file, None).unwrap_err(),
+        expected.replace("/input.py", file.to_str().unwrap())
+    );
+}
+
+#[test]
+fn a_named_comprehension_checks_its_conditional_capture_before_the_filter() {
+    let project = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("main.py"),
+        r#"def accepts(value: int) -> bool:
+    return bool(value)
+def rows(items: list[int], flag: bool) -> list[str]:
+    lookup: dict[int, int] = {item: item for item in items}
+    if flag:
+        word = "kept"
+    return [word for item in items if accepts("bad")]
+print(rows([], False))
+"#,
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_imre"))
+        .current_dir(project.path())
+        .args(["-B", "-m", "main"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8(output.stderr).unwrap();
+    assert!(error.contains("error[invalid-argument-type]"), "{error}");
+    assert!(error.contains("main.py:7:47"), "{error}");
+}
+
+#[test]
+fn eager_filters_use_the_checked_result_of_the_outer_call() {
+    let source = r#"
+def options() -> list[str]:
+    return ["alpha", "beta"]
+def text() -> str:
+    return "ab"
+def choose(prefix: str) -> list[str]:
+    return [s for s in options() if s.startswith(prefix)]
+def characters(keys: set[str]) -> set[str]:
+    return {c for c in text() if c in keys}
+"#;
+    let llvm = compile(source, &CompileOptions::default()).unwrap();
+    for kernel in ["imre_str_list_filter", "imre_filter_character_set"] {
+        assert!(llvm.contains(&format!("call ptr @{kernel}(")), "{kernel}");
+    }
+}

@@ -32,7 +32,7 @@ and binding keyword defaults remain unsupported.
 | Modules | Closed UTF-8 source graph; imports can follow literal exports in imported modules; entry definitions precede executable statements; imported initializers run once in dependency/source order; optional docstrings |
 | Imports | Absolute, `from`, and package-relative imports; aliases and package re-exports; fixed module, definition, and exported value bindings; shared mutable values; no import cycles |
 | Copying | Shallow copies of mutable containers share their children. Plain fixed class instances copy their stored fields without rerunning the initializer; a class may override this through an inherited or explicit `__copy__(self)` method. Deep copy preserves aliases in closed builtin container graphs with immutable keys, using the implicit memo or literal `None`. |
-| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only, keyword-only, and read-only variadic positional parameters; exact callable values, bound methods, and noncapturing lambdas; no recursive call cycles |
+| Functions | Exact signatures declared or inferred from concrete calls, scalar defaults, and checked bodies; direct positional and keyword calls; positional-only, keyword-only, and read-only variadic positional parameters; exact callable values, bound methods, and noncapturing lambdas; direct and mutual recursion with resolved signatures |
 | Types | `int`, `float`, `bool`, `str`, `bytes`, `None`, sealed `pathlib.Path` and `subprocess.CompletedProcess[str]`, `typing.TextIO` and `typing.BinaryIO`, the sealed builtin `Exception` family, fixed nominal classes, string-valued `enum.StrEnum` and `typing.Literal`, concrete `list[T]`, `dict[K, V]`, and `set[T]`, fixed tuples such as `tuple[str, int]`, exact `typing.Callable[[T1, T2], R]` signatures, `str \| bytes`, and `T \| None`; locals have one inferred or declared storage type |
 | Classes | Fixed fields, explicit or dataclass-generated initialization, typed instance/class/static methods, properties with optional setters, method-local `typing.Self`, alias-visible mutation, and frozen dataclasses |
 | Statements | Single-target and chained assignment; nested and starred unpacking of fixed tuples, lists, strings, and bytes, annotated assignment, numeric augmented assignment, local string/bytes `+=` and bytes `*=`, dictionary entry deletion, `if`/`elif`/`else`, structural `match`/`case`, `while`, `for` over ranges, strings, bytes, concrete containers, or supported iterator pipelines, loop `else`, `break`, `continue`, `return`, `pass`, `assert condition[, string_message]`, `raise`, `try`/`except`/`else`/`finally`, and builtin file/workspace `with` |
@@ -55,11 +55,11 @@ and binding keyword defaults remain unsupported.
 
 Booleans have a separate exact type: use `int(flag)` to store one in an integer list. A fresh local initialized with `rows = []` can take its element type from the first direct `rows.append(value)` statement later in the suite, including inside a loop or conditional. This inference supports scalar `int`, `bool`, `float`, `str`, and `bytes` operands. An empty list otherwise defaults to `list[int]` unless a typed storage, call, or return boundary supplies its element type. No annotation permits `Any`, an unrestricted union, an untyped object, or a foreign container to enter native storage. ty checks ordinary Python typing first; Imre additionally enforces exact types, definite assignment, fixed bindings, and every container write. Suppression comments cannot waive Imre's contract.
 
-Indentation must use spaces; tabs and form feeds remain valid inside string data. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
+Block indentation compares tab stops of eight columns with the alternate one-column indentation. Tabs in continuation lines and formatted-string expressions are whitespace. Source files restrict form feeds in block indentation and formatted-string expression indentation. For explicitly joined indentation, the pinned parser requires at least one physical prefix long enough to encode the active suite depth when its token stream needs correction. Blank lines, comment-only lines, ordinary continuation lines and string data can contain tabs and form feeds. Physical CRLF and CR newlines are normalized to LF before parsing, including inside string literals, as in Python. An optional encoding declaration must spell `utf-8`, `utf_8`, or `utf8` (case insensitive). Other declared encodings and literal NUL bytes in source are rejected; escaped NUL characters in strings are supported.
 
 The compiler bounds syntax complexity before parsing each module. Deeply nested blocks, delimiters, or long chains of operators can exceed the limit. Splitting a long expression into intermediate assignments reduces its depth.
 
-Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, async generators, slice assignment/deletion, open-ended call argument expansion, untyped variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. A recursive call graph is rejected, including indirect recursion through callable values, methods, constructors, or comprehension bodies; a future recursion feature needs an explicit stack policy.
+Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic attributes, general generator functions, escaping iterator values, slice assignment/deletion, open-ended call argument expansion, untyped variadic parameters, function defaults other than scalar literals, mutable-list augmented assignment, and arbitrary object identity comparisons are currently rejected. An async comprehension can consume an async generator in a saved executable. By default the compiler checks every function and branch. A closed entry profile can select particular branches of reachable functions. Recursive calls with resolved signatures count active Python frames against the current recursion limit. The compiler grows the native stack at entries on checked call cycles.
 
 ## Inferred function signatures and iterable consumers
 
@@ -73,7 +73,7 @@ def checksum(text):
 print(checksum("12345"))
 ```
 
-This infers `checksum(str) -> int`. Every function has one exact signature, and all bodies are checked again against the completed signatures before code generation. An annotation remains an enforced contract. Incompatible callers, an uncalled parameter without a default or annotation, recursive call cycles, and unsupported return unions are rejected. There is no dynamic fallback, implicit numeric conversion, arbitrary `Any`, or polymorphic specialization. A `None` default supplies the exact `None` type; annotate a parameter explicitly when it accepts a nullable payload. Inference does not solve arbitrary constraints backward from a function body.
+This infers `checksum(str) -> int`. Every function has one exact signature, and all bodies are checked again against the completed signatures before code generation. An annotation remains an enforced contract. Incompatible callers, an uncalled parameter without a default or annotation, unresolved recursive return types, and unsupported return unions are rejected. There is no dynamic fallback, implicit numeric conversion, arbitrary `Any`, or polymorphic specialization. A `None` default supplies the exact `None` type; annotate a parameter explicitly when it accepts a nullable payload. Inference does not solve arbitrary constraints backward from a function body.
 
 `list()` creates an empty list with the contextual element type, defaulting to `list[int]`. `list(source)` makes a shallow copy of a concrete list, string, bytes, dictionary keys/items, set, range, enumeration, or fixed tuple. All copied elements must fit one supported destination type; an existing source container retains its own layout and alias behavior.
 
@@ -180,9 +180,11 @@ print(apply(lambda value: value * value, 12))
 print(sum(map(lambda value: value + 1, filter(None, [0, 2, 3]))))
 ```
 
-Indirect calls evaluate and retain the callable before evaluating arguments from left to right. They accept positional arguments at full arity: parameter names and default omission are available only on direct calls. Parameter and result types must match exactly; callable variance and implicit numeric conversions are not supported. Functions with keyword-only parameters cannot become callable values.
+Indirect calls evaluate and retain the callable before evaluating arguments from left to right. A call through a fixed-layout callable takes all its arguments positionally. An annotation such as `Callable[[int, str], bool]` records their types and order. Parameter and result types must match exactly; callable variance and implicit numeric conversions are not supported. Functions with keyword-only parameters cannot become callable values.
 
-Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. Callable values cannot be stored in imported module globals, class fields, containers, or tuples, including through optional or nested storage. These restrictions keep the supported heap graph acyclic; callable values do not add a cycle collector.
+A dictionary can hold compiled module functions. In `handlers[key](n=value)`, the selected function binds the keyword against its own parameter list. If evaluating the argument replaces the dictionary entry, the current call still invokes the function it already selected.
+
+Noncapturing lambdas obtain parameter types from an expected callable annotation, parameter, or return type, or from the input elements of `map`, `filter`, `sorted`, or `list.sort`. Their bodies are checked against that signature. Captured enclosing locals, `nonlocal`, lambda defaults, variadic parameters, and keyword-only lambda parameters are rejected. `Callable[..., R]` is also rejected. The fixed-layout type system rejects `Callable` storage in imported module globals, class fields, containers, and tuples, including optional or nested storage. For example, `def use(values: dict[str, Callable[[int], int]]) -> None` still receives a build diagnostic.
 
 An annotated `def` directly inside another function can read enclosing typed
 locals. Each direct call reads their current bindings after evaluating its
@@ -482,7 +484,9 @@ def first_or_zero(values: list[int] | None) -> int:
 
 A true optional local is narrowed to its payload. A false optional number or container may still be present, so falsity does not prove `None`; use an explicit None check when that distinction matters. Truth testing never changes storage requirements: assigning an integer or container to a `bool` annotation still fails.
 
-A module can declare an immutable tuple class with `collections.namedtuple("Name", fields)`. Supply a literal field-name string, list, or tuple. Constructors accept positional and named fields and starred fixed tuples; field reads, indexing, unpacking, `_fields`, `__match_args__`, tuple equality for compatible immutable layouts, and named `repr` preserve tuple behavior. An annotated parameter or return must infer the corresponding class and a single concrete field layout. Dynamic factories, declaration options, generated methods such as `_replace`, and subclassing are outside this subset.
+A module can declare an immutable tuple class with `collections.namedtuple("Name", fields)`. Supply a literal field-name string, list, or tuple. Constructors accept positional and named fields and starred fixed tuples; field reads, indexing, unpacking, `_fields`, `__match_args__`, tuple equality for compatible immutable layouts, and named `repr` preserve tuple behavior. An annotated parameter or return must infer the corresponding class and a single concrete field layout. Typed lowering accepts this declaration without factory options. When it needs a concrete layout, it must diagnose an unresolved field list such as `Row = namedtuple("Row", sys.argv[1:])` at build time. Subclasses and generated methods such as `_replace` use boxed objects.
+
+In boxed code, the factory installs a Python function with the validated field names and defaults as its signature. Its precompiled body calls the tuple allocator with the bound values. This supports `rename`, keyword arguments and the named tuples created when `inspect` initializes.
 
 A loop can search a fixed tuple of up to eight differently typed fields. The tuple evaluates once before the first test. Imre checks the fresh loop variable at the corresponding field type each time.
 
@@ -564,6 +568,8 @@ in a guard leaves later cases inspecting the original subject.
 
 A direct call can pass an exact `int` to a `float` parameter when that parameter appears only in two-operand comparisons with the integer literal `0`. For example, a function that tests `delta == 0` and `delta > 0` accepts integer counts of any size. Imre evaluates the argument once and compares the integer exactly to obtain its sign. Float arguments retain their original binary64 values, including NaN and signed zero. The proof requires at least one comparison and excludes rebinding, captures, and uses of the value elsewhere. Other `float` parameters, calls through `Callable` values, and defaults require exact floats.
 
+A precompiled boxed call can also pass an exact `int` when the parameter annotation resolves to the builtin `float`. The callee receives the original integer object, so a closure can retain its identity, type, and arbitrary precision. For example, `def capture(value: float): return lambda: value` preserves the caller's object. This rule applies to explicitly supplied arguments. Float return annotations keep their existing checks.
+
 Native arithmetic uses no fast-math flags. Signed zeros, infinities, NaNs, and ordinary rounding remain observable. Float division by either signed zero raises `ZeroDivisionError`. Floor division and modulo follow Python's corrected remainder convention, including `1.0 // 0.1 == 9.0` and the divisor's sign on a zero remainder. Overflow in ordinary float arithmetic can produce infinity. Comparisons with NaN are false except `!=`; mixed integer/float comparisons compare exact values without rounding the integer to binary64.
 
 Integer `/` computes the ratio directly and rounds once, including at the subnormal boundary. Neither operand needs to fit in a float: two equal 400-digit integers divide to `1.0`. A result too large for binary64 raises `OverflowError`; underflow preserves the result's zero sign. `int(float)` truncates toward zero, raises `ValueError` for NaN, and raises `OverflowError` for infinity.
@@ -588,13 +594,37 @@ The receiver evaluates first, followed by start, stop and step in source order. 
 
 String loops, comprehensions, and loop-head `enumerate` capture the original immutable string once and advance by code point in linear time. Each yielded character has its own owner; replacing the source binding or field cannot invalidate the iterator or an earlier character. Repeated arbitrary string indexing may scan UTF-8, so use iteration when visiting every character.
 
-`separator.join(source)` accepts a supported immediate iterable yielding exact strings. The separator evaluates first and remains owned while the source evaluates and is consumed; rebinding its original variable does not change it. Empty input returns an empty string. `text.replace(old, new)` replaces all nonoverlapping occurrences using exact string arguments. An empty `old` inserts `new` at Unicode scalar boundaries, including both ends. Both methods accept positional arguments only; a replacement count and custom string or iteration protocols are unsupported.
+`separator.join(source)` accepts a supported immediate iterable yielding exact strings. The separator evaluates first and remains owned while the source evaluates and is consumed; rebinding its original variable does not change it. Empty input returns an empty string. `text.replace(old, new)` replaces all nonoverlapping occurrences using exact string arguments. An empty `old` inserts `new` at Unicode scalar boundaries, including both ends. The optional integer replacement count can be passed positionally or as `count=`. During explicit checking, a string literal’s `replace` method diagnoses a literal or container display with a fixed non-string class in either string argument. Executables raise a catchable `TypeError` when the call runs. `join` takes its iterable positionally.
 
 ## First-party module graphs
 
-For a script that imports source packages, `--runtime-imports` lets `imre build`, `run`, or `check` try the native object runtime when static compilation fails. The entry stays `__main__`; the executable evaluates imports using its startup search paths and the compiled Python module bodies. A missing runtime module raises `ModuleNotFoundError` when its import executes. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. Explicit runtime imports and Python command invocations can raise `TypeError` when a function violates a supported annotation. An explicit `--entry-profile` requires a statically compiled graph.
+A file entry runs as `__main__`. When its object code imports a missing runtime module, the import raises `ModuleNotFoundError`. Ordinary and reachable file builds preserve return contracts from a resolved static graph when an imported operation requires the object runtime. An explicit `--entry-profile` requires a statically compiled graph.
 
-For native code, `--extension-path DIRECTORY` adds an installed [Imre extension wheel](extensions.md) to the compile-time search path. Its typed declarations and compiled archive supply the module.
+Use `--include-module myproject.plugins.csv` to link a Python source module that the program may select by name at runtime. Repeat the option to declare other modules. The usual import paths determine which source is linked, and importing it runs its initializer. A fully typed entry has no runtime module loader and rejects this option.
+
+For a Python entry, pass `--include-module` before the script, `-m` or `-c` to declare a module for that invocation. Declarations supplied through `IMREFLAGS` or `IMRE_ENCODED_FLAGS` also apply to child Imre processes that inherit those variables.
+
+For `-m unittest`, declare the modules that contain the tests. The standard unittest loader selects classes and methods from those modules.
+
+```sh
+IMREFLAGS='--opt-level 0' imre -B --include-module tests.test_rates -m unittest -v tests.test_rates
+imre --include-module tests.test_rates -m unittest discover -s tests -t . -p 'test_rates.py'
+```
+
+For a larger suite, repeat `--include-module` for each module that discovery will import by name. Declaring a package links its initializer. Its ordinary imports follow the usual dependency rules.
+
+When an imported package belongs to an installed distribution, its wheel's `RECORD` also supplies Python modules for runtime imports. This works when the distribution is in the script directory or the current directory used by `-m`. Filesystem discovery still requires the directory being enumerated.
+
+To build an application that uses a pure-Python wheel, install the dependency in a directory and pass that directory to `imre build`. For example, a caller of `packaging.version` can use:
+
+```sh
+python -m pip install --target build/site packaging
+imre build main.py --extension-path build/site -o app
+```
+
+The build follows the imports and links the selected Python code into the executable. In this example, the executable can import `packaging.version` after `build/site` is removed. Compiled directory modules retain their build-time origins. When a program changes `sys.path`, the import finder searches the active entries in order. Ship any files the application reads, including package resources and distribution metadata, at the locations its loaders use. For example, HTTPX can use the linked `certifi` package while still requiring `certifi/cacert.pem` under the declared installation directory.
+
+Repeat `--extension-path` for additional roots. After the explicit roots, `imre check`, `imre build`, and `imre run` search the directories and ZIP archives on `PYTHONPATH`. A filename launch uses the same search order unless `-E` or `-I` disables the Python environment. When a wheel archive itself is an import root, the ZIP loader reads its directory and selected Python member at runtime. Keep the archive at its registered path so the loader can match that member's bytes to the compiled code. For native modules, install the typed declarations and compiled archive from an [Imre extension wheel](extensions.md) in a declared directory.
 
 An imported Python module may check its identity before other imports, for example
 `if __name__ != "pkg.helper": raise ValueError("unexpected module name")`.
@@ -641,9 +671,11 @@ Defaults must be `int`, `float`, `bool`, `str`, `bytes`, or `None` literals. A n
 
 The receiver of an instance call evaluates first. Supplied arguments then evaluate once in source order, independently of parameter order; a failure prevents later arguments and the callee from running. The compiler applies each parameter's exact type context to its argument, including empty containers and optional values, and retains evaluated values across later mutations and failures. Named arguments lower to ordinary positional native calls.
 
-Calls can expand a fixed tuple literal or local with `*args`, and a dictionary with distinct literal string keys with `**options`. A local dictionary must be assigned once and used only for expansion. Its values are evaluated when the dictionary is created. Rebinding the original variables does not change those values. When a packed value has type `T | None` and the parameter requires `T`, the call checks for `None` and raises `TypeError` before entering the callee. Ordinary nullable parameters still receive `None`.
+Calls can expand a fixed tuple literal or local with `*args`, and a dictionary with distinct literal string keys with `**options`. The compiler can keep the type of each literal-key entry when a local dictionary is assigned once and used only for expansion. Its values are evaluated when the dictionary is created. Rebinding the original variables does not change those values. When a packed value has type `T | None` and the parameter requires `T`, the call checks for `None` and raises `TypeError` before entering the callee. Ordinary nullable parameters still receive `None`.
 
-A function or method can declare homogeneous positional arguments such as `*args: str`. The body can iterate, check the length or expand the values into a fresh list. Indexing and slicing the pack are outside this subset. Returning the pack, mutating it, or observing its concrete storage is unsupported. `**kwargs` parameters, dynamically computed keyword shapes and variable-length spreading into an ordinary fixed call remain unsupported.
+A direct call to a compiled source function can use one trailing `**mapping` after positional and named arguments. A typed dictionary with string keys can fill positional-or-keyword and keyword-only parameters when its values fit their declared types. The call uses current entries and checks duplicate, unexpected and missing arguments before entering the function. A typed `**fields: T` parameter receives a fresh plain dictionary of remaining entries in insertion order. For `record(prefix="default", /, **fields)`, a mapping entry named `prefix` goes into `fields`.
+
+A function or method can declare homogeneous positional arguments such as `*args: str`. The body can iterate, check the length or expand the values into a fresh list. Indexing and slicing the pack are outside this subset. Returning the pack, mutating it, or observing its concrete storage is unsupported. Untyped `**kwargs` parameters and variable-length positional spreading into an ordinary fixed call remain unsupported.
 
 Builtins and methods accept specific keywords. `open` accepts `encoding="utf-8"`, `sum` accepts `start`, `zip` accepts `strict`, and both `sorted` and `list.sort` accept `key` and `reverse`.
 
@@ -755,7 +787,7 @@ numbers. It reads the receiver's metadata first. For a typed operand with a
 during the call triggers path conversion and a filesystem query. A different
 inode returns false without reading the operand's device number.
 
-`Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An invalid newline or codec name on an otherwise valid write is diagnosed after opening and truncating the file.
+`Path.read_text(encoding=None, errors=None, newline=None)` and `write_text(data, encoding=None, errors=None, newline=None)` use the same native file backend as binary reads and writes. UTF-8 is the default; UTF-8 with signature, Latin-1 and ASCII are also supported. Strict, ignore, replace and backslash-replace error modes work for these encodings; single-byte writes also support XML character references. With no newline override, reads translate CRLF and CR to LF. Empty or explicit newline strings keep the input line endings; on POSIX, write-side CR and CRLF overrides replace each LF. Writes return the number of input Unicode scalars, independent of encoded length. Data of the wrong type raises `TypeError` before opening the target. An embedded NUL in the encoding, errors or newline argument raises `ValueError` before the file opens. Other invalid newline values and unknown codec names on an otherwise valid write are diagnosed after opening and truncating the file.
 
 `mkdir(mode=0o777, parents=False, exist_ok=False)` creates a directory. The mode is an exact integer within the signed C-int range; larger values raise `OverflowError`. Boolean options require exact booleans. The process umask applies, and missing parents use mode `0o777` independently of the leaf mode. `exist_ok=True` accepts an existing directory, including a symlink to one, without changing its permissions. `unlink(missing_ok=False)` removes a file or symlink; its flag suppresses only `FileNotFoundError`. `rmdir()` removes an empty directory. These methods return `None` and preserve their normal filesystem error categories.
 
@@ -836,6 +868,27 @@ Invalid UTF-8 raises `UnicodeDecodeError`, matching `UnicodeError` and `ValueErr
 
 In command mode, each `-O` raises `sys.flags.optimize` by one. `PYTHONOPTIMIZE` can raise that level unless `-I` ignores it. At level one or higher, `__debug__` is false and assertions do not evaluate their conditions or messages. At level two or higher, the module docstring is `None`. File builds use level zero, including when LLVM code generation uses `--opt-level 3`.
 
+## Logging configuration
+
+A legacy `logging.config.fileConfig` INI can supply Python expressions for
+formatter defaults and handler classes and arguments. For a handler known
+when building the application, use `dictConfig` to name the class and pass
+its settings as data. This example writes `ready` to standard output.
+
+```python
+import logging.config
+
+logging.config.dictConfig({
+    "version": 1,
+    "handlers": {"console": {
+        "class": "logging.StreamHandler",
+        "stream": "ext://sys.stdout",
+    }},
+    "root": {"level": "INFO", "handlers": ["console"]},
+})
+logging.info("ready")
+```
+
 ## Command-line options
 
 A function can declare an `argparse.ArgumentParser`, add required positional arguments and named options, and return the result of `parse_args()`. An explicit `list[str]` supplies the arguments to parse; omitting it or passing `None` reads `sys.argv[1:]`. Imre derives a read-only namespace with a concrete field for each option. Hyphens become underscores in field names. A choice of strings gives the field a string `Literal` type. A value option without a default or `required=True` produces an optional field.
@@ -891,7 +944,7 @@ An unshadowed builtin class such as `object` or `int` can be a `store_const` val
 
 `logging.basicConfig` accepts `level`, `format`, `datefmt`, and `force`. A configured handler keeps its settings unless forced. Both configuration and `setLevel` resolve string levels in the native registry. `addLevelName` updates the integer label and the reverse name lookup; `getLevelNamesMapping()` returns a fresh dictionary. `getLevelName(number)` returns a string. For a string argument, use `isinstance(result, int)` to distinguish a registered name from the fallback text. The percent-style format accepts `name`, `levelname`, `levelno`, `message`, and local-time `asctime`. Custom handlers and filters are outside this surface.
 
-A direct `logging.shutdown()` call uses the object runtime’s weak handler registry. It visits live handlers in reverse registration order and respects each handler’s `flushOnClose` setting. Supplying a handler list requires a program that already uses runtime imports, such as one built with `--runtime-imports`.
+A direct `logging.shutdown()` call uses the object runtime’s weak handler registry. It visits live handlers in reverse registration order and respects each handler’s `flushOnClose` setting. Native lowering supports the no-argument form.
 
 ## Synchronous subprocesses
 
@@ -1216,8 +1269,14 @@ integers, strings and booleans.
 An unquoted `Sequence[T]` parameter from `collections.abc` or `typing` accepts
 an exact `list[T]` or an omitted `()` default. Its body may iterate the
 parameter, apply `map(str, parameter)`, or call `len`. Parameters without a
-tuple default also support read-only indexing and slicing.
-It shares the caller’s list, so mutations through existing aliases remain visible.
+tuple default also support read-only indexing and slicing. A list keeps its
+identity, so mutations through existing aliases remain visible.
+
+A module-level function with a required `Sequence[T]` parameter can also accept
+an exact tuple of `T` when it uses the parameter only for iteration, integer
+indexing, or calls to the original built-in `len`. List and tuple callers share
+one compiled body. For example, `def first(xs: Sequence[int]) -> int: return xs[0]`
+accepts both `first([1, 2])` and `first((1, 2))`.
 A function returning `Sequence[T]` can return an exact `list[T]`.
 
 `dict[K, V]` accepts exact `int`, `str`, `bytes`, `Path`, or immutable fixed-tuple keys and one concrete value type. Tuple keys may recursively contain `int`, `bool`, `str`, `bytes`, `Path`, `None`, and nullable forms of those immutable fields. Floats, records, mutable containers, and the `str | bytes` union are excluded from keys. Keys use value equality under one exact type; booleans cannot stand in for integer keys, and a bare `bool` is not a key type. Nonempty literals infer these types from their first entry; `{}` and `dict()` require a concrete contextual type. Duplicate keys keep the first insertion position and the last value. Replacing a value keeps its position, while deletion and reinsertion move the key to the end. `mapping[key]`, assignment, `del mapping[key]`, integer augmented assignment, `len`, and single `in`/`not in` comparisons are supported. Missing required reads and deletes report `KeyError`.
@@ -1377,7 +1436,7 @@ Heap objects are nonmoving reference-counted allocations. Classes and fixed tupl
 
 Writes acquire the replacement before releasing the displaced value, and reads acquire ownership before the receiver can be released, apart from the explicitly proved rooted integer borrows above. Fixed records start with zeroed fields and use a static destruction descriptor, so failed construction safely releases every initialized owner. Generated field accesses are direct; their receiver remains rooted and the checker proves complete initialization before a read. Container storage uses scoped `UnsafeCell` closures on one execution thread: mutable access is exclusive, operations cannot reenter through aliases, and no storage reference or resizable-buffer address may escape. Independently owned values and explicitly constrained borrowed integer handles may escape; displaced owners are dropped after access ends.
 
-Dictionaries use a randomized hash index and insertion-ordered entries. Integer, string, and byte keys have specialized storage; sets own keys without dummy value slots or an ordering guarantee. Internal iterators root their container and prevent entry compaction until released, but keep no storage reference across a loop body. The acyclic heap type graph prevents reference cycles through classes and containers. There are no finalizers or user callbacks under storage access. Threaded or reentrant extension boundaries would need to preserve these rules. This is not yet a general garbage collector, extension ABI, sandbox, or proof of memory safety; those claims would require additional design and evidence.
+Dictionaries use a randomized hash index and insertion-ordered entries. Integer, string, and byte keys have specialized storage; sets own keys without dummy value slots or an ordering guarantee. Internal iterators root their container and prevent entry compaction until released, but keep no storage reference across a loop body. For fixed layouts, the compiler checks class fields for ownership cycles through classes and containers. There are no finalizers or user callbacks under storage access. Threaded or reentrant extension boundaries would need to preserve these rules. The Python object heap traces roots and can reclaim unreachable cycles. Extension ABIs, sandboxing, and memory-safety proofs require additional design and evidence.
 
 Language errors propagate through explicit checked call results and can be caught. Each fallible runtime call records an owned pending exception and reports failure through either its result or a pending-state query; generated code checks before decoding or acquiring a result. Integer-list reads reserve raw zero for failure, while writes return a 32-bit success flag. Other calls retain the pending-state check. Proven fixed-field operations and functions whose complete bodies cannot raise omit redundant queries; their argument and receiver evaluations retain their own checks. Partial expression values, constructor fields, unpacking temporaries, and loop iterator roots are released when their scopes exit. Function propagation also releases owned locals. No Rust panic or native stack unwinding implements language exceptions. Uncaught errors print an exception category and message and return process status 1 after cleanup. Actual allocation failures and invalid internal ABI operations may still terminate the process. The compiler and runtime archive must be rebuilt together when this private ABI changes.
 
@@ -1529,8 +1588,8 @@ preserving the selected code generation mode. These options also work in
 `IMREFLAGS` and `IMRE_ENCODED_FLAGS`.
 
 Custom Clang drivers and raw `-C link-arg` arguments, explicit targets, emitted
-LLVM, sanitizers, ThinLTO, and unsupported toolchains use the whole-program
-backend without caching. By default, cache data lives under
+LLVM, sanitizers, ThinLTO, and unsupported toolchains bypass the native object
+and executable cache. By default, cache data lives under
 `$XDG_CACHE_HOME/imre/v1` or `~/.cache/imre/v1`. An absolute `IMRE_CACHE_DIR`
 overrides the parent directory. Older objects stay available for reverts until
 that cache directory is cleared.
@@ -1546,9 +1605,9 @@ target/release/imre build tests/programs/ownership.py -o /tmp/ownership --emit-l
 /tmp/ownership
 ```
 
-Build the compiler and runtime archive from the same revision. Imre finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver and `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
+Build the compiler and runtime archive from the same revision. Imre finds the archive beside the compiler executable, or accepts an explicit path with `--runtime`. `--clang` selects the Clang driver. An empty argument (`--clang ''`) restores the default toolchain, including after a driver was set in `IMREFLAGS`. `--opt-level` selects 0 through 3 (default 3). Every input module, executable, runtime, explicit ThinLTO linker, and saved LLVM output must have a distinct file identity; symlinks and hard links cannot bypass the input overwrite check.
 
-`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. At optimization level 3, Imre raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
+`--lto-linker PATH` enables optional cross-language ThinLTO and requires explicit `--runtime` and `--target TRIPLE`. Build that runtime with `RUSTFLAGS=-Clinker-plugin-lto` in a separate target directory, and select an LLVM linker that can read both the Rust and Clang bitcode. On Linux, use Clang 18 with the pinned Rust toolchain's bundled LLD. In boxed programs, Imre passes independent module initializers to the selected Clang as separate LLVM inputs. LLD can reuse their backends across programs through its ThinLTO cache. Typed programs, `--whole-program`, `--emit-llvm`, and sanitizer builds retain their existing ThinLTO input layout. At optimization level 3, Imre raises LLVM's import and inlining budgets to 1,000 so runtime accessors can inline across the language boundary; this trades additional code size and link work for fewer runtime calls. Other optimization levels retain LLVM's normal budgets. `--target` also works without ThinLTO; it does not expand the supported runtime platforms.
 
 On Apple Silicon, build the bitcode runtime with `--target aarch64-apple-darwin` so Cargo builds host tools normally. Pass the resulting `target/lto/aarch64-apple-darwin/release/libimre_runtime.a` to `--runtime`. Use the Mach-O linker `ld64.lld` from an LLVM release that reads both the Rust bitcode and your macOS SDK.
 

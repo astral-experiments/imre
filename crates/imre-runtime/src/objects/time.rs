@@ -10,12 +10,37 @@ use super::{
 };
 use std::ffi::CStr;
 use std::io;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) use super::stdlib::imre_wall_time as wall_time;
 
 #[cfg(target_os = "linux")]
 mod linux_clock;
+
+/// Monotonic time remaining in one operation, including time spent in callbacks.
+#[derive(Clone, Copy)]
+pub(crate) struct Deadline {
+    start: Instant,
+    duration: Duration,
+}
+
+impl Deadline {
+    pub(crate) fn after(duration: Duration) -> Self {
+        Self {
+            start: Instant::now(),
+            duration,
+        }
+    }
+
+    /// Preserve exact zero for callers that allow a final nonblocking syscall.
+    pub(crate) fn checked_remaining(self) -> Option<Duration> {
+        self.duration.checked_sub(self.start.elapsed())
+    }
+
+    pub(crate) fn remaining(self) -> Duration {
+        self.checked_remaining().unwrap_or_default()
+    }
+}
 
 /// A signal delivered to the sleeping thread interrupts the native wait. A
 /// returning handler resumes against the same deadline, including callback time.
@@ -179,6 +204,62 @@ pub(crate) fn clock_stamp(clock: libc::clockid_t) -> io::Result<libc::timespec> 
     }
     // SAFETY: the successful call initialized both fields.
     Ok(unsafe { stamp.assume_init() })
+}
+
+/// Process-wide user and system CPU time, excluding time asleep or in child processes.
+pub(crate) fn process_time() -> Result<f64, Error> {
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_vendor = "apple",
+        target_os = "freebsd"
+    ))]
+    if let Ok(stamp) = clock_stamp(libc::CLOCK_PROCESS_CPUTIME_ID) {
+        let ns = timestamp_ns(stamp.tv_sec, stamp.tv_nsec)?;
+        return Ok(ns as f64 / 1e9);
+    }
+    let (seconds, _) = process_clock_fallback()?;
+    Ok(seconds)
+}
+
+/// Read the remaining POSIX process CPU clocks in CPython order, with their clock info.
+fn process_clock_fallback() -> Result<(f64, (&'static str, f64)), Error> {
+    let mut usage = std::mem::MaybeUninit::uninit();
+    // SAFETY: getrusage initializes usage on success.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } == 0 {
+        // SAFETY: getrusage returned success.
+        let usage = unsafe { usage.assume_init() };
+        let user = timestamp_ns(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec * 1000)?;
+        let system = timestamp_ns(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec * 1000)?;
+        let ns = i128::from(user) + i128::from(system);
+        return Ok((ns as f64 / 1e9, ("getrusage(RUSAGE_SELF)", 1e-6)));
+    }
+    let mut times = std::mem::MaybeUninit::uninit();
+    // SAFETY: times initializes the process accounting snapshot on success.
+    if unsafe { libc::times(times.as_mut_ptr()) } != !0 {
+        // SAFETY: times returned success; _SC_CLK_TCK is a standard sysconf key.
+        let times = unsafe { times.assume_init() };
+        // SAFETY: sysconf takes a POSIX configuration selector and no pointers.
+        let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+        if ticks <= 0 {
+            return Err(super::errno_error(io::Error::last_os_error()));
+        }
+        let ns = |t: libc::clock_t| i128::from(t) * 1_000_000_000 / i128::from(ticks);
+        let total = ns(times.tms_utime) + ns(times.tms_stime);
+        return Ok((total as f64 / 1e9, ("times()", 1.0 / ticks as f64)));
+    }
+    unsafe extern "C" {
+        fn clock() -> libc::clock_t;
+    }
+    // SAFETY: clock takes no arguments; POSIX defines CLOCKS_PER_SEC as one million.
+    let ticks = unsafe { clock() };
+    if ticks == !0 {
+        return Err(Error::new(
+            Kind::RuntimeError,
+            "the processor time used is not available or its value cannot be represented",
+        ));
+    }
+    Ok((ticks as f64 / 1e6, ("clock()", 1e-6)))
 }
 
 /// Sample the monotonic clock directly in signed nanoseconds, preserving its full precision.

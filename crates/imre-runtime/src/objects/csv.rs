@@ -15,42 +15,39 @@ enum Lines {
 }
 
 impl Lines {
-    fn next(&mut self) -> Result<Option<StrOwner>> {
-        match self {
+    /// The checked row parser consumes the borrowed text before the source can advance again.
+    fn read_line(&mut self, parse: impl FnOnce(&str) -> Result<bool>) -> Result<Option<bool>> {
+        let parsed = match self {
             Self::List(lines, index) => {
-                // SAFETY: the concrete list and its string stay rooted during this nonreentrant read.
-                let value = unsafe {
-                    lines.0.with(|s| {
-                        Ok(s.sequence()?
-                            .values
-                            .get(*index)
-                            .map(|&word| crate::StrOwner::acquire_word(word)))
+                // SAFETY: the list owns each exact str, and parsing cannot reenter the list.
+                unsafe {
+                    lines.0.with(|s| -> Result<_> {
+                        Ok(s.sequence()?.values.get(*index).map(|&word| {
+                            *index += 1;
+                            parse(&*(word as *const Str))
+                        }))
                     })
-                }?;
-                if value.is_some() {
-                    *index += 1;
-                } else {
-                    *self = Self::End;
-                }
-                Ok(value)
+                }?
             }
             Self::File(file) => {
                 // SAFETY: this rooted file is distinct from its CSV reader; reading cannot reenter.
                 let line = unsafe { file.0.with_mut(|s| s.file_mut().readline()) }?;
-                Ok((!line.is_empty()).then(|| StrOwner::new(line)))
+                return (!line.is_empty()).then(|| parse(&line)).transpose();
             }
             Self::Text(text, byte) => {
-                let Some(ch) = text[*byte..].chars().next() else {
-                    *self = Self::End;
-                    return Ok(None);
-                };
-                let end = *byte + ch.len_utf8();
-                let line = StrOwner::new(Str::new(&text[*byte..end]));
-                *byte = end;
-                Ok(Some(line))
+                let rest = &text[*byte..];
+                let width = rest.ceil_char_boundary(1);
+                (width != 0).then(|| {
+                    *byte += width;
+                    parse(&rest[..width])
+                })
             }
-            Self::End => Ok(None),
+            Self::End => return Ok(None),
+        };
+        if parsed.is_none() {
+            *self = Self::End;
         }
+        parsed.transpose()
     }
 }
 
@@ -138,9 +135,16 @@ pub(crate) struct Row<F> {
     save_field: F,
     field: Field,
     chars: usize,
-    limit: i64,
     quoted: bool,
     state: State,
+}
+
+#[cold]
+fn field_limit_error(limit: i64) -> Error {
+    Error::new(
+        Kind::CsvError,
+        format!("field larger than field limit ({limit})"),
+    )
 }
 
 impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
@@ -149,7 +153,6 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
             save_field,
             field: Field::Text(String::new()),
             chars: 0,
-            limit: 131_072,
             quoted: false,
             state: State::Record,
         }
@@ -161,11 +164,10 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
         line: impl Iterator<Item = u32>,
         limit: i64,
     ) -> Result<bool> {
-        self.limit = limit;
         for ch in line {
-            self.token(dialect, Some(ch))?;
+            self.token(dialect, Some(ch), limit)?;
         }
-        self.token(dialect, None)?;
+        self.token(dialect, None, limit)?;
         Ok(self.state == State::Record)
     }
 
@@ -180,12 +182,9 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
         Ok(true)
     }
 
-    fn add(&mut self, point: u32) -> Result<()> {
-        if self.chars as i64 >= self.limit {
-            return Err(Error::new(
-                Kind::CsvError,
-                format!("field larger than field limit ({})", self.limit),
-            ));
+    fn add(&mut self, point: u32, limit: i64) -> Result<()> {
+        if self.chars as i64 >= limit {
+            return Err(field_limit_error(limit));
         }
         match &mut self.field {
             Field::Text(text) => {
@@ -223,7 +222,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
     }
 
     /// None is the iterator's end-of-line marker, which need not be a newline.
-    fn token(&mut self, dialect: &Dialect, token: Option<u32>) -> Result<()> {
+    fn token(&mut self, dialect: &Dialect, token: Option<u32>, limit: i64) -> Result<()> {
         use State::*;
         let newline = token == Some(u32::from('\n')) || token == Some(u32::from('\r'));
         if self.state == Record {
@@ -252,7 +251,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                     self.quoted = true;
                     self.state = Quoted;
                 } else if self.state == AfterQuote && token == dialect.quote.map(u32::from) {
-                    self.add(ch)?;
+                    self.add(ch, limit)?;
                     self.state = Quoted;
                 } else if self.state != AfterQuote && token == dialect.escape.map(u32::from) {
                     self.state = EscapeField;
@@ -274,7 +273,7 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                         ),
                     ));
                 } else {
-                    self.add(ch)?;
+                    self.add(ch, limit)?;
                     if self.state != AfterEscapeNewline {
                         self.state = Field;
                     }
@@ -291,12 +290,12 @@ impl<F: FnMut(Field, bool) -> Result<()>> Row<F> {
                             Field
                         };
                     } else {
-                        self.add(ch)?;
+                        self.add(ch, limit)?;
                     }
                 }
             }
             EscapeField | EscapeQuoted => {
-                self.add(token.unwrap_or(u32::from('\n')))?;
+                self.add(token.unwrap_or(u32::from('\n')), limit)?;
                 self.state = if self.state == EscapeQuoted {
                     Quoted
                 } else if newline {
@@ -341,14 +340,17 @@ impl Reader {
             Ok(())
         });
         loop {
-            let Some(line) = self.lines.next()? else {
+            let Some(complete) = self.lines.read_line(|line| {
+                self.line_num += 1;
+                row.line(&self.dialect, line.chars().map(u32::from), 131_072)
+            })?
+            else {
                 if !row.eof(&self.dialect)? {
                     return Ok(None);
                 }
                 break;
             };
-            self.line_num += 1;
-            if row.line(&self.dialect, line.chars().map(u32::from), 131_072)? {
+            if complete {
                 break;
             }
         }

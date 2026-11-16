@@ -1,5 +1,6 @@
 import doctest
 import os
+import sys
 import tempfile
 import unittest
 
@@ -14,6 +15,17 @@ class RecordingChecker(doctest.OutputChecker):
 
 
 def current():
+    class RejectEncoding(str):
+        def encode(self, encoding="utf-8", errors="strict"):
+            raise ValueError(str(self))
+
+    try:
+        doctest.OutputChecker().check_output(RejectEncoding("want"), RejectEncoding("got"), 0)
+    except ValueError as error:
+        assert str(error) == "got"
+    else:
+        raise AssertionError("the output should have failed to encode")
+
     file_suite = doctest.DocFileSuite
     with tempfile.TemporaryDirectory() as root:
         good = os.path.join(root, "numbers.good.txt")
@@ -29,6 +41,18 @@ def current():
             file.write(">>> seed\n41\n")
 
         globs = {"seed": 42}
+        def broken_teardown(test):
+            test.globs["seed"] = 99
+            raise ValueError("teardown")
+
+        (case,) = file_suite(good, module_relative=False, globs=globs, tearDown=broken_teardown)
+        cleaned = []
+        case.addCleanup(lambda: cleaned.append(case._dt_test.globs["seed"]))
+        result = unittest.TestResult()
+        case.run(result)
+        assert len(result.errors) == 1 and not result.failures
+        assert cleaned == ([42] if sys.implementation.name == "imre" else [99])
+
         suite = file_suite(good, wrong, module_relative=False, globs=globs)
         assert [case.id() for case in suite] == ["numbers_good_txt", "wrong_txt"]
         for _ in range(2):

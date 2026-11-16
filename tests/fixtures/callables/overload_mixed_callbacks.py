@@ -19,6 +19,11 @@ def invoke(callback: Callable[[], int]) -> int:
     return callback()
 
 
+def register(callback: Callable[[], int]) -> None:
+    alias = callback
+    overload(alias)
+
+
 def check() -> None:
     print(invoke(Reader().fetch))
     overload(sum)
@@ -34,6 +39,9 @@ def check() -> None:
     clear_overloads()
     print(invoke(recovered))
     print(read())
+    register(read)
+    print(len(get_overloads(read)))
+    clear_overloads()
 
 
 check()

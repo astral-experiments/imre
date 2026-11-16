@@ -5,6 +5,7 @@ use crate::ir::{
     walk_expressions_mut,
 };
 use crate::types::Types;
+use ruff_python_ast::UnaryOp;
 
 /// Changes a private set local to an optional set. Every read after the guard
 /// unwraps an actual owned set, so a nonempty result can still escape or mutate.
@@ -56,7 +57,7 @@ pub(super) fn specialize(
             ty: Type::Bool,
             kind: ExprKind::Builtin(Builtin::IsNone, vec![Expr::local(slot, optional)]),
         };
-        test.kind = ExprKind::Not(Box::new(absent));
+        test.kind = ExprKind::Unary(UnaryOp::Not, Box::new(absent));
         walk_expressions_mut(yes, &mut |expr| {
             if expr.ty == set && matches!(expr.kind, ExprKind::Local(read) if read == slot) {
                 *expr = Expr {

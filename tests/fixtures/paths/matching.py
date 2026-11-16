@@ -70,10 +70,26 @@ except ValueError as error:
 for text in ["", "/", "//", "a", "/a", "//a", "a/b", "/a/b", ".dot",
              "a\nb", "İ", "ı", "K", "ſ", "]", "雪"]:
     for pattern in ["", ".", "/", "//", "*", "?", "**", "***", "**/*", "a/**",
-                    "**/a", "/**/a", "//**", "a/**/**/b", "[!a]", "[z-a]",
+                    "**/a", "/**/a", "//**", "a/**/**/b", "a[!x]b", "a*b", "a**b", "a*b*c", "[!a]", "[z-a]",
                     "[!z-a]", "[a-c]", "[[]", "[]]", "[a-z]", "[!I]", "[ſ]"]:
         p = PosixPath(text)
         q = Path(pattern)
         check(p, q, None)
         check(p, q, False)
         check(p, q, True)
+
+
+for path, pattern in [("SRC/lib/Test_main.PY", "src/*/test_*.py"),
+                      ("test", "tes*est"), ("abc", "a**c"), ("a/b", "a*b")]:
+    windows = PureWindowsPath(path)
+    print(windows.match(pattern))
+    print(windows.full_match(pattern))
+    print(windows.full_match(pattern, case_sensitive=True))
+
+# Match character classes on each side of a star without sharing characters.
+for component, glob_pattern in [
+    ("é_雪", "[é]*[雪]"), ("雪", "[雪]*?"), ("abc", "a?c"),
+    ("test_x.py", "test_[a-z]*.py"), ("a/b", "a[!x]b"),
+]:
+    print(PurePosixPath(component).match(glob_pattern))
+    print(PurePosixPath(component).full_match(glob_pattern))

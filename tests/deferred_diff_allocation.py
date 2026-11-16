@@ -8,7 +8,7 @@ import subprocess
 def check(args, directory):
     fixtures = Path(__file__).resolve().parent / "fixtures/deferred_diff_allocation"
     wrapper = directory / "deferred-diff-refuse.o"
-    subprocess.run([args.clang, "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
+    subprocess.run([args.clang or "clang-18", "-c", fixtures / "refuse.c", "-o", wrapper], check=True)
     link = ["-C", f"link-arg={wrapper}"]
     for name in ("malloc", "realloc", "calloc", "imre_print_str"):
         link += ["-C", f"link-arg=-Wl,--wrap={name}"]

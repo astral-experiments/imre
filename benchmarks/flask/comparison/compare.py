@@ -159,7 +159,6 @@ def main():
     candidate.add_argument("--compiler", type=Path)
     candidate.add_argument("--imre-binary", type=Path, help="verify and time a supplied standalone ELF")
     parser.add_argument("--runtime", type=Path)
-    parser.add_argument("--runtime-imports", action="store_true", help="build the unchanged entry with native runtime imports")
     gate.add_build_timeout(parser)
     parser.add_argument("--wsgi-pair", action="store_true",
                         help="compare CPython/Werkzeug with CPython/Waitress using the extra pinned wheel")
@@ -182,8 +181,6 @@ def main():
         parser.error(f"run with CPython {expected['python']}")
     if bool(args.compiler) != bool(args.runtime):
         parser.error("supply both --compiler and --runtime")
-    if args.runtime_imports and not args.compiler:
-        parser.error("--runtime-imports requires --compiler and --runtime")
     paired = args.wsgi_pair or args.hosted_launcher
     if not paired and not args.rust:
         parser.error("the cross-language comparison requires --rust")
@@ -252,10 +249,8 @@ def main():
         binary = work / "imre-server"
         if args.compiler:
             inventory.update(compiler=executable(args.compiler), runtime=executable(args.runtime))
-            flags = ["--runtime-imports"] if args.runtime_imports else []
             report["imre_build"] = gate.native_build(args.compiler.resolve(), args.runtime.resolve(), site,
-                                                     binary, 3, flags, args.build_timeout)
-            report["imre_build"]["runtime_imports"] = args.runtime_imports
+                                                     binary, 3, [], args.build_timeout)
         elif args.imre_binary:
             inventory["imre_input"] = executable(args.imre_binary)
             shutil.copy2(args.imre_binary, binary)

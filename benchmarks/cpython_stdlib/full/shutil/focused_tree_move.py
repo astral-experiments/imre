@@ -125,7 +125,7 @@ def main():
         for level in (0, 3):
             binary = root / f"native-O{level}"
             print(f"Building -O{level}", flush=True)
-            subprocess.run([args.imre.resolve(), "build", entry, "--runtime-imports", "--module-root", root,
+            subprocess.run([args.imre.resolve(), "build", entry, "--module-root", root,
                             "--runtime", args.runtime.resolve(), "--clang", args.clang.resolve(),
                             "--opt-level", str(level), "-o", binary], cwd=root, check=True)
             if run_cases([binary, *ids], f"native -O{level}") != original:

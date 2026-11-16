@@ -1,12 +1,12 @@
 //! Unicode 16.0 text properties for integer conversion, matching CPython 3.14.
 
+use imre_ast::numbers::{DEFAULT_DIGITS, decimal_fits};
 use std::borrow::Cow;
-use std::cell::RefCell;
 use std::fmt::{self, Write};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigInt;
 use num_traits::Zero;
 
 use crate::{Error, Kind, Str};
@@ -24,10 +24,13 @@ pub unsafe extern "C" fn imre_int_parse_hex(text: *const Str) -> usize {
 
 /// Parse Python integer text at a validated radix, including prefixes and Unicode decimal digits.
 pub(crate) fn parse_radix(source: &str, base: u32) -> crate::Result<crate::Int> {
+    try_parse_radix(source, base)?.ok_or_else(|| invalid_literal_in_base(source, base))
+}
+
+/// Return `None` for invalid syntax so callers can display the original Python object.
+pub(crate) fn try_parse_radix(source: &str, base: u32) -> crate::Result<Option<crate::Int>> {
     let prefix = source.split('\0').next().unwrap_or_default();
-    parse_radix_or(prefix, base, prefix.len() != source.len(), || {
-        invalid_literal_in_base(source, base)
-    })
+    parse_radix_digits(prefix, base, prefix.len() != source.len())
 }
 
 pub(crate) fn parse_bytes_radix(source: &[u8], base: u32) -> crate::Result<crate::Int> {
@@ -45,20 +48,19 @@ pub(crate) fn parse_bytes_radix(source: &[u8], base: u32) -> crate::Result<crate
     if !prefix.is_ascii() {
         return Err(invalid());
     }
-    parse_radix_or(
+    parse_radix_digits(
         std::str::from_utf8(prefix).expect("ASCII integer"),
         base,
         prefix.len() != source.len(),
-        invalid,
-    )
+    )?
+    .ok_or_else(invalid)
 }
 
-fn parse_radix_or(
+fn parse_radix_digits(
     source: &str,
     mut base: u32,
     has_nul: bool,
-    error: impl Fn() -> Error,
-) -> crate::Result<crate::Int> {
+) -> crate::Result<Option<crate::Int>> {
     let source = source.trim();
     let source = if source.is_ascii() {
         Cow::Borrowed(source)
@@ -101,7 +103,7 @@ fn parse_radix_or(
         || digits.contains("__")
         || !digits.chars().all(|ch| ch == '_' || ch.is_digit(base))
     {
-        return Err(error());
+        return Ok(None);
     }
     if !base.is_power_of_two() {
         let limit = decimal_digit_limit();
@@ -111,7 +113,7 @@ fn parse_radix_or(
     }
     // The length-aware Python APIs reject embedded NULs after validating the C-string prefix.
     if has_nul {
-        return Err(error());
+        return Ok(None);
     }
     let normalized = if digits.contains('_') {
         let mut text = String::new();
@@ -122,11 +124,15 @@ fn parse_radix_or(
     } else {
         Cow::Borrowed(digits)
     };
-    let value = BigInt::parse_bytes(normalized.as_bytes(), base).ok_or_else(&error)?;
+    let Some(value) = BigInt::parse_bytes(normalized.as_bytes(), base) else {
+        return Ok(None);
+    };
     if guessed && !prefixed && digits.starts_with('0') && !value.is_zero() {
-        return Err(error());
+        return Ok(None);
     }
-    crate::Int::try_new(if negative { -value } else { value }).map_err(|_| Error::allocation())
+    crate::Int::try_new(if negative { -value } else { value })
+        .map(Some)
+        .map_err(|_| Error::allocation())
 }
 
 /// Record the interpreter setting before any user code can change the environment.
@@ -145,13 +151,7 @@ pub extern "C" fn imre_integer_digits_init(isolated: u32) {
     let _ = DIGITS.set(AtomicU32::new(configured));
 }
 
-const DEFAULT_DIGITS: u32 = 4300;
 static DIGITS: OnceLock<AtomicU32> = OnceLock::new();
-
-thread_local! {
-    // Cache only the threshold for the most recently checked nonzero limit on this thread.
-    static MAXIMUM_EXCLUSIVE: RefCell<(u32, BigUint)> = const { RefCell::new((0, BigUint::ZERO)) };
-}
 
 fn decimal_limit() -> &'static AtomicU32 {
     // Runtime unit tests may call the formatting ABI without a generated main.
@@ -206,19 +206,7 @@ fn check_digit_count(count: usize, limit: u32) -> crate::Result<()> {
 /// A broad bit-length bound avoids allocating a configured power of ten for small inputs.
 pub(super) fn check_decimal(value: &num_bigint::BigInt) -> crate::Result<()> {
     let limit = decimal_digit_limit();
-    let digits = u64::from(limit);
-    let bits = value.bits();
-    if limit == 0 || bits <= digits * 3 {
-        return Ok(());
-    }
-    if bits > digits * 4
-        || MAXIMUM_EXCLUSIVE.with_borrow_mut(|cached| {
-            if cached.0 != limit {
-                *cached = (limit, BigUint::from(10u8).pow(limit));
-            }
-            value.magnitude() >= &cached.1
-        })
-    {
+    if !decimal_fits(value, limit) {
         Err(Error::new(Kind::ValueError, output_limit_message(limit)?))
     } else {
         Ok(())
@@ -334,6 +322,14 @@ pub(super) fn invalid_literal_in_base(value: &str, base: u32) -> Error {
     }
 }
 
+/// Project an exact one-character decimal literal without invoking the integer parser.
+pub(crate) fn single_decimal_digit(text: &str) -> Option<u8> {
+    if let [byte] = text.as_bytes() {
+        return byte.is_ascii_digit().then(|| *byte - b'0');
+    }
+    decimal_digit(text.parse::<char>().ok()?)
+}
+
 /// Returns the decimal value of a Unicode 16.0 digit.
 ///
 /// Each entry is a zero followed by nine consecutive decimal digits. The table
@@ -368,6 +364,20 @@ pub(super) fn is_digit(c: char) -> bool {
         0x24ea | 0x24f5..=0x24fd | 0x24ff | 0x2776..=0x277e | 0x2780..=0x2788 |
         0x278a..=0x2792 | 0x10a40..=0x10a43 | 0x10e60..=0x10e68 | 0x11052..=0x1105a |
         0x1f100..=0x1f10a)
+}
+
+/// CPython 3.14 uses the Unicode 16 Decimal, Digit, and Numeric properties.
+pub(super) fn is_numeric(c: char) -> bool {
+    use icu_properties::{CodePointMapData, props::NumericType};
+
+    // ICU also marks newly assigned characters and eight older cuneiform signs
+    // as numeric in Unicode 17.
+    CodePointMapData::<NumericType>::new().get(c) != NumericType::None
+        && !newer_printable(c)
+        && !matches!(
+            c as u32,
+            0x12038..=0x12039 | 0x12079 | 0x12226 | 0x1222b | 0x1230b | 0x1230d | 0x12399
+        )
 }
 
 /// Identifies characters printable in locked ICU 2.3 data but not Unicode 16.
@@ -443,6 +453,16 @@ fn write_literal_repr_prefix(value: &str, text: &mut Str) -> crate::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_decimal_digit_requires_exactly_one_decimal_codepoint() {
+        for (text, digit) in [("0", 0), ("9", 9), ("٢", 2), ("５", 5), ("𝟟", 7)] {
+            assert_eq!(single_decimal_digit(text), Some(digit));
+        }
+        for text in ["", "12", "٣4", "+7", " 9", "9\0", "²", "½", "四"] {
+            assert_eq!(single_decimal_digit(text), None);
+        }
+    }
 
     #[test]
     fn decimal_coefficients_preserve_sign_and_zero_padded_groups() {

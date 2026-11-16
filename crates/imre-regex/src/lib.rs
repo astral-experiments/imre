@@ -42,8 +42,435 @@ pub fn ascii_class(escape: char) -> Option<&'static str> {
 /// The engine expression and capture layout corresponding to a Python pattern.
 pub struct FixedPattern {
     pub source: String,
+    pub verbose: bool,
     pub may_match_empty: bool,
     pub groups: Vec<Capture>,
+}
+
+/// CPython's regex flag bits, shared by checked patterns and the registered re module.
+pub mod flags {
+    pub const IGNORECASE: i64 = 2;
+    pub const LOCALE: i64 = 4;
+    pub const MULTILINE: i64 = 8;
+    pub const DOTALL: i64 = 16;
+    pub const UNICODE: i64 = 32;
+    pub const VERBOSE: i64 = 64;
+    pub const DEBUG: i64 = 128;
+    pub const ASCII: i64 = 256;
+}
+
+/// The immutable input used to intern and materialize a checked pattern.
+/// The translated source is UTF-8 even when the original spelling is arbitrary bytes.
+pub struct LiteralPattern<'a> {
+    pub bytes: bool,
+    pub supplied_flags: u16,
+    pub verbose: bool,
+    pub source: &'a str,
+    pub spelling: &'a [u8],
+}
+
+impl<'a> LiteralPattern<'a> {
+    pub fn encode(&self) -> Vec<u8> {
+        let [lo, hi] = self.supplied_flags.to_le_bytes();
+        let header = [u8::from(self.bytes), u8::from(self.verbose), lo, hi];
+        [&header[..], self.source.as_bytes(), &[0xff], self.spelling].concat()
+    }
+
+    pub fn decode(data: &'a [u8]) -> Option<Self> {
+        let ([bytes, verbose, lo, hi], payload) = data.split_first_chunk::<4>()?;
+        let separator = payload.iter().position(|&b| b == 0xff)?;
+        Some(Self {
+            bytes: *bytes != 0,
+            supplied_flags: u16::from_le_bytes([*lo, *hi]),
+            verbose: *verbose != 0,
+            source: str::from_utf8(&payload[..separator]).ok()?,
+            spelling: &payload[separator + 1..],
+        })
+    }
+}
+
+/// Preserve byte literals outside ASCII in the regex parser's text input.
+pub fn byte_pattern(bytes: &[u8]) -> String {
+    let mut source = String::with_capacity(bytes.len());
+    let mut escaped = false;
+    for &b in bytes {
+        if b.is_ascii() {
+            source.push(char::from(b));
+            escaped = b == b'\\' && !escaped;
+        } else {
+            if !escaped {
+                source.push('\\');
+            }
+            write!(source, "x{b:02x}").unwrap();
+            escaped = false;
+        }
+    }
+    source
+}
+
+/// Read an ordinary ASCII bracket run without compiling an automaton. Escapes,
+/// nested sets and operators with Python warning behavior use the full parser.
+pub fn plain_run(pattern: &[u8]) -> Option<[u8; 256]> {
+    let body = pattern.strip_prefix(b"[")?.strip_suffix(b"]+")?;
+    let (body, excluded) = body
+        .strip_prefix(b"^")
+        .map_or((body, false), |rest| (rest, true));
+    let atom =
+        |b: u8| b.is_ascii() && !matches!(b, b'[' | b']' | b'\\' | b'-' | b'&' | b'|' | b'~');
+    if body.is_empty() {
+        return None;
+    }
+    let mut members = [u8::from(excluded); 256];
+    let mut at = 0;
+    while at < body.len() {
+        let start = body[at];
+        if !atom(start) {
+            return None;
+        }
+        at += 1;
+        let end = if body.get(at) == Some(&b'-') {
+            let end = *body.get(at + 1)?;
+            if !atom(end) || end < start {
+                return None;
+            }
+            at += 2;
+            end
+        } else {
+            start
+        };
+        members[usize::from(start)..=usize::from(end)].fill(u8::from(!excluded));
+    }
+    Some(members)
+}
+
+/// Find the next maximal byte run without revisiting an accepted byte.
+pub fn next_byte_run(
+    bytes: &[u8],
+    members: &[u8; 256],
+    offset: usize,
+) -> Option<std::ops::Range<usize>> {
+    let skip = bytes[offset..]
+        .iter()
+        .position(|&b| members[usize::from(b)] != 0)?;
+    let start = offset + skip;
+    let mut end = start + 1;
+    while end < bytes.len() && members[usize::from(bytes[end])] != 0 {
+        end += 1;
+    }
+    Some(start..end)
+}
+
+/// Stream the boundaries of one byte class. A full block contributes one bit
+/// for every change between accepted and rejected bytes.
+pub struct ByteRuns<'a> {
+    members: &'a [u8; 256],
+    ranges: Option<[(u8, u8); 3]>,
+    offset: usize,
+    changes: u32,
+    previous: u32,
+}
+
+impl<'a> ByteRuns<'a> {
+    /// Prepare the class for a subject of the given byte length.
+    pub fn new(members: &'a [u8; 256], len: usize) -> Self {
+        let ranges = if len >= 256 {
+            small_ranges(members)
+        } else {
+            None
+        };
+        Self {
+            members,
+            ranges,
+            offset: 0,
+            changes: 0,
+            previous: 0,
+        }
+    }
+
+    /// Visit successive maximal runs. The caller can reborrow its subject
+    /// between fields when allocating the result can move the owning slot.
+    #[inline]
+    pub fn next(&mut self, bytes: &[u8]) -> Option<std::ops::Range<usize>> {
+        if self.ranges.is_none() {
+            let run = next_byte_run(bytes, self.members, self.offset)?;
+            self.offset = run.end;
+            return Some(run);
+        }
+        let start = self.boundary(bytes)?;
+        Some(start..self.boundary(bytes).unwrap_or(bytes.len()))
+    }
+
+    #[inline]
+    fn boundary(&mut self, bytes: &[u8]) -> Option<usize> {
+        if self.changes == 0 {
+            self.fill(bytes)?;
+        }
+        let bit = self.changes.trailing_zeros();
+        self.changes &= self.changes - 1;
+        Some(self.offset - 32 + bit as usize)
+    }
+
+    // Keep the live block and its range tests out of the per-field path.
+    #[inline(never)]
+    fn fill(&mut self, bytes: &[u8]) -> Option<()> {
+        let ranges = self.ranges.as_ref()?;
+        while self.changes == 0 {
+            let remaining = bytes.get(self.offset..).filter(|tail| !tail.is_empty())?;
+            let mask = if let Some(block) = remaining.first_chunk::<32>() {
+                block_mask(block, ranges)
+            } else {
+                remaining.iter().enumerate().fold(0, |mask, (i, &byte)| {
+                    mask | (u32::from(self.members[usize::from(byte)] != 0) << i)
+                })
+            };
+            self.changes = mask ^ ((mask << 1) | self.previous);
+            self.previous = mask >> 31;
+            self.offset += 32;
+        }
+        Some(())
+    }
+}
+
+fn block_mask(block: &[u8; 32], ranges: &[(u8, u8); 3]) -> u32 {
+    let mut flags = [0; 32];
+    for (flag, &byte) in flags.iter_mut().zip(block) {
+        *flag = 0u8.wrapping_sub(u8::from(
+            (byte.wrapping_sub(ranges[0].0) <= ranges[0].1)
+                | (byte.wrapping_sub(ranges[1].0) <= ranges[1].1)
+                | (byte.wrapping_sub(ranges[2].0) <= ranges[2].1),
+        ));
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::{_mm_loadu_si128, _mm_movemask_epi8};
+        // SAFETY: SSE2 is available on x86-64 and both loads fit in flags.
+        unsafe {
+            let lo = _mm_loadu_si128(flags.as_ptr().cast());
+            let hi = _mm_loadu_si128(flags.as_ptr().add(16).cast());
+            _mm_movemask_epi8(lo) as u32 | ((_mm_movemask_epi8(hi) as u32) << 16)
+        }
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        portable_mask(&flags)
+    }
+}
+
+#[cfg(any(test, not(target_arch = "x86_64")))]
+fn portable_mask(flags: &[u8; 32]) -> u32 {
+    // Gather the low bit of each byte into the high byte of the product.
+    let mut mask = 0;
+    for (i, group) in flags.as_chunks::<8>().0.iter().enumerate() {
+        let low = u64::from_le_bytes(*group) & 0x0101_0101_0101_0101;
+        let packed = low.wrapping_mul(0x0102_0408_1020_4080) >> 56;
+        mask |= (packed as u32) << (i * 8);
+    }
+    mask
+}
+
+/// Up to three inclusive ranges, stored as lower bounds and widths. Repeat
+/// the first range in unused lanes so all three comparisons are independent.
+pub fn small_ranges(members: &[u8; 256]) -> Option<[(u8, u8); 3]> {
+    let mut ranges = [(0, 0); 3];
+    let mut count = 0;
+    let mut start = 0;
+    for run in members.chunk_by(|a, b| (*a == 0) == (*b == 0)) {
+        if run[0] != 0 {
+            let range = (start as u8, (run.len() - 1) as u8);
+            if count == 0 {
+                ranges.fill(range);
+            }
+            *ranges.get_mut(count)? = range;
+            count += 1;
+        }
+        start += run.len();
+    }
+    (count != 0).then_some(ranges)
+}
+
+/// Encode a greedy scalar class as a byte lookup followed by little-endian
+/// change points for non-ASCII scalars. A single enclosing findall capture
+/// yields the same string as the complete match.
+pub fn collection(pattern: &FixedPattern, whole_capture: bool, bytes: bool) -> Option<Collection> {
+    let hir = regex_syntax::Parser::new().parse(&pattern.source).ok()?;
+    if whole_capture && pattern.groups.len() > 2 {
+        let fields = pattern.groups.len() - 1;
+        let program = capture_program(&hir, fields, bytes)?;
+        return Some(Collection::Rows { fields, program });
+    }
+    let atom = match (pattern.groups.len(), hir.kind()) {
+        (1, _) => &hir,
+        (2, HirKind::Capture(capture)) if whole_capture && capture.index == 1 => &capture.sub,
+        _ => return None,
+    };
+    if let Some(members) = run_class(atom, bytes) {
+        return Some(Collection::Runs(members));
+    }
+    literal_program(atom, bytes).map(Collection::Literals)
+}
+
+#[derive(Clone)]
+pub enum Collection {
+    Runs(Vec<u8>),
+    Literals(Vec<u8>),
+    Rows { fields: usize, program: Vec<u8> },
+}
+
+fn run_class(atom: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::Class;
+    let HirKind::Repetition(repeat) = atom.kind() else {
+        return None;
+    };
+    if !repeat.greedy || repeat.min != 1 || repeat.max.is_some() {
+        return None;
+    }
+    let mut members = vec![0; 256];
+    let mut add = |start: char, end: char| {
+        let start = start as u32;
+        let end = end as u32 + 1;
+        if bytes {
+            members[start.min(256) as usize..end.min(256) as usize].fill(1);
+            return;
+        }
+        if start < 128 {
+            members[start as usize..end.min(128) as usize].fill(1);
+        }
+        if end > 128 {
+            if start <= 128 && end == 0x110000 {
+                // Every non-ASCII scalar matches, independent of its UTF-8 width.
+                members[128..256].fill(1);
+            } else {
+                members.extend_from_slice(&start.max(128).to_le_bytes());
+                members.extend_from_slice(&end.to_le_bytes());
+            }
+        }
+    };
+    match repeat.sub.kind() {
+        HirKind::Class(Class::Bytes(class)) if bytes => {
+            for range in class.ranges() {
+                add(char::from(range.start()), char::from(range.end()));
+            }
+        }
+        HirKind::Class(Class::Unicode(class)) => {
+            for range in class.ranges() {
+                add(range.start(), range.end());
+            }
+        }
+        HirKind::Literal(literal) => {
+            let mut chars = std::str::from_utf8(&literal.0).ok()?.chars();
+            let ch = chars.next()?;
+            if chars.next().is_some() {
+                return None;
+            }
+            add(ch, ch);
+        }
+        _ => return None,
+    }
+    Some(members)
+}
+
+/// Lower concatenations with compulsory, source-ordered fields. A repeated
+/// class must be disjoint from the next atom's first byte, so consuming the
+/// maximal run never takes a byte the suffix needs.
+fn capture_program(hir: &regex_syntax::hir::Hir, fields: usize, bytes: bool) -> Option<Vec<u8>> {
+    let HirKind::Concat(atoms) = hir.kind() else {
+        return None;
+    };
+    let mut program = Vec::new();
+    let mut previous_run = None;
+    let mut captures = 0;
+    for atom in atoms {
+        let captured = matches!(atom.kind(), HirKind::Capture(_));
+        let atom = if let HirKind::Capture(capture) = atom.kind() {
+            captures += 1;
+            if capture.index as usize != captures {
+                return None;
+            }
+            &capture.sub
+        } else {
+            atom
+        };
+        let (run, data) = match atom.kind() {
+            HirKind::Literal(literal) => (false, literal_bytes(&literal.0, bytes)?),
+            _ => (true, run_class(atom, bytes)?),
+        };
+        if data.is_empty() || (run && data.len() != 256) {
+            return None;
+        }
+        if let Some(start) = previous_run {
+            let previous = &program[start..start + 256];
+            let overlaps = if run {
+                data.iter().zip(previous).any(|(&a, &b)| a & b != 0)
+            } else {
+                previous[usize::from(data[0])] != 0
+            };
+            if overlaps {
+                return None;
+            }
+        }
+        program.push(u8::from(run) | (u8::from(captured) << 1));
+        program.extend_from_slice(&u16::try_from(data.len()).ok()?.to_le_bytes());
+        previous_run = run.then_some(program.len());
+        program.extend_from_slice(&data);
+    }
+    (captures == fields).then_some(program)
+}
+
+fn literal_bytes(value: &[u8], bytes: bool) -> Option<Vec<u8>> {
+    if bytes {
+        std::str::from_utf8(value)
+            .ok()?
+            .chars()
+            .map(|ch| u8::try_from(u32::from(ch)).ok())
+            .collect()
+    } else {
+        Some(value.to_vec())
+    }
+}
+
+/// Group complete, nonempty literals by leading byte while retaining Python's
+/// branch order inside each group. The first four bytes select a first-byte
+/// search, followed by 257 little-endian offsets and length-prefixed literals.
+fn literal_program(hir: &regex_syntax::hir::Hir, bytes: bool) -> Option<Vec<u8>> {
+    use regex_syntax::hir::literal::Extractor;
+    if !hir.properties().look_set().is_empty() {
+        return None;
+    }
+    let seq = Extractor::new().extract(hir);
+    if !seq.is_exact() {
+        return None;
+    }
+    let mut literals = Vec::new();
+    for literal in seq.literals()? {
+        let value = literal_bytes(literal.as_bytes(), bytes)?;
+        if value.is_empty() || value.len() > 255 {
+            return None;
+        }
+        literals.push(value);
+    }
+    if literals.is_empty() {
+        return None;
+    }
+    let mut header = vec![0; 4];
+    let mut payload = Vec::new();
+    for first in 0..=u8::MAX {
+        let offset = u16::try_from(payload.len()).ok()?;
+        header.extend_from_slice(&offset.to_le_bytes());
+        for literal in literals.iter().filter(|s| s[0] == first) {
+            payload.push(literal.len() as u8);
+            payload.extend_from_slice(literal);
+        }
+        if payload.len() != usize::from(offset) && header[0] < 4 {
+            header[0] += 1;
+            let count = usize::from(header[0]);
+            if count < 4 {
+                header[count] = first;
+            }
+        }
+    }
+    header.extend_from_slice(&u16::try_from(payload.len()).ok()?.to_le_bytes());
+    header.extend_from_slice(&payload);
+    Some(header)
 }
 
 /// A capture may be unnamed or absent on some successful paths.
@@ -71,10 +498,10 @@ pub fn preserve_zero_repeat_groups(source: String) -> Result<String, String> {
                         Range(RepetitionRange::Exactly(0) | RepetitionRange::Bounded(0, 0))
                     )
                 {
-                    // The empty class makes this optional branch unreachable in both
-                    // text and byte regexes, so its captures never participate.
+                    // The disjoint digits form an empty class in both text and byte
+                    // regexes without folding a Unicode-wide class under ignore-case.
                     let group = rep.ast.span();
-                    edits.push((group.start.offset, group.start.offset, r"(?:[^\s\S]"));
+                    edits.push((group.start.offset, group.start.offset, "(?:[0&&1]"));
                     edits.push((group.end.offset, rep.span.end.offset, ")?"));
                 }
                 nodes.push(&rep.ast);
@@ -156,6 +583,8 @@ struct Escapes {
     alphabet: Alphabet,
     preserve_categories: bool,
     bracketed_word: bool,
+    // Source-only walks keep Python literals outside the Unicode scalar domain.
+    code_points: bool,
 }
 
 /// Use the caller's regex flags to limit literal guards to sound text modes.
@@ -199,7 +628,27 @@ pub fn translate_pattern_with_line_mode(
     literal_guards: bool,
     multiline: bool,
 ) -> Result<FixedPattern, String> {
-    let (output, groups) = tokenize(
+    let parsed = regular_pattern(
+        pattern,
+        verbose,
+        alphabet,
+        dotall,
+        literal_guards,
+        multiline,
+    )?;
+    fixed_pattern(parsed, alphabet == Alphabet::Bytes, multiline)
+}
+
+/// Translate a regular Python pattern, preserving its declared capture slots.
+pub fn regular_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+    literal_guards: bool,
+    multiline: bool,
+) -> Result<TokenizedPattern, String> {
+    let mut parsed = tokenize(
         pattern,
         verbose,
         alphabet,
@@ -208,7 +657,8 @@ pub fn translate_pattern_with_line_mode(
         Grammar::Standard { multiline },
         None,
     )?;
-    analyze(output, groups)
+    parsed.source = preserve_zero_repeat_groups(parsed.source)?;
+    Ok(parsed)
 }
 
 /// Normalize a text pattern requiring a lookaround without accepting backend-specific syntax.
@@ -227,6 +677,7 @@ pub fn lookahead_source(
         Grammar::Lookahead,
         None,
     )
+    .map(TokenizedPattern::into_parts)
 }
 
 /// Translate a pattern needing native backtracking, retaining Python capture slots.
@@ -237,6 +688,20 @@ pub fn backtracking_source(
     alphabet: Alphabet,
     dotall: bool,
 ) -> Result<(String, Vec<Option<String>>), String> {
+    let pattern = backtracking_pattern(pattern, verbose, alphabet, dotall)?;
+    if pattern.fold_ascii_references {
+        return Err("case-insensitive group reference requires a folded subject".into());
+    }
+    Ok(pattern.into_parts())
+}
+
+/// Lower a backtracking pattern and retain its minimum width in Python characters.
+pub fn backtracking_pattern(
+    pattern: &str,
+    verbose: bool,
+    alphabet: Alphabet,
+    dotall: bool,
+) -> Result<TokenizedPattern, String> {
     tokenize(
         pattern,
         verbose,
@@ -425,6 +890,7 @@ pub fn validation_source(
         Grammar::Validation,
         None,
     )
+    .map(TokenizedPattern::into_parts)
 }
 
 /// Tokenize byte patterns without expanding categories into ordinary literal ranges.
@@ -439,7 +905,7 @@ pub fn locale_byte_source(pattern: &str, verbose: bool, dotall: bool) -> Option<
         None,
     )
     .ok()
-    .map(|(source, _)| source)
+    .map(|pattern| pattern.source)
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -632,6 +1098,22 @@ fn skip_comment(input: &mut impl Iterator<Item = char>) -> Result<(), String> {
     }
 }
 
+/// Translation and capture information produced in one pass over the Python spelling.
+pub struct TokenizedPattern {
+    pub source: String,
+    verbose: bool,
+    pub groups: Vec<Option<String>>,
+    pub minimum_width: u64,
+    /// Match exact references on a subject with ASCII-valued simple lowercases.
+    pub fold_ascii_references: bool,
+}
+
+impl TokenizedPattern {
+    fn into_parts(self) -> (String, Vec<Option<String>>) {
+        (self.source, self.groups)
+    }
+}
+
 fn tokenize(
     pattern: &str,
     mut verbose: bool,
@@ -640,12 +1122,13 @@ fn tokenize(
     literal_guards: bool,
     grammar: Grammar,
     mut warnings: Option<&mut WarningVisitor<'_>>,
-) -> Result<(String, Vec<Option<String>>), String> {
+) -> Result<TokenizedPattern, String> {
     let lookahead = !matches!(grammar, Grammar::Standard { .. });
     let visiting = warnings.is_some();
     let mut escapes = Escapes {
         alphabet,
         preserve_categories: grammar == Grammar::LocaleBytes,
+        code_points: visiting,
         bracketed_word: false,
     };
     let mut modes = vec![(0, alphabet)];
@@ -985,7 +1468,8 @@ fn tokenize(
                     if size == 0 {
                         output.push_str("(?!)");
                     } else {
-                        output.push_str(r"[^\s\S]");
+                        // A one-character atom that cannot match in any case mode.
+                        output.push_str("[0&&1]");
                         if (2..u64::from(u32::MAX)).contains(&size) {
                             write!(output, "{{{size}}}").unwrap();
                         }
@@ -1055,6 +1539,7 @@ fn tokenize(
                     &mut input,
                     &mut output,
                     &mut escapes,
+                    None,
                     None,
                     warnings.as_deref_mut(),
                 )?;
@@ -1277,22 +1762,63 @@ fn tokenize(
         }
         _ => {}
     }
+    let mut fold_ascii_references = false;
     if casefold {
-        output = if grammar == Grammar::Backtracking && has_reference {
-            casefold::backrefs(&output, &modes)?
+        if grammar == Grammar::Backtracking && has_reference {
+            (output, fold_ascii_references) = casefold::backrefs(&output, &modes)?;
         } else {
-            casefold::scoped(&output, &modes, lookahead)?
-        };
+            output = casefold::scoped(&output, &modes, lookahead)?;
+        }
     }
-    Ok((output, groups))
+    Ok(TokenizedPattern {
+        fold_ascii_references,
+        verbose,
+        source: output,
+        groups,
+        minimum_width: width.width().min,
+    })
 }
 
-fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, String> {
-    let output = preserve_zero_repeat_groups(output)?;
-    let hir = regex_syntax::Parser::new()
-        .parse(&output)
-        .map_err(|e| e.to_string())?;
-    let mut required = vec![false; groups.len()];
+/// Parse the native matcher source with the indicated Python subject and line mode.
+pub fn fixed_hir(
+    source: &str,
+    bytes: bool,
+    multiline: bool,
+) -> Result<regex_syntax::hir::Hir, String> {
+    regex_syntax::ParserBuilder::new()
+        .unicode(!bytes)
+        .utf8(!bytes)
+        .multi_line(multiline)
+        .build()
+        .parse(source)
+        .map_err(|e| e.to_string())
+}
+
+impl TokenizedPattern {
+    /// Verify that a matcher's visible captures still have their Python indices and names.
+    pub fn check_capture_names<'a>(
+        &'a self,
+        names: impl Iterator<Item = Option<&'a str>>,
+    ) -> Result<(), String> {
+        if names
+            .filter(|name| *name != Some("imre.eol"))
+            .eq(self.groups.iter().map(Option::as_deref))
+        {
+            Ok(())
+        } else {
+            Err("regex optimization would change the Python capture groups".into())
+        }
+    }
+}
+
+/// Check capture participation and the repetition restrictions of a fixed matcher.
+pub fn fixed_pattern(
+    parsed: TokenizedPattern,
+    bytes: bool,
+    multiline: bool,
+) -> Result<FixedPattern, String> {
+    let hir = fixed_hir(&parsed.source, bytes, multiline)?;
+    let mut required = vec![false; parsed.groups.len()];
     required[0] = true;
     let mut nodes = vec![(&hir, true)];
     while let Some((node, always)) = nodes.pop() {
@@ -1318,18 +1844,20 @@ fn analyze(output: String, groups: Vec<Option<String>>) -> Result<FixedPattern, 
         };
         nodes.extend(node.kind().subs().iter().map(|sub| (sub, always)));
     }
-    let regex = regex::Regex::new(&output).map_err(|e| e.to_string())?;
-    if !regex
-        .capture_names()
-        .filter(|name| *name != Some("imre.eol"))
-        .eq(groups.iter().map(Option::as_deref))
-    {
-        return Err("regex optimization would change the Python capture groups".into());
-    }
+    // The checked HIR enforces text boundaries. This builder validates engine size
+    // and capture numbering for either alphabet, without observing match offsets.
+    let regex = regex::bytes::RegexBuilder::new(&parsed.source)
+        .unicode(!bytes)
+        .multi_line(multiline)
+        .build()
+        .map_err(|e| e.to_string())?;
+    parsed.check_capture_names(regex.capture_names())?;
     Ok(FixedPattern {
-        source: output,
+        verbose: parsed.verbose,
+        source: parsed.source,
         may_match_empty: hir.properties().minimum_len() == Some(0),
-        groups: groups
+        groups: parsed
+            .groups
             .into_iter()
             .zip(required)
             .map(|(name, required)| Capture { name, required })
@@ -1544,7 +2072,7 @@ fn guarded_class(
         match next_token(input, verbose)? {
             Some('\\')
                 if escaped(input, &mut excluded, false, escapes, None)?
-                    .scalar()
+                    .point()
                     .is_some() => {}
             Some(c) if !r"\.^$*+?{}[]()|".contains(c) => literal(&mut excluded, c),
             _ => return Err(unsupported.into()),
@@ -1557,7 +2085,7 @@ fn guarded_class(
     }
     output.push('[');
     match next_token(input, verbose)? {
-        Some('[') => parse_class(input, output, escapes, None, None)?,
+        Some('[') => parse_class(input, output, escapes, None, None, None)?,
         Some('\\') if escaped(input, output, false, escapes, None)? == Escape::Class => {}
         _ => return Err(unsupported.into()),
     }
@@ -1580,7 +2108,7 @@ fn atomic_delimited(
     }
     let mut delimiter = String::new();
     match input.next() {
-        Some('[') => parse_class(input, &mut delimiter, escapes, None, None)?,
+        Some('[') => parse_class(input, &mut delimiter, escapes, None, None, None)?,
         Some('\\') => {
             // The delimiter also appears inside a negated class in the lowered scan.
             let word_delimiter = matches!(input.peek(), Some('w' | 'W'));
@@ -1617,15 +2145,15 @@ fn literal(output: &mut String, c: char) {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Escape {
-    Scalar(char),
+    Literal(u32),
     Class,
     Anchor,
 }
 
 impl Escape {
-    fn scalar(self) -> Option<char> {
+    fn point(self) -> Option<u32> {
         match self {
-            Self::Scalar(value) => Some(value),
+            Self::Literal(value) => Some(value),
             _ => None,
         }
     }
@@ -1698,7 +2226,7 @@ fn escaped(
 ) -> Result<Escape, String> {
     let start = input.position - 1;
     if let Some(value) = push_octal_escape(input, output, in_class, visitor.as_deref_mut())? {
-        return Ok(Escape::Scalar(value));
+        return Ok(Escape::Literal(u32::from(value)));
     }
     let c = input.next().ok_or("incomplete regex escape")?;
     let ascii = escapes.alphabet.ascii();
@@ -1816,7 +2344,10 @@ fn escaped(
             if c == 'x' {
                 // The same escape denotes a scalar in text and a single octet in bytes.
                 write!(output, "\\x{result:02x}").unwrap();
-                return Ok(Escape::Scalar(char::from(result as u8)));
+                return Ok(Escape::Literal(result));
+            }
+            if escapes.code_points && (0xd800..=0xdfff).contains(&result) {
+                return Ok(Escape::Literal(result));
             }
             char::from_u32(result).ok_or("regex escape is not a Unicode scalar")?
         }
@@ -1831,7 +2362,7 @@ fn escaped(
         }
     };
     literal(output, value);
-    Ok(Escape::Scalar(value))
+    Ok(Escape::Literal(u32::from(value)))
 }
 
 /// Inspect one class in its original spelling before the backend expands Python categories.
@@ -1840,6 +2371,7 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
     let mut input = Input::new(source.strip_prefix('[')?);
     let mut escapes = Escapes {
         preserve_categories: false,
+        code_points: true,
         alphabet: if bytes {
             Alphabet::Bytes
         } else {
@@ -1853,6 +2385,7 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
         &mut String::new(),
         &mut escapes,
         Some(&mut from_end),
+        None,
         None,
     )
     .err()?;
@@ -1875,11 +2408,46 @@ pub fn class_range_diagnostic(source: &str, bytes: bool) -> Option<(String, usiz
     Some((error, position))
 }
 
+/// One literal class and its optional single-character repetition in a text pattern.
+pub struct LiteralClass<'a> {
+    pub negated: bool,
+    pub ranges: Vec<(u32, u32)>,
+    pub repeat: &'a str,
+}
+
+pub fn literal_class(source: &str) -> Option<LiteralClass<'_>> {
+    let mut input = Input::new(source.strip_prefix('[')?);
+    let negated = input.peek() == Some('^');
+    let mut ranges = Vec::new();
+    let mut escapes = Escapes {
+        alphabet: Alphabet::Unicode,
+        preserve_categories: false,
+        bracketed_word: false,
+        code_points: true,
+    };
+    parse_class(
+        &mut input,
+        &mut String::new(),
+        &mut escapes,
+        None,
+        Some(&mut ranges),
+        None,
+    )
+    .ok()?;
+    let repeat = input.chars.as_str();
+    matches!(repeat, "" | "*" | "+" | "?").then_some(LiteralClass {
+        negated,
+        ranges,
+        repeat,
+    })
+}
+
 fn parse_class(
     input: &mut Input<'_>,
     output: &mut String,
     escapes: &mut Escapes,
     from_end: Option<&mut usize>,
+    mut ranges: Option<&mut Vec<(u32, u32)>>,
     mut warnings: Option<&mut WarningVisitor<'_>>,
 ) -> Result<(), String> {
     output.push('[');
@@ -1938,7 +2506,7 @@ fn parse_class(
         let mut second = None;
         let value = if c == '\\' {
             second = input.peek();
-            escaped(input, output, true, escapes, warnings.as_deref_mut())?.scalar()
+            escaped(input, output, true, escapes, warnings.as_deref_mut())?.point()
         } else {
             if matches!(c, '[' | '-' | '&' | '~' | '|')
                 && let Some(visitor) = warnings.as_mut()
@@ -1946,7 +2514,7 @@ fn parse_class(
                 visitor.literals.push(input.position - 1);
             }
             literal(output, c);
-            Some(c)
+            Some(u32::from(c))
         };
         if let Some((low, left, extra)) = range_start.take() {
             if !matches!((low, value), (Some(low), Some(high)) if low <= high) {
@@ -1964,7 +2532,14 @@ fn parse_class(
                 }
                 return Err(format!("bad character range {range}"));
             }
+            if let Some(ranges) = &mut ranges {
+                ranges.last_mut().expect("left endpoint").1 = value.expect("validated range");
+            }
         } else {
+            if let Some(ranges) = &mut ranges {
+                let point = value.ok_or("expected a literal class member")?;
+                ranges.push((point, point));
+            }
             left_atom = Some((value, c, second));
         }
         first = false;
@@ -1976,6 +2551,63 @@ fn parse_class(
 mod tests {
     use super::translate;
     use regex::Regex;
+
+    #[test]
+    fn packed_match_bits_preserve_lane_order() {
+        let ranges = [(b'a', 0); 3];
+        for low in 0..=u16::MAX {
+            let mask = u32::from(low) | (u32::from(!low) << 16);
+            let block = std::array::from_fn(|i| if mask & (1 << i) != 0 { b'a' } else { b'!' });
+            let flags = block.map(|b| if b == b'a' { u8::MAX } else { 0 });
+            assert_eq!(super::block_mask(&block, &ranges), mask);
+            assert_eq!(super::portable_mask(&flags), mask);
+        }
+    }
+
+    #[test]
+    fn byte_class_blocks_preserve_boundaries() {
+        use super::ByteRuns;
+
+        let cases: &[&[(u8, u8)]] = &[
+            &[],
+            &[(0, 255)],
+            &[(255, 255)],
+            &[(0, 31), (125, 129), (240, 255)],
+            &[(0, 1), (3, 7), (33, 65), (240, 255)],
+        ];
+        for &ranges in cases {
+            let mut members = [0; 256];
+            for &(first, last) in ranges {
+                members[usize::from(first)..=usize::from(last)].fill(17);
+            }
+            let (inside, outside): (Vec<_>, _) =
+                (0..=255u8).partition(|&b| members[usize::from(b)] != 0);
+            let mut bytes = Vec::new();
+            for len in [1, 7, 8, 9, 31, 32, 33, 39, 40, 41, 63, 64, 65, 255] {
+                for pool in [&outside, &inside] {
+                    bytes.extend(pool.iter().copied().cycle().take(len));
+                }
+            }
+            for offset in 0..=bytes.len() {
+                let tail = &bytes[offset..];
+                let mut runs = ByteRuns::new(&members, tail.len());
+                let mut cursor = 0;
+                while let Some(skip) = tail[cursor..]
+                    .iter()
+                    .position(|&b| members[usize::from(b)] != 0)
+                {
+                    let start = cursor + skip;
+                    let len = tail[start..]
+                        .iter()
+                        .take_while(|&&b| members[usize::from(b)] != 0)
+                        .count();
+                    cursor = start + len;
+                    assert_eq!(runs.next(tail), Some(start..cursor));
+                }
+                assert_eq!(runs.next(tail), None);
+            }
+        }
+    }
 
     #[test]
     fn escape_errors_observe_source_order_and_token_boundaries() {
@@ -2085,6 +2717,21 @@ mod tests {
             .unwrap();
         assert!(compiled.is_match("aI"));
         assert!(!compiled.is_match("aİ"));
+    }
+
+    #[test]
+    fn unicode_ascii_capture_projection_is_explicit() {
+        use super::Alphabet::UnicodeIgnoreCase;
+        let pattern = r"([a-z]+):\1";
+        let parsed = super::backtracking_pattern(pattern, false, UnicodeIgnoreCase, false).unwrap();
+        assert!(parsed.fold_ascii_references);
+        assert!(parsed.source.contains(r"(?-i:\k<1>)"));
+        assert!(super::backtracking_source(pattern, false, UnicodeIgnoreCase, false).is_err());
+        for rejected in [r"(.)\1", r"(?-i:([a-z]+))\1", r"([a-z]*)*\1"] {
+            assert!(
+                super::backtracking_pattern(rejected, false, UnicodeIgnoreCase, false).is_err()
+            );
+        }
     }
 
     #[test]

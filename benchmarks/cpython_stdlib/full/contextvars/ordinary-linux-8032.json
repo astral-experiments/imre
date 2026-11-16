@@ -1,0 +1,71 @@
+{
+  "commit": "9541cdccbebfeee4d82876076a9c29b6569f2a16",
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "test_file_sha256": "0fbb1b9a9a6f8d3c86b185a1effc3df6c38c96a866d9bf69e2b4bc0c3dca77bd",
+  "test_file_bytes": 38429,
+  "stock_python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "products": {
+    "imre": "d04f4346275864e68703ff16d8ad788cd4a21f750113a389d808003a008685a8",
+    "libimre_runtime.a": "7fc46882b907ffc23fdcb48282243141f192f313ebb54363cdd4732d008f78e2",
+    "imre-stdlib.zip": "8b26d7ab3be29c1d577f411324d84aa3552a6a340a73cd0235ffc0d84d0bc74d"
+  },
+  "routes": {
+    "file-O0": {
+      "argv": [
+        "/home/dev-user/code/public-8032/sdk/imre",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "pid": 1005520,
+      "wait_status": 256,
+      "counts": {
+        "passed": 25,
+        "error": 3,
+        "failed-assertion": 5,
+        "skipped": 23
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d62e57018792ef317b294a9692462540e457cf4b6ddd3cb91cbde097bfa3a7f7"
+    },
+    "file-O3": {
+      "argv": [
+        "/home/dev-user/code/public-8032/sdk/imre",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "pid": 1007945,
+      "wait_status": 256,
+      "counts": {
+        "passed": 25,
+        "error": 3,
+        "failed-assertion": 5,
+        "skipped": 23
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "06fd15a3124db9ea1af863783d9323dac3d968ce20b9f5e121e7f05c01476722"
+    },
+    "file-stock": {
+      "argv": [
+        "/home/dev-user/.local/share/imre-campaign-toolchain/managed-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/home/dev-user/code/public-8032-context56/inputs/Lib/test/test_context.py",
+        "-v",
+        "ContextTest",
+        "HamtTest"
+      ],
+      "pid": 1005469,
+      "wait_status": 0,
+      "counts": {
+        "passed": 56
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cb82ccbcbbe2d0ff50ddc933177899607c17a58579dd562d42baa21f24206b76"
+    }
+  }
+}

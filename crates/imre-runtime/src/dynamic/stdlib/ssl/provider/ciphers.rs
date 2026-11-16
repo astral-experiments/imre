@@ -44,6 +44,23 @@ fn snapshot(ctx: &mut Context, api: &Api, ssl: Handle) -> Result<Id> {
     Ok(ctx.alloc(Value::List(list)))
 }
 
+impl super::OwnedSsl {
+    pub(in crate::dynamic::stdlib::ssl) fn negotiated_cipher(&self, ctx: &mut Context) -> Id {
+        // SAFETY: the SSL owns the borrowed cipher and OpenSSL owns its name strings.
+        unsafe {
+            let cipher = (self.api.SSL_get_current_cipher)(self.handle.as_ptr());
+            if cipher.is_null() {
+                return NONE;
+            }
+            let name = optional_text(ctx, (self.api.SSL_CIPHER_get_name)(cipher));
+            let version = optional_text(ctx, (self.api.SSL_CIPHER_get_version)(cipher));
+            let bits = (self.api.SSL_CIPHER_get_bits)(cipher, std::ptr::null_mut());
+            let bits = ctx.int(i64::from(bits));
+            ctx.alloc(Value::Tuple(vec![name, version, bits]))
+        }
+    }
+}
+
 unsafe fn optional_text(ctx: &mut Context, text: *const c_char) -> Id {
     if text.is_null() {
         return NONE;

@@ -1,8 +1,57 @@
 import random
-from random import choice, choices, randbytes, randint, random as draw, shuffle
+from random import choice, choices, randbytes, randint, random as draw, sample as sample_items, shuffle
 
 
 def current():
+    source = random.Random(41)
+    random.seed(41)
+    assert source.choices("abcd", k=12) == choices("abcd", k=12)
+    assert source.choices("ab", weights=[2, 1], k=7) == choices("ab", weights=[2, 1], k=7)
+    assert source.random() == random.random()
+
+    class Fixed(random.Random):
+        def random(self):
+            return 0.75
+
+    assert Fixed().choices("abcd", k=2) == ["d", "d"]
+
+    import gc
+    events = []
+
+    class Needle:
+        def __lt__(self, other):
+            return True
+
+        def __del__(self):
+            events.append("release")
+
+    class Weight:
+        def __add__(self, zero):
+            return self
+
+        def __le__(self, zero):
+            return False
+
+        def __float__(self):
+            return 2.0
+
+        def __rmul__(self, draw):
+            return Needle()
+
+    class Population:
+        def __len__(self):
+            return 2
+
+        def __getitem__(self, index):
+            gc.collect()
+            events.append("get")
+            return index
+
+    for rng in (random, source):
+        events.clear()
+        assert rng.choices(Population(), cum_weights=[1, Weight()]) == [0]
+        assert events == ["release", "get"]
+
     seed = (1 << 100) + 7
     random.seed(seed)
     first = random.Random(seed)
@@ -104,9 +153,17 @@ def current():
         raise AssertionError("empty integer interval accepted")
 
     assert randbytes is random.randbytes
+    assert randbytes.__self__ is random._inst
+    assert randbytes.__func__ is random.Random.randbytes
     for size in (0, 1, 4, 5, 35):
         value = randbytes(n=size)
         assert type(value) is bytes and len(value) == size
+
+    generator = random.Random(42)
+    reference = random.Random(42)
+    for size in (0, 1, 4, 5, 35):
+        expected = reference.getrandbits(size * 8).to_bytes(size, "little")
+        assert generator.randbytes(n=size) == expected
 
     class Length:
         def __mul__(self, other):
@@ -117,6 +174,21 @@ def current():
             return 3
 
     assert randbytes(Length()) == bytes(3)
+
+    class Draw:
+        def to_bytes(self, length, byteorder):
+            assert length is size_arg and byteorder == "little"
+            return self
+
+    class CustomRandom(random.Random):
+        def getrandbits(self, width):
+            assert width == 0
+            return result
+
+    size_arg = Length()
+    result = Draw()
+    assert CustomRandom().randbytes(size_arg) is result
+
     events = []
     try:
         randrange(Index(3), Index(6), Index(-2))
@@ -192,3 +264,137 @@ def current():
     j = events[1][1]
     assert 0 <= j <= 2
     assert events == ["len", ("get", j), ("get", 2), ("set", 2, 2), ("set", j, 3)]
+
+    from math import log
+    from random import expovariate, uniform
+
+    assert uniform.__self__ is random._inst
+    assert uniform.__func__ is random.Random.uniform
+    random.seed(1701)
+    reference = random.Random(1701)
+    assert uniform(-3.0, 10.0) == reference.uniform(-3.0, 10.0)
+    assert random.random() == reference.random()
+
+    saved_random = random.Random.random
+    random.seed(551)
+    local = random.Random(551)
+    local_expo = local.expovariate
+    assert expovariate.__func__ is local_expo.__func__ is random.Random.expovariate
+    replay = random.Random(101)
+    assert expovariate.__func__(replay, 2.0) == random.Random(101).expovariate(2.0)
+    assert not hasattr(draw, "__func__") and not hasattr(local.getrandbits, "__func__")
+    random.Random.random = lambda self: 0.0
+    try:
+        assert repr(expovariate()) == repr(local_expo()) == "-0.0"
+        assert draw() == saved_random(local)
+    finally:
+        random.Random.random = saved_random
+
+    assert expovariate is random.expovariate
+    random.seed(seed)
+    reference = random.Random(seed)
+    assert expovariate() == -log(1.0 - reference.random())
+    assert random.random() == reference.random()
+    assert random.Random(seed).expovariate(lambd=-2) == -log(1.0 - random.Random(seed).random()) / -2
+
+    class Fixed(random.Random):
+        def random(self):
+            draws.append(1)
+            return 0.25
+
+    class Duck:
+        random = Fixed.random
+
+    draws = []
+    source = Fixed()
+    assert source.expovariate() == -log(0.75)
+    assert random.Random.expovariate(self=Duck(), lambd=2) == -log(0.75) / 2
+    assert len(draws) == 2
+    for call, error, count in (
+        (lambda: source.expovariate(1, lambd=2), TypeError, 2),
+        (lambda: source.expovariate(0), ZeroDivisionError, 3),
+        (lambda: source.expovariate(None), TypeError, 4),
+    ):
+        try:
+            call()
+        except (TypeError, ZeroDivisionError) as caught:
+            assert type(caught) is error and len(draws) == count
+        else:
+            raise AssertionError("invalid exponential rate accepted")
+
+    generator = random.Random(7629)
+    print(generator.choice("ACGT"), generator.randrange(98, -3, -7), generator.randint(-4, 4))
+    print(generator.sample(range(9), 8), generator.sample(range(1000), 6))
+    print(generator.sample("ABC", k=5, counts=[2, 0, 4]))
+    print(generator.uniform(-2, 5), generator.gauss(), generator.gauss(5, 0.25))
+    print(generator.getrandbits(32))
+
+    class OnlyRandom(random.Random):
+        def random(self):
+            return 0.0
+
+    class OnlyBits(random.Random):
+        def getrandbits(self, width):
+            return 0
+
+    for source in (OnlyRandom(42), OnlyBits(42)):
+        assert source.choice("ab") == "a"
+        assert source.randint(3, 7) == 3
+        items = [1, 2, 3, 4]
+        assert source.shuffle(items) is None
+        assert items == [2, 3, 4, 1]
+    for items in ([], [2], list(range(20))):
+        generator.shuffle(items)
+        print(items, generator.getrandbits(32))
+    for call, error in (
+        (lambda: generator.choice([]), IndexError),
+        (lambda: generator.shuffle((1, 2)), TypeError),
+        (lambda: generator.randrange(0, 1, 0), ValueError),
+        (lambda: generator.randint(4, 3), ValueError),
+        (lambda: generator.sample({1, 2}, 1), TypeError),
+        (lambda: generator.sample("ab", 3), ValueError),
+        (lambda: generator.sample("ab", 1, counts=[2]), ValueError),
+    ):
+        try:
+            call()
+        except error as caught:
+            print(type(caught).__name__, str(caught))
+        else:
+            raise AssertionError("invalid sample accepted")
+
+    assert sample_items is random.sample and sample_items.__self__ is random._inst
+    random.seed(419)
+    reference = random.Random(419)
+    assert sample_items(range(40), 5) == reference.sample(range(40), 5)
+    assert random.getrandbits(32) == reference.getrandbits(32)
+
+    import os
+    import secrets
+    assert secrets.SystemRandom is random.SystemRandom
+    assert secrets.randbits.__self__ is secrets._sysrand
+    assert random._urandom is os.urandom
+
+    calls = []
+    def entropy(n):
+        calls.append(n)
+        return b"\xa5" * n
+
+    source = random.SystemRandom(419)
+    try:
+        random._urandom = entropy
+        assert source.getrandbits(k=0) == 0
+        assert source.getrandbits(9) == 331
+        assert secrets.randbits(8) == 165
+        assert source.random() == (int.from_bytes(b"\xa5" * 7) >> 3) * (2 ** -53)
+        assert source.randbytes(n=3) == b"\xa5" * 3
+        assert calls == [0, 2, 1, 7, 3]
+    finally:
+        random._urandom = os.urandom
+    assert source.seed(object(), extra=True) is None
+    for method in (source.getstate, source.setstate):
+        try:
+            method(None)
+        except NotImplementedError as error:
+            assert str(error) == "System entropy source does not have state."
+        else:
+            raise AssertionError("SystemRandom exposed generator state")

@@ -9,10 +9,16 @@ These are separate upstream suites, for **138 occurrences** in total. The JSON
 doctests are part of JSON's denominator. Imre's LLVM optimization level does
 not change CPython's discovery or remove docstrings.
 
-At O0 and O3, eleven complete primary methods pass under their original host
-fixtures. The 106 blocked occurrences, four reference skips and sixteen
-reviewed exclusions remain in the primary report. The companion is blocked
-at both levels.
+At O0 and O3, 52 complete primary methods pass under their original host
+fixtures. The batched doctest also passes, with CPython's original OutputChecker
+checking native output. The primary report records 64 blocked occurrences,
+four reference skips and sixteen reviewed exclusions. The companion remains blocked.
+
+`SubclassWithKwargsTest.test_keywords_in_subclass` constructs subclasses of
+twelve iterator types. It checks their identity and output, rejects an
+unexpected keyword on plain subclasses and verifies the keyword stored by
+subclasses overriding `__init__` or `__new__`. Its body and unittest assertions
+run in Imre under the original host fixture.
 
 Re-running all 137 primary occurrences on the tuple-display compiler after
 StringIO #928 kept every classification at O0 and O3. Three first diagnostics
@@ -28,10 +34,11 @@ are separate from these method results.
 [coverage.py](coverage.py) copies complete original test methods and the
 original global definitions and self helpers they reference. It uses the
 [shared runner](../../SUITE_RUNNER.md) to run the original unittest lifecycle.
-Every credited method records its source hash, native operations and native
-assertions. The coordinator's [v1 contract](../../NATIVE_EVIDENCE.md) classifies
-these bodies as `native-body-host-fixture`: CPython dispatches the original
-fixtures, and an Imre subprocess constructs its native instance. Filter and
+Each passing method records its source hash and the operations that ran. Seven
+TestGC methods call the original makecycle helper and contain no assertions.
+The [v1 contract](../../NATIVE_EVIDENCE.md) classifies the complete methods as
+`native-body-host-fixture`. CPython dispatches the original fixtures and the
+Imre subprocess constructs its native instance. Filter and
 zip are builtin-only examples inside the upstream denominator.
 
 On the reference build, four huge allocations skip under the upstream

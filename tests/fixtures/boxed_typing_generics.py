@@ -1,4 +1,6 @@
+import gc
 import sys
+import weakref
 from sys import path
 from inspect import signature
 from types import FunctionType, GenericAlias
@@ -180,6 +182,14 @@ try:
     assert t._overload_registry == {}
 finally:
     t._overload_registry = registry
+
+for name in ("overload", "get_overloads", "clear_overloads", "_overload_dummy"):
+    original = getattr(t, name)
+    delattr(t, name)
+    try:
+        assert not hasattr(t, name)
+    finally:
+        setattr(t, name, original)
 
 old = t.get_overloads(Left.select)
 print(len(old), old[0](None, 1), old[1](None, 2), old[0] is t.get_overloads(Left().select)[0])
@@ -444,6 +454,23 @@ class InheritedSubscription(Subscription):
     pass
 
 
+class FallbackMeta(type):
+    def __getattr__(cls, name):
+        if name == "__class_getitem__":
+            return lambda item: (cls, item)
+        raise AttributeError(name)
+
+
+class VirtualSubscription(metaclass=FallbackMeta):
+    pass
+
+
+class ListSubscription(list, metaclass=FallbackMeta):
+    pass
+
+
+assert VirtualSubscription[int] == (VirtualSubscription, int)
+assert ListSubscription[int].__origin__ is ListSubscription
 assert isinstance(Subscription.__dict__["__class_getitem__"], classmethod)
 assert InheritedSubscription[int] == (InheritedSubscription, int)
 
@@ -567,6 +594,19 @@ assert t.get_origin(unpacked) is t.Unpack and t.get_args(unpacked) == (pack,)
 assert t.TypeVarTuple("Manual").evaluate_default(1) is t.NoDefault
 
 
+class HeaderOwner[T]:
+    T = "class"
+
+    class Inner[U](list[(T for _ in (0,)), T]):
+        pass
+
+
+iterator, direct = HeaderOwner.Inner.__orig_bases__[0].__args__
+assert iterator.gi_code.co_freevars == ("T",)
+assert next(iterator) is HeaderOwner.__type_params__[0]
+assert direct == "class"
+
+
 class Hidden[__P]:
     value = __P
 
@@ -587,3 +627,22 @@ except AttributeError as error:
     assert str(error) == "readonly attribute"
 else:
     raise AssertionError("ParamSpecArgs origin was writable")
+
+def nested_owner():
+    def unused():
+        pass
+
+    __class__ = unused
+
+    class Owner[T]:
+        def reader(self):
+            return lambda: (T, __class__)
+
+    return Owner, weakref.ref(__class__)
+
+
+owner, unused = nested_owner()
+gc.collect()
+assert unused() is None
+parameter, defining_class = owner().reader()()
+assert parameter is owner.__type_params__[0] and defining_class is owner

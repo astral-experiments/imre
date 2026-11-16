@@ -1,4 +1,6 @@
 import gc
+import inspect
+import types
 import weakref
 from functools import lru_cache
 
@@ -28,6 +30,27 @@ def current():
     assert cached.cache_parameters() == {"maxsize": 128, "typed": False}
     assert cached.cache_parameters() is not cached.cache_parameters()
     assert outer.cache_parameters is cached.cache_parameters
+    for name, doc in (("cache_info", "Report cache statistics"),
+                      ("cache_clear", "Clear the cache and cache statistics")):
+        owner = type(cached)
+        descriptor = vars(owner)[name]
+        bound = getattr(cached, name)
+        assert type(descriptor) is types.MethodDescriptorType and descriptor.__objclass__ is owner
+        assert type(bound) is types.BuiltinMethodType and bound.__self__ is cached
+        assert bound.__text_signature__ == descriptor.__text_signature__ == "($self, /)"
+        assert bound.__doc__ == descriptor.__doc__ == doc
+        assert bound.__qualname__ == descriptor.__qualname__ == "_lru_cache_wrapper." + name
+        assert str(inspect.signature(descriptor)) == "(self, /)"
+        assert str(inspect.signature(bound)) == "()"
+        assert descriptor(cached) == bound()
+        for invalid in (lambda: descriptor(), lambda: descriptor(2),
+                        lambda: bound(1), lambda: bound(value=1)):
+            try:
+                invalid()
+            except TypeError:
+                pass
+            else:
+                raise AssertionError("invalid cache method call succeeded")
     other_parameters = lru_cache(original).cache_parameters
     assert type(lru_cache) is type(original)
     assert type(other_parameters) is type(original)

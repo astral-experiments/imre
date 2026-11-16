@@ -6,7 +6,6 @@ impl Checker<'_> {
     /// Emit a native function value with the same ownership and indirect-call ABI as a def.
     fn shutil_helper(
         &mut self,
-        site: &impl Ranged,
         locals: Vec<Type>,
         result: Type,
         op: ir::ProcessOperation,
@@ -24,17 +23,13 @@ impl Checker<'_> {
                 calls: HashSet::new(),
                 class_reads: HashSet::new(),
                 source_frame: false,
-                recursion_error: self.graph.modules[self.module].error(
-                    site,
-                    "recursive calls through this shutil operation are unsupported",
-                ),
                 function: ir::Function {
                     params: (0..locals.len()).collect(),
                     locals,
                     returns: result,
                     body: vec![Statement::Return(Expr {
                         ty: result,
-                        kind: ExprKind::Builtin(Builtin::Process(op), args),
+                        kind: ExprKind::Builtin(Builtin::process(op), args),
                     })],
                 },
             },
@@ -94,7 +89,7 @@ impl Checker<'_> {
             (Intrinsic::Copy(op), [src, dst]) if path(*src) && path(*dst) => (
                 ir::ProcessOperation::Copy(op),
                 self.copy_result(op, *dst),
-                vec![local(0), local(1), Expr::boolean(true)],
+                vec![local(0), local(1)],
             ),
             (Intrinsic::RmTree, [src] | [src, Type::Bool])
                 if matches!(*src, Type::Str | Type::Bytes) || src.is_path() =>
@@ -123,7 +118,7 @@ impl Checker<'_> {
                 ));
             }
         };
-        Ok(self.shutil_helper(site, params, result, op, args, None))
+        Ok(self.shutil_helper(params, result, op, args, None))
     }
 
     pub(super) fn shutil_ignore_patterns(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -134,7 +129,7 @@ impl Checker<'_> {
             .args
             .iter()
             .map(|pattern| self.expr(pattern))
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<std::result::Result<Vec<_>, _>>()?;
         let ty = values.first().map_or(Type::Str, |v| v.ty);
         if !matches!(ty, Type::Str | Type::Bytes) || values.iter().any(|v| v.ty != ty) {
             return Err(error(
@@ -159,7 +154,6 @@ impl Checker<'_> {
             .collect();
         let result = self.types.set(ty);
         Ok(self.shutil_helper(
-            call,
             locals,
             result,
             ir::ProcessOperation::IgnorePatterns,
@@ -296,7 +290,7 @@ impl Checker<'_> {
             let result = self.move_result(dst);
             (ir::ProcessOperation::Move(self.shutil_tree_issue()), result)
         };
-        Ok(self.ordered_builtin(Builtin::Process(op), result, args))
+        Ok(self.ordered_builtin(Builtin::process(op), result, args))
     }
 
     pub(super) fn shutil_copytree(&mut self, call: &ast::ExprCall) -> Result<Expr, String> {
@@ -370,7 +364,7 @@ impl Checker<'_> {
         let issue = self.shutil_tree_issue();
         let result = args.values[args.order[1]].ty;
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::CopyTree(issue)),
+            Builtin::process(ir::ProcessOperation::CopyTree(issue)),
             result,
             args,
         ))
@@ -424,7 +418,7 @@ impl Checker<'_> {
             }
         })?;
         Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::RmTree),
+            Builtin::process(ir::ProcessOperation::RmTree),
             Type::None,
             args,
         ))
@@ -437,23 +431,17 @@ impl Checker<'_> {
     ) -> Result<Expr, String> {
         calls::reject_unpacking(call, self.source)?;
         let params = [
-            ("src", Type::Str, ParameterKind::PositionalOrKeyword, None),
-            ("dst", Type::Str, ParameterKind::PositionalOrKeyword, None),
-            (
-                "follow_symlinks",
-                Type::Bool,
-                ParameterKind::KeywordOnly,
-                Some(Expr::boolean(true)),
-            ),
-        ]
-        .map(|(name, ty, kind, default)| Parameter {
-            name: name.into(),
-            ty,
-            kind,
-            default,
-            sign_only: false,
-        });
-        let args = self.arguments_with(call, &params, None, |checker, i, expr| {
+            calls::parameter("src", Type::Str, None),
+            calls::parameter("dst", Type::Str, None),
+            ParameterKind::KeywordOnly.parameter("follow_symlinks", Type::Bool, None),
+        ];
+        // The native copy ABI supplies its flag when Python supplied only the two paths.
+        let params = if call.arguments.find_keyword("follow_symlinks").is_some() {
+            &params[..]
+        } else {
+            &params[..2]
+        };
+        let args = self.arguments_with(call, params, None, |checker, i, expr| {
             if i == 2 {
                 return checker.expr_expected(expr, Type::Bool);
             }
@@ -470,10 +458,31 @@ impl Checker<'_> {
         })?;
         let dst = args.values[args.order[1]].ty;
         let result = self.copy_result(op, dst);
-        Ok(self.ordered_builtin(
-            Builtin::Process(ir::ProcessOperation::Copy(op)),
+        let value = self.ordered_builtin(
+            Builtin::process(ir::ProcessOperation::Copy(op)),
             result,
             args,
-        ))
+        );
+        if let Some(sites) = &mut self.fixed_sites
+            && self.namespace.is_none()
+            && let Some(field) = call.func.as_attribute_expr()
+            && let Some(module) = field.value.as_name_expr()
+            && !self.names.contains_key(module.id.as_str())
+            && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
+        {
+            sites.positional_call(call, &value, || {
+                let source = self.graph.modules[self.module]
+                    .registered_values()
+                    .operands(self.source, self.graph.python_optimization());
+                source.imported_callable(
+                    module,
+                    call,
+                    self.graph.session.operand_types(self.module),
+                )
+            });
+        } else {
+            self.record_named_call(call, &value);
+        }
+        Ok(value)
     }
 }

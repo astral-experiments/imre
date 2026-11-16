@@ -209,7 +209,7 @@ impl Checker<'_> {
             return Err(error(
                 self.source,
                 call,
-                "logging.shutdown arguments require --runtime-imports",
+                "native lowering of logging.shutdown supports only the no-argument form",
             ));
         }
         let error = self.scoped_builtin_error("logging.shutdown", call);
@@ -357,10 +357,9 @@ impl Checker<'_> {
             &params,
             None,
             Some(&mut scope),
-            None,
-            |checker, index, arg| {
+            &mut |checker, index, arg| {
                 if index == 0 {
-                    arg.checked(checker, Type::Str, false)
+                    arg.checked(checker, Type::Str, false, None)
                 } else {
                     Ok(Self::string_value(arg.value(checker)?))
                 }
@@ -376,7 +375,7 @@ impl Checker<'_> {
         &mut self,
         name: &str,
         args: ir::CallArgs,
-        call: &ast::ExprCall,
+        at: &impl Ranged,
     ) -> Result<Expr, String> {
         let sig = self
             .graph
@@ -385,7 +384,7 @@ impl Checker<'_> {
             .ok_or_else(|| {
                 error(
                     self.source,
-                    call,
+                    at,
                     &format!("missing native logging function {name}"),
                 )
             })?;
@@ -534,14 +533,17 @@ impl Checker<'_> {
         self.checked_level_value(value, arg)
     }
 
-    fn checked_level_value(&self, value: Expr, arg: &impl Ranged) -> Result<Expr, String> {
+    fn checked_level_value(&mut self, value: Expr, arg: &impl Ranged) -> Result<Expr, String> {
         match value.ty {
             Type::Int => Ok(value),
             Type::Bool => Ok(Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }),
-            Type::Str => Ok(operation(Log::CheckLevel, Type::Int, vec![value])),
+            Type::Str => {
+                let level = self.coerce(value, self.types.string_or_int(), arg)?;
+                self.logging_source_call("_checkLevel", ir::CallArgs::positional(vec![level]), arg)
+            }
             ty if dataclass_values::can_format(ty, self.types, self.classes)
                 && !matches!(ty, Type::Class(_)) =>
             {
@@ -648,69 +650,64 @@ impl Checker<'_> {
         attribute: &ast::ExprAttribute,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        if attribute.attr.as_str() == "makeRecord" {
+        let name = attribute.attr.as_str();
+        if name == "makeRecord" {
             return self.logger_make_record(logger, call);
         }
-        if matches!(attribute.attr.as_str(), "addHandler" | "removeHandler") {
+        if matches!(name, "addHandler" | "removeHandler") {
             let handler = self.handler_type().ok_or_else(|| {
                 error(self.source, attribute, "missing logging.Handler definition")
             })?;
             let args = self.arguments(call, &[parameter("hdlr", handler, None)], Some(logger))?;
-            let op = if attribute.attr.as_str() == "addHandler" {
+            let op = if name == "addHandler" {
                 Log::AddHandler
             } else {
                 Log::RemoveHandler
             };
             return Ok(self.ordered_builtin(Builtin::Logging(op), Type::None, args));
         }
-        if attribute.attr.as_str() == "hasHandlers" {
-            let args = self.arguments(call, &[], Some(logger))?;
-            return Ok(self.ordered_builtin(Builtin::Logging(Log::HasHandlers), Type::Bool, args));
+        if matches!(name, "setLevel" | "isEnabledFor") {
+            let params = [parameter("level", Type::Int, None)];
+            let (op, ty, args) = if name == "setLevel" {
+                let args =
+                    self.arguments_with(call, &params, Some(logger), |checker, _, arg| {
+                        checker.checked_logging_level(arg)
+                    })?;
+                (Log::SetLevel, Type::None, args)
+            } else {
+                (
+                    Log::Enabled,
+                    Type::Bool,
+                    self.arguments(call, &params, Some(logger))?,
+                )
+            };
+            return Ok(self.ordered_builtin(Builtin::Logging(op), ty, args));
         }
-        if attribute.attr.as_str() == "getChildren" {
-            let args = self.arguments(call, &[], Some(logger))?;
-            return Ok(self.ordered_builtin(
-                Builtin::Logging(Log::Children),
-                self.types.set(Type::Logger),
-                args,
-            ));
-        }
-        if attribute.attr.as_str() == "setLevel" {
-            let args = self.arguments_with(
-                call,
-                &[parameter("level", Type::Int, None)],
-                Some(logger),
-                |checker, _, arg| checker.checked_logging_level(arg),
-            )?;
-            return Ok(self.ordered_builtin(Builtin::Logging(Log::SetLevel), Type::None, args));
-        }
-        let args = call.arguments.args.as_ref();
-        let name = attribute.attr.as_str();
-        let (level, args) = match (name, args) {
-            ("getEffectiveLevel", []) => {
-                self.reject_builtin_keywords(call)?;
-                return Ok(operation(Log::EffectiveLevel, Type::Int, vec![logger]));
-            }
-            ("isEnabledFor", [level]) => {
-                self.reject_builtin_keywords(call)?;
-                let level = self.expr_expected(level, Type::Int)?;
-                return Ok(operation(Log::Enabled, Type::Bool, vec![logger, level]));
-            }
-            ("log", [level, args @ ..]) => (self.expr_expected(level, Type::Int)?, args),
-            ("debug", args) => (Expr::integer(10), args),
-            ("info", args) => (Expr::integer(20), args),
-            ("warning", args) => (Expr::integer(30), args),
-            ("error", args) => (Expr::integer(40), args),
-            ("critical" | "fatal", args) => (Expr::integer(50), args),
+        let (op, ty) = match name {
+            "hasHandlers" => (Log::HasHandlers, Type::Bool),
+            "getChildren" => (Log::Children, self.types.set(Type::Logger)),
+            "getEffectiveLevel" => (Log::EffectiveLevel, Type::Int),
             _ => {
-                return Err(error(
-                    self.source,
-                    call,
-                    "unsupported logger method or argument count",
-                ));
+                let level = match name {
+                    "log" => None,
+                    "debug" => Some(10),
+                    "info" => Some(20),
+                    "warning" => Some(30),
+                    "error" => Some(40),
+                    "critical" | "fatal" => Some(50),
+                    _ => {
+                        return Err(error(
+                            self.source,
+                            call,
+                            "unsupported logger method or argument count",
+                        ));
+                    }
+                };
+                return self.log_message(logger, level, false, call);
             }
         };
-        self.log_message(logger, level, args, false, call)
+        let args = self.arguments(call, &[], Some(logger))?;
+        Ok(self.ordered_builtin(Builtin::Logging(op), ty, args))
     }
 
     pub(super) fn root_log(
@@ -718,15 +715,7 @@ impl Checker<'_> {
         level: Option<u8>,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let args = call.arguments.args.as_ref();
-        let (level, args) = if let Some(level) = level {
-            (Expr::integer(level), args)
-        } else if let Some((level, args)) = args.split_first() {
-            (self.expr_expected(level, Type::Int)?, args)
-        } else {
-            return Err(error(self.source, call, "missing log level"));
-        };
-        self.log_message(self.root_logger(), level, args, true, call)
+        self.log_message(self.root_logger(), level, true, call)
     }
 
     /// Bind an inherited adapter logging method at its original call site.
@@ -768,100 +757,81 @@ impl Checker<'_> {
                 "forwarding adapter methods to an overridden log signature is unsupported",
             ));
         }
-        let args = call.arguments.args.as_ref();
-        let (level, args) = if let Some(level) = method_level {
-            (Expr::integer(level), args)
-        } else if let Some((level, rest)) = args.split_first() {
-            (self.expr_expected(level, Type::Int)?, rest)
-        } else {
-            return Err(error(self.source, call, "missing log level"));
-        };
         let receiver = self.coerce(receiver.clone(), Type::Class(base), call)?;
-        self.log_message(receiver, level, args, false, call)
+        self.log_message(receiver, method_level, false, call)
             .map(Some)
     }
 
     fn log_message(
         &mut self,
         logger: Expr,
-        level: Expr,
-        args: &[ast::Expr],
+        implicit_level: Option<u8>,
         root: bool,
         call: &ast::ExprCall,
     ) -> Result<Expr, String> {
-        let Some((message, operands)) = args.split_first() else {
-            return Err(error(self.source, call, "missing log message"));
-        };
         let adapter = logger.ty != Type::Logger;
-        let original = if adapter {
-            self.expr_expected(message, Type::Str)?
-        } else {
-            self.expr(message)?
-        };
-        let mut values = vec![logger, level, original];
-        for operand in operands {
-            values.push(self.expr(operand)?);
-        }
-        let extra = match call.arguments.keywords.as_ref() {
-            [] => None,
-            [kw] if kw.arg.as_ref().is_some_and(|name| name.as_str() == "extra") => {
-                if adapter {
-                    let fields = self.types.dict(Type::Str, Type::Str);
-                    let value = if matches!(kw.value, ast::Expr::Dict(_)) {
-                        self.expr_expected(&kw.value, fields)?
-                    } else {
-                        self.expr(&kw.value)?
-                    };
-                    Some(self.coerce(value, self.types.optional(fields), &kw.value)?)
-                } else {
-                    Some(self.logging_extra(&kw.value)?)
+        let params = [
+            parameter("level", Type::Int, None),
+            parameter("msg", Type::None, None),
+            ParameterKind::Variadic.parameter("args", Type::None, None),
+            ParameterKind::KeywordOnly.parameter("extra", Type::None, Some(Expr::none())),
+        ];
+        let skip = usize::from(implicit_level.is_some());
+        let mut scope = calls::ArgumentScope::default();
+        let logger = scope.hold(self, logger);
+        let mut record_types = Ok(());
+        let args = self.arguments_with(call, &params[skip..], None, |checker, index, node| {
+            let value = match index + skip {
+                0 => {
+                    let level = checker.expr_expected(node, Type::Int)?;
+                    if level.tagged_integer_literal().is_some() {
+                        return Ok(level);
+                    }
+                    level
                 }
-            }
-            _ => {
-                return Err(error(
-                    self.source,
-                    call,
-                    "keyword arguments are unsupported for this builtin",
-                ));
-            }
-        };
-        let extra_index = extra.map(|field| {
-            let i = values.len();
-            values.push(field);
-            i
-        });
-        // Python evaluates all arguments, even when a logger discards an event.
-        let mut body = Vec::new();
-        let mut clear = Vec::new();
-        for value in values {
-            let slot = self.hidden(value.ty);
-            body.push(Statement::Assign(slot, value));
-            clear.push(slot);
-        }
+                1 | 2 => {
+                    let value = if adapter && index + skip == 1 {
+                        checker.expr_expected(node, Type::Str)?
+                    } else {
+                        checker.expr(node)?
+                    };
+                    // Diagnose the argument expressions before rejecting a record layout.
+                    if record_types.is_ok() {
+                        record_types = checker.check_record_value_type(value.ty, node);
+                    }
+                    value
+                }
+                _ if adapter => {
+                    let fields = checker.types.dict(Type::Str, Type::Str);
+                    let value = if matches!(node, ast::Expr::Dict(_)) {
+                        checker.expr_expected(node, fields)?
+                    } else {
+                        checker.expr(node)?
+                    };
+                    checker.coerce(value, checker.types.optional(fields), node)?
+                }
+                _ => checker.logging_extra(node)?,
+            };
+            Ok(scope.hold(checker, value))
+        })?;
+        record_types?;
+        let bound = |index: usize| args.values[args.order[index - skip]].clone();
+        let level = implicit_level
+            .map(Expr::integer)
+            .unwrap_or_else(|| bound(0));
+        let original = bound(1);
+        let arguments = bound(2);
+        let extra = bound(3);
+        let extra = (extra.ty != Type::None).then_some(extra);
         // Module-level convenience functions install the default handler after
         // evaluating the message arguments, even when the root filters the event.
         if root {
-            body.push(Statement::Expr(self.logging_source_call(
+            scope.body.push(Statement::Expr(self.logging_source_call(
                 "_auto_config",
                 ir::CallArgs::positional(Vec::new()),
                 call,
             )?));
         }
-        let logger = self.local(clear[0]);
-        let level = self.local(clear[1]);
-        let original = self.check_record_value(self.local(clear[2]), message)?;
-        let arguments = clear[3..3 + operands.len()]
-            .iter()
-            .zip(operands)
-            .map(|(&slot, node)| self.check_record_value(self.local(slot), node))
-            .collect::<Result<Vec<_>, _>>()?;
-        let arguments = Expr {
-            ty: self
-                .types
-                .tuple(arguments.iter().map(|arg| arg.ty).collect()),
-            kind: ExprKind::Tuple(arguments),
-        };
-        let extra = extra_index.map(|i| self.local(clear[i]));
         let event = if adapter {
             let enabled = self.logging_source_call(
                 "_adapter_enabled",
@@ -898,14 +868,7 @@ impl Checker<'_> {
         } else {
             self.log_event(logger, level, original, arguments, extra, call)?
         };
-        Ok(Expr {
-            ty: Type::None,
-            kind: ExprKind::Scope {
-                body,
-                clear,
-                value: Box::new(event),
-            },
-        })
+        Ok(scope.finish(event))
     }
 
     fn log_event(

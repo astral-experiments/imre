@@ -1,6 +1,7 @@
 //! Nominal member identity and the finite set of values accepted by a match.
 
 use super::*;
+use ruff_python_ast::CmpOp;
 
 impl Checker<'_> {
     pub(super) fn assert_never(
@@ -17,10 +18,10 @@ impl Checker<'_> {
         };
         let val = self.expr(arg)?;
         let enum_local = matches!(arg, ast::Expr::Name(name) if self.names.contains_key(name.id.as_str()))
-            && matches!(
+            && (matches!(
                 self.types.payload(val.ty).unwrap_or(val.ty),
                 Type::StrEnum(_)
-            );
+            ) || self.registered.is_some() && val.ty == Type::PythonObject);
         if !call.arguments.keywords.is_empty() || !(enum_local || exhausted_pair) {
             return Err(error(
                 self.source,
@@ -43,6 +44,14 @@ impl Checker<'_> {
                 arg,
                 "assert_never requires an exhausted StrEnum domain",
             ));
+        }
+        if self.registered.is_some() {
+            let function = self.expr(&call.func)?;
+            return Ok(Statement::Expr(self.call_with_values(
+                call,
+                function,
+                vec![val],
+            )));
         }
         // Keep the defensive Python exception even when the checker proves the
         // argument uninhabited. typing truncates repr at 100 Unicode code points.
@@ -85,13 +94,13 @@ impl Checker<'_> {
                 clear: vec![slot],
             },
         };
-        Ok(Statement::Raise(Some(Expr {
+        Ok(Statement::raise(Expr {
             ty: Type::Exception,
             kind: ExprKind::Exception {
                 kind: exception_kind("AssertionError").unwrap(),
                 message: Some(Box::new(message)),
             },
-        })))
+        }))
     }
 
     pub(super) fn enum_member(&self, class: usize, name: &str) -> Option<Expr> {
@@ -181,11 +190,7 @@ impl Checker<'_> {
             .collect();
         let mapping = Expr {
             ty: self.types.dict(Type::Str, ty),
-            kind: ExprKind::Dict {
-                key: Type::Str,
-                value: ty,
-                entries,
-            },
+            kind: ExprKind::dict_pairs(entries),
         };
         let key = self.expr_expected(&sub.slice, Type::Str)?;
         Ok(Some(Expr {
@@ -217,7 +222,7 @@ impl Checker<'_> {
         match (from, to) {
             (Type::Bool, Type::Int) => Some(|value| Expr {
                 ty: Type::Int,
-                kind: ExprKind::Builtin(Builtin::Int, vec![value]),
+                kind: ExprKind::Builtin(Builtin::Int(None), vec![value]),
             }),
             (Type::IntEnum(_), Type::Int) => Some(Self::enum_integer),
             (Type::StrEnum(_), Type::Str) => Some(Self::enum_text),
@@ -280,27 +285,111 @@ impl Checker<'_> {
         }
     }
 
-    pub(super) fn nominal_identity(
+    /// The operand order and polarity used by both expression lowering and flow narrowing.
+    pub(super) fn identity_test<'n>(
+        &self,
+        test: &'n ast::Expr,
+    ) -> Option<(&'n ast::Expr, ast::CmpOp, &'n ast::Expr)> {
+        match test {
+            ast::Expr::Compare(compare) => {
+                let (left, op @ (ast::CmpOp::Is | ast::CmpOp::IsNot), right) =
+                    compare.as_single()?
+                else {
+                    return None;
+                };
+                Some((left, *op, right))
+            }
+            ast::Expr::Call(call) => {
+                let Binding::Intrinsic(Intrinsic::ScopedObjectExport(name)) =
+                    self.resolve(&call.func)?
+                else {
+                    return None;
+                };
+                self.operator_identity_call(call, name)
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn operator_identity_call<'n>(
+        &self,
+        call: &'n ast::ExprCall,
+        name: &str,
+    ) -> Option<(&'n ast::Expr, ast::CmpOp, &'n ast::Expr)> {
+        let (member, op) = match name {
+            "operator.is_" => ("is_", ast::CmpOp::Is),
+            "operator.is_not" => ("is_not", ast::CmpOp::IsNot),
+            _ => return None,
+        };
+        let [left, right] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        (call.arguments.keywords.is_empty()
+            && ["operator", "_operator"].into_iter().any(|owner| {
+                self.graph
+                    .session
+                    .is_stdlib_function(self.module, &call.func, owner, member)
+            }))
+        .then_some((left, op, right))
+    }
+
+    pub(super) fn identity_comparison(
         &mut self,
         left: &ast::Expr,
         right: &ast::Expr,
         op: ast::CmpOp,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
+        if let Some((value, class)) = self.exact_object_type(left, right) {
+            let value = self.expr(value)?;
+            let predicate = match (class, value.ty) {
+                (ty_python_semantic::types::KnownClass::Str, Type::ObjectValue) => {
+                    Builtin::IsInstance(vec![ir::InstanceType::ExactText])
+                }
+                (
+                    ty_python_semantic::types::KnownClass::Tuple,
+                    Type::ObjectValue | Type::VarTuple(_) | Type::Tuple(_),
+                ) => Builtin::IsExactTuple,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        node,
+                        "unsupported value layout for an exact type comparison",
+                    ));
+                }
+            };
+            let test = Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Builtin(predicate, vec![value]),
+            };
+            return Ok(if op == ast::CmpOp::Is {
+                test
+            } else {
+                Expr::not(test)
+            });
+        }
+        let classes = (self.class_reference(left), self.class_reference(right));
+        if let (Some(left), Some(right)) = classes {
+            return Ok(Expr::boolean((left == right) == (op == ast::CmpOp::Is)));
+        }
+        if let (ast::Expr::NoneLiteral(_), value) | (value, ast::Expr::NoneLiteral(_)) =
+            (left, right)
+        {
+            return Ok(Self::identity_is_none(self.expr(value)?, op));
+        }
         if let Some(value) = self.context_missing_test(left, right, op == ast::CmpOp::IsNot)? {
             return Ok(value);
         }
-        let (left, right) = match (self.class_reference(left), self.class_reference(right)) {
+        let (left, right) = match classes {
             (Some(class), None) | (None, Some(class)) => {
-                let class_first = self.class_reference(left).is_some();
+                let class_first = classes.0.is_some();
                 let (literal, other) = if class_first {
                     (left, right)
                 } else {
                     (right, left)
                 };
-                let proxy_class = matches!(other, ast::Expr::Attribute(attr) if attr.attr.as_str() == "__class__");
                 let other = self.expr(other)?;
-                let value = if proxy_class && other.ty == Type::BuiltinClass {
+                let value = if other.ty == Type::BuiltinClass {
                     self.record_class_object(class)
                 } else if let Some(base) = self.types.constructor_base(other.ty) {
                     self.record_constructor_value(class, base, other.ty, literal)?
@@ -346,10 +435,7 @@ impl Checker<'_> {
             },
         };
         if op == ast::CmpOp::IsNot {
-            result = Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(result)),
-            };
+            result = Expr::not(result);
         }
         result
     }
@@ -381,18 +467,20 @@ impl Checker<'_> {
         if self.types.is_url_split_result(left.ty) || self.types.is_url_split_result(right.ty) {
             return Err(self.scoped_builtin_error("urllib.parse.urlsplit result identity", node));
         }
+        let (left, right) = if left.ty == Type::BuiltinClass || right.ty == Type::BuiltinClass {
+            (self.class_object_view(left), self.class_object_view(right))
+        } else {
+            (left, right)
+        };
         let operands = [&left, &right];
         let tuple = |e: &Expr| {
             matches!(e.ty, Type::Tuple(_))
                 || matches!(
                     e.kind,
-                    ExprKind::Builtin(
-                        Builtin::ExceptionArgs
-                            | Builtin::ImportErrorField(0)
-                            | Builtin::ExceptionTupleView,
-                        _
-                    )
+                    ExprKind::Builtin(Builtin::ExceptionArgs | Builtin::ImportErrorField(0), _)
                 )
+                || matches!(&e.kind, ExprKind::Builtin(Builtin::BoxValue, args)
+                    if matches!(args.as_slice(), [value] if matches!(value.ty, Type::Tuple(_))))
         };
         if operands.iter().any(|e| e.ty == Type::ObjectValue)
             && operands
@@ -402,28 +490,15 @@ impl Checker<'_> {
         {
             // One proven tuple rules out unsupported scalar identity, even when
             // the other operand is an alias stored through a general object view.
-            let view = |e: Expr| {
-                if e.ty == Type::ObjectValue {
-                    e
-                } else {
-                    Expr {
-                        ty: Type::ObjectValue,
-                        kind: ExprKind::Builtin(Builtin::ExceptionTupleView, vec![e]),
-                    }
-                }
-            };
             let same = Expr {
                 ty: Type::Bool,
                 kind: ExprKind::Builtin(
                     Builtin::ExceptionTupleIdentity,
-                    vec![view(left), view(right)],
+                    vec![left.into_object_value(), right.into_object_value()],
                 ),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(same)),
-                }
+                Expr::not(same)
             } else {
                 same
             });
@@ -436,6 +511,7 @@ impl Checker<'_> {
                     | Type::Bytes
                     | Type::ListInt
                     | Type::List(_)
+                    | Type::PlainObject
                     | Type::BytesIO
                     | Type::StringIO
             )
@@ -467,13 +543,19 @@ impl Checker<'_> {
                 kind: ExprKind::Builtin(identity, vec![left, right]),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(same)),
-                }
+                Expr::not(same)
             } else {
                 same
             });
+        }
+        if [left.ty, right.ty]
+            .iter()
+            .all(|t| matches!(t, Type::RegexPattern | Type::RegexBytesPattern))
+        {
+            return Ok(Self::identity_result(
+                vec![left, right],
+                op == ast::CmpOp::IsNot,
+            ));
         }
         if [left.ty, right.ty].iter().all(|t| {
             matches!(
@@ -590,10 +672,7 @@ impl Checker<'_> {
                 ),
             };
             return Ok(if op == ast::CmpOp::IsNot {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Not(Box::new(expr)),
-                }
+                Expr::not(expr)
             } else {
                 expr
             });
@@ -652,9 +731,9 @@ impl Checker<'_> {
                 kind: ExprKind::Compare(
                     vec![left, right],
                     vec![if op == ast::CmpOp::Is {
-                        Compare::Equal
+                        CmpOp::Eq
                     } else {
-                        Compare::NotEqual
+                        CmpOp::NotEq
                     }],
                 ),
             });
@@ -712,6 +791,7 @@ impl Checker<'_> {
                         | Type::None
                 )
             })
+            || types.iter().all(|ty| matches!(ty, Type::VarTuple(_)))
             || types == [Type::NativeModule; 2]
             || types == [Type::ModuleNamespace; 2]
             || types
@@ -789,6 +869,12 @@ impl Checker<'_> {
             || types == [Type::ByteArray; 2]
             || types == [Type::Hash; 2])
         {
+            if types.iter().all(|ty| matches!(ty, Type::Tuple(_))) {
+                return Err(self.scoped_builtin_error("tuple identity comparison", node));
+            }
+            if types.contains(&Type::PythonObject) {
+                return Err(self.scoped_builtin_error("Python object identity comparison", node));
+            }
             return Err(error(
                 self.source,
                 node,
@@ -807,10 +893,7 @@ impl Checker<'_> {
             kind: ExprKind::Builtin(Builtin::NominalIdentity, values),
         };
         if negate {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Not(Box::new(identity)),
-            }
+            Expr::not(identity)
         } else {
             identity
         }
@@ -838,18 +921,9 @@ impl Checker<'_> {
         while let Some(pattern) = patterns.pop() {
             match pattern {
                 ast::Pattern::MatchValue(value) => {
-                    if let Some(Expr {
-                        kind:
-                            ExprKind::Builtin(
-                                Builtin::StrEnumMember {
-                                    class: owner,
-                                    member,
-                                },
-                                _,
-                            ),
-                        ..
-                    }) = self.qualified_member(&value.value)
-                        && class == owner
+                    if let Some(attr) = value.value.as_attribute_expr()
+                        && self.class_reference(&attr.value) == Some(class)
+                        && let Some(&member) = members.names.get(attr.attr.as_str())
                     {
                         remaining[member] = false;
                     }
@@ -872,7 +946,7 @@ impl Checker<'_> {
 mod tests {
     const PREFIX: &str = "from enum import StrEnum, auto\nclass State(StrEnum):\n    OPEN = auto()\n    ALIAS = OPEN\n    SAME = 'open'\n    CLOSED = 'off'\n";
 
-    fn check(body: &str) -> Result<(), String> {
+    fn check(body: &str) -> std::result::Result<(), String> {
         crate::check(&format!("{PREFIX}{body}"))
     }
 
@@ -905,13 +979,18 @@ mod tests {
                 "{err}"
             );
         }
-        let body = "def f(v: State) -> None:\n    try:\n        if v == State.OPEN:\n            return\n    finally:\n        if v == State.CLOSED:\n            return\n        exhausted(v)\n";
+        let body = "def f(v: State) -> None:\n    try:\n        if v == State.OPEN:\n            return\n    finally:\n        if v == State.CLOSED:\n            return\n";
         let two_members = "from enum import StrEnum\nclass State(StrEnum):\n    OPEN = 'open'\n    CLOSED = 'closed'\n";
-        let err = crate::check(&format!("{imported}{two_members}{body}")).unwrap_err();
-        assert!(
-            err.contains("assert_never inside finally is unsupported"),
-            "{err}"
-        );
+        for cleanup in [
+            "        exhausted(v)\n",
+            "        try:\n            exhausted(v)\n        except LookupError:\n            pass\n",
+        ] {
+            let err = crate::check(&format!("{imported}{two_members}{body}{cleanup}")).unwrap_err();
+            assert!(
+                err.contains("assert_never inside finally is unsupported"),
+                "{err}"
+            );
+        }
     }
 
     #[test]
