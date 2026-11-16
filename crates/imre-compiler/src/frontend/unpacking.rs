@@ -536,14 +536,13 @@ impl Checker<'_> {
                 && !self.names.contains_key(name.id.as_str())
             {
                 let value = self.consuming_lists.capture_split(target.range(), value);
-                // A refused Python operand still establishes its local binding during discovery.
-                if self.inference.is_some()
-                    && self.discarded_function_body()
-                    && value.ty == Type::PythonObject
+                // Later statements still need the binding after this body lost its output.
+                if value.ty == Type::PythonObject
                     && matches!(
                         value.kind,
                         ExprKind::Builtin(Builtin::Unrepresented | Builtin::UnrepresentedCall, _)
                     )
+                    && self.discarded_function_body()
                 {
                     self.assign(target, value, None)?;
                     return Ok(true);
