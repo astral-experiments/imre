@@ -445,7 +445,7 @@ pub(crate) fn frame_inputs(
     {
         return None;
     }
-    let needs_protocol = object_parameter || has_scalar;
+    let needs_protocol = object_parameter || scalar_reads != 0;
     let live = scalar_reads == protocol_reads
         && (!needs_protocol || uses_python_protocol || uses_scalar_protocol);
     let sites = sites.into_boxed_slice();
