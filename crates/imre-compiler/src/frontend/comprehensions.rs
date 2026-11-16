@@ -1236,6 +1236,20 @@ async def invalid(values: list[int]) -> int:
     }
 
     #[test]
+    fn an_entry_comprehension_before_a_nonreturning_call_has_one_helper() {
+        let graph = crate::modules::SourceGraph::single(
+            "def stop(selected: bool) -> None:\n    if selected:\n        raise ValueError('first')\n    else:\n        raise LookupError('second')\ndef emit(value: int) -> None:\n    print(value)\nif __name__ == '__main__':\n    print([str(i) for i in range(4)])\n    stop(True)\n    emit(0)\n",
+        )
+        .unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let helpers = module
+            .functions
+            .iter()
+            .filter(|function| module.types.element(function.returns) == Some(Type::Str));
+        assert_eq!(helpers.count(), 1);
+    }
+
+    #[test]
     fn decoded_gather_validates_before_calling_the_lazy_global_helper() {
         let directory = tempfile::tempdir().unwrap();
         let entry = directory.path().join("entry.py");

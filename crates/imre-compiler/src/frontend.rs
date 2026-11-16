@@ -1409,9 +1409,93 @@ fn lower_graph(
             }
         })?;
     }
+    let checker_for = |module| {
+        Checker::new(
+            graph,
+            module,
+            &signatures,
+            &classes,
+            &types,
+            &helpers,
+            &globals,
+        )
+    };
+    let mut startup = Vec::new();
+    let mut entry_source = None;
+    let mut python_entry = false;
+    let mut lower_entry = |nonreturning: &HashSet<usize>, placement_only: bool| {
+        startup.clear();
+        entry_source = None;
+        python_entry = false;
+        let module_id = graph.entry;
+        let mut checker = checker_for(module_id);
+        checker.module_scope = true;
+        checker.nonreturning_functions = nonreturning;
+        checker.placement_only = placement_only;
+        let mut fixed_entry =
+            if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
+                // The Python frame must read its live module name. Keep a tail that
+                // binds locals with the checker that owns their layout and contracts.
+                if named
+                    && let Some(guard) = tail.first()
+                    && module_values::main_guard(guard)
+                    && !graph
+                        .session
+                        .binds_module_name_from(module_id, guard.start())
+                {
+                    checker.registered = Some(graph.modules[module_id].registered_values());
+                    checker.registered_local_start = Some(0);
+                    checker.checked_call_contracts = true;
+                    checker.frame_arguments = FrameArguments::Python;
+                    python_entry = true;
+                } else {
+                    checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
+                }
+                // Leave room for the declarations and their Python statement checkpoints.
+                Some(Vec::with_capacity(tail.len() + 2 * prefix.len()))
+            } else {
+                (!checker.placement_only).then(Vec::new)
+            };
+        let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
+        checker.finish_region(result)?;
+        Ok(fixed_entry.map(|body| {
+            entry_source = checker.fixed_sites.take().and_then(|sites| {
+                sites.finish(
+                    entry_statements.len(),
+                    &body,
+                    std::mem::take(&mut checker.names),
+                    &checker.locals,
+                    None,
+                    FrameArguments::Python,
+                )
+            });
+            checker.fault_frame(&mut startup, "<module>", TextSize::default());
+            ir::Function {
+                params: Vec::new(),
+                returns: Type::None,
+                locals: checker.locals,
+                body,
+            }
+        }))
+    };
+
+    // A declaration that can still prove a call never returns can change which
+    // module operations are reachable. Check the entry once that set is settled.
+    let after_nonreturning = std::cell::LazyCell::new(|| {
+        graph.modules[graph.entry].executable_suffix()?;
+        Some(
+            definitions
+                .iter()
+                .rposition(|(module, source, _)| {
+                    !graph.session.call_may_return_implicitly(*module, source)
+                })
+                .map_or(0, |last| last + 1),
+        )
+    });
+    let mut early_entry = None;
     // After an initializer requests recovery, a checked procedure can supply both
     // its source contracts and its Python frame, just as it does on a named entry.
-    let place_procedures = recover_completed.get();
+    let mut place_procedures = recover_completed.get();
     // The ordinary checker supplies the unfinished physical definitions below.
     // Capture the other definitions from inference's settled results now.
     let place_live = |slot: usize| {
@@ -1454,17 +1538,6 @@ fn lower_graph(
             std::mem::take(completed).retain_lexical(graph, owners, defer_capture);
         }
     };
-    let checker_for = |module| {
-        Checker::new(
-            graph,
-            module,
-            &signatures,
-            &classes,
-            &types,
-            &helpers,
-            &globals,
-        )
-    };
     // Other fixed definitions can still complete after a body requests an object
     // frame. Place those operations before recovery selects a second body.
     let request_recovery = |failure: &Failure| {
@@ -1480,7 +1553,8 @@ fn lower_graph(
     let mut call_graph = Vec::new();
     let mut class_reads = Vec::new();
     let mut body_reports = Vec::new();
-    for (module_id, source, signature) in &definitions {
+    for (slot, (module_id, source, signature)) in definitions.iter().enumerate() {
+        let prior_report = !body_reports.is_empty();
         let definition = source.as_ref();
         let module = &graph.modules[*module_id];
         let mut checker = checker_for(*module_id);
@@ -1613,9 +1687,7 @@ fn lower_graph(
             && source_function
             && definition.returns.is_some()
             && signature.returns.builtin_scalar_name().is_some();
-        let result = if let Some(body) = inferred {
-            Ok(body)
-        } else if place_procedures
+        let procedure = inferred.is_none()
             && physical_function
             && signature
                 .params
@@ -1648,7 +1720,25 @@ fn lower_graph(
                                     graph,
                                     *module_id,
                                     definition.range(),
-                                ) == Some(true)))))
+                                ) == Some(true)))));
+        if procedure
+            && !place_procedures
+            && defer_capture
+            && !prior_report
+            && unavailable.is_none()
+            && early_entry.is_none()
+            && after_nonreturning.is_some_and(|first| slot >= first)
+        {
+            let entry = lower_entry(&completed_calls, false);
+            if entry.as_ref().is_err_and(Failure::is_object) {
+                recover_completed.set(true);
+                place_procedures = true;
+            }
+            early_entry = Some(entry);
+        }
+        let result = if let Some(body) = inferred {
+            Ok(body)
+        } else if place_procedures && procedure
             || named_scalar
                 && matches!(source, Cow::Borrowed(def) if signature.takes_positional_tuple(def, &graph.session))
         {
@@ -1878,72 +1968,21 @@ fn lower_graph(
             factories.push(helper);
         }
     }
-    let mut startup = Vec::new();
-    let mut entry_source = None;
-    let mut python_entry = false;
-    let entry = {
-        let module_id = graph.entry;
-        let mut checker = checker_for(module_id);
-        checker.module_scope = true;
-        checker.nonreturning_functions = &completed_calls;
-        checker.placement_only = needs_registered_entry || unavailable.is_some();
-        let mut fixed_entry =
-            if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
-                // The Python frame must read its live module name. Keep a tail that
-                // binds locals with the checker that owns their layout and contracts.
-                if named
-                    && let Some(guard) = tail.first()
-                    && module_values::main_guard(guard)
-                    && !graph
-                        .session
-                        .binds_module_name_from(module_id, guard.start())
-                {
-                    checker.registered = Some(graph.modules[module_id].registered_values());
-                    checker.registered_local_start = Some(0);
-                    checker.checked_call_contracts = true;
-                    checker.frame_arguments = FrameArguments::Python;
-                    python_entry = true;
-                } else {
-                    checker.fixed_sites = Some(fixed_body_source::SourceSites::default());
-                }
-                // Leave room for the declarations and their Python statement checkpoints.
-                Some(Vec::with_capacity(tail.len() + 2 * prefix.len()))
-            } else {
-                (!checker.placement_only).then(Vec::new)
-            };
-        let result = checker.lower_block(&entry_statements, fixed_entry.as_mut());
-        let result = checker.finish_region(result);
-        if checked_region(result, graph, module_id, &mut unavailable, |failure| {
-            // A FILE entry can select the same recovery as a checked function.
-            if pending_capture.borrow().is_some() {
-                request_recovery(failure);
-            }
-        })
-        .inspect_err(|_| place_completed(&mut completed, &owners))?
-        .is_some()
-            && let Some(body) = fixed_entry
-        {
-            entry_source = checker.fixed_sites.take().and_then(|sites| {
-                sites.finish(
-                    entry_statements.len(),
-                    &body,
-                    std::mem::take(&mut checker.names),
-                    &checker.locals,
-                    None,
-                    FrameArguments::Python,
-                )
-            });
-            checker.fault_frame(&mut startup, "<module>", TextSize::default());
-            Some(ir::Function {
-                params: Vec::new(),
-                returns: Type::None,
-                locals: checker.locals,
-                body,
-            })
-        } else {
-            None
+    let result = early_entry
+        .filter(|_| unavailable.is_none())
+        .unwrap_or_else(|| {
+            lower_entry(
+                &completed_calls,
+                needs_registered_entry || unavailable.is_some(),
+            )
+        });
+    let entry = checked_region(result, graph, graph.entry, &mut unavailable, |failure| {
+        if pending_capture.borrow().is_some() {
+            request_recovery(failure);
         }
-    };
+    })
+    .inspect_err(|_| place_completed(&mut completed, &owners))?
+    .flatten();
     let reason = unavailable.or_else(|| {
         globals
             .missing_bindings
