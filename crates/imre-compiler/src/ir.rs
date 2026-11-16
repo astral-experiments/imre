@@ -1133,6 +1133,41 @@ pub(crate) struct InvokeSite {
     pub scope: Option<Box<Expr>>,
 }
 
+/// Arguments supplied by the native ABI after the original Python arguments were checked.
+#[derive(Clone)]
+pub(crate) struct NativeArguments {
+    pub(crate) origin: FixedOrigin,
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) order: Vec<usize>,
+    pub(crate) defaults: Vec<Expr>,
+}
+
+#[derive(Clone)]
+pub(crate) enum ProcessSite {
+    Fixed(Option<FixedOrigin>),
+    Written(Box<NativeArguments>),
+}
+
+impl ProcessSite {
+    /// Read a bound formal without disturbing its written evaluation position.
+    pub(crate) fn formal<'a>(&'a self, written: &'a [Expr], formal: usize) -> &'a Expr {
+        let Self::Written(binding) = self else {
+            return &written[formal];
+        };
+        let index = binding.order[formal];
+        written
+            .get(index)
+            .unwrap_or_else(|| &binding.defaults[index - written.len()])
+    }
+
+    pub(crate) fn origin(&self) -> Option<&FixedOrigin> {
+        match self {
+            Self::Fixed(origin) => origin.as_ref(),
+            Self::Written(binding) => Some(&binding.origin),
+        }
+    }
+}
+
 /// Immutable code identity shared by the positioned operations in one fixed activation.
 pub(crate) struct FixedFrame {
     pub filename: String,
@@ -1202,22 +1237,25 @@ pub(crate) struct CallArgs {
     pub order: Vec<usize>,
 }
 
-impl CallArgs {
-    /// The binder maps each formal to its unique operand. Move whole operands,
-    /// following each permutation cycle once, after their effects have been held.
-    pub(crate) fn into_formal_order(mut self) -> Vec<Expr> {
-        debug_assert_eq!(self.values.len(), self.order.len());
-        for start in 0..self.order.len() {
-            let mut index = start;
-            loop {
-                let next = std::mem::replace(&mut self.order[index], index);
-                if next == start {
-                    break;
-                }
-                self.values.swap(index, next);
-                index = next;
+/// Apply the binder's permutation after evaluating all operands in source order.
+pub(crate) fn reorder_operands<T>(values: &mut [T], order: &mut [usize]) {
+    debug_assert_eq!(values.len(), order.len());
+    for start in 0..order.len() {
+        let mut index = start;
+        loop {
+            let next = std::mem::replace(&mut order[index], index);
+            if next == start {
+                break;
             }
+            values.swap(index, next);
+            index = next;
         }
+    }
+}
+
+impl CallArgs {
+    pub(crate) fn into_formal_order(mut self) -> Vec<Expr> {
+        reorder_operands(&mut self.values, &mut self.order);
         self.values
     }
 
@@ -2703,7 +2741,7 @@ pub(crate) enum Builtin {
     Errno(ErrnoOperation),
     Fnmatch(FnmatchOperation),
     Patch(PatchOperation),
-    Process(ProcessOperation, Option<FixedOrigin>),
+    Process(ProcessOperation, ProcessSite),
     /// Zero reads, one truncates/writes; the frontend accepts literal modes only.
     TextOpen(u32),
     BinaryOpen(u32),
@@ -2869,7 +2907,7 @@ pub(crate) enum Builtin {
 
 impl Builtin {
     pub(crate) fn process(operation: ProcessOperation) -> Self {
-        Self::Process(operation, None)
+        Self::Process(operation, ProcessSite::Fixed(None))
     }
 
     /// Takes a private argument record, whose fields were bound at the source call.

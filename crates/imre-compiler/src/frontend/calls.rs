@@ -1394,7 +1394,7 @@ impl Checker<'_> {
         returns: Type,
         mut arguments: ir::CallArgs,
     ) -> Expr {
-        if let Builtin::Process(op, origin @ None) = &mut operation
+        if let Builtin::Process(op, ir::ProcessSite::Fixed(origin @ None)) = &mut operation
             && let ir::CallSite::Written(range, callee_end) = arguments.site
             && Builtin::process(*op).contract(&arguments.values).may_raise
         {

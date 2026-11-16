@@ -192,11 +192,11 @@ pub(super) fn process_error_view(
                 return;
             }
             ExprKind::Builtin(
-                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }, _),
+                Builtin::Process(ProcessOperation::CheckOutput { capture, .. }, site),
                 args,
             ) => {
                 timed = true;
-                (*capture, args[0].ty)
+                (*capture, site.formal(args, 0).ty)
             }
             ExprKind::Builtin(
                 Builtin::Process(
@@ -226,7 +226,7 @@ pub(super) fn process_error_view(
             ExprKind::Builtin(
                 Builtin::Process(
                     op @ (ProcessOperation::PopenWait | ProcessOperation::Call { .. }),
-                    _,
+                    site,
                 ),
                 args,
             ) => {
@@ -237,7 +237,7 @@ pub(super) fn process_error_view(
                         ..
                     }
                 );
-                let command = match args[0].ty {
+                let command = match site.formal(args, 0).ty {
                     Type::Popen(_, _, id) => types.command_type(id),
                     ty => ty,
                 };
@@ -1210,15 +1210,14 @@ impl Checker<'_> {
                 ),
             ),
         };
-        if self.placement_only
-            && self.registered.is_none()
+        if self.registered.is_none()
             && self.namespace.is_none()
-            && let Some(sites) = &mut self.fixed_sites
-            && sites.has_written_arguments(call, &args.values)
             && let Some(attribute) = call.func.as_attribute_expr()
             && let Some(name) = attribute.value.as_name_expr()
             && !self.names.contains_key(name.id.as_str())
             && !ruff_python_stdlib::identifiers::is_mangled_private(name.id.as_str())
+            && let Some(sites) = &mut self.fixed_sites
+            && sites.has_written_arguments(call, &args.values)
         {
             let source = self.graph.modules[self.module]
                 .registered_values()
@@ -1227,6 +1226,26 @@ impl Checker<'_> {
                 source.imported_callable(name, call, self.graph.session.operand_types(self.module))
             {
                 let mut values = args.values;
+                if !self.placement_only {
+                    let defaults = values.split_off(call.arguments.len());
+                    let ir::CallSite::Written(range, end) = args.site else {
+                        unreachable!()
+                    };
+                    let origin = self.fixed_origin(range, Some((end, b'(')));
+                    let site = ir::ProcessSite::Written(Box::new(ir::NativeArguments {
+                        origin,
+                        range,
+                        defaults,
+                        order: args.order,
+                    }));
+                    let value = Expr {
+                        ty,
+                        kind: ExprKind::Builtin(Builtin::Process(op, site), values),
+                    };
+                    let sites = self.fixed_sites.as_mut().unwrap();
+                    sites.written_call(call, &value, None, || Some(target));
+                    return Ok(value);
+                }
                 values.truncate(call.arguments.len());
                 let mut value = registered::values::bound_call(
                     call,
@@ -1773,13 +1792,18 @@ mod tests {
         let mut calls = 0;
         for function in &fixed.ir.0.functions {
             ir::walk_expressions(&function.body, &mut |expr| {
-                if let ExprKind::Builtin(Builtin::Process(ProcessOperation::Run { .. }, _), args) =
-                    &expr.kind
+                if let ExprKind::Builtin(
+                    Builtin::Process(ProcessOperation::Run { .. }, site),
+                    args,
+                ) = &expr.kind
                 {
                     calls += 1;
-                    assert!(matches!(args[7].kind, ExprKind::Bool(true)));
-                    assert!(matches!(args[15].kind, ExprKind::Bool(true)));
-                    assert!(matches!(args[16].kind, ExprKind::None));
+                    assert_eq!(args.len(), 4);
+                    assert!(std::ptr::eq(site.formal(args, 7), &args[1]));
+                    assert!(std::ptr::eq(site.formal(args, 15), &args[2]));
+                    assert!(matches!(site.formal(args, 7).kind, ExprKind::Bool(true)));
+                    assert!(matches!(site.formal(args, 15).kind, ExprKind::Bool(true)));
+                    assert!(matches!(site.formal(args, 16).kind, ExprKind::None));
                 }
             });
         }

@@ -160,6 +160,12 @@ pub(super) enum FixedNode {
     },
     Store(usize),
     StoreField(Option<Binary>),
+    NativeCall(
+        TextRange,
+        std::mem::Discriminant<ir::ProcessOperation>,
+        usize,
+        Type,
+    ),
     Branch(usize, usize),
     TryFinally(usize, usize),
     /// The operation keeps its checked slot or operand count, and its native type.
@@ -340,6 +346,15 @@ impl FixedNode {
                     Builtin::Process(ir::ProcessOperation::Copy(op), _),
                     ref operands,
                 ) => Self::Copy(op, operands.len(), expr.ty),
+                ExprKind::Builtin(
+                    Builtin::Process(op, ir::ProcessSite::Written(ref binding)),
+                    ref operands,
+                ) => Self::NativeCall(
+                    binding.range,
+                    std::mem::discriminant(&op),
+                    operands.len(),
+                    expr.ty,
+                ),
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {
                     Self::Path(op, operands.len(), expr.ty)
                 }
@@ -592,22 +607,36 @@ impl SourceSites {
         value: &Expr,
         target: impl FnOnce() -> Option<Expr>,
     ) {
-        if let Some(site) = self.site_at(call.range())
-            && let Some(args) = value.named_call_arguments().or_else(|| {
-                value
-                    .coroutine_arguments()
-                    .filter(|fields| self.has_written_arguments(call, fields))
-            })
-            && args.len() == call.arguments.args.len()
+        if let Some(args) = value.named_call_arguments().or_else(|| {
+            value
+                .coroutine_arguments()
+                .filter(|fields| self.has_written_arguments(call, fields))
+        }) && args.len() == call.arguments.args.len()
             && registered::values::fixed_positional_arguments(call)
+        {
+            self.written_call(
+                call,
+                value,
+                Some(ir::RegisteredArguments::Positional),
+                target,
+            );
+        }
+    }
+
+    /// Retain the callable at its original occurrence before evaluating its checked arguments.
+    pub(super) fn written_call(
+        &mut self,
+        call: &ast::ExprCall,
+        value: &Expr,
+        layout: Option<ir::RegisteredArguments>,
+        target: impl FnOnce() -> Option<Expr>,
+    ) {
+        if let Some(site) = self.site_at(call.range())
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
             && let Some(target) = target()
         {
-            let (invoke, target) = registered::values::callable_target(call).bind(
-                call,
-                target,
-                Some(ir::RegisteredArguments::Positional),
-            );
+            let (invoke, target) =
+                registered::values::callable_target(call).bind(call, target, layout);
             self.attributes
                 .insert(site.range, FixedAttribute::Call(Some(target), invoke));
             self.commit(site, node);

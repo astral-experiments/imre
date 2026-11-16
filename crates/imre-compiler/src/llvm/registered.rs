@@ -205,7 +205,24 @@ pub(crate) fn frame_inputs(
                 protocol_reads += protocol_parameter(receiver);
                 return true;
             }
-            return matches!(&receiver.without_location().kind,
+            // A saved callable is read in the live scope before its arguments. An
+            // imported member keeps the same name read underneath its attribute load.
+            let binding = match &receiver.without_location().kind {
+                ExprKind::Builtin(
+                    Builtin::RegisteredAttribute {
+                        action: ir::AttributeAction::Load,
+                        ..
+                    },
+                    operands,
+                ) => {
+                    let [base] = operands.as_slice() else {
+                        return false;
+                    };
+                    base
+                }
+                _ => receiver,
+            };
+            return matches!(&binding.without_location().kind,
                 ExprKind::Builtin(Builtin::RegisteredName(_), args) if args.is_empty());
         }
         if let Some(crate::frontend::FixedAttribute::Load(_)) = attribute
