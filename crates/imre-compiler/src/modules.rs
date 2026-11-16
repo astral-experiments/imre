@@ -3961,7 +3961,7 @@ impl SourceGraph {
         self.checked_diagnostics.borrow_mut()[module].push(CheckedDiagnostic::DictDeletion(target));
     }
 
-    /// This read checks a local's assignment flag and raises Python's error if unset.
+    /// This read raises Python's error if the local has no binding.
     pub(crate) fn checked_unbound_local_read(&self, module: ModuleId, read: TextRange) {
         self.checked_diagnostics.borrow_mut()[module]
             .push(CheckedDiagnostic::UnboundLocalRead(read));

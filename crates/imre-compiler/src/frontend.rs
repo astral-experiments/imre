@@ -4169,7 +4169,8 @@ struct Checker<'a> {
     /// Fresh annotated lists whose inner lists may come from a document.
     document_list_sites: HashMap<usize, u32>,
     nullable_assignments: HashMap<String, Type>,
-    bound_flags: HashMap<String, usize>,
+    /// Guarded locals use a flag in a fixed frame and the binding itself in a Python frame.
+    bound_flags: HashMap<String, Option<usize>>,
     omitted_assert_locals: HashMap<String, unbound_locals::Binding>,
     omitted_assert_free: HashMap<String, unbound_locals::Binding>,
     names: HashMap<String, usize>,
@@ -7048,7 +7049,9 @@ impl<'a> Checker<'a> {
                 {
                     continue;
                 }
-                let flag = self.hidden(Type::Bool);
+                // Interactive doctest names use NameError when their binding is missing.
+                let flag = (self.registered_local_start.is_none() || self.interactive_names)
+                    .then(|| self.hidden(Type::Bool));
                 self.bound_flags.insert(name, flag);
             }
         }
@@ -7165,7 +7168,7 @@ impl<'a> Checker<'a> {
                 .list_length_guard(statement)
                 .or_else(|| length_guard.filter(|guard| fixed_tuples::preserves(*guard, lowered)));
             self.remember_regex_assignment(statement, body, ops, &statements[index + 1..]);
-            if let Some(flag) =
+            if let Some(Some(flag)) =
                 unbound_locals::assigned(statement).and_then(|n| self.bound_flags.get(n))
             {
                 body.push(Statement::Assign(*flag, Expr::boolean(true)));
@@ -9999,7 +10002,10 @@ impl<'a> Checker<'a> {
             if let Some(&flag) = self.bound_flags.get(name) {
                 self.graph
                     .checked_unbound_local_read(self.module, expression.range());
-                return Ok(self.checked_bound_read(slot, flag, name));
+                return Ok(match flag {
+                    Some(flag) => self.checked_bound_read(slot, flag, name),
+                    None => self.local(slot),
+                });
             }
             return Err(error(
                 self.source,
