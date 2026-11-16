@@ -1096,11 +1096,11 @@ pub(super) fn capture(
             None
         };
         let body = placed.or_else(|| {
-            // No parameters distinguish the two binders here. Keep the original return
-            // when the selected caller needs neither fixed attributes nor callback coercion.
+            // The prepared function can serve the live caller when its own operand sites
+            // accept Python arguments and the caller needs no checked callback coercion.
             if !checked
-                && signature.params.is_empty()
-                && let Some(frame) = lexical
+                && let Some(mut frame) = lexical
+                && frame.frame.bind_python_arguments()
             {
                 return Some(frame.frame);
             }
