@@ -1964,13 +1964,24 @@ fn a_guarded_class_annotation_can_use_its_locally_imported_implementation() {
     let pkg = site.path().join("pkg");
     fs::create_dir(&pkg).unwrap();
     let entry = app.path().join("main.py");
-    fs::write(&entry, "import pkg\nprint(pkg.get().value())\n").unwrap();
+    let entry_source = "import pkg\nprint(pkg.get().value())\n";
+    fs::write(&entry, entry_source).unwrap();
     let check = || crate::check_file_with_extensions(&entry, None, &[site.path().to_owned()]);
     let factory = |argument: &str| {
-        fs::write(pkg.join("__init__.py"), format!(concat!(
-            "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .model import Item\n",
-            "def get() -> 'Item':\n    from .model import Item\n    return Item({})\n"
-        ), argument)).unwrap();
+        let source = format!(
+            r#"from typing import TYPE_CHECKING, Optional
+if TYPE_CHECKING:
+    from .model import Item
+_current: Optional['Item'] = None
+def get() -> 'Item':
+    global _current
+    if _current is None:
+        from .model import Item
+        _current = Item({argument})
+    return _current
+"#
+        );
+        fs::write(pkg.join("__init__.py"), source).unwrap();
     };
     let model = pkg.join("model.py");
     fs::write(
@@ -1987,7 +1998,29 @@ fn a_guarded_class_annotation_can_use_its_locally_imported_implementation() {
     factory("width='wrong'");
     let error = check().unwrap_err();
     assert!(
-        error.contains("invalid-argument-type") && error.contains("__init__.py:6:17"),
+        error.contains("invalid-argument-type") && error.contains("__init__.py:9:25"),
+        "{error}"
+    );
+    factory("");
+
+    fs::write(
+        &entry,
+        format!("{entry_source}\ndef invalid() -> None:\n    status: int = True\n"),
+    )
+    .unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("main.py:5:19: Imre: expected int, got bool"),
+        "{error}"
+    );
+    fs::write(&entry, entry_source).unwrap();
+
+    let init = pkg.join("__init__.py");
+    let provider = fs::read_to_string(&init).unwrap();
+    fs::write(&init, format!("{provider}cache: int = 'x'\n")).unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("__init__.py:11:") && error.contains("int"),
         "{error}"
     );
     factory("");
