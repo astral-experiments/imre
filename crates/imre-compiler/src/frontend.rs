@@ -5809,18 +5809,19 @@ impl<'a> Checker<'a> {
         body: &[ast::Stmt],
         source: Option<(&pipelines::Prepared, &ast::Expr)>,
     ) -> Result<(), String> {
-        let names = narrowing::assigned_names_with_updates(body, &mut |name| {
+        let may_delete = narrowing::visit_assignments(body, &mut |name, in_place| {
             // The next iteration can receive the replacement returned by __iadd__ and its peers.
-            if let Some(slot) = self.registered_in_place_local(name) {
+            if in_place && let Some(slot) = self.registered_in_place_local(name) {
                 self.locals[slot] = Type::PythonObject;
             }
-        });
-        for name in names {
-            if let Some(slot) = self.names.get(&name) {
+            if let Some(slot) = self.names.get(name) {
                 self.narrowed.remove_mut(slot);
                 self.assigned
                     .set_type_source(*slot, self.declared_slots.get(slot).copied());
             }
+        });
+        if !may_delete {
+            return Ok(());
         }
         for name in narrowing::deleted_names(body) {
             if let Some(slot) = self.names.get(&name) {

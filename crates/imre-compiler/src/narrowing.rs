@@ -206,33 +206,41 @@ pub(crate) fn guaranteed_assignments(
 /// Callers must invalidate these names' incoming facts before checking a loop:
 /// later iterations can observe a value written on an earlier backedge.
 pub(crate) fn assigned_names(body: &[ast::Stmt]) -> HashSet<String> {
-    assigned_names_with_updates(body, &mut |_| {})
+    let mut names = HashSet::new();
+    visit_assignments(body, &mut |name, _| {
+        names.insert(name.to_string());
+    });
+    names
 }
 
-pub(crate) fn assigned_names_with_updates(
-    body: &[ast::Stmt],
-    updated: &mut dyn FnMut(&str),
-) -> HashSet<String> {
-    let mut visitor = Assignments(HashSet::new(), updated);
-    for statement in body {
-        visitor.visit_stmt(statement);
-    }
-    visitor.0
+/// Report each written name as it is encountered. A named handler or an
+/// explicit deletion can also clear a binding on the next loop iteration.
+pub(crate) fn visit_assignments(body: &[ast::Stmt], store: &mut dyn FnMut(&str, bool)) -> bool {
+    let mut visitor = Assignments {
+        store,
+        may_delete: false,
+    };
+    visitor.visit_body(body);
+    visitor.may_delete
 }
 
-struct Assignments<'a>(HashSet<String>, &'a mut dyn FnMut(&str));
+struct Assignments<'a> {
+    store: &'a mut dyn FnMut(&str, bool),
+    may_delete: bool,
+}
 
 impl<'a> Visitor<'a> for Assignments<'_> {
     fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
-        if let ast::Stmt::FunctionDef(function) = statement {
-            self.0.insert(function.name.to_string());
-        } else {
-            if let ast::Stmt::AugAssign(assign) = statement
-                && let Some(name) = assign.target.as_name_expr()
-            {
-                (self.1)(name.id.as_str());
+        match statement {
+            ast::Stmt::FunctionDef(function) => (self.store)(function.name.as_str(), false),
+            ast::Stmt::AugAssign(assign) if let Some(name) = assign.target.as_name_expr() => {
+                (self.store)(name.id.as_str(), true);
+                self.visit_expr(&assign.value);
             }
-            walk_stmt(self, statement);
+            _ => {
+                self.may_delete |= statement.is_delete_stmt();
+                walk_stmt(self, statement);
+            }
         }
     }
 
@@ -244,7 +252,7 @@ impl<'a> Visitor<'a> for Assignments<'_> {
             _ => None,
         };
         if let Some(name) = name {
-            self.0.insert(name.to_string());
+            (self.store)(name.as_str(), false);
         }
         walk_pattern(self, pattern);
     }
@@ -256,7 +264,7 @@ impl<'a> Visitor<'a> for Assignments<'_> {
         if let ast::Expr::Name(name) = expression
             && name.ctx == ast::ExprContext::Store
         {
-            self.0.insert(name.id.to_string());
+            (self.store)(name.id.as_str(), false);
         }
         walk_expr(self, expression);
     }
@@ -273,7 +281,8 @@ impl<'a> Visitor<'a> for Assignments<'_> {
     fn visit_except_handler(&mut self, handler: &'a ast::ExceptHandler) {
         let ast::ExceptHandler::ExceptHandler(handler_) = handler;
         if let Some(name) = &handler_.name {
-            self.0.insert(name.to_string());
+            self.may_delete = true;
+            (self.store)(name.as_str(), false);
         }
         walk_except_handler(self, handler);
     }

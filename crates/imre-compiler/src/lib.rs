@@ -2896,6 +2896,24 @@ def parse(policy: Policy, text: str) -> int:
     }
 
     #[test]
+    fn a_later_iteration_can_read_a_deleted_local() {
+        let source = "\
+def invalid(items: list[int]) -> int:
+    value = 3
+    for item in items:
+        if item > 0:
+            return value
+        del value
+    return 0
+";
+        let error = super::check(source).unwrap_err();
+        assert!(
+            error.contains("5:20: Imre: local may be uninitialized on this path"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn loop_break_does_not_restore_a_deleted_exception_target() {
         let deleted = r#"
 def invalid(values: list[int]) -> str:
