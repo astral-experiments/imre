@@ -1239,8 +1239,12 @@ pub(super) fn operation<E>(
             return Ok(Some(comparison(cmp, values, source.operand_types)));
         }
         ast::Expr::If(branch) => {
+            let mut test = child(&branch.test)?;
+            if let Some(types) = source.operand_types {
+                refine_operand(types, &branch.test, &mut test);
+            }
             return Ok(Some(select(
-                child(&branch.test)?,
+                test,
                 child(&branch.body)?,
                 child(&branch.orelse)?,
             )));
