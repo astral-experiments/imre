@@ -5223,7 +5223,7 @@ impl<'a> Checker<'a> {
             expression,
             expected,
             alternative,
-            coerce,
+            |checker, value, ty, site| coerce(checker, value, ty, site),
             declaration,
             ResultUse::Fixed,
         )
@@ -5234,11 +5234,11 @@ impl<'a> Checker<'a> {
         expression: &ast::Expr,
         expected: Type,
         alternative: impl Fn(&Self, Type) -> bool,
-        coerce: impl Fn(&Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
+        coerce: impl Fn(&mut Self, Expr, Type, &ast::Expr) -> Result<Expr, String>,
         declaration: Option<TypeDeclaration>,
         result: ResultUse<'_>,
     ) -> Result<Expr, String> {
-        let coerce = |checker: &Self, value, ty, site: &ast::Expr| {
+        let coerce = |checker: &mut Self, value, ty, site: &ast::Expr| {
             coerce(checker, value, ty, site).map_err(|e| e.expected_from(declaration, site.range()))
         };
         let mut concrete = self.types.payload(expected).unwrap_or(expected);

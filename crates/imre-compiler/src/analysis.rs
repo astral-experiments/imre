@@ -807,16 +807,12 @@ impl Session {
             })
     }
 
-    /// Pick a layout for an inferred local whose initial value is None and whose other
-    /// writes all produce the same scalar.
-    pub(crate) fn inferred_optional_payload(
+    /// Find the definitions of an unannotated function local with multiple writes.
+    pub(crate) fn inferred_local_definitions(
         &self,
         module: usize,
         target: &Expr,
-    ) -> Option<crate::ir::Type> {
-        use ty_python_core::definition::DefinitionKind;
-        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
-
+    ) -> Option<impl Iterator<Item = ty_python_core::definition::Definition<'_>>> {
         let name = target.as_name_expr()?;
         let file = self.files[module];
         let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
@@ -831,15 +827,33 @@ impl Session {
         {
             return None;
         }
+        Some(
+            index
+                .use_def_map(scope)
+                .definitions_with_usage()
+                .filter_map(move |(_, definition, _)| {
+                    (definition.place(&self.db).as_symbol() == Some(id)).then_some(definition)
+                }),
+        )
+    }
+
+    /// Pick a layout for an inferred local whose initial value is None and whose other
+    /// writes all produce the same scalar.
+    pub(crate) fn inferred_optional_payload(
+        &self,
+        module: usize,
+        target: &Expr,
+    ) -> Option<crate::ir::Type> {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_semantic::types::{ProgramEnvironment, Type as Ty};
+
+        let definitions = self.inferred_local_definitions(module, target)?;
+        let file = self.files[module];
         let parsed = self.parsed(file);
         let env = ProgramEnvironment::from_file(self.db.program_file(file));
         let exact = |ty| Self::scalar_layout(&self.db, &env, ty, ScalarMatch::Exact);
         let mut payload = None;
-        for (_, definition, _) in index
-            .use_def_map(scope)
-            .definitions_with_usage()
-            .filter(|(_, definition, _)| definition.place(&self.db).as_symbol() == Some(id))
-        {
+        for definition in definitions {
             let store = match definition.kind(&self.db) {
                 // The index records a loop's incoming value alongside the statements that write it.
                 DefinitionKind::LoopHeader(_) => continue,

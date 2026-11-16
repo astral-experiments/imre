@@ -56,6 +56,48 @@ fn a_dormant_async_method_preserves_an_unrelated_definitions_field_contract() {
 }
 
 #[test]
+fn a_json_write_to_an_inferred_local_preserves_the_next_declared_store() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let reader = project.path().join("reader.py");
+    fs::write(
+        &main,
+        "from reader import select\nselect('{\"packages\":[]}')\n",
+    )
+    .unwrap();
+    let source = concat!(
+        "import json\n\n",
+        "def select(raw: str):\n",
+        "    packages = json.loads(raw)['packages']\n",
+        "    current = None\n",
+        "    for package in packages:\n",
+        "        current = package['version']\n",
+        "    return current\n",
+    );
+    fs::write(&reader, source).unwrap();
+    crate::check_file(&main, None).unwrap();
+
+    let invalid = source.replace("    return", "    later: str = 17\n    return");
+    fs::write(&reader, &invalid).unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(
+        error.contains("reader.py:8:18: Imre: expected str, got int"),
+        "{error}"
+    );
+
+    fs::write(
+        &reader,
+        invalid.replace("current = None", "current: None = None"),
+    )
+    .unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(
+        error.contains("reader.py:7:19: Imre: expected None, got JSON value"),
+        "{error}"
+    );
+}
+
+#[test]
 fn an_inferred_loop_local_accepts_none_and_its_written_scalar() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
