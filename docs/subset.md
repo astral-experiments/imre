@@ -63,7 +63,7 @@ Global rebinding, capturing closures, arbitrary decorators, reflection, dynamic 
 
 ## Inferred function signatures and iterable consumers
 
-Parameter and return annotations are optional when the closed source graph supplies enough concrete evidence. A missing parameter type comes from its scalar literal default or a known direct call. Once all parameters are concrete, the checker infers the return type from the body, including supported nullable returns and implicit `None` on a falling-through path. Evidence propagates through imported functions, direct methods, constructors, and comprehension bodies until every signature is complete.
+Parameter and return annotations are optional when the closed source graph supplies enough concrete evidence. A missing parameter type comes from its scalar literal default or a known direct call. Once all parameters are concrete, the checker infers the return type from the body, including supported nullable returns and implicit `None` on a falling-through path. Known types propagate through imported functions, direct methods, constructors and comprehension bodies.
 
 ```python
 def checksum(text):
@@ -73,7 +73,11 @@ def checksum(text):
 print(checksum("12345"))
 ```
 
-This infers `checksum(str) -> int`. Every function has one exact signature, and all bodies are checked again against the completed signatures before code generation. An annotation remains an enforced contract. Incompatible callers, an uncalled parameter without a default or annotation, unresolved recursive return types, and unsupported return unions are rejected. There is no dynamic fallback, implicit numeric conversion, arbitrary `Any`, or polymorphic specialization. A `None` default supplies the exact `None` type; annotate a parameter explicitly when it accepts a nullable payload. Inference does not solve arbitrary constraints backward from a function body.
+For this call, Imre infers `checksum(str) -> int`. A function with a native signature needs a concrete type for each parameter and its result. The compiler can reuse the body it checked during inference. An uncalled function such as `def identity(value): return value` can appear in the same module even when no call supplies a type for `value`.
+
+An annotation constrains callers. Passing `"three"` to a parameter declared as `int` produces a build diagnostic. A `None` default gives a parameter the exact `None` type. Write `value: int | None = None` when callers can also pass an integer. An unresolved recursive return type or an unsupported return union can prevent the compiler from inferring a native signature.
+
+The compiler chooses how to implement each operation from its operands. For example, a membership test against a tuple of exact strings can compare the strings directly. When the operands require Python comparison, the compiled test can invoke `__eq__` and then test the truth of its result. Both forms use the same LLVM emitter. [How Imre emits operations](design.md#emitting-operations)
 
 `list()` creates an empty list with the contextual element type, defaulting to `list[int]`. `list(source)` makes a shallow copy of a concrete list, string, bytes, dictionary keys/items, set, range, enumeration, or fixed tuple. All copied elements must fit one supported destination type; an existing source container retains its own layout and alias behavior.
 
