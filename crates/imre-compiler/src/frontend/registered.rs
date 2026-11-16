@@ -5888,6 +5888,32 @@ else:
     }
 
     #[test]
+    fn a_named_scalar_copy_keeps_its_source_and_live_receiver() {
+        let text = concat!(
+            "def read_alias(name: str) -> str:\n",
+            "    alias = name\n",
+            "    return alias.title()\n",
+            "import argparse\n",
+            "parser = argparse.ArgumentParser()\nparser.add_argument('name')\n",
+            "print(read_alias(parser.parse_args().name))\n",
+        );
+        let (graph, lowered) = caller_cache::observe_lowerings(|| checked_named_source(text));
+        let preparations = lowered.iter().filter(|name| *name == "read_alias").count();
+        assert_eq!(preparations, 1);
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&TextSize::default()];
+        assert!(matches!(frame.inputs, FrameInputs::Protocol { .. }));
+        let mut sites = frame.fixed_sites.iter().map(|range| &text[*range]);
+        assert_eq!(sites.next(), Some("alias = name"));
+        assert_eq!(sites.next(), Some("name"));
+        let Statement::Assign(alias, value) = &frame.function.body[0] else {
+            panic!("expected the checked assignment");
+        };
+        assert_eq!(frame.local_names[alias].name, "alias");
+        assert!(matches!(value.kind, ExprKind::Local(slot) if frame.function.params == [slot]));
+    }
+
+    #[test]
     fn a_scalar_parameter_can_be_forwarded_through_an_object_local() {
         use crate::llvm::registered::frame_inputs;
 
