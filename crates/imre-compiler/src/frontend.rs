@@ -9533,53 +9533,6 @@ impl<'a> Checker<'a> {
         self.object_builtin_error(name, node)
     }
 
-    /// Checks the logarithm domain once before lowering the unboxed operation.
-    fn checked_float_log2(&mut self, value: Expr) -> Expr {
-        let slot = self.hidden(Type::Float);
-        let input = self.local(slot);
-        let invalid = pipelines::compare(
-            Compare::LessEqual,
-            input.clone(),
-            Expr {
-                ty: Type::Float,
-                kind: ExprKind::Float(0.0),
-            },
-        );
-        let prefix = Expr {
-            ty: Type::Str,
-            kind: ExprKind::Str("expected a positive input, got ".to_string()),
-        };
-        let spelling = Expr {
-            ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::Str, vec![input.clone()]),
-        };
-        let message = Expr {
-            ty: Type::Str,
-            kind: ExprKind::Binary(Binary::Add, Box::new(prefix), Box::new(spelling)),
-        };
-        let error = Expr {
-            ty: Type::Exception,
-            kind: ExprKind::Exception {
-                kind: exception_kind("ValueError").unwrap(),
-                message: Some(Box::new(message)),
-            },
-        };
-        Expr {
-            ty: Type::Float,
-            kind: ExprKind::Scope {
-                body: vec![
-                    Statement::Assign(slot, value),
-                    Statement::If(invalid, vec![Statement::raise(error)], vec![]),
-                ],
-                value: Box::new(Expr {
-                    ty: Type::Float,
-                    kind: ExprKind::Builtin(Builtin::FloatLog2, vec![input]),
-                }),
-                clear: vec![slot],
-            },
-        }
-    }
-
     fn unsupported_comparison(&self, expression: &ast::Expr, left: Type, right: Type) -> Failure {
         if left == Type::PythonObject || right == Type::PythonObject {
             // The checked Python operation owns comparisons without a fixed operand layout.
@@ -13697,7 +13650,13 @@ impl<'a> Checker<'a> {
                     .expr(arg)
                     .map_err(|_| self.scoped_builtin_error(name, call))?;
                 if value.ty == Type::Float {
-                    return Ok(self.checked_float_log2(value));
+                    return Ok(Expr {
+                        ty: Type::Float,
+                        kind: ExprKind::Builtin(
+                            Builtin::FloatUnary("imre_float_log2"),
+                            vec![value],
+                        ),
+                    });
                 }
                 return Err(self.scoped_builtin_error(name, call));
             }

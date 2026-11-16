@@ -150,6 +150,10 @@ pub(crate) fn int_logarithm(integer: &Int, log: fn(f64) -> f64) -> Result<f64> {
 }
 
 pub(crate) fn float_logarithm(x: f64, log: fn(f64) -> f64) -> Result<f64> {
+    // CPython returns the input NaN, including its signaling bit and payload.
+    if x.is_nan() {
+        return Ok(x);
+    }
     if x <= 0.0 {
         return Err(Error::new(
             Kind::ValueError,
@@ -269,14 +273,14 @@ pub extern "C" fn imre_float_log1p(value: f64) -> f64 {
     finish(log1p(value), 0.0)
 }
 
-/// CPython returns the input NaN, including its signaling bit and payload.
-pub(crate) fn log10(x: f64) -> f64 {
-    if x.is_nan() { x } else { x.log10() }
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_log2(value: f64) -> f64 {
+    finish(float_logarithm(value, f64::log2), 0.0)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn imre_float_log10(value: f64) -> f64 {
-    finish(float_logarithm(value, log10), 0.0)
+    finish(float_logarithm(value, f64::log10), 0.0)
 }
 
 /// # Safety
@@ -285,7 +289,7 @@ pub extern "C" fn imre_float_log10(value: f64) -> f64 {
 pub unsafe extern "C" fn imre_int_log10(value: usize) -> f64 {
     // SAFETY: the caller keeps the integer rooted during the call.
     let value = unsafe { Int::borrow(value) };
-    finish(int_logarithm(&value, log10), 0.0)
+    finish(int_logarithm(&value, f64::log10), 0.0)
 }
 
 /// Validate the common domain of asin and acos, allowing NaN through to libm.

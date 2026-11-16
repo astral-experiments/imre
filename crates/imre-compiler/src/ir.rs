@@ -2248,8 +2248,6 @@ pub(crate) enum Builtin {
     FloatRadians,
     FloatUnary(&'static str),
     Sumprod,
-    /// Base-two logarithm after checking the Python domain in the caller.
-    FloatLog2,
     FloatLog10,
     IntLog10,
     IntSignAsFloat,
