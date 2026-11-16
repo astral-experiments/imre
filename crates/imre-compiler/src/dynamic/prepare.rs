@@ -281,6 +281,7 @@ mod tests {
         let source = "def _path_stat(path):\n    return _os.stat(path)\n";
         let modules = [
             ("__main__".into(), "app.py".into(), "".into()),
+            ("first".into(), root.join("first.py"), "x = 1".into()),
             (
                 "importlib._bootstrap_external".into(),
                 path.clone(),
@@ -295,30 +296,90 @@ mod tests {
         ];
         let errors = HashMap::new();
         let registered = RegisteredBodies::default();
-        let bodies = units(
-            (&modules, &[]),
-            SourceInputs::default(),
-            0,
-            root,
-            &errors,
-            &registered,
-            vec![],
-        )
-        .skip(1)
-        .map(|unit| match unit.unwrap().initializer {
-            Ok(Initializer::Checked(body)) => body,
-            _ => panic!("expected the checked source"),
-        })
-        .collect::<Vec<_>>();
-        assert!(Rc::ptr_eq(&bodies[0], &bodies[1]));
-        assert!(!Rc::ptr_eq(&bodies[1], &bodies[2]));
-        for (body, (name, _, _)) in bodies.iter().zip(&modules[1..3]) {
-            let (symbol, code) = body.provider_body(name, None).unwrap();
-            assert_eq!(
-                code.llvm_ir(&symbol, "")
-                    .contains("<frozen importlib._bootstrap_external>"),
-                name == "_frozen_importlib_external"
+        let prepare = || {
+            units(
+                (&modules, &[]),
+                SourceInputs::default(),
+                0,
+                root,
+                &errors,
+                &registered,
+                vec![],
+            )
+        };
+        let bodies = prepare()
+            .skip(1)
+            .map(|unit| match unit.unwrap().initializer {
+                Ok(Initializer::Checked(body)) => body,
+                _ => panic!("expected the checked source"),
+            })
+            .collect::<Vec<_>>();
+        assert!(Rc::ptr_eq(&bodies[1], &bodies[2]));
+        assert!(!Rc::ptr_eq(&bodies[2], &bodies[3]));
+        let standalone: Vec<_> = bodies
+            .iter()
+            .zip(&modules[1..])
+            .map(|(body, (name, _, _))| {
+                let (symbol, code) = body.provider_body(name, None).unwrap();
+                let ir = code.llvm_ir(&symbol, "");
+                assert_eq!(
+                    ir.contains("<frozen importlib._bootstrap_external>"),
+                    name == "_frozen_importlib_external"
+                );
+                (symbol, ir)
+            })
+            .collect();
+
+        // The only archived provider can be before, within, or after the shared pair.
+        for archived in std::iter::once(None).chain((0..standalone.len()).map(Some)) {
+            let providers = archived
+                .map(|i| standalone[i].0.clone())
+                .into_iter()
+                .collect();
+            let emit = |layout| {
+                let mut output = crate::ProgramOutput::new(layout);
+                let used = output
+                    .emit_registered(prepare(), None, "{}", 0, &providers)
+                    .unwrap();
+                assert_eq!(used, archived.is_some());
+                output
+            };
+            let whole = emit(crate::CodegenLayout::Whole);
+            let split = emit(crate::CodegenLayout::SplitWithWhole);
+            let ir = &whole.compilation.units[0].llvm_ir;
+            assert!(
+                split.whole.as_deref() == Some(ir.as_str()),
+                "whole LLVM differs with archive {archived:?}"
             );
+            for (i, ((symbol, expected), (name, _, _))) in
+                standalone.iter().zip(&modules[1..]).enumerate()
+            {
+                let unit = split.compilation.units.iter().find(|u| &u.name == name);
+                if archived == Some(i) {
+                    assert!(unit.is_none() && ir.contains(&format!("ptr @{symbol})")));
+                } else {
+                    assert!(
+                        unit.is_some_and(|u| &u.llvm_ir == expected),
+                        "standalone {name} with archive {archived:?}"
+                    );
+                }
+            }
+            if archived.is_none() {
+                let entries: Vec<_> = ir
+                    .lines()
+                    .filter(|line| line.contains("call void @imre_dyn_register_source("))
+                    .map(|line| line.rsplit_once("ptr ").unwrap().1.trim_end_matches(')'))
+                    .collect();
+                let [_main, _first, file, frozen, changed] = entries.as_slice() else {
+                    panic!("expected five source registrations");
+                };
+                assert_ne!(file, frozen);
+                assert_ne!(frozen, changed);
+                assert!(ir.contains(&format!(
+                    "define internal i64 {frozen}(ptr %ctx, i64 %scope) {{\n  %result = tail call i64 {file}("
+                )));
+                assert_eq!(ir.matches(" = tail call i64 @code").count(), 1);
+            }
         }
     }
 }

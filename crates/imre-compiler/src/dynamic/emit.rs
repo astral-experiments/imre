@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::rc::{Rc, Weak};
 
 use ruff_python_ast as ast;
 use ruff_text_size::{Ranged, TextRange, TextSize};
@@ -120,6 +121,8 @@ impl crate::ProgramOutput {
         let mut unidentified = providers.len();
         let mut archive_names = HashSet::new();
         let mut used_archive = false;
+        // Independently loadable objects retain their sealed producer and their own symbols.
+        let mut shared: Vec<(Weak<PreparedBody<'a>>, String)> = Vec::new();
         let root = ModuleLauncher::new(config, python_optimization < 2);
         // The requested whole IR and split native root share their exact prefix.
         // Fork only when the split layout acquires its first independent local unit.
@@ -159,6 +162,11 @@ impl crate::ProgramOutput {
                 // has an owner, a different name can go straight to ordinary placement.
                 let check_archive =
                     bundled && (unidentified != 0 || archive_names.contains(name.as_str()));
+                // The independently linkable provider has a static filename. A shared
+                // whole-program initializer takes its filename from the active Code.
+                let share_in_whole = (!split || whole_requested)
+                    && matches!(initializer, Initializer::Checked(body)
+                        if body.has_body_statements && prompts.is_empty() && Rc::strong_count(body) > 1);
                 let mut placed = None;
                 let mut whole_entry = None;
                 let mut external = None;
@@ -171,7 +179,7 @@ impl crate::ProgramOutput {
                 {
                     // Commit the fork only if the provider gets an independent native unit.
                     let mut fork = None;
-                    let target = if separate && !check_archive && whole_requested {
+                    let target = if separate && !check_archive && whole_requested && !share_in_whole {
                         let launcher = whole.as_mut().unwrap_or_else(|| fork.insert(root.clone()));
                         let module = launcher.module_operands(name, path);
                         let (_, entry) = whole_entry.insert((module, String::new()));
@@ -201,9 +209,9 @@ impl crate::ProgramOutput {
                     }
                 }
                 used_archive |= archived;
-                let register = |launcher: &mut ModuleLauncher,
-                                symbol: Option<&str>,
-                                entry|
+                let mut register = |launcher: &mut ModuleLauncher,
+                                    symbol: Option<&str>,
+                                    entry|
                  -> Result<String, String> {
                     let (module, code) = if let Some(entry) = entry {
                         entry
@@ -213,9 +221,25 @@ impl crate::ProgramOutput {
                             (Some(symbol), _) | (None, &Initializer::Archived(symbol)) => {
                                 launcher.external(symbol, suspends)
                             }
-                            (None, Initializer::Checked(body)) => {
-                                body.emit_module(name, &mut launcher.output, unit, &module.file)?
+                            (None, Initializer::Checked(body)) if share_in_whole => {
+                                if let Some((_, entry)) = shared
+                                    .iter()
+                                    .find(|(owner, _)| owner.as_ptr() == Rc::as_ptr(body))
+                                {
+                                    launcher.registration_entry(unit, entry)
+                                } else {
+                                    let entry =
+                                        body.emit_module(name, &mut launcher.output, unit, None)?;
+                                    shared.push((Rc::downgrade(body), entry.clone()));
+                                    entry
+                                }
                             }
+                            (None, Initializer::Checked(body)) => body.emit_module(
+                                name,
+                                &mut launcher.output,
+                                unit,
+                                Some(&module.file),
+                            )?,
                         };
                         (module, code)
                     };
@@ -794,7 +818,7 @@ impl<'a> PreparedBody<'a> {
     }
 
     fn emit(&self, output: &mut Output, unit: usize, file: &str) -> Result<String, String> {
-        self.emit_module(self.name, output, unit, file)
+        self.emit_module(self.name, output, unit, Some(file))
     }
 
     fn emit_module(
@@ -802,20 +826,21 @@ impl<'a> PreparedBody<'a> {
         name: &str,
         output: &mut Output,
         unit: usize,
-        file: &str,
+        file: Option<&str>,
     ) -> Result<String, String> {
         #[cfg(test)]
         crate::single_emission_tests::record_llvm_start(Some(&self.source.path));
-        // Frozen code exposes its origin independently of the module's registered source path.
-        let code_file = match (self.source.bundled, name) {
+        // A shared body takes its filename from the executing Code object.
+        let code_file = file.map(|file| match (self.source.bundled, name) {
             (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
             (true, "_frozen_importlib_external") => {
                 output.data(b"<frozen importlib._bootstrap_external>")
             }
             _ => file.to_owned(),
-        };
-        let positions = SourcePositions::new(&self.source.path, &self.source.text, &code_file)
-            .with_names(&self.source.private_names);
+        });
+        let positions =
+            SourcePositions::for_code(&self.source.path, &self.source.text, code_file.as_deref())
+                .with_names(&self.source.private_names);
         let location = SourceMap {
             info: &self.source,
             callable_code: Default::default(),
@@ -858,7 +883,7 @@ impl<'a> PreparedBody<'a> {
         }
         let filename = self.source.path.as_os_str().as_encoded_bytes();
         let file = output.data(filename);
-        let mut entry = self.emit_module(name, &mut output, 0, &file)?;
+        let mut entry = self.emit_module(name, &mut output, 0, Some(&file))?;
         if let Some((target, _, whole_entry)) = placement {
             *whole_entry = Output::whole_operand(&mut entry);
             output.finish_placement(target);
