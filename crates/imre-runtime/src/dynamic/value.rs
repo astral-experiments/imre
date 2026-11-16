@@ -4603,16 +4603,20 @@ impl Heap {
         self.fill_slot(SlotShape::text(&text), false, true, || Value::Str(text))
     }
 
+    /// Cached integers are permanent. A fresh slot roots the integer in the active frame.
+    pub(super) fn owned_integer(&mut self, integer: crate::Int) -> Id {
+        integer
+            .as_small()
+            .and_then(Self::cached_integer)
+            .unwrap_or_else(|| self.alloc_slot(Value::Int(integer)))
+    }
+
     pub fn alloc(&mut self, value: Value) -> Id {
         if let Value::Str(text) = value {
             return self.owned_text(text);
         }
-        if let Value::Int(integer) = &value
-            && let Some(id) = integer.as_small().and_then(Self::cached_integer)
-        {
-            return id;
-        }
         match value {
+            Value::Int(integer) => self.owned_integer(integer),
             Value::Bytes(bytes) if bytes.is_empty() => self.bytes_from_data(bytes),
             Value::Bytes(bytes) => self.alloc_bytes(bytes, true),
             Value::Tuple(items) if items.is_empty() => EMPTY_TUPLE,

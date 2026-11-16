@@ -2058,8 +2058,7 @@ pub(super) unsafe extern "C" fn imre_dyn_get_int_item(
 pub(super) unsafe extern "C" fn imre_dyn_take_int(ctx: *mut Context, word: usize) -> Id {
     // SAFETY: the caller owns the context and transfers the reference to the heap.
     let ctx = unsafe { &mut *ctx };
-    let object = ctx.alloc(Value::Int(crate::Int(word)));
-    finish(ctx, Ok(object))
+    ctx.heap.owned_integer(crate::Int(word))
 }
 
 #[unsafe(no_mangle)]
@@ -4242,6 +4241,25 @@ impl Context {
 mod tests {
     use super::*;
     use std::rc::{Rc, Weak};
+
+    #[test]
+    fn taking_an_integer_roots_only_a_new_handle() {
+        let mut ctx = new_context(serde_json::json!({"paths": []}), ["imre"]);
+        for number in [-6, -5, 0, 256, 257, i64::MAX] {
+            let mark = ctx.heap.temporary_mark();
+            let word = std::mem::ManuallyDrop::new(crate::Int::from(number)).0;
+            // SAFETY: the context is live and the call takes sole ownership of the word.
+            let result = unsafe { imre_dyn_take_int(&mut ctx, word) };
+            assert!(matches!(ctx.heap.get(result), Value::Int(integer) if integer.0 == word));
+            if let Some(cached) = value::Heap::cached_integer(number) {
+                assert_eq!(result, cached);
+                assert_eq!(ctx.heap.temporary_mark(), mark);
+            } else {
+                assert_eq!(ctx.heap.temporary_mark(), mark + 1);
+                assert_eq!(*ctx.heap.temporary_root(mark), result);
+            }
+        }
+    }
 
     #[test]
     fn workers_keep_the_interpreters_startup_prefix() {
