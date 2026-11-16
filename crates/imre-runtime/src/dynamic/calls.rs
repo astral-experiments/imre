@@ -3319,8 +3319,12 @@ impl Context {
                     ctx.lazy_module_field(obj, scope, name)?;
                 }
                 let value = if let Some(key) = attr.original() {
-                    let dict = ctx.module_globals_storage(scope)?;
-                    ctx.dictionary_field_with_key(dict, key)?
+                    if !nonexact && let Some(value) = ctx.scalar_scope_name(scope, name) {
+                        value
+                    } else {
+                        let dict = ctx.module_globals_storage(scope)?;
+                        ctx.dictionary_field_with_key(dict, key)?
+                    }
                 } else {
                     ctx.lookup_scope_name(scope, name)?
                 };
