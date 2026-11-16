@@ -1,6 +1,11 @@
 #!/bin/sh
-# Share the runner's CPUs among up to four concurrent suite linkers.
-jobs=$(( $(nproc) / 4 ))
+# Only the full suite runs up to four linkers concurrently. The smoke suite
+# has one linker and can use the runner's full CPU budget.
+linkers=1
+if [ "${FULL_THINLTO:-false}" = true ]; then
+    linkers=4
+fi
+jobs=$(( $(nproc) / linkers ))
 if [ "$jobs" -lt 1 ]; then
     jobs=1
 fi
