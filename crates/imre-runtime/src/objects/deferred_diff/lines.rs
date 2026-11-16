@@ -94,7 +94,7 @@ impl LineRanges {
         }
     }
 
-    fn iter(&self) -> impl ExactSizeIterator<Item = Range<usize>> {
+    fn iter(&self) -> impl ExactSizeIterator<Item = Range<usize>> + Clone {
         (0..self.len()).map(|i| self.range(i))
     }
 }
@@ -229,48 +229,21 @@ impl TextLines {
     }
 
     pub(super) fn joined(&self, separator: &str) -> *const Str {
-        if self.len() == 0 {
-            return StrOwner::into_raw(super::super::text::owned_string(""));
-        }
-        let span = self.span(separator);
-        if span == Some(0..self.source.end) {
-            return self.source.full_join().map_or_else(
-                || {
-                    exceptions::sequence_allocation_failed();
-                    std::ptr::null()
-                },
-                StrOwner::into_raw,
-            );
-        }
-        let source = self.source.text.borrow();
-        let size = if let Some(span) = &span {
-            Some(span.len())
-        } else {
-            separator
-                .len()
-                .checked_mul(self.rows.len() - 1)
-                .and_then(|n| {
-                    self.rows
-                        .iter()
-                        .try_fold(n, |n, row| n.checked_add(row.len()))
-                })
-        };
-        let Some(mut result) = size.and_then(|n| Str::try_with_capacity(n).ok()) else {
-            exceptions::sequence_allocation_failed();
-            return std::ptr::null();
-        };
-        if let Some(span) = span {
-            result.push_str(&source[span]);
-        } else {
-            let mut rows = self.rows.iter();
-            result.push_str(&source[rows.next().unwrap()]);
-            for row in rows {
-                result.push_str(separator);
-                result.push_str(&source[row]);
+        let joined = match self.span(separator) {
+            Some(span) if span.is_empty() => super::super::text::try_owned_string("").ok(),
+            Some(span) if span == (0..self.source.end) => self.source.full_join(),
+            Some(span) => Str::try_new(&self.source.text.borrow()[span])
+                .ok()
+                .and_then(|text| StrOwner::try_new(text).ok()),
+            None => {
+                let source = self.source.text.borrow();
+                let parts = self.rows.iter().map(|row| &source[row]);
+                super::super::stdlib::join_native_parts(separator, self.len(), parts)
+                    .and_then(|text| super::super::stdlib::own_joined(text).ok())
             }
-        }
-        StrOwner::try_new(result).map_or_else(
-            |_| {
+        };
+        joined.map_or_else(
+            || {
                 exceptions::sequence_allocation_failed();
                 std::ptr::null()
             },

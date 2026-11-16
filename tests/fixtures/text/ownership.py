@@ -73,3 +73,9 @@ for index in range(30):
     unchanged.pop()
     original = "rebound"
     print(kept)
+
+
+empty = ""
+empty_fields: list[str] = []
+assert "/".join(empty_fields) is empty
+assert empty.join([empty, empty]) is empty
