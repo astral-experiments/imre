@@ -730,7 +730,13 @@ pub(super) fn finish_source_statement(
     scope.names = std::mem::take(&mut checker.names);
     let locals = scope.locals.len();
     let start = body.len();
-    let result = scope.source_operation(statement, body).ok();
+    let result = (&mut scope, SourceScope::frame_value)
+        .source_statement(statement, false, body)
+        .ok()
+        .map(|(op, continues)| {
+            body.extend(op);
+            continues
+        });
     if result.is_none() {
         body.truncate(start);
         scope.truncate_locals(locals);
@@ -2385,22 +2391,18 @@ impl<'a> SuitePreparation<'a> {
     fn region_operand(
         &mut self,
         expr: &ast::Expr,
-        scope: &mut SourceScope<'_>,
+        kind: RegisteredScope,
         operands: &mut Vec<PhysicalOperand>,
-        selection: SuiteSelection,
+        checked: Option<Expr>,
         suspended: bool,
     ) -> Expr {
-        let start = scope.locals.len();
-        let value = scope.selected_operand(expr, selection);
-        scope.refusal = None;
-        if let Some(value) = value {
+        if let Some(value) = checked {
             self.refusal = self
                 .refusal
                 .or_else(|| self.literal_refusal(RegionRoot::Operand(&value)));
             return value;
         }
-        scope.truncate_locals(start);
-        let value = self.retain_operand(expr, scope.kind, suspended, None);
+        let value = PhysicalOperand::Residual(self.owned_input(expr, kind, suspended));
         self.refusal = self.refusal.or_else(|| self.operand_refusal(&value));
         bind_operand(operands, value, Type::PythonObject)
     }
@@ -2535,8 +2537,8 @@ impl<'a> SuitePreparation<'a> {
         let mut handlers = Vec::with_capacity(stmt.handlers.len());
         for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
             let matcher = exception_matcher(handler, stmt.is_star, |class, site| {
-                let operand =
-                    self.region_operand(class, &mut scope, &mut operands, selection, suspended);
+                let checked = scope.try_operand(|scope| scope.selected_operand(class, selection));
+                let operand = self.region_operand(class, kind, &mut operands, checked, suspended);
                 Ok::<_, std::convert::Infallible>(values::located(site, class.start(), operand))
             })
             .expect("prepared exception matcher");
@@ -2580,13 +2582,10 @@ impl<'a> SuitePreparation<'a> {
         let mut protected = &mut statements;
         let mut refused_binding = None;
         for item in &stmt.items {
-            let manager = self.region_operand(
-                &item.context_expr,
-                &mut scope,
-                &mut operands,
-                selection,
-                suspended,
-            );
+            let checked =
+                scope.try_operand(|scope| scope.selected_operand(&item.context_expr, selection));
+            let manager =
+                self.region_operand(&item.context_expr, kind, &mut operands, checked, suspended);
             let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
             let manager = values::located(site.range, site.anchor, manager);
             scope.report_child_refusals = true;
@@ -2668,8 +2667,8 @@ impl<'a> SuitePreparation<'a> {
     ) -> StdResult<RegisteredSuite, OperandRefusal> {
         let mut operands = Vec::new();
         let mut scope = self.source_scope(kind);
-        let iterable =
-            self.region_operand(&loop_.iter, &mut scope, &mut operands, selection, suspended);
+        let checked = scope.try_operand(|scope| scope.selected_operand(&loop_.iter, selection));
+        let iterable = self.region_operand(&loop_.iter, kind, &mut operands, checked, suspended);
         let mut input = cursor_input(
             iterable,
             Some(loop_.iter.range()),
@@ -2739,10 +2738,30 @@ impl<'a> SuitePreparation<'a> {
                         stmt,
                         ast::Stmt::If(_) | ast::Stmt::While(_) | ast::Stmt::Try(_)
                     ));
-            let lowered = if physical {
+            let lowered = if physical && !scope.checked_physical_statement(stmt) {
                 scope.physical_statement(stmt, &mut body, self)
             } else {
-                scope.statement(stmt, &mut body.statements)
+                let first = operands.len();
+                let enclosing = self.refusal.take();
+                let lowered = scope.written_statement(stmt, &mut body.statements, |scope, expr| {
+                    let checked = scope.try_operand(|scope| scope.frame_value(expr));
+                    Some(self.region_operand(expr, kind, &mut operands, checked, suspended))
+                });
+                let refusal = std::mem::replace(&mut self.refusal, enclosing);
+                match lowered {
+                    Ok((Some(operation), _)) if operands.len() != first => {
+                        body.mixed(self, operation, refusal);
+                        continue;
+                    }
+                    Ok((operation, continues)) => {
+                        body.statements.extend(operation);
+                        Ok(continues)
+                    }
+                    Err(()) => {
+                        operands.truncate(first);
+                        Err(())
+                    }
+                }
             };
             if let Ok(continues) = lowered {
                 if !body.falls_through
@@ -2831,32 +2850,6 @@ impl<'a> SuitePreparation<'a> {
                     .collect();
                 body.statements
                     .push(scope.store(def.name.as_str(), function_definition(def, header)));
-                continue;
-            }
-            let mut operand = |expr: &ast::Expr| keep(frame_value(expr));
-            let output = match stmt {
-                ast::Stmt::Return(ret) => Some(Statement::Return(
-                    ret.value
-                        .as_deref()
-                        .map(&mut operand)
-                        .unwrap_or_else(Expr::none),
-                )),
-                ast::Stmt::Expr(value) if !value.value.is_string_literal_expr() => {
-                    Some(Statement::Expr(operand(&value.value)))
-                }
-                ast::Stmt::Raise(raise) => {
-                    let Ok(statement) = statements::raised(raise, |value| {
-                        raised_value(raise, value, |expr| {
-                            Ok::<_, std::convert::Infallible>(operand(expr))
-                        })
-                    });
-                    Some(statement)
-                }
-                _ => None,
-            };
-            if let Some(output) = output {
-                body.statements.push(checkpoint(stmt));
-                body.mixed(self, output, self.operand_refusals(&operands[start..]));
                 continue;
             }
             if let ast::Stmt::AnnAssign(ann) = stmt
@@ -3221,7 +3214,12 @@ pub(super) fn raised_value<E>(
     Ok(Statement::raise_at(exception, cause, None))
 }
 
-impl statements::StatementLowering for SourceScope<'_> {
+// Only the three written value operations use the supplied reader. Nested
+// suites enter through the scope and own their own operand placement.
+impl<'s, F> statements::StatementLowering for (&mut SourceScope<'s>, F)
+where
+    F: FnMut(&mut SourceScope<'s>, &ast::Expr) -> Option<Expr>,
+{
     type Error = ();
 
     fn assignment(
@@ -3230,8 +3228,9 @@ impl statements::StatementLowering for SourceScope<'_> {
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
-        let value = self.frame_value(rhs).ok_or(())?;
-        unpacking::bind_assignment(self, targets, value, body)?;
+        let scope = &mut *self.0;
+        let value = scope.frame_value(rhs).ok_or(())?;
+        unpacking::bind_assignment(scope, targets, value, body)?;
         Ok(true)
     }
 
@@ -3240,41 +3239,44 @@ impl statements::StatementLowering for SourceScope<'_> {
         branch: &ast::StmtIf,
         mut output: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
+        let scope = &mut *self.0;
         let mut falls = false;
         for (test, suite) in statements::if_clauses(branch) {
             let Some(test) = test else {
-                let continues = self.block_into(suite, output)?;
+                let continues = scope.block_into(suite, output)?;
                 return Ok(falls || continues);
             };
-            let condition = self.condition_operand(test).ok_or(())?;
+            let condition = scope.condition_operand(test).ok_or(())?;
             let (body, otherwise) = statements::push_if(output, condition);
-            falls |= self.block_into(suite, body)?;
+            falls |= scope.block_into(suite, body)?;
             output = otherwise;
         }
         Ok(true)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
+        let scope = &mut *self.0;
         // Decorators and parameter defaults execute in the enclosing frame, including for generics.
-        let header = self
+        let header = scope
             .with_binding_operands(|scope| {
                 imre_ast::function_definition_expressions(def)
                     .map(|expr| scope.ordinary_operand(expr))
                     .collect::<Option<Vec<_>>>()
             })
             .ok_or(())?;
-        Ok(Some(self.store(
+        Ok(Some(scope.store(
             def.name.as_str(),
             function_definition(def, header),
         )))
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
-        if !self.interactive && value.is_string_literal_expr() {
+        let (scope, read) = self;
+        if !scope.interactive && value.is_string_literal_expr() {
             return Ok((None, true));
         }
-        let value = self.frame_value(value).ok_or(())?;
-        let effect = if self.interactive {
+        let value = read(scope, value).ok_or(())?;
+        let effect = if scope.interactive {
             operation(Builtin::RegisteredDisplayHook, Type::None, vec![value])
         } else {
             value
@@ -3283,21 +3285,23 @@ impl statements::StatementLowering for SourceScope<'_> {
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, ()> {
+        let (scope, read) = self;
         Ok(Statement::Return(match ret.value.as_deref() {
-            Some(value) => self.frame_value(value).ok_or(())?,
+            Some(value) => read(scope, value).ok_or(())?,
             None => Expr::none(),
         }))
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let mut input = self
+        let scope = &mut *self.0;
+        let mut input = scope
             .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
             .ok_or(())?;
-        input.bind_loop_target(self, &loop_.target)?;
-        self.in_loop(LoopScope::WithCursor, |scope| {
+        input.bind_loop_target(scope, &loop_.target)?;
+        scope.in_loop(LoopScope::WithCursor, |scope| {
             scope.block_into(&loop_.body, &mut input.next)
         })?;
-        let otherwise = self.suite(&loop_.orelse)?;
+        let otherwise = scope.suite(&loop_.orelse)?;
         Ok((input.loop_suite(otherwise, Vec::new()), true))
     }
 
@@ -3306,11 +3310,12 @@ impl statements::StatementLowering for SourceScope<'_> {
         raise: &ast::StmtRaise,
         value: &ast::Expr,
     ) -> StdResult<Statement, ()> {
-        raised_value(raise, value, |expr| self.frame_value(expr).ok_or(()))
+        let (scope, read) = self;
+        raised_value(raise, value, |expr| read(scope, expr).ok_or(()))
     }
 
     fn record_loop_transfer(&mut self, _: &Statement) -> bool {
-        self.loop_scope != LoopScope::Outside
+        self.0.loop_scope != LoopScope::Outside
     }
 
     fn other_statement(
@@ -3318,21 +3323,34 @@ impl statements::StatementLowering for SourceScope<'_> {
         stmt: &ast::Stmt,
         output: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
+        self.0.other_statement(stmt, output)
+    }
+}
+
+impl SourceScope<'_> {
+    fn other_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        output: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
         let (statements, continues) = match stmt {
             ast::Stmt::AugAssign(assign) => {
-                let statement = if let Some(effect) = attribute_write(stmt) {
-                    let values = effect
-                        .operands()
-                        .map(|node| self.ordinary_operand(node))
-                        .collect::<Option<_>>()
-                        .ok_or(())?;
-                    effect.statement(values)
-                } else {
-                    self.augmented_assignment(assign, |input, scope| input.lower(scope))
-                        .ok_or(())?
-                };
-                output.push(statement);
-                return Ok(true);
+                return self.with_suspending_operands(|scope| {
+                    let statement = if let Some(effect) = attribute_write(stmt) {
+                        let values = effect
+                            .operands()
+                            .map(|node| scope.ordinary_operand(node))
+                            .collect::<Option<_>>()
+                            .ok_or(())?;
+                        effect.statement(values)
+                    } else {
+                        scope
+                            .augmented_assignment(assign, |input, scope| input.lower(scope))
+                            .ok_or(())?
+                    };
+                    output.push(statement);
+                    Ok(true)
+                });
             }
             ast::Stmt::TypeAlias(alias) => {
                 let name = alias.name.as_name_expr().ok_or(())?;
@@ -3666,6 +3684,16 @@ impl<'a> SourceScope<'a> {
         }
     }
 
+    fn try_operand(&mut self, read: impl FnOnce(&mut Self) -> Option<Expr>) -> Option<Expr> {
+        let start = self.locals.len();
+        let value = read(self);
+        self.refusal = None;
+        if value.is_none() {
+            self.truncate_locals(start);
+        }
+        value
+    }
+
     fn finish(self, body: Vec<Statement>) -> RegisteredFunction {
         self.bindings().finish(body)
     }
@@ -3822,9 +3850,6 @@ impl SourceScope<'_> {
         preparation: &SuitePreparation<'_>,
     ) -> StdResult<bool, ()> {
         let body = &mut suite.statements;
-        if self.checked_physical_statement(stmt) {
-            return self.statement(stmt, body);
-        }
         if !matches!(self.kind, RegisteredScope::Function { .. }) {
             return Err(());
         }
@@ -3832,7 +3857,9 @@ impl SourceScope<'_> {
             ast::Stmt::Match(_) => return self.statement(stmt, body),
             ast::Stmt::If(_) => PhysicalRegion::Fallthrough,
             ast::Stmt::While(_) => PhysicalRegion::Loop,
-            ast::Stmt::For(loop_) if !loop_.is_async => return self.statement(stmt, body),
+            ast::Stmt::For(loop_) if !loop_.is_async => {
+                return self.statement(stmt, body);
+            }
             ast::Stmt::Try(region) if !region.is_star => PhysicalRegion::Protected,
             _ => return Err(()),
         };
@@ -3893,36 +3920,29 @@ impl SourceScope<'_> {
     }
 
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
+        let (operation, continues) = self.written_statement(stmt, body, Self::frame_value)?;
+        body.extend(operation);
+        Ok(continues)
+    }
+
+    fn written_statement(
+        &mut self,
+        stmt: &ast::Stmt,
+        body: &mut Vec<Statement>,
+        read: impl FnMut(&mut Self, &ast::Expr) -> Option<Expr>,
+    ) -> StdResult<(Option<Statement>, bool), ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
             if !self.omit_assertions {
                 body.extend(self.assertion(assertion)?);
             }
-            return Ok(true);
+            return Ok((None, true));
         }
         let start = body.len();
         push_checkpoint(body, stmt);
-        self.source_operation(stmt, body)
+        let module = matches!(self.kind, RegisteredScope::Module);
+        (self, read)
+            .source_statement(stmt, module, body)
             .inspect_err(|_| body.truncate(start))
-    }
-
-    fn source_operation(
-        &mut self,
-        stmt: &ast::Stmt,
-        body: &mut Vec<Statement>,
-    ) -> StdResult<bool, ()> {
-        let mut lower = |scope: &mut Self| {
-            statements::StatementLowering::source_statement(
-                scope,
-                stmt,
-                matches!(scope.kind, RegisteredScope::Module),
-                body,
-            )
-        };
-        if stmt.is_aug_assign_stmt() {
-            self.with_suspending_operands(lower)
-        } else {
-            lower(self)
-        }
     }
 
     fn suite(&mut self, stmts: &[ast::Stmt]) -> StdResult<Vec<Statement>, ()> {
@@ -4842,6 +4862,29 @@ mod tests {
             });
             assert_eq!(calls, 1);
         }
+    }
+
+    #[test]
+    fn a_mixed_raise_retains_only_its_declined_cause() {
+        let text = "raise make() from cause((-1).__format__)\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let ops = HashMap::new();
+        let mut prepare =
+            SuitePreparation::new(&ops, module.registered_values().context(text), true);
+        let suite = prepare.suite(&module.parsed.syntax().body, RegisteredScope::Module);
+        assert!(suite.refusal.is_none());
+        assert_eq!(suite.operands.len(), 1);
+        let [Statement::Position(..), Statement::Raise(Some(raised))] =
+            &*suite.checked.function.body
+        else {
+            panic!("expected the written checkpoint and raise");
+        };
+        assert!(raised.exception.without_location().python_call().is_some());
+        assert!(matches!(
+            raised.cause.as_deref().unwrap().kind,
+            ExprKind::Builtin(Builtin::RegisteredInput(0), _)
+        ));
     }
 
     #[test]

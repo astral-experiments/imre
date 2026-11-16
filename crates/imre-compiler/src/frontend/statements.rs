@@ -113,26 +113,27 @@ pub(super) trait StatementLowering {
         output: &mut Vec<Statement>,
     ) -> StdResult<bool, Self::Error>;
 
+    /// Return the single completed operation. Compound lowerings write their block into `body`.
     fn source_statement(
         &mut self,
         stmt: &ast::Stmt,
         module: bool,
         body: &mut Vec<Statement>,
-    ) -> StdResult<bool, Self::Error> {
-        let (statement, continues) = match stmt {
+    ) -> StdResult<(Option<Statement>, bool), Self::Error> {
+        Ok(match stmt {
             _ if !matches!(stmt, ast::Stmt::AnnAssign(a) if a.target.is_name_expr())
                 && let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) =>
             {
-                return self.assignment(targets, rhs, body);
+                (None, self.assignment(targets, rhs, body)?)
             }
-            ast::Stmt::If(branch) => return self.branch(branch, body),
+            ast::Stmt::If(branch) => (None, self.branch(branch, body)?),
             ast::Stmt::FunctionDef(def) => (self.definition(def)?, true),
             ast::Stmt::Expr(expr) => self.effect(&expr.value)?,
             ast::Stmt::Return(ret) if !module => (Some(self.returned(ret)?), false),
             ast::Stmt::For(loop_) => {
                 let (statements, continues) = self.for_loop(loop_)?;
                 append_block(body, statements);
-                return Ok(continues);
+                (None, continues)
             }
             ast::Stmt::Raise(raise) => (
                 Some(raised(raise, |value| self.raised_value(raise, value))?),
@@ -141,11 +142,9 @@ pub(super) trait StatementLowering {
             ast::Stmt::Pass(_) => (self.position_only(stmt.range()), true),
             _ => match loop_transfer(stmt) {
                 Some(transfer) if self.record_loop_transfer(&transfer) => (Some(transfer), false),
-                _ => return self.other_statement(stmt, body),
+                _ => (None, self.other_statement(stmt, body)?),
             },
-        };
-        body.extend(statement);
-        Ok(continues)
+        })
     }
 }
 
