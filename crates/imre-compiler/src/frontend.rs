@@ -1853,73 +1853,55 @@ fn lower_graph(
                 // Capture will bind any operands this definition already checked.
                 let recovering = recover_completed.get();
                 if defer_capture
-                    && physical_function
                     && *module_id == graph.entry
-                    && matches!(source, Cow::Borrowed(_))
                     && (!recovering
                         || pending_capture
                             .borrow()
                             .as_ref()
                             .is_some_and(|pending| !pending.contains_key(&signature.id)))
                 {
-                    let for_launch = |module| {
-                        let mut checker = checker_for(module);
+                    let launch = |slot: usize,
+                                  inputs: Option<&mut HashMap<_, _>>,
+                                  collect_calls: bool,
+                                  independent: bool| {
+                        let (module, def, sig) = definitions.get(slot)?;
+                        if !sig.physical_frame
+                            || sig.method.is_some()
+                            || !matches!(def, Cow::Borrowed(_))
+                        {
+                            return None;
+                        }
+                        let mut checker = checker_for(*module);
                         checker.nonreturning_functions = &completed_calls;
                         checker.frame_arguments = FrameArguments::Pending;
-                        checker
+                        checker.boxed_calls = collect_calls.then(HashSet::new);
+                        let (facts, frame) = registered::prepare_checked_definition(
+                            &checker,
+                            def,
+                            sig,
+                            inference,
+                            inputs,
+                            registered::ReturnCheck::Declared,
+                        )
+                        .ok()??;
+                        frame
+                            .retain_for_launch(
+                                graph,
+                                &inference.source_checks,
+                                independent && !facts.needs_fixed_callee,
+                            )
+                            .then_some(facts.calls)
                     };
-                    let mut checker = for_launch(*module_id);
-                    checker.boxed_calls = (recovering
-                        && !graph.has_registered_function(*module_id, definition.start()))
-                    .then(HashSet::new);
-                    if let Ok(Some((checked, placement))) = registered::prepare_checked_definition(
-                        &checker,
-                        definition,
-                        signature,
-                        inference,
-                        None,
-                        registered::ReturnCheck::Declared,
-                    ) && placement.retain_for_launch(
-                        graph,
-                        &inference.source_checks,
-                        !checked.needs_fixed_callee,
-                    ) && let Some(prior) = pending_capture.borrow_mut().as_mut()
+                    let collect_calls = recovering
+                        && !graph.has_registered_function(*module_id, definition.start());
+                    if let Some(calls) = launch(signature.id, None, collect_calls, true)
+                        && let Some(prior) = pending_capture.borrow_mut().as_mut()
                     {
-                        // Earlier native callees can supply their checked operands to the
-                        // Python frame selected by this caller.
-                        let caller = signature.id;
-                        for id in checked.calls {
-                            let Some((module, callee, signature)) = definitions.get(id) else {
-                                continue;
-                            };
-                            if !signature.physical_frame
-                                || signature.method.is_some()
-                                || !matches!(callee, Cow::Borrowed(_))
+                        for id in calls {
+                            if let Some(PreparedBody::Attributes(inputs)) = prior.get_mut(&id)
+                                && !inputs.is_empty()
                             {
-                                continue;
-                            }
-                            let Some(PreparedBody::Attributes(inputs)) = prior.get_mut(&id) else {
-                                continue;
-                            };
-                            if inputs.is_empty() {
-                                continue;
-                            }
-                            let checker = for_launch(*module);
-                            if let Ok(Some((checked, frame))) =
-                                registered::prepare_checked_definition(
-                                    &checker,
-                                    callee,
-                                    signature,
-                                    inference,
-                                    Some(inputs),
-                                    registered::ReturnCheck::Declared,
-                                )
-                            {
-                                frame.retain_for_launch(
-                                    graph,
-                                    &inference.source_checks,
-                                    id < caller && checked.calls.is_empty(),
-                                );
+                                launch(id, Some(inputs), false, id != signature.id);
                             }
                         }
                     }
