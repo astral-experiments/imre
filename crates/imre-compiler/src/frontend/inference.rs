@@ -1581,7 +1581,7 @@ impl Inference {
                             let pending = self.pending.borrow();
                             pending[*callee].returns.is_none()
                                 && !pending[signature.id].inferred_params.contains(&true)
-                                && !pending[*callee].inferred_params.contains(&true)
+                                && pending[*callee].params.iter().all(Option::is_some)
                         }
                         && let Ok(callee) = u32::try_from(*callee)
                     {
