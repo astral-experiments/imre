@@ -63,7 +63,6 @@ impl Checker<'_> {
             if let Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } = &input
                 && matches!(iterable.ty, Type::List(_))
                 && let Some(element) = self.types.element(iterable.ty)
@@ -122,7 +121,6 @@ impl Checker<'_> {
                         kind: ExprKind::List(values),
                     },
                     items: false,
-                    start: None,
                 });
             }
         }

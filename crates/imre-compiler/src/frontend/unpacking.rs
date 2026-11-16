@@ -1519,10 +1519,14 @@ impl Checker<'_> {
         let input = Iteration::Container {
             iterable: slice,
             items: false,
-            start: None,
         };
-        let (iteration, _) =
-            self.lower_iteration_after(&item_target, input, &[], Vec::new(), |checker, body| {
+        let (iteration, _) = self.lower_iteration_after(
+            &item_target,
+            None,
+            input,
+            &[],
+            Vec::new(),
+            |checker, body| {
                 let item = checker.local(checker.names[&name]);
                 let item = checker.coerce(item, expected, target)?;
                 body.push(Statement::Expr(builtin(

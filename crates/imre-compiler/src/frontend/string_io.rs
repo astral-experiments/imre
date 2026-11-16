@@ -103,7 +103,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             } if self.types.fields(iterable.ty).is_some() => {
                 let captured = self.hidden(iterable.ty);
                 body.push(Statement::Assign(captured, iterable));
@@ -112,7 +111,6 @@ impl Checker<'_> {
                 Iteration::Container {
                     iterable: self.local(captured),
                     items: false,
-                    start: None,
                 }
             }
             input => {

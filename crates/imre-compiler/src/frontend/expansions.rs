@@ -142,7 +142,6 @@ impl Checker<'_> {
                         iterable: self
                             .boolean_operand(source, shape.map(|(k, v)| self.types.dict(k, v)))?,
                         items: false,
-                        start: None,
                     }
                 } else {
                     let pair = shape.map(|(k, v)| self.types.tuple(vec![k, v]));
@@ -151,7 +150,6 @@ impl Checker<'_> {
                         | ExpansionSource::Iteration(Iteration::Container {
                             iterable: value,
                             items: false,
-                            start: None,
                         }) if value.ty == Type::PythonObject
                             && self.unshadowed_builtin(&call.func, "dict") =>
                         {
@@ -160,12 +158,7 @@ impl Checker<'_> {
                         input => input.into_iteration(self, source)?,
                     }
                 };
-                let Iteration::Container {
-                    ref iterable,
-                    start: None,
-                    ..
-                } = input
-                else {
+                let Iteration::Container { ref iterable, .. } = input else {
                     return self.dictionary_from_pairs(call, source, input, shape);
                 };
                 let Some(fields) = self.types.mapping(iterable.ty) else {
@@ -542,7 +535,7 @@ impl Checker<'_> {
                         continue;
                     }
                 }
-                let fixed = matches!(&input, Iteration::Container { iterable, items: false, start: None } if self.types.fields(iterable.ty).is_some());
+                let fixed = matches!(&input, Iteration::Container { iterable, items: false } if self.types.fields(iterable.ty).is_some());
                 body.extend(self.expand_items(input, entry, |checker, value| {
                     parts.push((value.ty, !fixed));
                     Ok(vec![push(checker, value)])
@@ -596,7 +589,6 @@ impl Checker<'_> {
             Iteration::Container {
                 iterable: self.local(input),
                 items: false,
-                start: None,
             },
             node,
             |checker, value| {
@@ -648,7 +640,6 @@ impl Checker<'_> {
             | ExpansionSource::Iteration(Iteration::Container {
                 iterable: value,
                 items: false,
-                start: None,
             }) if self.checked_call_contracts
                 && (value.ty == receiver.ty || value.ty == Type::PythonObject)
                 && matches!(append, Builtin::Append) =>
@@ -670,7 +661,6 @@ impl Checker<'_> {
         if let Iteration::Container {
             mut iterable,
             items: false,
-            start: None,
         } = input
         {
             if matches!(append, Builtin::Append)
@@ -684,7 +674,6 @@ impl Checker<'_> {
             input = Iteration::Container {
                 iterable,
                 items: false,
-                start: None,
             };
         }
         let destination = self.hidden(receiver.ty);
@@ -846,7 +835,6 @@ impl Checker<'_> {
                 return Ok(ExpansionSource::Iteration(Iteration::Container {
                     iterable: self.expr(expression)?,
                     items: false,
-                    start: None,
                 }));
             }
             if matches!(&*call.func, ast::Expr::Name(name) if name.id == "range") {
@@ -913,7 +901,6 @@ impl Checker<'_> {
             ExpansionSource::Iteration(Iteration::Container {
                 iterable,
                 items: true,
-                start: None,
             })
         };
         Ok(Some(source))
@@ -955,7 +942,6 @@ impl Checker<'_> {
         if let Iteration::Container {
             iterable,
             items: false,
-            start: None,
         } = &input
             && let Some(fields) = self.types.fields(iterable.ty)
         {
@@ -985,8 +971,13 @@ impl Checker<'_> {
             id: name.clone().into(),
             ctx: ast::ExprContext::Store,
         });
-        let (body, _) =
-            self.lower_iteration_after(&target, input, &[], before_iteration, |checker, body| {
+        let (body, _) = self.lower_iteration_after(
+            &target,
+            None,
+            input,
+            &[],
+            before_iteration,
+            |checker, body| {
                 let slot = checker.names[&name];
                 let statements = consume(checker, checker.local(slot))?;
                 if statements.is_empty() && checker.discarded_function_body() {
@@ -1067,7 +1058,6 @@ impl Checker<'_> {
                         Iteration::Container {
                             iterable,
                             items: false,
-                            start: None,
                         } if result.is_none()
                             && matches!(iterable.ty, Type::ListInt | Type::List(_))
                             && checker
