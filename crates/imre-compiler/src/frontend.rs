@@ -848,6 +848,7 @@ fn lower_graph(
         }
         for (name, binding) in &module.bindings {
             if reserved(name)
+                && !module.registered_namespace
                 && graph.builtin_function_shadow(name, *binding).is_none()
                 && !matches!(
                     (name.as_str(), binding),

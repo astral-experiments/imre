@@ -3084,6 +3084,8 @@ with zipfile.ZipFile('zip-writer-capability.zip', 'w', zipfile.ZIP_DEFLATED) as 
             "    print(t.string, t.exact_type)\n"
         )
         compare("-B", tokenize_script)
+        checked = run(imre, "check", tokenize_script)
+        assert checked.returncode == 0, checked
 
         pyio_script = root / "pyio_entry.py"
         pyio_script.write_text(
