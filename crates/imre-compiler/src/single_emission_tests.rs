@@ -661,6 +661,38 @@ print(measure())
 }
 
 #[test]
+fn a_reducer_keeps_the_unrelated_callbacks_argument_diagnostic() {
+    let project = tempfile::tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    std::fs::write(
+        &entry,
+        r#"class Packet:
+    value: int
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+    def __reduce__(self):
+        print("reconstruct", self.value)
+        return int, (self.value + 1,)
+
+from typing import Callable
+def take(f: Callable[[int], int]) -> int:
+    return f("bad")
+def inc(x: int) -> int:
+    return x+1
+print(take(inc))
+"#,
+    )
+    .unwrap();
+    assert_source_refusal(
+        &entry,
+        &entry,
+        ":12:14: Imre: expected int, got str; annotations are enforced contracts",
+        &[CompileOptions::default()],
+    );
+}
+
+#[test]
 fn required_object_call_keeps_its_admission_reason() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("app.py");
