@@ -112,24 +112,20 @@ impl<'a> RegisteredSource<'a> {
         self,
         node: &ast::Expr,
         placed: Option<FixedAttribute>,
-        allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, (Type, Option<usize>)) -> bool,
+        allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
         mut child: impl FnMut(&ast::Expr, ResultUse<'_>) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
-        let accepts =
-            |method: Option<&ast::Expr>, node: &ast::Expr, facts: (Type, Option<usize>)| {
-                allow_typed_receiver(method, node, facts) || facts.0 == Type::PythonObject
-            };
+        let accepts = |method: Option<&ast::Expr>, node: &ast::Expr, value: &Expr| {
+            allow_typed_receiver(method, node, value) || value.ty == Type::PythonObject
+        };
         if let ast::Expr::Call(call) = node
             && let Some(FixedAttribute::CallValue { checked, .. }) = placed
         {
             // Selection already verified the target and the original parameter at this call.
             let admitted = call.func.as_attribute_expr().is_none_or(|field| {
-                accepts(
-                    Some(&call.func),
-                    &field.value,
-                    (checked.ty, Some(checked.slot)),
-                )
+                matches!(&checked.call.kind, ExprKind::Invoke { callable, .. }
+                    if accepts(Some(&call.func), &field.value, callable))
             });
             return Ok(admitted.then_some(checked.call));
         }
@@ -138,7 +134,7 @@ impl<'a> RegisteredSource<'a> {
                 return Ok(None);
             }
             let value = child(node, result)?;
-            Ok(accepts(method, node, receiver_facts(&value)).then_some(value))
+            Ok(accepts(method, node, &value).then_some(value))
         };
         match node {
             ast::Expr::Call(call) => {
@@ -1182,7 +1178,7 @@ pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
     placed: Option<FixedAttribute>,
-    allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, (Type, Option<usize>)) -> bool,
+    allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
     mut operand: impl FnMut(&ast::Expr, ResultUse<'_>) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
@@ -1222,11 +1218,9 @@ pub(super) fn operation<E>(
             return Ok(None);
         }
         let value = child(&unary.operand)?;
-        return Ok(
-            (allow_typed_receiver(None, &unary.operand, receiver_facts(&value))
-                || value.ty == Type::PythonObject)
-                .then(|| Expr::unary(unary.op, value, Type::PythonObject)),
-        );
+        return Ok((allow_typed_receiver(None, &unary.operand, &value)
+            || value.ty == Type::PythonObject)
+            .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
     }
     let kind = match node {
         ast::Expr::Generator(generator)
@@ -1527,7 +1521,8 @@ impl Checker<'_> {
             return Ok(Some(source.located(node, value)));
         }
         if let ast::Expr::FString(value) = node
-            && self.registered_local_start.is_some()
+            && (self.registered_local_start.is_some()
+                || self.frame_arguments == FrameArguments::Python)
         {
             let value = fstrings::registered_fstring(value, source, |child| self.expr(child))?;
             self.frame_arguments = FrameArguments::Python;
@@ -1818,12 +1813,21 @@ impl Checker<'_> {
             }
             (_, attribute) => attribute,
         };
+        let bound_imports = self.bound_function_imports;
         let mut live_receiver = false;
         let Some(mut value) = operation(
             node,
             source,
             placed,
-            |method, receiver, (ty, slot)| {
+            |method, receiver, value| {
+                if bound_imports
+                    && matches!(value.without_location().kind, ExprKind::Binary(..))
+                    && method.is_some_and(is_bound_method)
+                {
+                    live_receiver = true;
+                    return true;
+                }
+                let (ty, slot) = receiver_facts(value);
                 let Some(first) = first_local else {
                     return false;
                 };
@@ -1850,7 +1854,8 @@ impl Checker<'_> {
             },
             // Even a skipped operand participates in static argument and result checking.
             |receiver| {
-                first_local.is_some()
+                python_frame
+                    || first_local.is_some()
                     || graph.session.is_dynamic_receiver(owner, receiver)
                     || node
                         .as_call_expr()

@@ -4234,7 +4234,8 @@ impl SourceScope<'_> {
                 expr,
                 self.source,
                 None,
-                |method, _, (ty, _)| {
+                |method, _, value| {
+                    let ty = value.ty;
                     class
                         || ty == Type::Str
                             && method
