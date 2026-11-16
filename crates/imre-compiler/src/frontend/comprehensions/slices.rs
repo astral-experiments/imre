@@ -3,38 +3,13 @@
 use crate::ir::{Binary, Builtin, Expr, ExprKind, Statement, Type};
 use ruff_python_ast::CmpOp;
 
-/// A helper's first iterable has no Python-visible identity. For a readonly
-/// integer reduction, reading the original list in the same selected order
-/// preserves the slice snapshot. Literal bounds cannot raise or call user code,
-/// and all remaining captures are local reads. Keep every other slice intact.
-pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) {
-    let Some(&parameter) = params.first() else {
-        return;
-    };
-    let Some(argument) = args.first() else {
-        return;
-    };
-    if argument.ty != Type::ListInt
-        || !args[1..]
-            .iter()
-            .all(|value| matches!(value.kind, ExprKind::Local(_)))
-        || !crate::list_bounds::block_readonly(body)
-    {
-        return;
-    }
-    let ExprKind::Builtin(Builtin::Slice, parts) = &argument.kind else {
-        return;
-    };
-    let Some((source, start, step)) = crate::ir::reverse_slice(parts) else {
-        return;
-    };
-    let source = source.clone();
+/// Read a private reverse slice in place when the reduction cannot mutate its source.
+pub(super) fn fuse(body: &mut [Statement]) {
     let [
         Statement::Assign(_, _),
         Statement::Scope {
             body: iteration, ..
         },
-        Statement::Return(_),
     ] = body
     else {
         return;
@@ -47,19 +22,24 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
     else {
         return;
     };
-    if !matches!(input.kind, ExprKind::Local(slot) if slot == parameter)
+    let ExprKind::Builtin(Builtin::Slice, parts) = &mut input.kind else {
+        return;
+    };
+    let Some((_, start, step)) = crate::ir::reverse_slice(parts) else {
+        return;
+    };
+    if input.ty != Type::ListInt
         || !matches!(&initial.kind, ExprKind::Int(value) if value == "0")
         || !orelse.is_empty()
-        || !forward_condition(test, *captured, *cursor)
+        || !test.tests_index_before_len(*captured, *cursor)
+        || !crate::list_bounds::block_readonly(loop_body)
     {
         return;
     }
     let Some(increment) = loop_body.iter_mut().find_map(|statement| {
         if let Statement::Assign(slot, value) = statement
             && slot == cursor
-            && let ExprKind::Binary(Binary::Add, left, right) = &value.kind
-            && matches!(left.kind, ExprKind::Local(slot) if slot == *cursor)
-            && matches!(&right.kind, ExprKind::Int(value) if value == "1")
+            && value.local_integer_offset() == Some((*cursor, 1))
         {
             Some(value)
         } else {
@@ -82,20 +62,7 @@ pub(super) fn fuse(body: &mut [Statement], params: &[usize], args: &mut [Expr]) 
         ty: Type::Bool,
         kind: ExprKind::Compare(vec![local(*cursor), Expr::integer(0)], vec![CmpOp::GtE]),
     };
-    args[0] = source;
-}
-
-fn forward_condition(value: &Expr, captured: usize, cursor: usize) -> bool {
-    let ExprKind::Compare(values, operations) = &value.kind else {
-        return false;
-    };
-    let [left, right] = values.as_slice() else {
-        return false;
-    };
-    matches!(operations.as_slice(), [CmpOp::Lt])
-        && matches!(left.kind, ExprKind::Local(slot) if slot == cursor)
-        && matches!(&right.kind, ExprKind::Builtin(Builtin::Len, args)
-            if matches!(args.as_slice(), [Expr { kind: ExprKind::Local(slot), .. }] if *slot == captured))
+    *input = parts.swap_remove(0);
 }
 
 fn local(slot: usize) -> Expr {

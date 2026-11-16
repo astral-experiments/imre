@@ -399,7 +399,6 @@ mod tests {
         Module {
             types: Types::default(),
             class_fields: vec![vec![Type::Class(0)]],
-            list_builds: Default::default(),
             class_metadata: Vec::new(),
             command_flags: None,
             builtin_module_sources: None,

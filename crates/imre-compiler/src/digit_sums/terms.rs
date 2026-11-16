@@ -13,6 +13,7 @@ pub(super) fn table(
     let mut evaluator = Evaluator {
         locals: vec![None; local_count],
         protected,
+        temporaries: Vec::new(),
     };
     let mut table = [0; 10];
     for (digit, entry) in table.iter_mut().enumerate() {
@@ -26,11 +27,12 @@ pub(super) fn table(
 struct Evaluator<'a> {
     locals: Vec<Option<i64>>,
     protected: &'a [usize],
+    temporaries: Vec<usize>,
 }
 
 impl Evaluator<'_> {
     fn write(&mut self, slot: usize, value: Option<i64>) -> Option<()> {
-        if self.protected.contains(&slot) {
+        if self.protected.contains(&slot) || !self.temporaries.contains(&slot) {
             return None;
         }
         self.locals[slot] = value;
@@ -51,8 +53,7 @@ impl Evaluator<'_> {
                     self.write(*to, Some(v))?;
                 }
                 Statement::Scope { body, clear } => {
-                    self.statements(body)?;
-                    self.clear(clear)?;
+                    self.in_scope(clear, |cx| cx.statements(body))?;
                 }
                 _ => return None,
             }
@@ -60,11 +61,21 @@ impl Evaluator<'_> {
         Some(())
     }
 
-    fn clear(&mut self, clear: &[usize]) -> Option<()> {
+    // Scalarizing a tuple can introduce private slots after the display was checked.
+    // An assignment to any other enclosing local must survive the reduction.
+    fn in_scope<T>(
+        &mut self,
+        clear: &[usize],
+        evaluate: impl FnOnce(&mut Self) -> Option<T>,
+    ) -> Option<T> {
+        let start = self.temporaries.len();
+        self.temporaries.extend_from_slice(clear);
+        let value = evaluate(self)?;
         for &slot in clear {
             self.write(slot, None)?;
         }
-        Some(())
+        self.temporaries.truncate(start);
+        Some(value)
     }
 
     /// Only exact small-integer operations may disappear. A zero divisor,
@@ -89,12 +100,10 @@ impl Evaluator<'_> {
                     _ => return None,
                 }
             }
-            ExprKind::Scope { body, value, clear } => {
-                self.statements(body)?;
-                let v = self.value(value)?;
-                self.clear(clear)?;
-                v
-            }
+            ExprKind::Scope { body, value, clear } => self.in_scope(clear, |cx| {
+                cx.statements(body)?;
+                cx.value(value)
+            })?,
             _ => return None,
         };
         (-(1_i64 << 62)..1_i64 << 62).contains(&n).then_some(n)

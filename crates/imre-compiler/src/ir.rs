@@ -544,8 +544,6 @@ pub(crate) struct Module {
     pub class_fields: Vec<Vec<Type>>,
     /// Static names and generated value behavior; instance layouts stay unchanged.
     pub class_metadata: Vec<ClassMetadata>,
-    /// Single-generator list builds, keyed by the outlined helper they describe.
-    pub list_builds: std::collections::HashMap<usize, ListBuild>,
     /// Concrete JSON field schemas; decoding additionally checks constructors.
     pub json_records: Vec<JsonRecordSchema>,
     /// Fixed module bindings own their exact storage until process cleanup.
@@ -588,14 +586,6 @@ pub(crate) struct ClassMetadata {
     /// Field index for each parameter of a generated, field-only initializer.
     pub initializer_fields: Option<Vec<usize>>,
     pub fields: Vec<ClassFieldMetadata>,
-}
-
-/// A helper appends one element to its private result for each item of the
-/// iterable parameter. The element stays in the checked append expression.
-pub(crate) struct ListBuild {
-    pub iterable: usize,
-    pub item: usize,
-    pub result: usize,
 }
 
 pub(crate) struct ClassFieldMetadata {
@@ -682,6 +672,22 @@ impl Expr {
                 kind: ExprKind::Builtin(Builtin::BoxValue, vec![self]),
             }
         }
+    }
+
+    /// The normal indexed loop continues while its cursor is below the source length.
+    pub(crate) fn tests_index_before_len(&self, source: usize, cursor: usize) -> bool {
+        let ExprKind::Compare(values, ops) = &self.kind else {
+            return false;
+        };
+        let [index, bound] = values.as_slice() else {
+            return false;
+        };
+        let ExprKind::Builtin(Builtin::Len, args) = &bound.kind else {
+            return false;
+        };
+        matches!(ops.as_slice(), [CmpOp::Lt])
+            && matches!(index.kind, ExprKind::Local(slot) if slot == cursor)
+            && matches!(args.as_slice(), [Expr { kind: ExprKind::Local(slot), .. }] if *slot == source)
     }
 
     pub(crate) fn scope(body: Vec<Statement>, value: Expr, clear: Vec<usize>) -> Self {

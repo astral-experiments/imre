@@ -1477,13 +1477,13 @@ impl Emitter<'_, '_> {
                 receiver.operand
             ))
         };
-        let snapshot = self.length_roots[slot]
-            .and_then(|root| self.length_snapshots[root].clone().map(|view| (root, view)))
-            .and_then(|(root, view)| match view.data {
-                Some(ListBuffer::Words(data)) => Some((root, data, view.receiver)),
-                _ => None,
-            });
-        let Some((root, data, snapshot_receiver)) = snapshot else {
+        let root = self.length_roots[slot].unwrap_or(slot);
+        let Some(LengthSnapshot {
+            data: Some(ListBuffer::Words(data)),
+            receiver: snapshot_receiver,
+            ..
+        }) = self.length_snapshots[root].clone()
+        else {
             return read(self);
         };
         if root == slot {
@@ -1701,6 +1701,7 @@ impl Emitter<'_, '_> {
     fn snapshot_loop_lengths(&mut self, statement: &Statement) -> Vec<Option<LengthSnapshot>> {
         let previous = self.length_snapshots.clone();
         let mut roots = vec![(false, false); self.locals.len()];
+        let mut local_view = None;
         crate::ir::walk_expressions(std::slice::from_ref(statement), &mut |expression| {
             if let ExprKind::Builtin(
                 operation @ (Builtin::Len
@@ -1709,12 +1710,29 @@ impl Emitter<'_, '_> {
                 args,
             ) = &expression.kind
                 && let ExprKind::Local(slot) = args[0].kind
-                && let Some(root) = self.length_roots[slot]
             {
-                roots[root].0 = true;
-                roots[root].1 |= !matches!(operation, Builtin::Len);
+                if let Some(root) = self.length_roots[slot] {
+                    roots[root].0 = true;
+                    roots[root].1 |= !matches!(operation, Builtin::Len);
+                } else if matches!(operation, Builtin::ListGetBoundedInBounds { .. })
+                    && let ExprKind::Local(cursor) = args[1].kind
+                    && let Statement::While(test, ..) = statement
+                    && test.tests_index_before_len(slot, cursor)
+                {
+                    local_view = Some(slot);
+                }
             }
         });
+        // This guard reads the local's length even on an empty input. Its view
+        // lives only for this loop, while both the slot and the list are stable.
+        if let Some(slot) = local_view {
+            let region = std::slice::from_ref(statement);
+            let mut stable = true;
+            crate::ir::walk_writes(region, |written, _| stable &= written != slot);
+            if stable && crate::list_bounds::block_readonly(region) {
+                roots[slot] = (true, true);
+            }
+        }
         for (root, (needed, data_needed)) in roots.into_iter().enumerate() {
             // Integer buffer views must not span callbacks in an enclosing loop.
             let data_needed = data_needed
@@ -1915,7 +1933,7 @@ impl Emitter<'_, '_> {
     /// pointer guard preserves the original length read on every unequal value,
     /// including a cleared alias; no hidden-slot liveness assumption is needed.
     fn snapshot_length(&mut self, slot: usize, receiver: &Value) -> Option<Value> {
-        let root = self.length_roots[slot]?;
+        let root = self.length_roots[slot].unwrap_or(slot);
         let snapshot = self.length_snapshots[root].clone()?;
         if slot == root {
             return Some(snapshot.length);
@@ -12891,24 +12909,22 @@ def total(text: str) -> int:
                 },
             )
             .unwrap();
-            let sites: Vec<_> = llvm
-                .split("\ndefine ")
-                .filter(|function| function.contains("call ptr @imre_list_data_readonly("))
-                .collect();
-            assert_eq!(sites.len(), 2);
-            for function in sites {
-                assert_eq!(
-                    function
-                        .lines()
-                        .next()
-                        .unwrap()
-                        .contains("sanitize_address"),
-                    sanitize
-                );
-                let (guard, fast) = function
+            let function = llvm.split_once("define internal i64 @fn_0(").unwrap().1;
+            let (function, _) = function.split_once("\n}").unwrap();
+            assert_eq!(
+                function
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .contains("sanitize_address"),
+                sanitize
+            );
+            let loops: Vec<_> = function.split("icmp sle i64").skip(1).collect();
+            assert_eq!(loops.len(), 2);
+            for body in loops {
+                let (_, fast) = body
                     .split_once("call ptr @imre_list_data_readonly(")
                     .unwrap();
-                assert!(guard.contains("icmp sle i64"));
                 let (fast, checked) = fast
                     .split_once("call i64 @imre_list_borrow_index(")
                     .unwrap();
@@ -12939,7 +12955,9 @@ def total(text: str) -> int:
             &CompileOptions::default(),
         )
         .unwrap();
-        assert!(llvm.contains("call i64 @imre_list_borrow_index_proven("));
+        assert!(llvm.contains("call ptr @imre_list_data_readonly("));
+        assert!(llvm.contains("getelementptr inbounds i64"));
+        assert!(llvm.contains("call i64 @imre_list_borrow_index("));
         assert!(calls_integer_operation(&llvm, "add", true));
         assert!(calls_integer_operation(&llvm, "add", false));
         assert!(
@@ -13155,21 +13173,12 @@ def total(text: str) -> int:
             ));
             assert_eq!(update_releases(&body, 0), [false]);
         }
-        let llvm = compile(
+        let body = function_body(
             "def total(text: str) -> int:\n    digits = list(map(int, text))\n    return sum([sum(divmod(2 * digit, 10)) for digit in digits])\n",
-            &CompileOptions::default(),
-        )
-        .unwrap();
-        let body = llvm
-            .split_once("define internal i64 @fn_1(")
-            .unwrap()
-            .1
-            .split_once("\n}")
-            .unwrap()
-            .0;
-        // The private subtotal is local1: its guarded update is immediate, and
-        // its arbitrary-precision fallback still releases the previous owner.
-        assert_eq!(update_releases(body, 1), [false, true]);
+        );
+        // The subtotal follows the two source locals. Only its arbitrary-precision
+        // fallback releases the previous owner.
+        assert_eq!(update_releases(&body, 2), [false, true]);
     }
 
     #[test]

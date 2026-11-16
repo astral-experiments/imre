@@ -2079,7 +2079,6 @@ fn lower_graph(
     });
     // Entry code and inactive module guards can create helpers too. Validate the
     // complete graph only after every source expression has been lowered.
-    let list_builds = helpers.list_builds.take();
     let mut python_frames: Vec<_> = owners
         .iter()
         .map(|&module| graph.modules[module].archive.is_none())
@@ -2385,7 +2384,6 @@ fn lower_graph(
                 .as_ref()
                 .map(|(flags, _)| flags.clone()),
             class_metadata: dataclass_values::metadata(&classes, graph),
-            list_builds,
             class_fields: classes.fields,
             types,
             json_records,

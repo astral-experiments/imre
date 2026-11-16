@@ -262,7 +262,7 @@ impl Checker<'_> {
                 imre_ast::comprehension::Output::List(&display.elt),
             );
             let subtotal =
-                self.comprehension_display(source, &plan, comprehensions::Collector::IntegerSum)?;
+                self.comprehension_display(&plan, comprehensions::Collector::IntegerSum)?;
             let start = self.integer_fold_start(call)?;
             return Ok(add_start(subtotal, start));
         }

@@ -1,15 +1,10 @@
 //! Fuse a sorted key union with a checked list build of generated records.
 
-use std::collections::HashMap;
-
-use crate::ir::{self, Builtin, Expr, ExprKind, Function, ListBuild, Module, Statement, Type};
+use crate::ir::{Builtin, Expr, ExprKind, Function, Module, Statement, Type};
 
 pub(crate) fn specialize(module: &mut Module) {
-    // Consume the list-build facts while their outlined helpers are still in
-    // the form produced by checking.
-    let builds = std::mem::take(&mut module.list_builds);
     for id in 0..module.functions.len() {
-        if let Some(rows) = sorted_rows(module, &module.functions[id], &builds) {
+        if let Some(rows) = sorted_rows(module, &module.functions[id]) {
             let body = &mut module.functions[id].body;
             body.truncate(body.len() - 2);
             body.push(Statement::Return(rows));
@@ -17,11 +12,7 @@ pub(crate) fn specialize(module: &mut Module) {
     }
 }
 
-fn sorted_rows(
-    module: &Module,
-    function: &Function,
-    builds: &HashMap<usize, ListBuild>,
-) -> Option<Expr> {
+fn sorted_rows(module: &Module, function: &Function) -> Option<Expr> {
     // A handler or finally can observe the keys binding. Only the terminal
     // assignment and return at function scope can be replaced together.
     let [
@@ -35,35 +26,13 @@ fn sorted_rows(
     let ExprKind::Builtin(Builtin::SortedStringKeys, inputs) = &sorted.kind else {
         return None;
     };
-    let ExprKind::Call(id, captures) = &result.kind else {
-        return None;
-    };
-    let build = builds.get(id)?;
-    let helper = &module.functions[*id];
-    let caller_slot = |slot| {
-        let param = helper
-            .params
-            .iter()
-            .position(|&parameter| parameter == slot)?;
-        match captures.values[captures.order[param]].kind {
-            ExprKind::Local(source) => Some(source),
-            _ => None,
-        }
-    };
-    // Bypassing the helper call must preserve every argument's effects.
-    if caller_slot(build.iterable)? != *keys
-        || !captures
-            .values
-            .iter()
-            .all(|value| matches!(value.kind, ExprKind::Local(_)))
-        || !inputs
-            .iter()
-            .all(|dict| module.types.is_default_list_dict(dict.ty))
+    if !inputs
+        .iter()
+        .all(|dict| module.types.is_default_list_dict(dict.ty))
     {
         return None;
     }
-
-    let element = build.element(helper)?;
+    let (item, element) = list_projection(result, *keys)?;
     let (Type::Class(class), ExprKind::Construct { args, .. }) = (element.ty, &element.kind) else {
         return None;
     };
@@ -80,7 +49,7 @@ fn sorted_rows(
             return None;
         }
         let column = match &value.kind {
-            ExprKind::Local(slot) if *slot == build.item => 0,
+            ExprKind::Local(slot) if *slot == item => 0,
             ExprKind::Builtin(Builtin::DictGet, operands) => {
                 let [dict, key] = operands.as_slice() else {
                     return None;
@@ -88,12 +57,11 @@ fn sorted_rows(
                 let (ExprKind::Local(dict), ExprKind::Local(key)) = (&dict.kind, &key.kind) else {
                     return None;
                 };
-                if *key != build.item {
+                if *key != item {
                     return None;
                 }
-                let source = caller_slot(*dict)?;
                 let index = inputs.iter().position(
-                    |input| matches!(input.kind, ExprKind::Local(slot) if slot == source),
+                    |input| matches!(input.kind, ExprKind::Local(slot) if slot == *dict),
                 )?;
                 u8::try_from(index + 1).ok()?
             }
@@ -110,19 +78,64 @@ fn sorted_rows(
     })
 }
 
-impl ListBuild {
-    fn element<'a>(&self, helper: &'a Function) -> Option<&'a Expr> {
-        let mut element = None;
-        ir::walk_expressions(&helper.body, &mut |expr| {
-            if let ExprKind::Builtin(Builtin::Append, args) = &expr.kind
-                && let [list, value] = args.as_slice()
-                && matches!(list.kind, ExprKind::Local(slot) if slot == self.result)
-            {
-                element = Some(value);
-            }
-        });
-        element
+/// Prove that the private list receives one projection for every key in order.
+fn list_projection(result: &Expr, keys: usize) -> Option<(usize, &Expr)> {
+    let ExprKind::Scope { body, value, clear } = &result.kind else {
+        return None;
+    };
+    let [
+        Statement::Assign(list, empty),
+        Statement::Scope {
+            body,
+            clear: loop_roots,
+        },
+    ] = body.as_slice()
+    else {
+        return None;
+    };
+    let [
+        Statement::Assign(source, input),
+        Statement::Assign(cursor, initial),
+        Statement::While(test, steps, otherwise),
+    ] = body.as_slice()
+    else {
+        return None;
+    };
+    let [
+        Statement::Assign(item, row),
+        Statement::Assign(advance, next),
+        Statement::Expr(append),
+    ] = steps.as_slice()
+    else {
+        return None;
+    };
+    let local = |expr: &Expr, expected: usize| matches!(expr.kind, ExprKind::Local(slot) if slot == expected);
+    if !matches!(&empty.kind, ExprKind::List(items) if items.is_empty())
+        || !local(value, *list)
+        || !local(input, keys)
+        || initial.tagged_integer_literal() != Some(0)
+        || !test.tests_index_before_len(*source, *cursor)
+        || !otherwise.is_empty()
+        || advance != cursor
+        || next.local_integer_offset() != Some((*cursor, 1))
+        || loop_roots != &[*source, *cursor]
+        || clear != &[*list, *source, *cursor, *item]
+    {
+        return None;
     }
+    let ExprKind::Builtin(Builtin::SequenceGetInBounds | Builtin::ListGet(None), index) = &row.kind
+    else {
+        return None;
+    };
+    let ExprKind::Builtin(Builtin::Append, args) = &append.kind else {
+        return None;
+    };
+    let [output, element] = args.as_slice() else {
+        return None;
+    };
+    (matches!(index.as_slice(), [container, i] if local(container, *source) && local(i, *cursor))
+        && local(output, *list))
+    .then_some((*item, element))
 }
 
 #[cfg(test)]
@@ -147,6 +160,10 @@ class Row:
 def ordered(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Row]:
     keys = sorted(a.keys() | b.keys())
     return [Row(first=b[k], second=a[k], key=k, rest=a[k]) for k in keys]
+
+def filtered(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Row]:
+    keys = sorted(a.keys() | b.keys())
+    return [Row(first=b[k], second=a[k], key=k, rest=a[k]) for k in keys if k]
 
 def reordered(a: defaultdict[str, list[int]], b: defaultdict[str, list[int]]) -> list[Row]:
     keys = sorted(a.keys() | b.keys())

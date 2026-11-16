@@ -1,6 +1,6 @@
 //! Class bodies can store their implicit metadata in a cell from an enclosing function.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
 
 use ruff_python_ast as ast;
 use ruff_python_ast::visitor::{self, Visitor};
@@ -93,17 +93,6 @@ pub(super) fn declaration_reads<'a>(
         uses.visit_annotation(expression);
     }
     uses.reads
-}
-
-/// The body of a lifted display excludes its first iterable, which belongs to its caller.
-pub(in crate::frontend) fn display_bindings(
-    plan: &imre_ast::comprehension::Plan<'_>,
-) -> (HashSet<String>, BTreeSet<String>, BTreeSet<String>) {
-    let mut uses = Uses::default();
-    let targets: HashSet<String> = plan.scope_bindings(|expr| uses.visit_expr(expr));
-    let mut reads = uses.reads.enclosing(None);
-    reads.retain(|name| !targets.contains(name));
-    (targets, reads, uses.walrus)
 }
 
 /// Resolve free names through nested expression scopes.
