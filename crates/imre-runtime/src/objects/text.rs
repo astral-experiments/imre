@@ -1024,6 +1024,37 @@ unsafe fn split_field(value: *const Str, separator: *const Str, field: SplitFiel
     }
 }
 
+/// A Python string strip argument borrows its original character storage.
+pub(crate) enum StripChars<'a> {
+    Whitespace,
+    Text(&'a str),
+    Codepoints(&'a [u32]),
+}
+
+impl StripChars<'_> {
+    pub(crate) fn contains(&self, point: u32) -> bool {
+        match self {
+            Self::Whitespace => char::from_u32(point).is_some_and(python_whitespace),
+            Self::Text(set) => char::from_u32(point).is_some_and(|ch| set.contains(ch)),
+            Self::Codepoints(set) => set.contains(&point),
+        }
+    }
+
+    pub(crate) fn strip<'a>(&self, source: &'a str, left: bool, right: bool) -> &'a str {
+        let matches = |ch: char| self.contains(u32::from(ch));
+        let source = if left {
+            source.trim_start_matches(matches)
+        } else {
+            source
+        };
+        if right {
+            source.trim_end_matches(matches)
+        } else {
+            source
+        }
+    }
+}
+
 /// Trims a character set or Python whitespace from the selected ends.
 ///
 /// # Safety
@@ -1037,18 +1068,11 @@ pub unsafe extern "C" fn imre_str_strip(
 ) -> *const Str {
     // SAFETY: immutable string inputs remain rooted throughout the call.
     let (source, chars) = unsafe { (&*value, chars.as_ref()) };
-    let matches = |character| {
-        chars.map_or_else(
-            || python_whitespace(character),
-            |chars| chars.contains(character),
-        )
-    };
-    let result = match mode {
-        0 => source.trim_matches(matches),
-        1 => source.trim_start_matches(matches),
-        2 => source.trim_end_matches(matches),
-        _ => fail("SystemError", "invalid string strip mode"),
-    };
+    if mode > 2 {
+        fail("SystemError", "invalid string strip mode");
+    }
+    let chars = chars.map_or(StripChars::Whitespace, |set| StripChars::Text(set.as_str()));
+    let result = chars.strip(source, mode != 2, mode != 1);
     if result.len() == source.len() {
         // SAFETY: the caller's live owner permits acquiring the result reference.
         unsafe { StrOwner::increment_strong_count(value) };

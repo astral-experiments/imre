@@ -134,8 +134,8 @@ mod sumprod;
 pub(crate) mod tempdirs;
 mod text;
 pub(crate) use imre_ast::strings::{is_line_boundary, python_whitespace};
+pub(crate) use text::{StripChars, translate, zfill};
 pub(crate) use text::{codepoint_search_window, hexadecimal, indexed_search_bounds, search_window};
-pub(crate) use text::{translate, zfill};
 pub(crate) mod time;
 pub(crate) use text::{Case, UrlInput, case_map, case_map_points, urlquote, urlsplit};
 pub(crate) use text::{
@@ -1388,21 +1388,8 @@ unsafe fn concat_parts(parts: *const StringPart, count: usize) -> Result<StrOwne
 /// null. The returned string owns an independent reference, including no-ops.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_str_rstrip(value: *const Str, chars: *const Str) -> *const Str {
-    // SAFETY: both immutable strings remain rooted throughout this call.
-    let (source, chars) = unsafe { (&*value, chars.as_ref()) };
-    let stripped = source.trim_end_matches(|character: char| {
-        chars.map_or_else(
-            || python_whitespace(character),
-            |chars| chars.contains(character),
-        )
-    });
-    if stripped.len() == source.len() {
-        // SAFETY: acquiring an independent reference preserves the caller's owner.
-        unsafe { StrOwner::increment_strong_count(value) };
-        value
-    } else {
-        StrOwner::into_raw(StrOwner::new(Str::new(stripped)))
-    }
+    // SAFETY: the fixed trailing-strip entry has the same rooted string operands.
+    unsafe { text::imre_str_strip(value, chars, 2) }
 }
 
 /// Splits with Python's no-separator whitespace rules, omitting empty fields.
