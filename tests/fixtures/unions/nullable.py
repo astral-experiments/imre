@@ -38,3 +38,20 @@ inspect(selected(False))
 print(text(fallback(None)))
 print(text(fallback("")))
 print(text(fallback("kept")))
+
+
+class Source:
+    def get(self, flag: bool) -> str | bytes | None:
+        pass
+
+
+class Words(Source):
+    def get(self, flag: bool) -> str | bytes:
+        return "text" if flag else b"bytes"
+
+
+def read(source: Source, flag: bool) -> str:
+    return text(source.get(flag))
+
+
+print(read(Source(), True), read(Words(), True), read(Words(), False))
