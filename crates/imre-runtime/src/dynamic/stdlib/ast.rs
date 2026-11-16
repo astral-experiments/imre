@@ -43,7 +43,8 @@ pub(in super::super) fn install(ctx: &mut Context, module: Id) {
         let base = if spec.base == "object" {
             object
         } else {
-            ctx.scope_data(module).names[spec.base]
+            ctx.scope_name(module, spec.base)
+                .expect("AST bases are installed before their subclasses")
         };
         let ancestors = ctx.lineage(base);
         let pattern_flags = ctx.class_pattern_flags(base);
