@@ -93,13 +93,28 @@ impl BooleanExits {
 // nested suite only copies the paths for slots whose facts actually change.
 #[derive(Clone, Default)]
 pub(super) struct Assigned {
+    pub(super) has_frame_writes: bool,
+    alternatives: bool,
     words: rpds::HashTrieMap<usize, u64>,
     /// A value keeps its storage origin only when every incoming write agrees.
-    type_sources: rpds::HashTrieMap<usize, ValueSource>,
+    type_sources: rpds::HashTrieMap<SourceSlot, ValueSource>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Hash, PartialEq, Eq)]
+pub(super) enum SourceSlot {
+    Local(usize),
+    Caller(String),
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub(super) enum ValueSource {
+    /// A potentially live frame namespace received a write to this named slot.
+    FrameBinding(std::rc::Rc<HashSet<(TextSize, Type)>>),
+    /// The stored value is a writable namespace acquired by a checked frame lookup.
+    FrameLocals {
+        site: TextSize,
+        caller: bool,
+    },
     /// The selected invoke produces a live Python handle and has no alternative fixed layout.
     PythonCall,
     Declaration(TypeDeclaration),
@@ -114,7 +129,7 @@ pub(super) enum ValueSource {
 
 impl Assigned {
     pub(super) fn value_source(&self, slot: usize) -> Option<ValueSource> {
-        self.type_sources.get(&slot).copied()
+        self.type_sources.get(&SourceSlot::Local(slot)).cloned()
     }
 
     pub(super) fn set_type_source(&mut self, slot: usize, source: Option<TypeDeclaration>) {
@@ -122,11 +137,32 @@ impl Assigned {
     }
 
     pub(super) fn set_value_source(&mut self, slot: usize, source: Option<ValueSource>) {
+        let slot = SourceSlot::Local(slot);
         if let Some(source) = source {
             self.type_sources.insert_mut(slot, source);
         } else {
             self.type_sources.remove_mut(&slot);
         }
+    }
+
+    /// A second lookup can return a different frame. Only writes through the
+    /// same acquired namespace replace one another's possible value.
+    pub(super) fn write_frame_local(
+        &mut self,
+        slot: SourceSlot,
+        owner: TextSize,
+        types: impl IntoIterator<Item = Type>,
+    ) {
+        self.has_frame_writes = true;
+        let mut writes = match self.type_sources.get(&slot) {
+            Some(ValueSource::FrameBinding(writes)) => writes.clone(),
+            _ => Default::default(),
+        };
+        let possible = std::rc::Rc::make_mut(&mut writes);
+        possible.retain(|(prior, _)| *prior != owner);
+        possible.extend(types.into_iter().map(|ty| (owner, ty)));
+        self.type_sources
+            .insert_mut(slot, ValueSource::FrameBinding(writes));
     }
 
     pub(super) fn contains(&self, slot: &usize) -> bool {
@@ -144,7 +180,7 @@ impl Assigned {
     }
 
     pub(super) fn remove(&mut self, slot: &usize) {
-        self.type_sources.remove_mut(slot);
+        self.type_sources.remove_mut(&SourceSlot::Local(*slot));
         let index = slot / 64;
         if let Some(&bits) = self.words.get(&index) {
             let remaining = bits & !(1 << (slot % 64));
@@ -162,11 +198,77 @@ impl Assigned {
         }
     }
 
-    fn intersect_type_sources(&mut self, other: &Self) {
-        if !self.type_sources.ptr_eq(&other.type_sources) {
-            for (&slot, &source) in &self.type_sources.clone() {
-                if other.value_source(slot) != Some(source) {
-                    self.type_sources.remove_mut(&slot);
+    /// A storage origin must agree on every incoming path. A frame write can
+    /// affect a later read when either incoming path reaches it.
+    fn merge_type_sources(&mut self, other: &Self, include_new_slots: bool) {
+        self.has_frame_writes |= other.has_frame_writes;
+        self.alternatives |= other.alternatives;
+        if self.type_sources.ptr_eq(&other.type_sources) {
+            return;
+        }
+        self.alternatives |= self.has_frame_writes;
+        for (slot, source) in &self.type_sources.clone() {
+            if let ValueSource::FrameBinding(left) = source {
+                // A shared finally also runs on interrupted paths. A possible
+                // value from only one of its incoming states cannot prove a
+                // normal caller return. Keep the slot live for its scalar guard.
+                if include_new_slots && other.type_sources.get(slot) != Some(source) {
+                    let mut agreed = left.clone();
+                    std::rc::Rc::make_mut(&mut agreed).retain(|write| matches!(
+                        other.type_sources.get(slot), Some(ValueSource::FrameBinding(right)) if right.contains(write)
+                    ));
+                    self.type_sources
+                        .insert_mut(slot.clone(), ValueSource::FrameBinding(agreed));
+                }
+            } else if (!include_new_slots
+                || matches!(slot, SourceSlot::Local(n) if other.contains(n)))
+                && other.type_sources.get(slot) != Some(source)
+            {
+                self.type_sources.remove_mut(slot);
+            }
+        }
+        if !include_new_slots && !other.has_frame_writes {
+            return;
+        }
+        for (slot, source) in &other.type_sources {
+            if let ValueSource::FrameBinding(right) = source {
+                if include_new_slots {
+                    if !matches!(
+                        self.type_sources.get(slot),
+                        Some(ValueSource::FrameBinding(_))
+                    ) {
+                        self.type_sources.insert_mut(
+                            slot.clone(),
+                            ValueSource::FrameBinding(Default::default()),
+                        );
+                    }
+                    continue;
+                }
+                match self.type_sources.get_mut(slot) {
+                    Some(ValueSource::FrameBinding(left)) if left != right => {
+                        std::rc::Rc::make_mut(left).extend(right.iter().copied());
+                    }
+                    Some(ValueSource::FrameBinding(_)) => {}
+                    _ => self.type_sources.insert_mut(slot.clone(), source.clone()),
+                }
+            } else if include_new_slots && matches!(slot, SourceSlot::Local(n) if !self.contains(n))
+            {
+                self.type_sources.insert_mut(slot.clone(), source.clone());
+            }
+        }
+    }
+
+    /// A new conditional suite may exclude the path that wrote the observed
+    /// slot. The Python frame stays live, but its earlier value is no longer
+    /// evidence that an annotated store can succeed on this path.
+    pub(super) fn enter_frame_statement(&mut self, stmt: &ast::Stmt) {
+        if self.alternatives && (ast::helpers::is_compound_statement(stmt) || stmt.is_assert_stmt())
+        {
+            self.alternatives = false;
+            for (slot, source) in &self.type_sources.clone() {
+                if matches!(source, ValueSource::FrameBinding(_)) {
+                    self.type_sources
+                        .insert_mut(slot.clone(), ValueSource::FrameBinding(Default::default()));
                 }
             }
         }
@@ -174,12 +276,12 @@ impl Assigned {
 
     pub(super) fn after_iteration(&mut self, mut before: Self) {
         // A loop can perform zero assignments, or finish after a different value was stored.
-        before.intersect_type_sources(self);
+        before.merge_type_sources(self, false);
         *self = before;
     }
 
     fn intersect(&mut self, other: &Self) {
-        self.intersect_type_sources(other);
+        self.merge_type_sources(other, false);
         if !self.words.ptr_eq(&other.words) {
             for (&index, &bits) in &self.words.clone() {
                 let common = bits & other.words.get(&index).copied().unwrap_or(0);
@@ -191,18 +293,7 @@ impl Assigned {
     }
 
     pub(super) fn extend(&mut self, other: &Self) {
-        if !self.type_sources.ptr_eq(&other.type_sources) {
-            for (&slot, &source) in &self.type_sources.clone() {
-                if other.contains(&slot) && other.value_source(slot) != Some(source) {
-                    self.type_sources.remove_mut(&slot);
-                }
-            }
-            for (&slot, &source) in &other.type_sources {
-                if !self.contains(&slot) {
-                    self.type_sources.insert_mut(slot, source);
-                }
-            }
-        }
+        self.merge_type_sources(other, true);
         for (&index, &bits) in &other.words {
             let old = self.words.get(&index).copied().unwrap_or(0);
             if old | bits != old {
@@ -400,6 +491,101 @@ impl ModuleNamespace {
 }
 
 impl Checker<'_> {
+    /// Resolve a direct frame lookup where the namespace object is first acquired.
+    pub(super) fn frame_locals(&self, source: &ast::Expr) -> Option<ValueSource> {
+        let field = source.as_attribute_expr()?;
+        let call = field.value.as_call_expr()?;
+        if field.attr.as_str() != "f_locals"
+            || !call.arguments.keywords.is_empty()
+            || !self
+                .graph
+                .session
+                .operand_types(self.module)
+                .is_original_operand(source)
+            || !self
+                .graph
+                .session
+                .is_stdlib_function(self.module, &call.func, "sys", "_getframe")
+        {
+            return None;
+        }
+        let caller = match call.arguments.args.as_ref() {
+            [] => false,
+            [ast::Expr::NumberLiteral(n)] if let ast::Number::Int(depth) = &n.value => {
+                match depth.as_i64()? {
+                    0 => false,
+                    1 => true,
+                    _ => return None,
+                }
+            }
+            _ => return None,
+        };
+        Some(ValueSource::FrameLocals {
+            site: source.start(),
+            caller,
+        })
+    }
+
+    pub(super) fn record_caller_frame_return(&mut self) {
+        if !self.assigned.has_frame_writes
+            || !self
+                .assigned
+                .type_sources
+                .keys()
+                .any(|slot| matches!(slot, SourceSlot::Caller(_)))
+        {
+            return;
+        }
+        if let Some(prior) = &mut self.caller_frame_returns {
+            prior.merge_type_sources(&self.assigned, false);
+        } else {
+            self.caller_frame_returns = Some(Box::new(self.assigned.clone()));
+        }
+    }
+
+    /// Publish only values that reached a normal exit from this physical callee.
+    pub(super) fn finish_caller_frame_stores(&mut self, signature: &Signature, falls: bool) {
+        if falls {
+            self.record_caller_frame_return();
+        }
+        let mut summaries = self.classes.caller_frame_stores.borrow_mut();
+        if let Some(returned) = self.caller_frame_returns.take() {
+            summaries.insert(signature.id, returned);
+        } else {
+            summaries.remove(&signature.id);
+        }
+    }
+
+    pub(super) fn apply_caller_frame_stores(
+        &mut self,
+        signature: &Signature,
+        call: &ast::ExprCall,
+    ) {
+        if self.module_scope
+            || !self.reachable
+            || signature.asynchronous
+            || self.classes.generators.contains(&signature.id)
+        {
+            return;
+        }
+        if let Some(stores) = self.classes.caller_frame_stores.borrow().get(&signature.id) {
+            for (key, value) in &stores.type_sources {
+                if let (SourceSlot::Caller(name), ValueSource::FrameBinding(writes)) = (key, value)
+                    && let Some(&slot) = self.names.get(name)
+                    && !self.declared_slots.contains_key(&slot)
+                {
+                    // A return can reach the caller without writing this slot.
+                    self.assigned.alternatives = true;
+                    self.assigned.write_frame_local(
+                        SourceSlot::Local(slot),
+                        call.start(),
+                        writes.iter().map(|&(_, ty)| ty),
+                    );
+                }
+            }
+        }
+    }
+
     pub(super) fn live_module_binding(&self, expr: &ast::Expr) -> Option<Expr> {
         let name = &expr.as_name_expr()?.id;
         self.live_module_name(name)
@@ -869,6 +1055,40 @@ mod tests {
             "    print(args.command == 'write' and args.text != '')\n    print(args.text)",
         ] {
             assert!(checked(expr).unwrap_err().contains("unknown field"));
+        }
+    }
+
+    #[test]
+    fn an_annotated_local_requires_a_reaching_frame_write() {
+        let check = |after_store, after_call| {
+            let source = format!(
+                r"import sys
+def update(flag: bool) -> None:
+    if flag:
+        sys._getframe(1).f_locals['chosen'] = 17
+        {after_store}
+def read(flag: bool) -> int:
+    chosen = 'old'
+    update(flag)
+    {after_call}
+    alias = chosen if flag else chosen
+    required: int = alias
+    return required
+print(read(True))
+"
+            );
+            crate::check(&source)
+        };
+        check("return", "pass").unwrap();
+        for (after_store, after_call) in [
+            ("raise ValueError()", "pass"),
+            ("return", "if flag: raise ValueError()"),
+        ] {
+            let error = check(after_store, after_call).unwrap_err();
+            assert!(
+                error.contains("11:21: Imre: expected int, got str"),
+                "{error}"
+            );
         }
     }
 

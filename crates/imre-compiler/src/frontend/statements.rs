@@ -170,7 +170,18 @@ impl StatementLowering for Checker<'_> {
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
     ) -> Result<bool, String> {
-        self.assignment_statement(targets, rhs, body)
+        let continues = self.assignment_statement(targets, rhs, body)?;
+        if continues
+            && !self.module_scope
+            && self.reachable
+            && let [ast::Expr::Name(name)] = targets
+            && let Some(source) = self.frame_locals(rhs)
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && !self.declared_slots.contains_key(&slot)
+        {
+            self.assigned.set_value_source(slot, Some(source));
+        }
+        Ok(continues)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> Result<Option<Statement>, String> {
@@ -369,6 +380,9 @@ impl StatementLowering for Checker<'_> {
             // The fixed call never returns. Leave the return site unplaced so a Python
             // frame can return the actual value of a live replacement.
             return Ok(Statement::Expr(value));
+        }
+        if !terminates && self.reachable {
+            self.record_caller_frame_return();
         }
         let statement = Statement::Return(value);
         Ok(match operand {

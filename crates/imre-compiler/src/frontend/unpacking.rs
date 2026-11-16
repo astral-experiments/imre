@@ -656,6 +656,26 @@ impl Checker<'_> {
                     };
                     if self.module_scope && self.is_module_namespace(&receiver) {
                         self.namespace_item_store(&index, &value);
+                    } else if !self.module_scope
+                        && self.reachable
+                        && let Some(key) = subscript.slice.as_string_literal_expr()
+                        && let Some(ValueSource::FrameLocals { site, caller }) = self
+                            .value_source(&receiver)
+                            .or_else(|| self.frame_locals(&subscript.value))
+                    {
+                        let name = key.value.to_str();
+                        let slot = if caller {
+                            Some(assignments::SourceSlot::Caller(name.to_owned()))
+                        } else {
+                            self.names
+                                .get(name)
+                                .copied()
+                                .filter(|slot| !self.declared_slots.contains_key(slot))
+                                .map(assignments::SourceSlot::Local)
+                        };
+                        if let Some(slot) = slot {
+                            self.assigned.write_frame_local(slot, site, [value.ty]);
+                        }
                     }
                     break 'place Statement::assign_item(receiver, index, value);
                 }

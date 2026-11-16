@@ -278,6 +278,7 @@ struct ClassInfo<'a> {
     setup_fields: unittest_setup::Slots,
     generators: HashSet<usize>,
     producer_items: HashMap<usize, Type>,
+    caller_frame_stores: std::cell::RefCell<HashMap<usize, Box<assignments::Assigned>>>,
     contexts: HashSet<usize>,
 }
 
@@ -536,6 +537,7 @@ impl<'a> ClassInfo<'a> {
             setup_fields,
             generators: HashSet::new(),
             producer_items: HashMap::new(),
+            caller_frame_stores: Default::default(),
             contexts: HashSet::new(),
             declarations,
             fields,
@@ -2710,6 +2712,7 @@ fn lower_function(
             Err(failure) => return checker.finish_region(Err(failure)).map_err(Into::into),
         }
     };
+    checker.finish_caller_frame_stores(signature, falls_through);
     if let Some(context) = signature.method
         && context.generated_initializer(classes.declarations)
         && let Some(post) = classes.methods[context.class].get("__post_init__")
@@ -4152,6 +4155,7 @@ struct Checker<'a> {
     present_fields: Vec<(usize, usize)>,
     caught_exceptions: Vec<CaughtException>,
     returns: Type,
+    caller_frame_returns: Option<Box<assignments::Assigned>>,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
     inferred_containers: HashSet<usize>,
     /// Annotations constrain later assignments to the same lexical slot.
@@ -4296,6 +4300,7 @@ impl<'a> Checker<'a> {
             present_fields: Vec::new(),
             caught_exceptions: Vec::new(),
             returns: Type::None,
+            caller_frame_returns: None,
             inferred_containers: HashSet::new(),
             declared_slots: HashMap::new(),
             unstored_targets: HashSet::new(),
@@ -5189,6 +5194,57 @@ impl<'a> Checker<'a> {
         )
     }
 
+    fn annotated_local_value(
+        &mut self,
+        source: &ast::Expr,
+        expected: Type,
+        declaration: TypeDeclaration,
+        annotation: &ast::Expr,
+        new_frame_local: bool,
+    ) -> Result<Expr, String> {
+        if self.assigned.has_frame_writes
+            && let ast::Expr::If(choice) = source
+        {
+            return self.conditional_with(choice, false, |checker, arm| {
+                checker.annotated_local_value(
+                    arm,
+                    expected,
+                    declaration,
+                    annotation,
+                    new_frame_local,
+                )
+            });
+        }
+        self.expr_in_context(
+            source,
+            expected,
+            |_, actual| new_frame_local && actual == Type::PythonObject,
+            |checker, value, expected, site| {
+                if let Some(ValueSource::FrameBinding(written)) = checker.value_source(&value)
+                    && (value.ty == expected
+                        || written
+                            .iter()
+                            .any(|&(_, ty)| ty == expected || ty == Type::PythonObject))
+                    && expected.builtin_scalar_name().is_some()
+                    && checker
+                        .graph
+                        .session
+                        .operand_types(checker.module)
+                        .local_scalar_annotation(annotation)
+                        == Some(expected)
+                {
+                    let checked = registered::checked_local_scalar(Some(expected), value);
+                    return Ok(Expr {
+                        ty: expected,
+                        ..checked
+                    });
+                }
+                checker.coerce_supplied_result(value, expected, site)
+            },
+            Some(declaration),
+        )
+    }
+
     /// A partial can accept a sentinel in place of a parameter. Preserve its type
     /// while checking ordinary operands in the declared parameter's context.
     fn expr_expected_or(
@@ -5974,7 +6030,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Conditional(_, yes, no) => {
                 let source = self.value_source(yes)?;
-                (self.value_source(no) == Some(source)).then_some(source)
+                (self.value_source(no).as_ref() == Some(&source)).then_some(source)
             }
             _ => self
                 .globals
@@ -5999,7 +6055,9 @@ impl<'a> Checker<'a> {
         match self.value_source(value)? {
             ValueSource::Declaration(declaration)
             | ValueSource::CoroutineCallback(declaration, _) => Some(declaration),
-            ValueSource::PythonCall
+            ValueSource::FrameBinding(_)
+            | ValueSource::FrameLocals { .. }
+            | ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
             | ValueSource::Function(_)
@@ -6942,6 +7000,7 @@ impl<'a> Checker<'a> {
         // Checking an unplaced body still needs the current statement for narrowing.
         let mut discarded = Vec::new();
         for (index, statement) in statements.iter().enumerate() {
+            self.assigned.enter_frame_statement(statement);
             let mut fresh = None;
             if let ast::Stmt::Assign(assignment) = statement
                 && let [ast::Expr::Name(name)] = assignment.targets.as_slice()
@@ -7568,12 +7627,12 @@ impl<'a> Checker<'a> {
                 if let Some(rhs) = &assign.value {
                     let value = checked.map_or_else(
                         || {
-                            self.expr_in_context(
+                            self.annotated_local_value(
                                 rhs,
                                 ty,
-                                |_, actual| new_frame_local && actual == Type::PythonObject,
-                                Self::coerce_supplied_result,
-                                Some(declaration),
+                                declaration,
+                                &assign.annotation,
+                                new_frame_local,
                             )
                         },
                         Ok,
@@ -8652,6 +8711,8 @@ impl<'a> Checker<'a> {
         let before = self.assigned.clone();
         let before_facts = self.narrowed.clone();
         let earlier_returns = self.explicit_return;
+        let earlier_frame_returns =
+            (!try_.finalbody.is_empty()).then(|| self.caller_frame_returns.take());
         let earlier_breaks = if try_.finalbody.is_empty() {
             None
         } else {
@@ -8888,6 +8949,9 @@ impl<'a> Checker<'a> {
         // optional facts it may have changed, rather than recording an early
         // "broken" flag before the final completion is known.
         let pending_breaks = self.take_breaks();
+        // Cleanup may replace a value written on any protected return. Only
+        // a fresh normal exit can establish its value beyond this point.
+        self.caller_frame_returns = earlier_frame_returns.flatten();
         let protected_returns = std::mem::replace(&mut self.explicit_return, earlier_returns);
         let outer_finally = std::mem::replace(&mut self.in_finally, true);
         let final_result = self.placed_suite(&try_.finalbody);
@@ -10651,6 +10715,10 @@ impl<'a> Checker<'a> {
                         expression,
                         "local may be uninitialized on this path",
                     ));
+                }
+                if let Some(ValueSource::FrameBinding(_)) = self.assigned.value_source(slot) {
+                    self.require_registered_operation(expression)?;
+                    return Ok(self.local(slot));
                 }
                 let value = self.read_local(slot);
                 if let Some(sites) = &mut self.fixed_sites
