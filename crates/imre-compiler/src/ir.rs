@@ -813,7 +813,7 @@ impl Expr {
                 Some(message.as_deref().map_or(&[], std::slice::from_ref))
             }
             ExprKind::Builtin(Builtin::GlobalGet(_), _) => None,
-            ExprKind::Builtin(op, args) => (!op.takes_call_frame()).then_some(args),
+            ExprKind::Builtin(op, _) if !op.takes_call_frame() => self.attribute_operands(),
             _ => None,
         }
     }
@@ -822,6 +822,9 @@ impl Expr {
     pub(crate) fn attribute_operands(&self) -> Option<&[Expr]> {
         match &self.kind {
             ExprKind::Field(receiver, _) => Some(std::slice::from_ref(receiver)),
+            ExprKind::Builtin(Builtin::Process(_, ProcessSite::Written(site)), operands) => {
+                operands.get(..site.written)
+            }
             ExprKind::Builtin(_, operands) => Some(operands),
             _ => None,
         }
@@ -1145,7 +1148,8 @@ pub(crate) struct NativeArguments {
     pub(crate) origin: FixedOrigin,
     pub(crate) range: ruff_text_size::TextRange,
     pub(crate) order: Vec<usize>,
-    pub(crate) defaults: Vec<Expr>,
+    /// Supplied values precede omitted defaults in the checked argument array.
+    pub(crate) written: usize,
 }
 
 #[derive(Clone)]
@@ -1156,14 +1160,11 @@ pub(crate) enum ProcessSite {
 
 impl ProcessSite {
     /// Read a bound formal without disturbing its written evaluation position.
-    pub(crate) fn formal<'a>(&'a self, written: &'a [Expr], formal: usize) -> &'a Expr {
-        let Self::Written(binding) = self else {
-            return &written[formal];
-        };
-        let index = binding.order[formal];
-        written
-            .get(index)
-            .unwrap_or_else(|| &binding.defaults[index - written.len()])
+    pub(crate) fn formal<'a>(&self, values: &'a [Expr], formal: usize) -> &'a Expr {
+        &values[match self {
+            Self::Written(binding) => binding.order[formal],
+            Self::Fixed(_) => formal,
+        }]
     }
 
     pub(crate) fn origin(&self) -> Option<&FixedOrigin> {
@@ -4715,6 +4716,11 @@ macro_rules! expression_children {
                     if let Some(key) = key {
                         $visit(key);
                     }
+                    $visit(value);
+                }
+            }
+            ExprKind::Builtin(Builtin::Process(_, ProcessSite::Written(site)), values) => {
+                for value in values.into_iter().take(site.written) {
                     $visit(value);
                 }
             }

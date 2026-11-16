@@ -4500,7 +4500,6 @@ impl Emitter<'_, '_> {
             })
             .collect::<Vec<_>>();
         if let Builtin::Process(_, ir::ProcessSite::Written(binding)) = builtin {
-            args.extend(binding.defaults.iter().map(|value| self.operand(value)));
             ir::reorder_operands(&mut args, &mut binding.order.clone());
         }
         // Each operand has already performed its own checks at its own site.
