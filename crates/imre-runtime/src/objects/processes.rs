@@ -95,7 +95,7 @@ impl ProcessError {
         let mut output = ReprWriter(&mut text);
         if self.returncode < 0 {
             let signal = -self.returncode;
-            if let Some(name) = signal_name(signal) {
+            if let Some(name) = crate::signals::name(signal) {
                 write!(output, " died with <Signals.{name}: {signal}>.")?;
             } else {
                 write!(output, " died with unknown signal {signal}.")?;
@@ -204,61 +204,6 @@ impl TimeoutError {
         }
         Ok(text.into())
     }
-}
-
-/// Python formats a child's terminating signal with the host's signal number.
-fn signal_name(signal: i32) -> Option<&'static str> {
-    Some(match signal {
-        libc::SIGHUP => "SIGHUP",
-        libc::SIGINT => "SIGINT",
-        libc::SIGQUIT => "SIGQUIT",
-        libc::SIGILL => "SIGILL",
-        libc::SIGTRAP => "SIGTRAP",
-        libc::SIGABRT => "SIGABRT",
-        libc::SIGBUS => "SIGBUS",
-        libc::SIGFPE => "SIGFPE",
-        libc::SIGKILL => "SIGKILL",
-        libc::SIGUSR1 => "SIGUSR1",
-        libc::SIGSEGV => "SIGSEGV",
-        libc::SIGUSR2 => "SIGUSR2",
-        libc::SIGPIPE => "SIGPIPE",
-        libc::SIGALRM => "SIGALRM",
-        libc::SIGTERM => "SIGTERM",
-        libc::SIGCHLD => "SIGCHLD",
-        libc::SIGCONT => "SIGCONT",
-        libc::SIGSTOP => "SIGSTOP",
-        libc::SIGTSTP => "SIGTSTP",
-        libc::SIGTTIN => "SIGTTIN",
-        libc::SIGTTOU => "SIGTTOU",
-        libc::SIGURG => "SIGURG",
-        libc::SIGXCPU => "SIGXCPU",
-        libc::SIGXFSZ => "SIGXFSZ",
-        libc::SIGVTALRM => "SIGVTALRM",
-        libc::SIGPROF => "SIGPROF",
-        libc::SIGWINCH => "SIGWINCH",
-        libc::SIGIO => "SIGIO",
-        libc::SIGSYS => "SIGSYS",
-        #[cfg(target_os = "macos")]
-        libc::SIGEMT => "SIGEMT",
-        #[cfg(target_os = "macos")]
-        libc::SIGINFO => "SIGINFO",
-        #[cfg(all(
-            target_os = "linux",
-            not(any(
-                target_arch = "mips64",
-                target_arch = "mips64r6",
-                target_arch = "sparc64"
-            ))
-        ))]
-        libc::SIGSTKFLT => "SIGSTKFLT",
-        #[cfg(target_os = "linux")]
-        libc::SIGPWR => "SIGPWR",
-        #[cfg(target_os = "linux")]
-        value if value == libc::SIGRTMIN() => "SIGRTMIN",
-        #[cfg(target_os = "linux")]
-        value if value == libc::SIGRTMAX() => "SIGRTMAX",
-        _ => return None,
-    })
 }
 
 /// A traced stop can be reported by waitpid without WUNTRACED. Popen
