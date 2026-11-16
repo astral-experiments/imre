@@ -468,3 +468,11 @@ except LookupError as error:
     assert manager.frame.f_lineno == manager.raised_at
 else:
     raise AssertionError("exit suppressed the exception")
+
+
+from inspect import getframeinfo
+
+failed = saved.tb_next
+position = getframeinfo(failed, context=0).positions
+assert position.col_offset is not None
+assert getframeinfo(failed.tb_frame, context=0).positions == position
