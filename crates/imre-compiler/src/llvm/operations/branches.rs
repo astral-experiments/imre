@@ -232,7 +232,9 @@ impl CheckedBody<'_, '_, '_, '_> {
         {
             return frame.at_expression(range, anchor, |frame| {
                 let mut code = CheckedBody::registered(frame.reborrow());
-                if let ExprKind::Builtin(Builtin::RegisteredLocation(..), args) = &expr.kind {
+                if let ExprKind::Builtin(Builtin::RegisteredLocation(..), args) = &expr.kind
+                    && args[0].source_position().is_some()
+                {
                     code.operand_truth(&args[0], value, Some(range))
                 } else {
                     code.result_truth(expr, value, Some(range))
@@ -260,7 +262,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 if let Some(word) = exact_word {
                     return frame.body().instruction(format!("icmp ne i64 {word}, 1"));
                 }
-                if expr.ty == Type::Int {
+                if expr.checked_operand_type() == Type::Int {
                     let word = frame.exact_word(id);
                     return self.word_or_truth(&word, id, at);
                 }
