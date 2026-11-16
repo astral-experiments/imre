@@ -100,14 +100,6 @@ class Handler(Filterer):
         _addHandlerRef(self)
         self.createLock()
 
-    def acquire(self):
-        if self.lock:
-            self.lock.acquire()
-
-    def release(self):
-        if self.lock:
-            self.lock.release()
-
     def handle(self, record):
         """
         Conditionally emit the specified logging record.

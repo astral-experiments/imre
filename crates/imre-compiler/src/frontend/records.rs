@@ -577,8 +577,8 @@ impl Checker<'_> {
             return receiver;
         };
         match payload {
-            // Handler.formatter is optional until explicit or basic configuration assigns it.
-            Type::LogFormatter => {
+            // Both fields hold native Object handles when set.
+            Type::LogFormatter | Type::HandlerLock => {
                 return require_object_receiver(receiver, payload, attr.attr.as_str());
             }
             Type::Str if attr.attr.as_str() == "encode" => {}
