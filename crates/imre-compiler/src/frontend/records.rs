@@ -698,7 +698,7 @@ impl Checker<'_> {
             return Some(binding);
         }
         if self.is_class_receiver(root)
-            || self.class_lexical.contains(name)
+            || self.shadowing_locals.contains(name)
             || self
                 .names
                 .get(name)

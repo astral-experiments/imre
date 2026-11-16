@@ -386,7 +386,7 @@ impl Checker<'_> {
                         && !(matches!(&*assign.value, ast::Expr::DictComp(_))
                             && !ast::helpers::any_over_expr(&assign.value, |expr| {
                                 expr.as_name_expr().is_some_and(|n| {
-                                    self.class_lexical.contains(n.id.as_str())
+                                    self.shadowing_locals.contains(n.id.as_str())
                                         || n.id == "__class__"
                                 })
                             }))
@@ -431,7 +431,7 @@ impl Checker<'_> {
                 }
             }
             let previous = self.names.insert(name.to_owned(), temporary);
-            self.class_lexical.insert(name.to_owned());
+            self.shadowing_locals.insert(name.to_owned());
             self.assigned.insert(temporary);
             locals.push((name.to_owned(), temporary, previous));
             Checkpoint::record(
@@ -444,7 +444,7 @@ impl Checker<'_> {
             );
         }
         for (name, slot, previous) in locals.into_iter().rev() {
-            self.class_lexical.remove(&name);
+            self.shadowing_locals.remove(&name);
             if let Some(old) = previous {
                 self.names.insert(name, old);
             } else {
