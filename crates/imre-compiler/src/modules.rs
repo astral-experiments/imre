@@ -2664,36 +2664,6 @@ impl IntrinsicModule {
             (Self::Os | Self::OsPath | Self::PosixPath, "pardir") => {
                 Intrinsic::StringConstant("..")
             }
-            (Self::GenericPath | Self::PosixPath, "commonprefix") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.commonprefix")
-            }
-            (Self::GenericPath | Self::PosixPath, "getatime") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.getatime")
-            }
-            (Self::GenericPath | Self::PosixPath, "getctime") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.getctime")
-            }
-            (Self::GenericPath | Self::PosixPath, "getmtime") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.getmtime")
-            }
-            (Self::GenericPath | Self::PosixPath, "isjunction") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.isjunction")
-            }
-            (Self::GenericPath | Self::PosixPath, "lexists") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.lexists")
-            }
-            (Self::GenericPath | Self::PosixPath, "getsize") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.getsize")
-            }
-            (Self::GenericPath | Self::PosixPath, "samefile") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.samefile")
-            }
-            (Self::GenericPath | Self::PosixPath, "sameopenfile") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.sameopenfile")
-            }
-            (Self::GenericPath | Self::PosixPath, "samestat") => {
-                Intrinsic::ObjectRuntimeExport("genericpath.samestat")
-            }
             (Self::GenericPath | Self::PosixPath, "exists") => Intrinsic::OsPathExists,
             (Self::PosixPath, "commonpath") => Intrinsic::PosixPath(PosixPathOperation::Commonpath),
             (Self::PosixPath, "join") => Intrinsic::PosixPath(PosixPathOperation::Join),
