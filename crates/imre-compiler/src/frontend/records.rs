@@ -1737,36 +1737,19 @@ impl Checker<'_> {
             ));
         }
         let constructor = initializer.id;
-        let args = params
-            .iter()
-            .enumerate()
-            .map(|(slot, &ty)| Expr::local(slot, ty))
-            .collect();
-        let record = Expr {
-            ty: Type::Class(class),
-            kind: ExprKind::Construct {
-                initializer: constructor,
-                args: ir::CallArgs::positional(args),
-            },
-        };
-        let result = self.coerce(self.register_logging_handler(class, record), returns, at)?;
-        let id = self.helpers.reserve();
-        self.types.register_constructor(id, class);
-        self.helpers.finish(
-            id,
-            comprehensions::Helper {
-                module: self.module,
-                function: ir::Function {
-                    params: (0..params.len()).collect(),
-                    locals: params,
-                    returns,
-                    body: vec![Statement::Return(result)],
+        let id = self.call_result_adapter(params, constructor, returns, at, |args| {
+            self.register_logging_handler(
+                class,
+                Expr {
+                    ty: Type::Class(class),
+                    kind: ExprKind::Construct {
+                        initializer: constructor,
+                        args,
+                    },
                 },
-                calls: HashSet::from([constructor]),
-                class_reads: HashSet::new(),
-                source_frame: false,
-            },
-        );
+            )
+        })?;
+        self.types.register_constructor(id, class);
         Ok(Expr {
             ty,
             kind: ExprKind::Callable {
