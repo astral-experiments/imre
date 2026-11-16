@@ -1,4 +1,12 @@
     # Shared by the boxed and fixed-layout Handler classes.
+    def acquire(self):
+        if self.lock:
+            self.lock.acquire()
+
+    def release(self):
+        if self.lock:
+            self.lock.release()
+
     def createLock(self) -> None:
         self.lock = _Lock()
 
