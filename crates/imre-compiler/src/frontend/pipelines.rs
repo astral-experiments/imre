@@ -43,6 +43,36 @@ pub(super) fn byte_split(iterable: &Expr) -> Option<(&Expr, u8)> {
     matches!(&limit.kind, ExprKind::Int(n) if n == "-1").then_some((text, byte))
 }
 
+/// One native index test and step, used by both ordinary loops and resumable pulls.
+pub(super) struct IndexedPull {
+    pub(super) slot: usize,
+    pub(super) available: Expr,
+    pub(super) advance: Statement,
+}
+
+/// Read the current length of a concrete collection.
+pub(super) fn collection_length(source: Expr) -> Expr {
+    Expr {
+        ty: Type::Int,
+        kind: ExprKind::Builtin(Builtin::Len, vec![source]),
+    }
+}
+
+/// Read the element at an index already checked against the container's length.
+pub(super) fn indexed_item(source: Expr, index: Expr, element: Type, take: bool) -> Expr {
+    let get = match source.ty {
+        Type::VarTuple(_) => Builtin::TupleIndex,
+        Type::Bytes => Builtin::BytesGet,
+        _ if take => Builtin::SequenceTakeInBounds,
+        Type::List(_) | Type::Tuple(_) => Builtin::SequenceGetInBounds,
+        _ => Builtin::ListGet(None),
+    };
+    Expr {
+        ty: element,
+        kind: ExprKind::Builtin(get, vec![source, index]),
+    }
+}
+
 /// `evaluate` evaluates an iterable expression; `acquire` obtains its iterator.
 /// Constructor expressions fold their own acquisition into `evaluate`. Every
 /// successful `next` owns `value`, and its consumer clears that transient owner.
@@ -1853,6 +1883,64 @@ impl<'s> Checker<'s> {
         }
     }
 
+    /// Forward iteration tests the live length. A reverse iterator uses the
+    /// same bounds and captures its starting position when acquired.
+    pub(super) fn indexed_pull(
+        &mut self,
+        source: usize,
+        reverse: bool,
+        acquire: &mut Vec<Statement>,
+        clear: &mut Vec<usize>,
+    ) -> IndexedPull {
+        let cursor = self.hidden(Type::Int);
+        clear.push(cursor);
+        let length = || {
+            let source = self.local(source);
+            if let Some(item) = self.types.sequence_union_element(source.ty) {
+                self.sequence_read(&source, item, None)
+            } else {
+                collection_length(source)
+            }
+        };
+        acquire.push(Statement::Assign(
+            cursor,
+            if reverse {
+                binary(Binary::Subtract, length(), Expr::integer(1))
+            } else {
+                Expr::integer(0)
+            },
+        ));
+        let in_bounds = compare(Compare::Less, self.local(cursor), length());
+        let available = if reverse {
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(
+                    true,
+                    vec![
+                        compare(Compare::GreaterEqual, self.local(cursor), Expr::integer(0)),
+                        in_bounds,
+                    ],
+                ),
+            }
+        } else {
+            in_bounds
+        };
+        let direction = if reverse {
+            Binary::Subtract
+        } else {
+            Binary::Add
+        };
+        let advance = Statement::Assign(
+            cursor,
+            binary(direction, self.local(cursor), Expr::integer(1)),
+        );
+        IndexedPull {
+            slot: cursor,
+            available,
+            advance,
+        }
+    }
+
     /// List cursors re-read the live length; reverse cursors capture only their
     /// starting index. Dict/set/string cursors use the rooted runtime protocol.
     pub(super) fn prepare_container(
@@ -1940,42 +2028,8 @@ impl<'s> Checker<'s> {
             || fields.is_some()
             || ty == Type::Bytes;
         if indexed {
-            let cursor = self.hidden(Type::Int);
-            clear.push(cursor);
-            let length = || {
-                let source = Expr::local(source, ty);
-                if let Some(item) = sequence_item {
-                    self.sequence_read(&source, item, None)
-                } else {
-                    Expr {
-                        ty: Type::Int,
-                        kind: ExprKind::Builtin(Builtin::Len, vec![source]),
-                    }
-                }
-            };
-            acquire.push(Statement::Assign(
-                cursor,
-                if reverse {
-                    binary(Binary::Subtract, length(), Expr::integer(1))
-                } else {
-                    Expr::integer(0)
-                },
-            ));
-            let in_bounds = compare(Compare::Less, self.local(cursor), length());
-            let available = if reverse {
-                Expr {
-                    ty: Type::Bool,
-                    kind: ExprKind::Boolean(
-                        true,
-                        vec![
-                            compare(Compare::GreaterEqual, self.local(cursor), Expr::integer(0)),
-                            in_bounds,
-                        ],
-                    ),
-                }
-            } else {
-                in_bounds
-            };
+            let index = self.indexed_pull(source, reverse, &mut acquire, &mut clear);
+            let cursor = index.slot;
             let item = if let Some(item) = sequence_item {
                 self.sequence_read(&self.local(source), item, Some((&self.local(cursor), None)))
             } else if let Some(fields) = fields
@@ -2015,40 +2069,18 @@ impl<'s> Checker<'s> {
                 }
                 item
             } else {
-                Expr {
-                    ty: element,
-                    kind: ExprKind::Builtin(
-                        if matches!(ty, Type::VarTuple(_)) {
-                            Builtin::TupleIndex
-                        } else if ty == Type::Bytes {
-                            Builtin::BytesGet
-                        } else if !reverse && self.consumes_list(ty, node.range()) {
-                            Builtin::SequenceTakeInBounds
-                        } else if matches!(ty, Type::List(_) | Type::Tuple(_)) {
-                            Builtin::SequenceGetInBounds
-                        } else {
-                            Builtin::ListGet(None)
-                        },
-                        vec![self.local(source), self.local(cursor)],
-                    ),
-                }
+                indexed_item(
+                    self.local(source),
+                    self.local(cursor),
+                    element,
+                    !reverse && self.consumes_list(ty, node.range()),
+                )
             };
             pull.push(Statement::If(
-                available,
+                index.available,
                 vec![
                     Statement::Assign(value, item),
-                    Statement::Assign(
-                        cursor,
-                        binary(
-                            if reverse {
-                                Binary::Subtract
-                            } else {
-                                Binary::Add
-                            },
-                            self.local(cursor),
-                            Expr::integer(1),
-                        ),
-                    ),
+                    index.advance,
                     Statement::Assign(ready, Expr::boolean(true)),
                 ],
                 vec![

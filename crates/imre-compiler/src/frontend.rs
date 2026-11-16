@@ -6652,7 +6652,6 @@ impl<'a> Checker<'a> {
         let mapping = self.types.mapping(iterable.ty);
         let set_element = self.types.readable_set_element(iterable.ty);
         let string = iterable.ty == Type::Str;
-        let bytes = iterable.ty == Type::Bytes;
         let element = self
             .types
             .iteration_element(iterable.ty, items)
@@ -6702,38 +6701,15 @@ impl<'a> Checker<'a> {
         }
         let mut output = Vec::new();
         let mut cleanup = Vec::new();
-        // Indexed loops read the container again on each pull.
-        let (iterable, captured) = if indexed {
+        let mut body = Vec::new();
+        let (item, pull, step) = if indexed {
             let source = self.hidden(iterable.ty);
             output.push(Statement::Assign(source, iterable));
             cleanup.push(source);
-            (self.local(source), Some(source))
-        } else {
-            (iterable, None)
-        };
-        let cursor = indexed.then(|| self.hidden(Type::Int));
-        let mut body = Vec::new();
-        let (item, pull) = if let Some(cursor) = cursor {
-            output.push(Statement::Assign(cursor, Expr::integer(0)));
-            cleanup.push(cursor);
-            (
-                Expr {
-                    ty: element,
-                    kind: ExprKind::Builtin(
-                        if bytes {
-                            Builtin::BytesGet
-                        } else if matches!(iterable.ty, Type::VarTuple(_)) {
-                            Builtin::TupleIndex
-                        } else if matches!(iterable.ty, Type::List(_)) {
-                            Builtin::SequenceGetInBounds
-                        } else {
-                            Builtin::ListGet(None)
-                        },
-                        vec![iterable, self.local(cursor)],
-                    ),
-                },
-                None,
-            )
+            let index = self.indexed_pull(source, false, &mut output, &mut cleanup);
+            let item =
+                pipelines::indexed_item(self.local(source), self.local(index.slot), element, false);
+            (item, None, Some(index))
         } else {
             let (key_type, value_type) = mapping.expect("items iteration requires a dictionary");
             let iterator = self.hidden(Type::Iterator);
@@ -6756,7 +6732,7 @@ impl<'a> Checker<'a> {
                 ty: element,
                 kind: ExprKind::Tuple(vec![self.local(key), self.local(value)]),
             };
-            (item, Some((ready, key, value)))
+            (item, Some((ready, key, value)), None)
         };
         let mut facts = self.narrowed.clone();
         let before = self.assigned.clone();
@@ -6767,7 +6743,7 @@ impl<'a> Checker<'a> {
         if let Some(index) = index {
             self.store_value(
                 index,
-                self.local(cursor.expect("indexed enumeration")),
+                self.local(step.as_ref().expect("indexed enumeration").slot),
                 None,
                 Some(&mut body),
             )?;
@@ -6778,21 +6754,13 @@ impl<'a> Checker<'a> {
             cleanup.extend([key, value]);
             body.extend([key, value].map(Statement::Clear));
         }
-        // Advance before entering the body so continue and target rebinding do
-        // not alter progression. Length is read anew on every loop condition.
-        if let Some(slot) = cursor {
-            body.push(Statement::Assign(
-                slot,
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Binary(
-                        Binary::Add,
-                        Box::new(self.local(slot)),
-                        Box::new(Expr::integer(1)),
-                    ),
-                },
-            ));
-        }
+        let test = match step {
+            Some(index) => {
+                body.push(index.advance);
+                index.available
+            }
+            None => Expr::boolean(true),
+        };
         self.loop_breaks.push(None);
         let emit = lower_body(self, &mut body)?;
         let breaks = self.loop_breaks.pop().unwrap();
@@ -6803,17 +6771,6 @@ impl<'a> Checker<'a> {
             return Ok((Vec::new(), falls));
         }
         output.extend(before_iteration);
-        let test = match cursor.zip(captured) {
-            Some((cursor, source)) => pipelines::compare(
-                Compare::Less,
-                self.local(cursor),
-                Expr {
-                    ty: Type::Int,
-                    kind: ExprKind::Builtin(Builtin::Len, vec![self.local(source)]),
-                },
-            ),
-            None => Expr::boolean(true),
-        };
         let output = pipelines::scoped_loop(output, cleanup, orelse, |orelse| {
             Statement::While(test, body, orelse)
         });

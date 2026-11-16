@@ -554,22 +554,8 @@ impl Checker<'_> {
         if ty != Type::Int {
             return None;
         }
-        let length = |value| Expr {
-            ty: Type::Int,
-            kind: ExprKind::Builtin(Builtin::Len, vec![value]),
-        };
         let project = |index| {
-            let item = Expr {
-                ty: element,
-                kind: ExprKind::Builtin(
-                    if matches!(input.ty, Type::List(_)) {
-                        Builtin::SequenceGetInBounds
-                    } else {
-                        Builtin::ListGet(None)
-                    },
-                    vec![input.clone(), Expr::integer(index)],
-                ),
-            };
+            let item = pipelines::indexed_item(input.clone(), Expr::integer(index), element, false);
             path.iter().fold(item, |item, &(field, ty)| Expr {
                 ty,
                 kind: ExprKind::Field(Box::new(item), field),
@@ -591,12 +577,15 @@ impl Checker<'_> {
         let larger = choose(
             pipelines::compare(Compare::Equal, size.clone(), two),
             pair,
-            length(set.clone()),
+            pipelines::collection_length(set.clone()),
         );
         Some(Expr {
             ty: Type::Int,
             kind: ExprKind::Scope {
-                body: vec![Statement::Assign(slot, length(input.clone()))],
+                body: vec![Statement::Assign(
+                    slot,
+                    pipelines::collection_length(input.clone()),
+                )],
                 value: Box::new(choose(
                     pipelines::compare(Compare::LessEqual, size.clone(), one),
                     size,
