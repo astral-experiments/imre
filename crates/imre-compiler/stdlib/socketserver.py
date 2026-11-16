@@ -17,7 +17,11 @@ class BaseRequestHandler:
         self.request = request
         self.client_address = client_address
         self.server = server
-        _run_handler(self)
+        self.setup()
+        try:
+            self.handle()
+        finally:
+            self.finish()
 
     def setup(self) -> None:
         pass
@@ -27,14 +31,6 @@ class BaseRequestHandler:
 
     def finish(self) -> None:
         pass
-
-
-def _run_handler(handler: BaseRequestHandler) -> None:
-    handler.setup()
-    try:
-        handler.handle()
-    finally:
-        handler.finish()
 
 
 class _SocketWriter:
