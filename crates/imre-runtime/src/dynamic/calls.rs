@@ -10586,13 +10586,8 @@ impl Context {
         let globals = self.root_scope(parent);
         let module_name = if self.binding_scope(scope, "__name__") != scope {
             self.lookup(scope, "__name__")?
-        } else if let Some(name) = self.lookup_scope_name(scope, "__name__")? {
-            name
-        } else if let Some(exec_globals) = self.scope_data(globals).exec_globals {
-            self.source_global(exec_globals, "__name__")?
         } else {
-            self.scope_name(globals, "__name__")
-                .unwrap_or_else(|| self.text("builtins"))
+            self.lookup_class_local(scope, "__name__")?
         };
         self.store_class_metadata(scope, "__module__", module_name)?;
         if let Ok(qualname) = self.lookup_attr(body, "__qualname__") {
