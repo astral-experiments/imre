@@ -5160,6 +5160,7 @@ for name in ("md4", "ripemd160"):
             "boxed_urllib_retrieve.py",
             "boxed_socket_timeout.py",
             "boxed_socketserver_source.py",
+            "boxed_class_module_key.py",
             "boxed_urllib_data.py",
             "boxed_urllib_http_status.py",
             "boxed_urllib_ftp.py",
