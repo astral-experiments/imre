@@ -353,27 +353,6 @@ impl From<&str> for Failure {
     }
 }
 
-impl Failure<&'static str> {
-    pub(super) fn at(self, source: &str, site: &impl Ranged) -> Failure {
-        match self {
-            Self::PendingSignature {
-                signature,
-                missing_callable_parameters,
-                module,
-                range,
-            } => Failure::PendingSignature {
-                signature,
-                missing_callable_parameters,
-                module,
-                range,
-            },
-            Self::Diagnostic(report) => Diagnostic::at(source, site, report.message.to_owned())
-                .classified(report.kind)
-                .into(),
-        }
-    }
-}
-
 impl Failure {
     pub(super) fn in_entry_statement(
         mut self,

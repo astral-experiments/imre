@@ -826,9 +826,9 @@ impl Inference {
         &self,
         signature: &Signature,
         request: SignatureUse,
-        module: ModuleId,
+        checker: &Checker<'_>,
         range: TextRange,
-    ) -> Result<Type, &'static str> {
+    ) -> Result<Type, String> {
         let needs_parameters = matches!(request, SignatureUse::Callable { .. });
         if let SignatureUse::Callable {
             skip,
@@ -836,10 +836,11 @@ impl Inference {
         } = request
         {
             if params.len() + skip != signature.params.len() {
-                return Err(Diagnostic::plain(
+                return Err(error(
+                    checker.source,
+                    &range,
                     "function value does not match its Callable parameter count",
-                )
-                .into());
+                ));
             }
             for (index, ty) in params.into_iter().enumerate() {
                 let index = index + skip;
@@ -863,7 +864,7 @@ impl Inference {
             .ok_or(Failure::PendingSignature {
                 signature: signature.id,
                 missing_callable_parameters,
-                module,
+                module: checker.module,
                 range,
             })
     }
@@ -879,10 +880,9 @@ impl Inference {
         self.lookup(
             signature,
             SignatureUse::Callable { skip, expected },
-            checker.module,
+            checker,
             site.range(),
-        )
-        .map_err(|failure| failure.at(checker.source, site))?;
+        )?;
         Ok(self.updated_signature(signature))
     }
 
@@ -2129,9 +2129,9 @@ impl Checker<'_> {
         boxed: bool,
     ) -> Result<Type, String> {
         let returned = match self.inference {
-            Some(inference) => inference
-                .lookup(signature, SignatureUse::Return, self.module, call.range())
-                .map_err(|failure| failure.at(self.source, call)),
+            Some(inference) => {
+                inference.lookup(signature, SignatureUse::Return, self, call.range())
+            }
             None => Ok(signature.returns),
         };
         if returned.is_ok()
