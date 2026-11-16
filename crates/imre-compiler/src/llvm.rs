@@ -3233,17 +3233,6 @@ impl Emitter<'_, '_> {
         }
     }
 
-    fn integer_arithmetic(&mut self, op: Binary, left: &str, right: &str) -> Value {
-        let result = self.body.integer_arithmetic(op, left, right, false);
-        if matches!(
-            op,
-            Binary::FloorDivide | Binary::Modulo | Binary::RightShift
-        ) {
-            self.check_error();
-        }
-        self.owned(result)
-    }
-
     fn binary(&mut self, op: Binary, left: &Value, right: &Value) -> Value {
         if op == Binary::Divide && left.ty.is_path() {
             let name = if right.ty.is_path() {
@@ -3341,7 +3330,9 @@ impl Emitter<'_, '_> {
             | Binary::Multiply
             | Binary::FloorDivide
             | Binary::Modulo
-            | Binary::RightShift => self.integer_arithmetic(op, &left.operand, &right.operand),
+            | Binary::RightShift => {
+                CheckedBody::native(self).integer_word(op, &left.operand, &right.operand)
+            }
             Binary::Divide => self.call("imre_int_true_divide", Type::Float, &[left, right]),
             Binary::BitAnd => self.call("int_and", Type::Int, &[left, right]),
             Binary::BitOr => self.call("int_or", Type::Int, &[left, right]),
