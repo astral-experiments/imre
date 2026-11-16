@@ -521,26 +521,21 @@ impl Context {
     }
 
     pub(super) fn module_code(&mut self, entry: ModuleInitializer, path: &Path) -> Result<Id> {
-        let filename = self.import_path_text(path)?;
-        self.module_code_at(entry, path, filename)
+        self.linked_module_code(entry, path, None)
+            .map(|(code, _)| code)
     }
 
-    pub(super) fn module_code_at(
+    pub(super) fn linked_module_code(
         &mut self,
         entry: ModuleInitializer,
         path: &Path,
-        filename: Id,
-    ) -> Result<Id> {
-        let flags = match entry {
-            ModuleInitializer::Zip(_, _, flags) => Some(flags),
-            ModuleInitializer::File { flags, .. } => flags,
-            _ => None,
-        };
-        let entry = match entry {
-            ModuleInitializer::Native(entry)
-            | ModuleInitializer::File { entry, .. }
-            | ModuleInitializer::Zip(entry, _, _)
-            | ModuleInitializer::Builtin(entry) => entry,
+        filename: Option<Id>,
+    ) -> Result<(Id, value::Code)> {
+        let filename = filename.map_or_else(|| self.import_path_text(path), Ok)?;
+        let (entry, flags) = match entry {
+            ModuleInitializer::Native(entry) | ModuleInitializer::Builtin(entry) => (entry, None),
+            ModuleInitializer::File { entry, flags, .. } => (entry, flags),
+            ModuleInitializer::Zip(entry, _, flags) => (entry, Some(flags)),
             ModuleInitializer::Invalid {
                 message,
                 position,
@@ -570,7 +565,7 @@ impl Context {
                 )?);
             }
         };
-        Ok(self.native_module_code(entry, filename, flags))
+        Ok((self.native_module_code(entry, filename, flags), entry))
     }
 
     /// Each execution of compiled source gets its own module code and nested definition cache.
@@ -678,7 +673,8 @@ impl Context {
         if Sha256::digest(self.bytes_like(data)?).as_slice() != digest {
             return Ok(None);
         }
-        self.module_code_at(code, &path, filename).map(Some)
+        self.linked_module_code(code, &path, Some(filename))
+            .map(|(code, _)| Some(code))
     }
 
     /// Resolve the file that runpy tried to open to the declaring loader’s native code.
@@ -711,7 +707,10 @@ impl Context {
             }
         }
         selected
-            .map(|(code, ..)| self.module_code_at(code, &path, filename))
+            .map(|(code, ..)| {
+                self.linked_module_code(code, &path, Some(filename))
+                    .map(|(code, _)| code)
+            })
             .transpose()
     }
 

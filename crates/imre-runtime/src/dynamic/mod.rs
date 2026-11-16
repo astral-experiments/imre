@@ -4406,16 +4406,9 @@ impl Context {
             };
             (module, self.main_execution_scope(scope)?, origin)
         };
-        let code = match origin {
-            Some(filename) => self.module_code_at(initializer, &path, filename),
-            None => self.module_code(initializer, &path),
-        }
-        .inspect_err(|_| {
-            self.finish_initialization(module);
-        })?;
-        let value::Body::Native(entry, _) = self.code_object(code).body else {
-            unreachable!("registered module code has a native entry")
-        };
+        let (code, entry) = self
+            .linked_module_code(initializer, &path, origin)
+            .inspect_err(|_| self.finish_initialization(module))?;
         self.heap.enter(scope, code, FrameOwner::Module(name));
         Ok(Some(MainModuleFrame { module, entry }))
     }
