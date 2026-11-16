@@ -29,7 +29,10 @@ pub(crate) enum Kind {
     ClassLayout,
     ScopedClassLayout,
     RegisteredClassDefinition,
-    GuardedSignature(DefinitionId),
+    GuardedSignature {
+        owner: DefinitionId,
+        missing_layout: bool,
+    },
 }
 
 /// The entry operand and physical source containing its checked diagnostic.
@@ -306,7 +309,7 @@ impl From<&str> for Diagnostic {
 }
 
 impl Kind {
-    pub(super) fn is_representation(self) -> bool {
+    pub(crate) fn is_representation(self) -> bool {
         self == Self::UnsupportedRepresentation || self.is_object()
     }
 
@@ -326,6 +329,12 @@ impl Kind {
 
     pub(crate) fn is_class_layout(self) -> bool {
         matches!(self, Self::ClassLayout | Self::ScopedClassLayout)
+    }
+}
+
+impl From<Diagnostic> for String {
+    fn from(error: Diagnostic) -> Self {
+        error.to_string()
     }
 }
 

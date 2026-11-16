@@ -1829,6 +1829,33 @@ fn the_ordinary_entry_keeps_an_operand_in_the_default_flow_region() {
 }
 
 #[test]
+fn an_unavailable_provider_layout_preserves_the_callers_argument_contract() {
+    let project = tempdir().unwrap();
+    let installed = tempdir().unwrap();
+    let package = installed.path().join("provider");
+    fs::create_dir(&package).unwrap();
+    fs::write(package.join("model.py"), "class Result: pass\n").unwrap();
+    fs::write(
+        package.join("__init__.py"),
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .model import Result\ntype Answer = Result\ndef get() -> Answer:\n    from .model import Result\n    return Result()\n",
+    )
+    .unwrap();
+    let entry = project.path().join("app.py");
+    let check = |argument: &str| {
+        fs::write(
+            &entry,
+            format!("import provider\ndef take(n: int) -> int: return n\nprint(take({argument}))\nprint(provider.get())\n"),
+        )
+        .unwrap();
+        crate::check_file_with_extensions(&entry, None, &[installed.path().to_owned()]).unwrap_err()
+    };
+    let error = check("'wrong'");
+    assert!(error.contains("app.py:3:12"), "{error}");
+    let error = check("1");
+    assert!(error.contains("has no linked native layout"), "{error}");
+}
+
+#[test]
 fn quoted_annotations_use_a_linked_class_reexported_for_type_checking() {
     let project = tempdir().unwrap();
     let root = project.path();

@@ -367,6 +367,10 @@ impl<'a> ClassInfo<'a> {
                         {
                             return Ok(Type::ObjectValue);
                         }
+                        let module = &graph.modules[field.module];
+                        let invalid = |message: &str| {
+                            Diagnostic::at(&module.source, &field.annotation, message.to_owned())
+                        };
                         annotation_in_class(
                             &field.annotation,
                             graph,
@@ -379,17 +383,11 @@ impl<'a> ClassInfo<'a> {
                             if class.dataclass.is_some_and(|d| d.value_struct)
                                 && !matches!(ty, Type::Float | Type::Bool)
                             {
-                                return Err(diagnostic_message(
-                                    &graph.modules[field.module].source,
-                                    &field.annotation,
-                                    "imre.struct fields must be float or bool",
-                                ));
+                                return Err(invalid("imre.struct fields must be float or bool"));
                             }
                             if field.weak_proxy {
                                 let Type::Class(id) = ty else {
-                                    return Err(diagnostic_message(
-                                        &graph.modules[field.module].source,
-                                        &field.annotation,
+                                    return Err(invalid(
                                         "a weak proxy field requires a record annotation",
                                     ));
                                 };
@@ -412,11 +410,7 @@ impl<'a> ClassInfo<'a> {
                                     .push((field_index, default));
                             }
                             if callables::contains_callable(ty, types) {
-                                Err(diagnostic_message(
-                                    &graph.modules[field.module].source,
-                                    &field.annotation,
-                                    "class fields cannot contain callable values",
-                                ))
+                                Err(invalid("class fields cannot contain callable values"))
                             } else if class.toml_hash && ty == Type::JsonObject {
                                 // The constructor accepts its declared default. The hash reads
                                 // these fields together using the stored TOML representation.
@@ -425,9 +419,7 @@ impl<'a> ClassInfo<'a> {
                                 Ok(ty)
                             }
                         })
-                        .map_err(|error| {
-                            format!("{}:{error}", graph.modules[field.module].path.display())
-                        })
+                        .map_err(|error| error.with_path(&module.path))
                     })
                     .collect::<StdResult<Vec<_>, _>>()
             })
@@ -975,15 +967,19 @@ fn lower_graph(
                         Ok(signature) => signature,
                         Err(_) if layout_error.is_some() => continue,
                         Err(error) => {
-                            let error =
-                                Diagnostic::from(format!("{}:{error}", module.path.display()));
+                            let error = error.with_path(&module.path);
                             return Err(
                                 if !module.type_guards.iter().any(|&stmt| {
                                     stmt < statement_id && module.parsed.suite()[stmt].is_if_stmt()
                                 }) {
                                     error
                                 } else {
-                                    error.classified(Kind::GuardedSignature(owner))
+                                    let missing_layout =
+                                        error.kind == Kind::UnsupportedRepresentation;
+                                    error.classified(Kind::GuardedSignature {
+                                        owner,
+                                        missing_layout,
+                                    })
                                 },
                             );
                         }
@@ -1144,7 +1140,7 @@ fn lower_graph(
                 Some(context),
                 inference,
             )
-            .map_err(|error| format!("{}:{error}", module.path.display()))?;
+            .map_err(|error| error.with_path(&module.path))?;
             if method.name.as_str() == "__init__" {
                 if signature.returns != Type::None {
                     return Err(module.diagnostic(method.as_ref(), "__init__ must return None"));
@@ -2842,7 +2838,7 @@ fn signature(
     class_info: &ClassInfo,
     method: Option<records::MethodContext>,
     inference: &inference::Inference,
-) -> StdResult<Signature, String> {
+) -> StdResult<Signature, Diagnostic> {
     let classes = class_info.declarations;
     let types = class_info.types;
     let module = defaults.module;
@@ -2878,10 +2874,10 @@ fn signature(
         }) {
             graph.needs_object_runtime.set(true);
         }
-        return Err(diagnostic_message(
+        return Err(Diagnostic::at(
             source,
             function,
-            "decorators and type parameters are unsupported",
+            "decorators and type parameters are unsupported".to_owned(),
         ));
     }
     let mut params = Vec::new();
@@ -3014,10 +3010,10 @@ fn signature(
             if let Some(declared) = parameter.annotation()
                 && annotation_in_class(declared, graph, module, classes, types, owner)? != receiver
             {
-                return Err(diagnostic_message(
+                return Err(Diagnostic::at(
                     source,
                     parameter,
-                    "self annotation must name its exact class",
+                    "self annotation must name its exact class".to_owned(),
                 ));
             }
             Some(receiver)
@@ -3138,24 +3134,24 @@ fn signature(
                     // Record the declaration-time identity. Constructor adapters require the
                     // checked initializer and are created by the ordinary call binder.
                     if ty != Type::BuiltinClass && types.constructor_base(ty) != Some(class) {
-                        return Err(diagnostic_message(
+                        return Err(Diagnostic::at(
                             source,
                             value,
-                            "default requires its exact type",
+                            "default requires its exact type".to_owned(),
                         ));
                     }
                     Ok(records::class_object(graph, &classes.definitions[class]))
                 } else if let Some(default) = fixed_default {
                     if default.ty != ty {
-                        return Err(diagnostic_message(
+                        return Err(Diagnostic::at(
                             source,
                             value,
-                            "default requires its exact type",
+                            "default requires its exact type".to_owned(),
                         ));
                     }
                     Ok(default)
                 } else {
-                    calls::scalar_default(value, ty, types, source)
+                    calls::scalar_default(value, ty, types, source).map_err(Into::into)
                 }
             })
             .transpose()?;
@@ -3404,7 +3400,7 @@ fn annotation(
     classes: &Classes,
     types: &Types,
 ) -> StdResult<Type, String> {
-    annotation_in_class(expression, graph, module, classes, types, None)
+    annotation_in_class(expression, graph, module, classes, types, None).map_err(Into::into)
 }
 
 fn annotation_in_class(
@@ -3414,7 +3410,7 @@ fn annotation_in_class(
     classes: &Classes,
     types: &Types,
     owner: Option<usize>,
-) -> StdResult<Type, String> {
+) -> StdResult<Type, Diagnostic> {
     annotation_at(
         expression,
         graph,
@@ -3436,7 +3432,7 @@ fn annotation_at(
     types: &Types,
     source: &str,
     owner: Option<usize>,
-) -> StdResult<Type, String> {
+) -> StdResult<Type, Diagnostic> {
     annotation_with_aliases(
         expression,
         graph,
@@ -3520,21 +3516,21 @@ fn record_constructor_type(
     classes: &Classes,
     types: &Types,
     alias_depth: usize,
-) -> StdResult<Type, String> {
+) -> StdResult<Type, Diagnostic> {
     let class = &classes.definitions[base];
     let index = class.initializer.ok_or_else(|| {
-        diagnostic_message(
+        Diagnostic::at(
             source,
             expression,
-            "type[T] requires a declared initializer",
+            "type[T] requires a declared initializer".to_owned(),
         )
     })?;
     let params = &class.methods[index].parameters;
     if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
-        return Err(diagnostic_message(
+        return Err(Diagnostic::at(
             source,
             expression,
-            "class factories require positional parameters",
+            "class factories require positional parameters".to_owned(),
         ));
     }
     let origin = class.method_origins[index].module;
@@ -3543,10 +3539,10 @@ fn record_constructor_type(
         .skip(1)
         .map(|p| {
             let annotation = p.annotation().ok_or_else(|| {
-                diagnostic_message(
+                Diagnostic::at(
                     source,
                     expression,
-                    "class factory parameters require exact annotations",
+                    "class factory parameters require exact annotations".to_owned(),
                 )
             })?;
             annotation_with_aliases(
@@ -3571,11 +3567,12 @@ fn annotation_with_aliases(
     types: &Types,
     owner: Option<usize>,
     alias_depth: usize,
-) -> StdResult<Type, String> {
+) -> StdResult<Type, Diagnostic> {
+    let invalid_at =
+        |site: &ast::Expr, message: &str| Diagnostic::at(source, site, message.to_owned());
+    let invalid = |message: &str| invalid_at(expression, message);
     if alias_depth >= 32 {
-        return Err(diagnostic_message(
-            source,
-            expression,
+        return Err(invalid(
             "type aliases nest more than 32 levels or form a cycle",
         ));
     }
@@ -3600,17 +3597,14 @@ fn annotation_with_aliases(
     if let Some(class) = graph.session.annotation_class(module, expression) {
         let (origin, name) = match class {
             crate::analysis::AnnotationClass::Builtin(layout) => {
-                return layout.ok_or_else(|| {
-                    diagnostic_message(source, expression, "unsupported exact type annotation")
-                });
+                return layout.ok_or_else(|| invalid("unsupported exact type annotation"));
             }
             crate::analysis::AnnotationClass::Linked(origin, name) => (origin, name),
             crate::analysis::AnnotationClass::Declaration(location) => {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    &format!("class declared at {location} has no linked native layout"),
-                ));
+                return Err(invalid(&format!(
+                    "class declared at {location} has no linked native layout"
+                ))
+                .classified(Kind::UnsupportedRepresentation));
             }
         };
         let body = &graph.modules[origin].parsed.syntax().body;
@@ -3634,9 +3628,8 @@ fn annotation_with_aliases(
     }
     if let ast::Expr::StringLiteral(value) = expression {
         let contents = value.value.to_str();
-        let parsed = ruff_python_parser::parse_expression(contents).map_err(|_| {
-            diagnostic_message(source, expression, "invalid quoted type annotation")
-        })?;
+        let parsed = ruff_python_parser::parse_expression(contents)
+            .map_err(|_| invalid("invalid quoted type annotation"))?;
         return annotation_with_aliases(
             parsed.expr(),
             graph,
@@ -3647,11 +3640,7 @@ fn annotation_with_aliases(
             alias_depth,
         )
         .map_err(|message| {
-            diagnostic_message(
-                source,
-                expression,
-                &format!("invalid quoted annotation: {message}"),
-            )
+            invalid(&format!("invalid quoted annotation: {message}")).classified(message.kind)
         });
     }
     if let Some(ty) = annotations::fixed_instance_type(binding) {
@@ -3664,13 +3653,9 @@ fn annotation_with_aliases(
             }
         }
         Some(Binding::Intrinsic(Intrinsic::SelfType)) => {
-            return owner.map(|id| classes.instance(id)).ok_or_else(|| {
-                diagnostic_message(
-                    source,
-                    expression,
-                    "Self is supported only inside a fixed class",
-                )
-            });
+            return owner
+                .map(|id| classes.instance(id))
+                .ok_or_else(|| invalid("Self is supported only inside a fixed class"));
         }
         Some(Binding::Intrinsic(Intrinsic::Readiness(ir::Readiness::New))) => {
             return Ok(Type::Poll);
@@ -3715,11 +3700,9 @@ fn annotation_with_aliases(
             name @ ("urllib.parse.DefragResult" | "urllib.parse.DefragResultBytes"),
         ))) => {
             graph.needs_object_runtime.set(true);
-            return Err(diagnostic_message(
-                source,
-                expression,
-                &format!("{name} requires native Python object operations"),
-            ));
+            return Err(invalid(&format!(
+                "{name} requires native Python object operations"
+            )));
         }
         Some(Binding::Intrinsic(Intrinsic::PurePath(flavor))) => return Ok(Type::PurePath(flavor)),
         Some(Binding::Intrinsic(Intrinsic::CompletedProcess)) => {
@@ -3742,9 +3725,8 @@ fn annotation_with_aliases(
         )
     };
     match expression {
-        ast::Expr::Name(name) => builtin_annotation(name.id.as_str()).ok_or_else(|| {
-            diagnostic_message(source, expression, "unsupported exact type annotation")
-        }),
+        ast::Expr::Name(name) => builtin_annotation(name.id.as_str())
+            .ok_or_else(|| invalid("unsupported exact type annotation")),
         ast::Expr::NoneLiteral(_) => Ok(Type::None),
         ast::Expr::Subscript(value) if matches!(graph.resolve_type(module, &value.value), Some(Binding::Definition(id)) if graph.is_abstract_context_manager(id)) => {
             nested(&value.value)
@@ -3754,11 +3736,7 @@ fn annotation_with_aliases(
                 && graph.resolve_type(module, &value.value).is_none() =>
         {
             let Type::Class(base) = nested(&value.slice)? else {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    "type[T] requires a fixed record class",
-                ));
+                return Err(invalid("type[T] requires a fixed record class"));
             };
             record_constructor_type(base, expression, graph, source, classes, types, alias_depth)
         }
@@ -3777,9 +3755,7 @@ fn annotation_with_aliases(
             {
                 return Ok(Type::ReadOnlyObjectMapping);
             }
-            Err(diagnostic_message(
-                source,
-                expression,
+            Err(invalid(
                 "read-only mapping annotations currently require Mapping[str, object]",
             ))
         }
@@ -3801,7 +3777,7 @@ fn annotation_with_aliases(
             if graph.resolve_type(module, &subscript.value)
                 == Some(Binding::Intrinsic(Intrinsic::Literal)) =>
         {
-            literals::annotation(&subscript.slice, types, source)
+            literals::annotation(&subscript.slice, types, source).map_err(Into::into)
         }
         ast::Expr::Subscript(value)
             if graph.resolve_type(module, &value.value)
@@ -3816,11 +3792,7 @@ fn annotation_with_aliases(
             )) = graph.resolve_type(module, &value.value) =>
         {
             if nested(&value.slice)? != Type::Str {
-                return Err(diagnostic_message(
-                    source,
-                    expression,
-                    "regex annotations require str",
-                ));
+                return Err(invalid("regex annotations require str"));
             }
             Ok(if kind == Intrinsic::RegexPattern {
                 Type::RegexPattern
@@ -3844,11 +3816,7 @@ fn annotation_with_aliases(
                 Type::Str => crate::ir::ProcessCapture::TEXT,
                 Type::Bytes => crate::ir::ProcessCapture::BYTES,
                 _ => {
-                    return Err(diagnostic_message(
-                        source,
-                        expression,
-                        "CompletedProcess requires str or bytes output",
-                    ));
+                    return Err(invalid("CompletedProcess requires str or bytes output"));
                 }
             };
             Ok(Type::CompletedProcess(capture, None))
@@ -3859,9 +3827,7 @@ fn annotation_with_aliases(
                 Some(Binding::Intrinsic(Intrinsic::Callable))
             ) =>
         {
-            callable_annotation(types, &value.slice, nested, |reason| {
-                diagnostic_message(source, expression, reason)
-            })
+            callable_annotation(types, &value.slice, nested, |reason| invalid(reason))
         }
         ast::Expr::Subscript(value)
             if graph.resolve_type(module, &value.value)
@@ -3885,11 +3851,7 @@ fn annotation_with_aliases(
                 vec![nested(&value.slice)?]
             };
             types.union(&members).ok_or_else(|| {
-                diagnostic_message(
-                    source,
-                    expression,
-                    "finite unions support str | bytes and nullable exact types",
-                )
+                invalid("finite unions support str | bytes and nullable exact types")
             })
         }
         ast::Expr::Subscript(value) => match &*value.value {
@@ -3916,11 +3878,7 @@ fn annotation_with_aliases(
                 match nested(&value.slice)? {
                     Type::Str => Ok(Type::TextIO),
                     Type::Bytes => Ok(Type::BinaryIO),
-                    _ => Err(diagnostic_message(
-                        source,
-                        &*value.slice,
-                        "checked IO requires str or bytes",
-                    )),
+                    _ => Err(invalid_at(&value.slice, "checked IO requires str or bytes")),
                 }
             }
             item if graph.resolve_type(module, item)
@@ -3933,9 +3891,8 @@ fn annotation_with_aliases(
             {
                 let key = nested(&value.slice)?;
                 if !types.hashable_key(key) {
-                    return Err(diagnostic_message(
-                        source,
-                        &*value.slice,
+                    return Err(invalid_at(
+                        &value.slice,
                         "Counter requires an immutable key type",
                     ));
                 }
@@ -3964,9 +3921,8 @@ fn annotation_with_aliases(
             ast::Expr::Name(name) if name.id == "set" => {
                 let element = nested(&value.slice)?;
                 if !types.hashable_key(element) {
-                    return Err(diagnostic_message(
-                        source,
-                        &*value.slice,
+                    return Err(invalid_at(
+                        &value.slice,
                         "set elements must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
                 }
@@ -3982,18 +3938,10 @@ fn annotation_with_aliases(
                     ) =>
             {
                 let ast::Expr::Tuple(arguments) = &*value.slice else {
-                    return Err(diagnostic_message(
-                        source,
-                        expression,
-                        "dict requires key and value types",
-                    ));
+                    return Err(invalid("dict requires key and value types"));
                 };
                 let [key, value] = arguments.elts.as_slice() else {
-                    return Err(diagnostic_message(
-                        source,
-                        expression,
-                        "dict requires key and value types",
-                    ));
+                    return Err(invalid("dict requires key and value types"));
                 };
                 let key_type = nested(key)?;
                 if matches!(receiver, ast::Expr::Name(name) if name.id == "dict")
@@ -4003,8 +3951,7 @@ fn annotation_with_aliases(
                     return Ok(Type::JsonObject);
                 }
                 if !types.hashable_key(key_type) {
-                    return Err(diagnostic_message(
-                        source,
+                    return Err(invalid_at(
                         key,
                         "dictionary keys must be int, str, bytes, Path, or immutable scalar tuples",
                     ));
@@ -4019,11 +3966,7 @@ fn annotation_with_aliases(
                     == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
                 {
                     if types.element(value_type).is_none() {
-                        return Err(diagnostic_message(
-                            source,
-                            value,
-                            "defaultdict requires a typed list value",
-                        ));
+                        return Err(invalid_at(value, "defaultdict requires a typed list value"));
                     }
                     Ok(types.default_list_dict(key_type, value_type))
                 } else if graph.resolve_type(module, receiver)
@@ -4051,26 +3994,16 @@ fn annotation_with_aliases(
                 };
                 Ok(types.tuple(fields))
             }
-            _ => Err(diagnostic_message(
-                source,
-                expression,
+            _ => Err(invalid(
                 "only list[T], dict[K, V], set[T], and fixed tuple[T, ...] are supported",
             )),
         },
         ast::Expr::BinOp(union) if union.op == ast::Operator::BitOr => {
             union_annotation(types, union, nested, || {
-                diagnostic_message(
-                    source,
-                    expression,
-                    "finite unions support str | bytes and nullable exact types",
-                )
+                invalid("finite unions support str | bytes and nullable exact types")
             })
         }
-        _ => Err(diagnostic_message(
-            source,
-            expression,
-            "unsupported type annotation",
-        )),
+        _ => Err(invalid("unsupported type annotation")),
     }
 }
 
