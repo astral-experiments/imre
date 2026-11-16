@@ -1054,11 +1054,45 @@ impl Checker<'_> {
         is_set: bool,
         node: &impl Ranged,
     ) -> Result<Expr, String> {
-        let result = self.hidden(Type::None);
+        // A native list and a Python frame can both consume the written spread.
+        // Introduce a private destination only when an iterator needs a checked loop.
+        let mut result = is_set.then(|| self.hidden(Type::None));
+        let mut prefix = Vec::new();
         let mut body = Vec::new();
         for expression in values {
             if let ast::Expr::Starred(starred) = expression {
-                let input = self.expansion_input(&starred.value, element)?;
+                let Some(input) = self.with_fixed_site(expression.range(), |checker| {
+                    let input = checker.expansion_input(&starred.value, element)?;
+                    match input {
+                        Iteration::Container {
+                            iterable,
+                            items: false,
+                            start: None,
+                        } if result.is_none()
+                            && matches!(iterable.ty, Type::ListInt | Type::List(_))
+                            && checker
+                                .types
+                                .element(iterable.ty)
+                                .is_some_and(|ty| element.is_none_or(|dst| dst == ty)) =>
+                        {
+                            element = checker.types.element(iterable.ty);
+                            let spread = Expr {
+                                ty: iterable.ty,
+                                kind: ExprKind::Builtin(Builtin::RegisteredSpread, vec![iterable]),
+                            };
+                            if let Some(sites) = &mut checker.fixed_sites {
+                                sites.checked_expression(expression.range(), &spread);
+                            }
+                            prefix.push(spread);
+                            Ok(None)
+                        }
+                        input => Ok(Some(input)),
+                    }
+                })?
+                else {
+                    continue;
+                };
+                let result = *result.get_or_insert_with(|| self.hidden(Type::None));
                 body.extend(self.expand_items(input, expression, |checker, value| {
                     checker.expansion_insert(result, &mut element, value, is_set, expression)
                 })?);
@@ -1067,6 +1101,11 @@ impl Checker<'_> {
                     self.expr_expected(expression, element)?
                 } else {
                     self.expr(expression)?
+                };
+                let Some(result) = result else {
+                    let expected = *element.get_or_insert(value.ty);
+                    prefix.push(self.coerce(value, expected, expression)?);
+                    continue;
                 };
                 body.extend(self.expansion_insert(
                     result,
@@ -1091,7 +1130,7 @@ impl Checker<'_> {
                 "set elements must be int, str, bytes, Path, or immutable scalar tuples",
             ));
         }
-        let (ty, empty) = if is_set {
+        let (ty, initial) = if is_set {
             (
                 self.types.set(element),
                 ExprKind::Set {
@@ -1100,10 +1139,13 @@ impl Checker<'_> {
                 },
             )
         } else {
-            (self.types.list(element), ExprKind::List(Vec::new()))
+            (self.types.list(element), ExprKind::List(prefix))
+        };
+        let Some(result) = result else {
+            return Ok(Expr { ty, kind: initial });
         };
         self.locals[result] = ty;
-        body.insert(0, Statement::Assign(result, Expr { ty, kind: empty }));
+        body.insert(0, Statement::Assign(result, Expr { ty, kind: initial }));
         Ok(Expr {
             ty,
             kind: ExprKind::Scope {

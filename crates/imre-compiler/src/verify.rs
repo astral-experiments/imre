@@ -170,7 +170,8 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                         _ => false,
                     });
                     require(
-                        collection && value.ty == Type::PythonObject && args.len() == 1,
+                        collection && matches!(args.as_slice(), [input] if value.ty == Type::PythonObject
+                            || value.ty == input.ty && matches!(value.ty, Type::ListInt | Type::List(_))),
                         "registered spread needs one operand in a Python collection",
                     )
                 }
@@ -587,7 +588,20 @@ impl Verifier<'_> {
                     .element(value.ty)
                     .ok_or("list expression has non-list type")?;
                 for value in values {
-                    same(value.ty, element)?;
+                    if let ExprKind::Builtin(Builtin::RegisteredSpread, operands) = &value.kind {
+                        let [input] = operands.as_slice() else {
+                            return Err("list spread requires one operand".into());
+                        };
+                        same(value.ty, input.ty)?;
+                        same(
+                            types
+                                .element(input.ty)
+                                .ok_or("list spread requires a list")?,
+                            element,
+                        )?;
+                    } else {
+                        same(value.ty, element)?;
+                    }
                 }
                 Ok(())
             }
@@ -1196,6 +1210,10 @@ class Item:
             kind: ExprKind::List(items),
         };
         let empty = literal(vec![]);
+        let spread = literal(vec![Expr {
+            ty: floats,
+            kind: ExprKind::Builtin(Builtin::RegisteredSpread, vec![unknown.clone()]),
+        }]);
         let nonempty = literal(vec![Expr::local(1, Type::Float)]);
         let exposed = Expr {
             ty: floats,
@@ -1212,6 +1230,7 @@ class Item:
         verify(unknown.clone(), nonempty.clone(), Type::Float).unwrap();
         verify(unknown.clone(), unknown.clone(), Type::ObjectValue).unwrap();
         verify(empty.clone(), empty.clone(), Type::ObjectValue).unwrap();
+        verify(spread.clone(), spread.clone(), Type::ObjectValue).unwrap();
 
         let ints = Expr {
             ty: Type::ListInt,
@@ -1220,6 +1239,7 @@ class Item:
         for (left, right) in [
             (unknown.clone(), unknown.clone()),
             (empty.clone(), empty),
+            (spread.clone(), spread),
             (exposed, unknown),
             (ints, nonempty),
         ] {

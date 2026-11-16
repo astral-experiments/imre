@@ -67,7 +67,7 @@ impl Emitter<'_, '_> {
             self,
             items,
             STACK_USE_GUIDELINE,
-            |_| None,
+            Expr::spread_operand,
             |emitter, expr| {
                 if packed && let Some(row) = emitter.packed_constructor(expr) {
                     return Element::Packed(row);
@@ -101,8 +101,21 @@ impl Emitter<'_, '_> {
                 }
                 container
             },
-            |emitter, container, index, value, _| {
-                emitter.store_display_element(container, tuple, index, value)
+            |emitter, container, index, value, spread| {
+                if spread {
+                    let Element::Value(source) = value else {
+                        unreachable!("spread list")
+                    };
+                    let element = emitter
+                        .module
+                        .types
+                        .element(container.ty)
+                        .expect("list display");
+                    emitter.extend_display(container, &[&source.value], element);
+                    emitter.release_operand(&source);
+                } else {
+                    emitter.store_display_element(container, tuple, index, value);
+                }
             },
         )
         .0
@@ -140,8 +153,14 @@ impl Emitter<'_, '_> {
         element: Type,
     ) -> Value {
         let result = self.display_mutable(left.ty);
+        self.extend_display(&result, &[left, right], element);
+        result
+    }
+
+    /// Copy each checked list before evaluating the next display operand.
+    fn extend_display(&mut self, result: &Value, sources: &[&Value], element: Type) {
         let cursor = self.entry_alloca("i64");
-        for source in [left, right] {
+        for &source in sources {
             // Zero and each following index use the small tagged integer representation.
             self.line(format!("store i64 1, ptr {cursor}"));
             super::iteration::loop_region(
@@ -169,14 +188,13 @@ impl Emitter<'_, '_> {
                         value: e.get_item(source, &index, element, true),
                         ownership: Ownership::Owned,
                     };
-                    e.append(&result, &item);
+                    e.append(result, &item);
                     let next = e.instruction(format!("add nuw nsw i64 {}, 2", index.operand));
                     e.line(format!("store i64 {next}, ptr {cursor}"));
                 },
                 None::<fn(&mut Self)>,
             );
         }
-        result
     }
 
     fn display_mutable(&mut self, ty: Type) -> Value {

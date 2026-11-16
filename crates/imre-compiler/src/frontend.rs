@@ -1640,7 +1640,10 @@ fn lower_graph(
         let provider_frame = !needs_registered_entry
             && source_function
             && matches!(source, Cow::Borrowed(_))
-            && fixed_frame_header(definition)
+            && (fixed_frame_header(definition)
+                || definition.decorator_list.is_empty()
+                    && definition.type_params.is_none()
+                    && signature.takes_positional_tuple(definition, &graph.session))
             && fixed_frame_provider(graph, callable_definitions[signature.id], definition)
             && (!definition.is_async
                 || graph
