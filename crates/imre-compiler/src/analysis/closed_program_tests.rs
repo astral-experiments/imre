@@ -82,6 +82,32 @@ fn rebound_imported_cells_keep_their_storage_through_checking() {
         error.contains("storage.py:1:1: Imre: a rebindable module value requires"),
         "{error}"
     );
+
+    fs::write(project.path().join("left.py"), "value = 1\n").unwrap();
+    fs::write(project.path().join("right.py"), "value = 2\n").unwrap();
+    fs::write(
+        &storage,
+        r#"import left
+import right
+
+def choose(first: bool):
+    return left if first else right
+
+cache = choose(True)
+
+def seen() -> bool:
+    global cache
+    saved = cache
+    cache = choose(False)
+    return saved is left and cache is right
+"#,
+    )
+    .unwrap();
+    let mut graph = crate::modules::SourceGraph::load(&main, Some(project.path()), &[]).unwrap();
+    assert!(matches!(
+        crate::checked_lower(&mut graph).unwrap(),
+        crate::CheckedProgram::Native(_)
+    ));
 }
 
 #[test]

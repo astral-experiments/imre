@@ -591,7 +591,7 @@ impl Checker<'_> {
                 && !class_data_type(value.ty, self.types)
                 && !matches!(
                     self.types.payload(value.ty).unwrap_or(value.ty),
-                    Type::Class(_)
+                    Type::Class(_) | Type::SourceModule
                 )
             {
                 return Err(error(
