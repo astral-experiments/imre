@@ -285,7 +285,7 @@ pub(super) fn call(
     };
     if matches!(operation, "log2" | "log10") {
         let log = if operation == "log10" {
-            crate::floats::log10
+            f64::log10
         } else {
             f64::log2
         };

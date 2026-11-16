@@ -637,7 +637,6 @@ impl Builtin {
             | Self::FloatAtan
             | Self::FloatDegrees
             | Self::FloatRadians
-            | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
             | Self::IsInstance(_)
@@ -1067,7 +1066,6 @@ impl Builtin {
             | Self::FloatDegrees
             | Self::FloatRadians
             | Self::FloatUnary(_)
-            | Self::FloatLog2
             | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
@@ -1675,6 +1673,7 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_acos"
                 | "imre_float_fmod"
                 | "imre_float_asin"
+                | "imre_float_log2"
                 | "imre_float_log10"
                 | "imre_float_log1p"
                 | "imre_float_exp2"

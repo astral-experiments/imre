@@ -1,5 +1,6 @@
 import math
 from math import log2
+from struct import pack, unpack
 
 
 class Real:
@@ -22,6 +23,11 @@ def current():
     assert math.log10(Real()) == math.log10(0.125)
     assert math.log10(Index()) == math.log10(32)
     assert log2 is math.log2
+    for bits in (0x7ff0000000000042, 0xfff0000000000042):
+        raw = pack(">Q", bits)
+        value = unpack(">d", raw)[0]
+        for log in (math.log, log2, math.log10):
+            assert pack(">d", log(value)) == raw
     for exponent in (0, 1, 52, 53, 1023, 1024, 4096):
         assert log2(Integer(1 << exponent)) == exponent
     assert log2(5e-324) == -1074

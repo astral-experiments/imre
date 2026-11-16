@@ -7384,14 +7384,6 @@ impl Emitter<'_, '_> {
             Builtin::FloatUnary(symbol) => self.call(symbol, Type::Float, &[&args[0].value]),
             Builtin::FloatLog10 => self.call("imre_float_log10", Type::Float, &[&args[0].value]),
             Builtin::IntLog10 => self.call("imre_int_log10", Type::Float, &[&args[0].value]),
-            Builtin::FloatLog2 => Value {
-                ty: Type::Float,
-                operand: self.instruction(format!(
-                    "call double @llvm.log2.f64(double {})",
-                    args[0].value.operand
-                )),
-                small_integer: false,
-            },
             Builtin::FloatIsInteger => {
                 let value = &args[0].value.operand;
                 let truncated =
@@ -10470,6 +10462,7 @@ declare double @imre_float_acos(double)
 declare double @imre_float_asin(double)
 declare double @atan(double)
 declare double @imre_float_log1p(double)
+declare double @imre_float_log2(double)
 declare double @imre_float_log10(double)
 declare double @imre_int_log10(i64)
 declare double @cbrt(double)
@@ -11030,7 +11023,6 @@ declare ptr @imre_popen_selector_class(i32)
 declare void @imre_popen_set_selector(ptr)
 declare ptr @imre_float_format(double, i32, i32)
 declare ptr @imre_int_hex_format(i64, i32, i32)
-declare double @llvm.log2.f64(double)
 declare double @llvm.fabs.f64(double)
 declare double @llvm.copysign.f64(double, double)
 declare double @llvm.trunc.f64(double)
