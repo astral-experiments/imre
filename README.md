@@ -87,10 +87,9 @@ results = [Result("Mira", 8), Result("Jo", 4), Result("Ada", 10)]
 print(", ".join(finalists(results, 8)))  # Ada, Mira
 ```
 
-Imre can resolve `result.name` and `result.score` at compile time. If you add
-the loop below, `imre build` reports an error at `getattr`. Running the same
-module with `imre -m` supports this lookup and prints `Mira` and `8`, as
-CPython does.
+Imre resolves `result.name` and `result.score` at compile time. It can also
+compile `getattr` when it knows which fields the loop can select. Adding this
+loop prints `Mira` and `8` on separate lines.
 
 ```python
 for field in ["name", "score"]:

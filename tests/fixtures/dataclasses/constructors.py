@@ -49,3 +49,6 @@ print(SelfNamed(self=9))
 record = Keywords(8, name="Mira")
 for key in ["name", "first"]:
     print(getattr(record, key, argument("default", 99)))
+
+for key in ("first", "name"):
+    print(getattr(record, key))
