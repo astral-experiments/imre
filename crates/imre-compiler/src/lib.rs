@@ -607,17 +607,26 @@ fn object_fallback(
     // A newly found checked provider can lower normally. If lowering fails, its
     // dependencies alone do not admit the caller to the object importer.
     let fallback = |graph: Option<modules::SourceGraph>| {
-        if let (Some(graph), LoweringKind::ExecutionOperand(id)) = (graph, kind)
-            && graph.modules[id].is_program_source()
-        {
-            // Native lowering can fail before the file has a runtime registration.
-            // Check its existing contracts before diagnosing the failed call's source.
-            if let Some(contract) = &graph.source_contract {
+        if let Some(graph) = graph {
+            let execution = match kind {
+                LoweringKind::ExecutionOperand(id) if graph.modules[id].is_program_source() => {
+                    Some(id)
+                }
+                _ => None,
+            };
+            // An unavailable representation cannot decide whether the original calls
+            // satisfy their declarations. Genuine earlier source errors keep their order.
+            if (kind.is_representation() || execution.is_some())
+                && let Some(contract) = &graph.source_contract
+            {
                 contract.original(&graph).clone()?;
             }
-            graph
-                .session
-                .check_execution_escapes(std::iter::once((id, graph.modules[id].path.as_path())))?;
+            if let Some(id) = execution {
+                graph.session.check_execution_escapes(std::iter::once((
+                    id,
+                    graph.modules[id].path.as_path(),
+                )))?;
+            }
         }
         Err(refusal_message())
     };
@@ -1239,7 +1248,12 @@ fn checked_lower_with(
         return Ok(CheckedProgram::Runtime(reason));
     }
     let lowered = match lowered {
-        Err(report) if let LoweringKind::GuardedSignature(owner) = report.kind => {
+        Err(report)
+            if let LoweringKind::GuardedSignature {
+                owner,
+                missing_layout,
+            } = report.kind =>
+        {
             use ruff_text_size::Ranged;
             let operand = graph.modules[owner.module].parsed.suite()[owner.statement].range();
             let session = retry_checks.as_mut().unwrap_or(&mut graph.session);
@@ -1247,9 +1261,14 @@ fn checked_lower_with(
                 cache.as_deref_mut().map(|compiler| &mut compiler.cache),
                 &graph.inputs,
             )?;
+            let cause = if missing_layout {
+                LoweringKind::UnsupportedRepresentation
+            } else {
+                LoweringKind::Ordinary
+            };
             Err(session
                 .guarded_signature_error(owner.module, operand)
-                .map_or(report, Into::into))
+                .map_or_else(|| report.classified(cause), Into::into))
         }
         result => result,
     };
