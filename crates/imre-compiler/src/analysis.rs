@@ -81,23 +81,70 @@ pub(crate) enum EagerDisplays {
 pub(crate) struct RegisteredBodyChecks(Database);
 
 impl RegisteredBodyChecks {
-    pub(crate) fn source_error_ranges(
+    pub(crate) fn source_errors(
         &self,
         source: &Session,
         module: usize,
-    ) -> Option<Vec<Option<TextRange>>> {
+    ) -> Option<Vec<RegisteredSourceError>> {
         let path = source.files[module].path(&source.db);
         let file = system_path_to_file(&self.0, path.as_str()).ok()?;
-        Some(self.0.source_error_ranges(file))
+        Some(self.0.registered_source_errors(file))
+    }
+}
+
+/// One error from the registered body check, projected onto its physical module.
+#[derive(Clone, Copy)]
+pub(crate) enum RegisteredSourceError {
+    Local { range: TextRange, attribute: bool },
+    Unlocated(Option<TextRange>),
+}
+
+impl RegisteredSourceError {
+    fn new(file: File, diagnostic: &Diagnostic) -> Self {
+        match primary_range(diagnostic, file) {
+            Some(range) => Self::Local {
+                range,
+                attribute: CheckedDiagnostic::BuiltinAttribute(range)
+                    .covers(diagnostic.id().as_str(), range),
+            },
+            None => Self::Unlocated(diagnostic.primary_span().and_then(|span| span.range())),
+        }
+    }
+
+    pub(crate) fn range(self) -> Option<TextRange> {
+        match self {
+            Self::Local { range, .. } => Some(range),
+            Self::Unlocated(range) => range,
+        }
+    }
+
+    pub(crate) fn only_attributes(
+        errors: &[Self],
+        definition: TextRange,
+        owns: impl Fn(TextRange) -> bool,
+    ) -> bool {
+        let mut found = false;
+        for &error in errors {
+            let Self::Local { range, attribute } = error else {
+                return false;
+            };
+            if definition.intersect(range).is_some() {
+                if !attribute || !owns(range) {
+                    return false;
+                }
+                found = true;
+            }
+        }
+        found
     }
 }
 
 impl Database {
-    fn source_error_ranges(&self, file: File) -> Vec<Option<TextRange>> {
+    fn registered_source_errors(&self, file: File) -> Vec<RegisteredSourceError> {
         self.check_file(file)
-            .into_iter()
+            .iter()
             .filter(|diagnostic| diagnostic.severity() >= Severity::Error)
-            .map(|diagnostic| diagnostic.primary_span().and_then(|span| span.range()))
+            .map(|diagnostic| RegisteredSourceError::new(file, diagnostic))
             .collect()
     }
 }
@@ -2033,21 +2080,18 @@ impl Session {
     pub(crate) fn current_registered_source_errors(
         &self,
         module: usize,
-    ) -> Option<Vec<Option<TextRange>>> {
+    ) -> Option<Vec<RegisteredSourceError>> {
         self.uses_registered_body_rules()
-            .then(|| self.db.source_error_ranges(self.files[module]))
+            .then(|| self.db.registered_source_errors(self.files[module]))
     }
 
-    pub(crate) fn registered_source_error_ranges(
-        &mut self,
-        module: usize,
-    ) -> Vec<Option<TextRange>> {
-        if let Some(errors) = self.current_registered_source_errors(module) {
-            return errors;
+    pub(crate) fn registered_source_errors(&mut self, module: usize) -> Vec<RegisteredSourceError> {
+        if self.uses_registered_body_rules() {
+            return self.db.registered_source_errors(self.files[module]);
         }
         self.with_diagnostic_rules(|session| {
             session.use_registered_body_rules();
-            session.db.source_error_ranges(session.files[module])
+            session.db.registered_source_errors(session.files[module])
         })
     }
 

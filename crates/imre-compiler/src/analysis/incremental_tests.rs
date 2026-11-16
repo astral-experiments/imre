@@ -35,6 +35,48 @@ fn llvm(result: UnitCompilation) -> Vec<(String, String)> {
 }
 
 #[test]
+fn only_the_placed_method_owns_its_local_diagnostic() {
+    use super::RegisteredSourceError;
+    use ruff_db::diagnostic::{Annotation, Diagnostic, DiagnosticId, LintName, Severity, Span};
+    use ruff_text_size::{TextRange, TextSize};
+
+    let graph = crate::modules::SourceGraph::single("x.group()").unwrap();
+    let file = graph.session.files[graph.entry];
+    let member = TextRange::up_to(TextSize::of("x.group"));
+    let definition = TextRange::up_to(TextSize::of("x.group()"));
+    let rule = DiagnosticId::Lint(LintName::of("unresolved-attribute"));
+    let error = |id, span: Option<Span>| {
+        let mut error = Diagnostic::new(id, Severity::Error, "test");
+        if let Some(span) = span {
+            error.annotate(Annotation::primary(span));
+        }
+        error
+    };
+    let local = || Some(Span::from(file).with_range(member));
+    let covered = |errors: Vec<Diagnostic>| {
+        let errors = errors
+            .iter()
+            .map(|error| RegisteredSourceError::new(file, error))
+            .collect::<Vec<_>>();
+        RegisteredSourceError::only_attributes(&errors, definition, |range| range == member)
+    };
+    assert!(covered(vec![error(rule, local())]));
+    assert!(!covered(Vec::new()));
+    for other in [
+        error(rule, None),
+        error(rule, Some(Span::from(file))),
+        error(
+            rule,
+            Some(Span::from(graph.session.execution_names).with_range(member)),
+        ),
+        error(rule, Some(Span::from(file).with_range(definition))),
+        error(DiagnosticId::InvalidSyntax, local()),
+    ] {
+        assert!(!covered(vec![error(rule, local()), other]));
+    }
+}
+
+#[test]
 fn body_and_unrelated_export_reuse_importer_diagnostics() {
     let project = tempdir().unwrap();
     let dep = project.path().join("dep.py");

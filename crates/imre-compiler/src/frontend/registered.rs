@@ -336,6 +336,24 @@ impl RegisteredFunction {
         self.fixed_attributes.as_ref()?.get(&range)
     }
 
+    fn owns_lookup_errors(
+        &self,
+        graph: &SourceGraph,
+        module: ModuleId,
+        definition: TextRange,
+    ) -> bool {
+        let errors = graph.registered_source_errors.borrow();
+        errors.get(&module).is_some_and(|errors| {
+            crate::analysis::RegisteredSourceError::only_attributes(errors, definition, |range| {
+                self.fixed_sites.iter().any(|site| {
+                    matches!(self.fixed_attribute(*site),
+                        Some(FixedAttribute::Call(None, call))
+                            if call.checked_nullable_receiver && matches!(call.target, ir::RegisteredCallTarget::Method { attribute, .. } if attribute == range))
+                })
+            })
+        })
+    }
+
     pub(super) fn from_checked_body(
         function: ir::Function,
         local_names: HashMap<usize, LocalBinding>,
@@ -473,7 +491,7 @@ pub(super) fn finish_source_checks(
             source_checks
                 .as_deref_mut()
                 .unwrap_or(session)
-                .registered_source_error_ranges(module)
+                .registered_source_errors(module)
         });
         SourceChecks::accepts_range(errors, range)
     };
@@ -492,7 +510,10 @@ pub(super) fn finish_source_checks(
             graph.defer_registered_function(
                 module,
                 range.start(),
-                !matches!(source, SourceFrame::Fixed),
+                !matches!(source, SourceFrame::Fixed) || {
+                    let functions = graph.registered_functions();
+                    functions[&module][&range.start()].owns_lookup_errors(graph, module, range)
+                },
             );
         }
     }
@@ -810,11 +831,14 @@ pub(super) struct SourceChecks {
 }
 
 impl SourceChecks {
-    fn accepts_range(errors: &[Option<TextRange>], definition: TextRange) -> bool {
+    fn accepts_range(
+        errors: &[crate::analysis::RegisteredSourceError],
+        definition: TextRange,
+    ) -> bool {
         errors
             .iter()
-            .flatten()
-            .all(|error| !definition.contains_range(*error))
+            .filter_map(|error| error.range())
+            .all(|error| !definition.contains_range(error))
     }
 
     pub(super) fn cached(
@@ -864,7 +888,7 @@ impl SourceChecks {
                 self.session
                     .get_or_init(|| graph.session.registered_body_checks().ok())
                     .as_ref()
-                    .and_then(|checks| checks.source_error_ranges(&graph.session, module))
+                    .and_then(|checks| checks.source_errors(&graph.session, module))
             })
         else {
             return false;
@@ -931,6 +955,10 @@ impl FixedFunctions {
             |module, definition, frame| {
                 if accepted(module, definition) {
                     graph.register_function(module, definition.start(), frame);
+                } else if !matches!(frame.inputs, FrameInputs::Protocol { .. })
+                    && frame.owns_lookup_errors(graph, module, definition)
+                {
+                    graph.retain_lexical_function(module, definition.start(), frame);
                 }
             },
         );
@@ -951,6 +979,8 @@ impl FixedFunctions {
                 // are taken and their Python arguments are bound.
                 if module != graph.entry
                     || SourceChecks::cached(graph, module, definition) != Some(false)
+                    || !matches!(frame.inputs, FrameInputs::Protocol { .. })
+                        && frame.owns_lookup_errors(graph, module, definition)
                 {
                     graph.retain_lexical_function(module, definition.start(), frame);
                 }
@@ -5875,6 +5905,29 @@ else:
     }
 
     #[test]
+    fn a_prior_definition_keeps_the_nullable_member_obligation() {
+        let text = "import re\ndef before() -> int: return 1\ndef select(line: str) -> str:\n    return re.match('x', line).group()\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        for warm in [false, true] {
+            let graph = SourceGraph::load(&path, None, &[]).unwrap();
+            let module = graph.entry;
+            let body = &graph.modules[module].parsed.syntax().body;
+            let checks = SourceChecks::default();
+            if warm {
+                assert!(checks.accepts(&graph, module, body[1].range()));
+            }
+            assert!(!checks.accepts(&graph, module, body[2].range()));
+            assert!(crate::analysis::RegisteredSourceError::only_attributes(
+                &graph.registered_source_errors.borrow()[&module],
+                body[2].range(),
+                |range| &text[range] == "re.match('x', line).group",
+            ));
+        }
+    }
+
+    #[test]
     fn a_replaced_named_frame_keeps_its_source_error() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("main.py");
@@ -5898,7 +5951,11 @@ else:
         let store = "obj.values['a'] = 'wrong'";
         let start = TextSize::try_from(scores.find(store).unwrap()).unwrap();
         let range = TextRange::at(start, TextSize::of(store));
-        assert!(graph.registered_source_errors.borrow()[&module].contains(&Some(range)));
+        assert!(
+            graph.registered_source_errors.borrow()[&module]
+                .iter()
+                .any(|error| error.range() == Some(range))
+        );
     }
 
     #[test]

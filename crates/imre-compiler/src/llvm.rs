@@ -4264,9 +4264,77 @@ impl Emitter<'_, '_> {
         })
     }
 
+    fn regex_literal(
+        &mut self,
+        spelling: &Expr,
+        pattern: &imre_regex::FixedPattern,
+        flags: u16,
+    ) -> Value {
+        let (ty, spelling) = match &spelling.kind {
+            ExprKind::Str(value) => (Type::RegexPattern, value.as_bytes()),
+            ExprKind::Bytes(value) => (Type::RegexBytesPattern, value.as_slice()),
+            _ => unreachable!("fixed regex spelling is str or bytes"),
+        };
+        let payload = imre_regex::LiteralPattern {
+            bytes: ty == Type::RegexBytesPattern,
+            spelling,
+            source: &pattern.source,
+            supplied_flags: flags,
+            verbose: pattern.verbose,
+        }
+        .encode();
+        self.pooled_literal(&payload, ty)
+    }
+
+    fn regex_receiver(&mut self, builtin: &Builtin, arg: &Expr) -> Option<Operand> {
+        let value = match builtin {
+            Builtin::RegexSearch(Some(pattern)) | Builtin::RegexMatchStart(Some(pattern)) => {
+                self.regex_literal(arg, pattern, 0)
+            }
+            Builtin::RegexCapture { operation, .. } => {
+                let ty = self.module.types.payload(arg.ty)?;
+                let name = match operation {
+                    RegexCapture::Group | RegexCapture::Absent => "group",
+                    RegexCapture::Start => "start",
+                    RegexCapture::End => "end",
+                };
+                let receiver = self.operand(arg);
+                let name = self.literal_root(name.as_bytes(), Type::Str);
+                let value = self.require_object_receiver(&receiver.value, &name, ty);
+                self.release_operand(&receiver);
+                value
+            }
+            _ => return None,
+        };
+        Some(Operand {
+            value: self.owned(value),
+            ownership: Ownership::Owned,
+        })
+    }
+
+    fn require_object_receiver(&mut self, receiver: &Value, name: &Value, ty: Type) -> Value {
+        debug_assert!(matches!(ty.word_kind(), WordKind::Object));
+        let word = self.word(receiver);
+        Value {
+            ty,
+            operand: self.checked_instruction(format!(
+                "call ptr @imre_text_optional_receiver(i64 {word}, ptr {})",
+                name.operand
+            )),
+            small_integer: false,
+        }
+    }
+
     fn builtin(&mut self, builtin: &Builtin, expressions: &[Expr], returns: Type) -> Value {
         if let Some(v) = self.at_builtin_origin(builtin, |e| e.line_builtin(builtin, expressions)) {
             return v;
+        }
+        if let Builtin::RegexCompile {
+            supplied_flags,
+            pattern,
+        } = builtin
+        {
+            return self.regex_literal(&expressions[0], pattern, *supplied_flags);
         }
         if let (Builtin::Len, [sequence]) = (builtin, expressions)
             && let Some(count) = self.regex_run_count(sequence)
@@ -4399,6 +4467,11 @@ impl Emitter<'_, '_> {
             .iter()
             .enumerate()
             .map(|(index, arg)| {
+                if index == 0
+                    && let Some(receiver) = self.regex_receiver(builtin, arg)
+                {
+                    return receiver;
+                }
                 if probe_index == Some(index)
                     && let ExprKind::Tuple(fields) = &arg.kind
                     && TUPLE_PROBE_ARITY.contains(&fields.len())
@@ -4763,26 +4836,7 @@ impl Emitter<'_, '_> {
                 returns,
                 &[&args[0].value],
             ),
-            Builtin::RegexCompile {
-                spelling,
-                supplied_flags,
-                pattern,
-            } => {
-                let (bytes, spelling) = match spelling {
-                    ir::Constant::Text(spelling) => (false, spelling.as_slice()),
-                    ir::Constant::Bytes(spelling) => (true, spelling.as_slice()),
-                    _ => unreachable!("fixed regex spelling is str or bytes"),
-                };
-                let payload = imre_regex::LiteralPattern {
-                    bytes,
-                    spelling,
-                    source: &pattern.source,
-                    supplied_flags: *supplied_flags,
-                    verbose: pattern.verbose,
-                }
-                .encode();
-                self.pooled_literal(&payload, returns)
-            }
+            Builtin::RegexCompile { .. } => unreachable!("compiled from its literal operand"),
             Builtin::RegexFlags => self.call("imre_regex_flags", returns, &[&args[0].value]),
             Builtin::RegexSpelling => self.call("imre_regex_spelling", returns, &[&args[0].value]),
             Builtin::UnittestCompilePattern => Value {
@@ -5089,13 +5143,13 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::RegexSearch | Builtin::RegexMatchStart => {
+            Builtin::RegexSearch(_) | Builtin::RegexMatchStart(_) => {
                 let pointer = self.checked_instruction(format!(
                     "call ptr @imre_regex_execute(ptr {}, ptr {}, i32 {}, i32 {})",
                     args[0].value.operand,
                     args[1].value.operand,
                     u32::from(args[1].value.ty == Type::Bytes),
-                    u32::from(matches!(builtin, Builtin::RegexMatchStart)),
+                    u32::from(matches!(builtin, Builtin::RegexMatchStart(_))),
                 ));
                 Value {
                     ty: returns,
@@ -5823,16 +5877,7 @@ impl Emitter<'_, '_> {
                 none()
             }
             Builtin::RequireObjectReceiver => {
-                debug_assert!(matches!(returns.word_kind(), WordKind::Object));
-                let word = self.word(&args[0].value);
-                Value {
-                    ty: returns,
-                    operand: self.checked_instruction(format!(
-                        "call ptr @imre_text_optional_receiver(i64 {word}, ptr {})",
-                        args[1].value.operand
-                    )),
-                    small_integer: false,
-                }
+                self.require_object_receiver(&args[0].value, &args[1].value, returns)
             }
             Builtin::TextMetadata { errors } => {
                 let lookup = format!(
@@ -11745,11 +11790,21 @@ mod tests {
 
     #[test]
     fn fixed_patterns_compile_once_across_search_sites() {
-        let llvm = compile(
+        use crate::ir::{self, ExprKind};
+
+        let graph = crate::modules::SourceGraph::single(
             "import re\n\ndef first(text: str) -> int:\n    if m := re.search('a+', text):\n        return m.start()\n    return -1\nprint(first('aa'))\nprint(bool(re.compile('a+').search('b')))\n",
-            &CompileOptions::default(),
         )
         .unwrap();
+        let module = crate::frontend::lower(&graph).unwrap();
+        let mut spellings = Vec::new();
+        ir::walk_expressions(&module.entry.body, &mut |value| {
+            if let ExprKind::Builtin(ir::Builtin::RegexCompile { .. }, _) = &value.kind {
+                ir::children(value, |operand| spellings.push(&operand.kind));
+            }
+        });
+        assert!(matches!(spellings.as_slice(), [ExprKind::Str(s)] if s == "a+"));
+        let llvm = super::emit(&module, &crate::ranges::analyze(&module), false).unwrap();
         assert_eq!(llvm.matches("call ptr @imre_regex_literal(").count(), 1);
         assert_eq!(llvm.matches("call ptr @imre_regex_execute(").count(), 2);
         let cleanup = llvm

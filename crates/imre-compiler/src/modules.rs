@@ -3297,7 +3297,8 @@ struct RegisteredFunctions {
     initializers: CheckedInitializers,
 }
 
-pub(crate) type RegisteredSourceErrors = HashMap<ModuleId, Vec<Option<TextRange>>>;
+pub(crate) type RegisteredSourceErrors =
+    HashMap<ModuleId, Vec<crate::analysis::RegisteredSourceError>>;
 
 pub(crate) struct SourceGraph {
     /// Fixed at graph construction, in the checked resolver's search order.

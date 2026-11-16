@@ -463,26 +463,7 @@ impl Checker<'_> {
             result,
             args,
         );
-        if let Some(sites) = &mut self.fixed_sites
-            && self.namespace.is_none()
-            && let Some(field) = call.func.as_attribute_expr()
-            && let Some(module) = field.value.as_name_expr()
-            && !self.names.contains_key(module.id.as_str())
-            && !ruff_python_stdlib::identifiers::is_mangled_private(module.id.as_str())
-        {
-            sites.positional_call(call, &value, || {
-                let source = self.graph.modules[self.module]
-                    .registered_values()
-                    .operands(self.source, self.graph.python_optimization());
-                source.imported_callable(
-                    module,
-                    call,
-                    self.graph.session.operand_types(self.module),
-                )
-            });
-        } else {
-            self.record_named_call(call, &value);
-        }
+        self.record_positional_call(call, &value);
         Ok(value)
     }
 }
