@@ -87,6 +87,12 @@ for row in rows.values():
     rows["second"] = [3]
     print(row[0])
 """,
+    "tuple_membership_with_an_optional_object": """
+def selected(data: dict[str, object]) -> bool:
+    return data.get("tool") in ("Write", "Edit")
+
+print(selected({"tool": "Edit"}), selected({"tool": 17}), selected({}))
+""",
     "iteration_heterogeneous_tuple": 'for value in (1, "two"):\n    print(value)\n    print(type(value).__name__)\n',
     "iteration_list_unpacking": "first, second = [1, 2]\nprint(first)\nprint(second)\n",
     "iteration_starred_unpacking": "first, *rest = (1, 2, 3)\nprint(first)\nprint(rest[0])\nprint(rest[1])\n",
