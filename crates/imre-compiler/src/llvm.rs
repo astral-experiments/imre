@@ -1173,7 +1173,7 @@ impl Emitter<'_, '_> {
 
     fn at_builtin_origin<R>(&mut self, builtin: &Builtin, emit: impl FnOnce(&mut Self) -> R) -> R {
         let origin = match builtin {
-            Builtin::Process(_, origin) => origin.clone().map(CheckedFaultOrigin::Single),
+            Builtin::Process(_, site) => site.origin().cloned().map(CheckedFaultOrigin::Single),
             Builtin::Int(origin)
             | Builtin::Float(origin)
             | Builtin::ListGet(origin)
@@ -4357,7 +4357,7 @@ impl Emitter<'_, '_> {
                 })
         });
         let mut probe_fields = Vec::new();
-        let args = expressions
+        let mut args = expressions
             .iter()
             .enumerate()
             .map(|(index, arg)| {
@@ -4388,6 +4388,10 @@ impl Emitter<'_, '_> {
                 }
             })
             .collect::<Vec<_>>();
+        if let Builtin::Process(_, ir::ProcessSite::Written(binding)) = builtin {
+            args.extend(binding.defaults.iter().map(|value| self.operand(value)));
+            ir::reorder_operands(&mut args, &mut binding.order.clone());
+        }
         // Each operand has already performed its own checks at its own site.
         self.at_builtin_origin(builtin, |e| {
             e.prepared_builtin(builtin, expressions, returns, args, probe_fields)
