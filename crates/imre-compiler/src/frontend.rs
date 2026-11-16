@@ -1687,6 +1687,7 @@ fn lower_graph(
                 {
                     // A later Python placement can bind this same store to a live receiver.
                     if !body
+                        .facts
                         .source
                         .as_ref()
                         .is_some_and(FixedBodySource::has_method_store)
