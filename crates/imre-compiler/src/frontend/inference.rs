@@ -1090,6 +1090,9 @@ impl Inference {
                 }
             }
             before = self.revision.get();
+            let registered_entry = signatures_settled
+                && (!suspended_bodies.is_empty()
+                    || signatures.values().any(Signature::registered_frame));
             let class_globals = classes.declarations.has_class_values(graph.entry);
             let helpers = Helpers::new(self.len() + graph.initializers(class_globals).count());
             let globals = ModuleValues::for_initializers(!registered.is_empty());
@@ -1235,7 +1238,8 @@ impl Inference {
                 let body_revision = self.revision.get();
                 // With only scalar inputs and local bindings, a checked return can keep
                 // its settled scalar, list or tuple layout across unrelated revisions.
-                let keep_return = body_revision != before
+                let keep_return = (body_revision != before
+                    || registered_entry && signature.method.is_some())
                     && !self.widened.get()
                     && !discover_returns
                     && !signature.registered_frame()
@@ -1262,14 +1266,18 @@ impl Inference {
                 checker.placement_only = !keep_return || signature.physical_frame;
                 let mut method_storage =
                     keep_return.then(|| (helpers.len(), globals.types().len()));
-                let mut return_body = keep_return.then(|| {
+                if keep_return {
                     checker.frame = LexicalFrame::Named(function.name.id.clone());
                     checker.fixed_sites = (signature.physical_frame
                         || signature.method.is_none()
                             && fixed_frame_provider(graph, owners[signature.id], function))
                     .then(|| fixed_body_source::SourceSites::new(signature.physical_frame));
-                    (Vec::new(), Vec::new())
-                });
+                }
+                // Solving an open signature invalidates a method's layout. Check its operand
+                // sites as usual, but only keep the instructions when they can survive the round.
+                let mut return_body = (keep_return
+                    && (signature.method.is_none() || signatures_settled || !self.unresolved()))
+                .then(|| (Vec::new(), Vec::new()));
                 let statements = checker.function_statements(function);
                 let mut checked_return = false;
                 let mut implicit_none = false;
