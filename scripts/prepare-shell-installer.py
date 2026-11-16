@@ -40,6 +40,7 @@ replace_directories = '''    # Arguments: staged directory, destination, backup,
     _stdlib="$_prefix/lib/imre3.14"
     ensure mkdir -p "$_stdlib"
     _staging=$(mktemp -d "$_stdlib/.ensurepip.XXXXXXXXXX") || err "could not stage ensurepip"
+    ensure cp "$_src_dir/lib/imre3.14/"*.py "$_staging/"
     if ! (ensure cp -R "$_src_dir/lib/imre3.14/ensurepip" "$_staging/ensurepip"
           replace_directory "$_staging/ensurepip" "$_stdlib/ensurepip" \\
               "$_staging/previous-ensurepip" CPython.txt); then
@@ -47,6 +48,7 @@ replace_directories = '''    # Arguments: staged directory, destination, backup,
         [ -e "$_staging/previous-ensurepip" ] || rm -rf "$_staging"
         err "could not install ensurepip in $_stdlib"
     fi
+    ensure mv -f "$_staging/"*.py "$_stdlib/"
     ensure rm -rf "$_staging"
 
     if [ -e "$_incoming" ]; then
