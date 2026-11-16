@@ -13585,16 +13585,12 @@ impl<'a> Checker<'a> {
                     "checked operator identity functions require two positional arguments",
                 ));
             }
-            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
-                name @ ("math.fabs" | "math.log1p"),
-            ))) if call.arguments.keywords.is_empty()
-                && let [arg] = call.arguments.args.as_ref() =>
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(name)))
+                if let Some(member) = name.strip_prefix("math.")
+                    && let Some(builtin) = stdlib::unary_math_operation(member)
+                    && call.arguments.keywords.is_empty()
+                    && let [arg] = call.arguments.args.as_ref() =>
             {
-                let (member, builtin) = if name == "math.fabs" {
-                    ("fabs", Builtin::Abs)
-                } else {
-                    ("log1p", Builtin::FloatLog1p)
-                };
                 if !self
                     .graph
                     .session

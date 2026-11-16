@@ -183,6 +183,76 @@ pub extern "C" fn imre_float_radians(value: f64) -> f64 {
     value.to_radians()
 }
 
+/// Convert a unary math overflow to Python's error while retaining infinities at infinity.
+pub(crate) fn check_math_range(input: f64, result: f64) -> Result<f64> {
+    if input.is_finite() && result.is_infinite() {
+        return Err(Error::new(Kind::OverflowError, "math range error"));
+    }
+    Ok(result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_exp2(x: f64) -> f64 {
+    finish(check_math_range(x, x.exp2()), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_expm1(x: f64) -> f64 {
+    finish(check_math_range(x, x.exp_m1()), 0.0)
+}
+
+unsafe extern "C" {
+    safe fn tgamma(x: f64) -> f64;
+    #[cfg(unix)]
+    fn lgamma_r(x: f64, sign: *mut std::ffi::c_int) -> f64;
+    #[cfg(not(unix))]
+    safe fn lgamma(x: f64) -> f64;
+}
+
+/// Gamma and log-absolute-gamma share their finite poles but differ at negative infinity.
+pub(crate) fn gamma(x: f64, logarithmic: bool) -> Result<f64> {
+    if x.is_nan() {
+        return Ok(x);
+    }
+    if x <= 0.0 && x == x.trunc() && (x.is_finite() || !logarithmic) {
+        return Err(Error::new(
+            Kind::ValueError,
+            format!(
+                "expected a noninteger or positive integer, got {}",
+                render(x)
+            ),
+        ));
+    }
+    let result = if logarithmic {
+        #[cfg(unix)]
+        {
+            let mut sign = 0;
+            // SAFETY: libm writes the sign through a valid pointer to a local int.
+            unsafe { lgamma_r(x, &mut sign) }
+        }
+        #[cfg(not(unix))]
+        {
+            lgamma(x)
+        }
+    } else if (1.0..=23.0).contains(&x) && x == x.trunc() {
+        // CPython returns the exact binary64 factorials 0! through 22!.
+        (1..x as u8).map(f64::from).product()
+    } else {
+        tgamma(x)
+    };
+    check_math_range(x, result)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_gamma(x: f64) -> f64 {
+    finish(gamma(x, false), 0.0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn imre_float_lgamma(x: f64) -> f64 {
+    finish(gamma(x, true), 0.0)
+}
+
 pub(crate) fn log1p(value: f64) -> Result<f64> {
     if value <= -1.0 {
         return Err(Error::new(

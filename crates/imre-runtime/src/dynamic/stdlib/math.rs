@@ -310,6 +310,8 @@ pub(super) fn call(
         "asin" => Some(crate::floats::asin),
         "degrees" => Some(|x| Ok(crate::floats::imre_float_degrees(x))),
         "radians" => Some(|x| Ok(crate::floats::imre_float_radians(x))),
+        "gamma" => Some(|x| crate::floats::gamma(x, false)),
+        "lgamma" => Some(|x| crate::floats::gamma(x, true)),
         "log1p" => Some(crate::floats::log1p),
         _ => None,
     };
@@ -340,10 +342,14 @@ pub(super) fn call(
         "atan" => Some(|x| atan(x)),
         // The platform libm retains precision for inputs just above -1.
         "atanh" => Some(|x| atanh(x)),
+        "cbrt" => Some(f64::cbrt),
         "cos" => Some(f64::cos),
         "cosh" => Some(f64::cosh),
+        "erf" => Some(|x| erf(x)),
         "erfc" => Some(|x| erfc(x)),
         "exp" => Some(f64::exp),
+        "exp2" => Some(f64::exp2),
+        "expm1" => Some(f64::exp_m1),
         "fabs" => Some(f64::abs),
         "sin" => Some(f64::sin),
         "sinh" => Some(f64::sinh),
@@ -368,10 +374,7 @@ pub(super) fn call(
                 ),
             ));
         }
-        let result = unary(x);
-        if x.is_finite() && result.is_infinite() {
-            return Err(Error::new("OverflowError", "math range error"));
-        }
+        let result = crate::floats::check_math_range(x, unary(x))?;
         return Ok(ctx.alloc(Value::Float(result)));
     }
     if operation == "isfinite" {
@@ -984,6 +987,7 @@ fn ieee_remainder(x: f64, y: f64) -> Result<f64> {
 unsafe extern "C" {
     safe fn atan(x: f64) -> f64;
     safe fn atanh(x: f64) -> f64;
+    safe fn erf(x: f64) -> f64;
     safe fn erfc(x: f64) -> f64;
     safe fn remainder(x: f64, y: f64) -> f64;
     safe fn ldexp(x: f64, exponent: std::ffi::c_int) -> f64;

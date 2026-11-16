@@ -458,6 +458,9 @@ impl Builtin {
                     .is_none_or(|arg| !matches!(arg.ty, Type::Int | Type::Bool)),
                 PreservesLists,
             ),
+            Self::FloatUnary(symbol) => {
+                Contract::new(runtime_call_may_raise(symbol), PreservesLists)
+            }
             Self::Float(_) => Contract::new(
                 args.first()
                     .is_none_or(|arg| !matches!(arg.ty, Type::Float | Type::Bool)),
@@ -587,7 +590,6 @@ impl Builtin {
             | Self::FloatFmod
             | Self::FloatAsin
             | Self::FloatLog10
-            | Self::FloatLog1p
             | Self::IntLog10
             | Self::FloatFormat { .. } => Contract::new(true, PreservesLists),
             Self::Abs
@@ -635,7 +637,6 @@ impl Builtin {
             | Self::FloatAtan
             | Self::FloatDegrees
             | Self::FloatRadians
-            | Self::FloatErfc
             | Self::FloatLog2
             | Self::IntSignAsFloat
             | Self::FloatCopySign
@@ -1065,10 +1066,9 @@ impl Builtin {
             | Self::FloatAtan
             | Self::FloatDegrees
             | Self::FloatRadians
-            | Self::FloatErfc
+            | Self::FloatUnary(_)
             | Self::FloatLog2
-            | Self::FloatLog10
-            | Self::FloatLog1p => signature(&[Type::Float], Type::Float),
+            | Self::FloatLog10 => signature(&[Type::Float], Type::Float),
             Self::IntSignAsFloat | Self::IntLog10 => signature(&[Type::Int], Type::Float),
             Self::PairTable(op) => {
                 use crate::ir::PairTableOp::*;
@@ -1677,6 +1677,10 @@ pub(crate) fn runtime_call_may_raise(name: &str) -> bool {
                 | "imre_float_asin"
                 | "imre_float_log10"
                 | "imre_float_log1p"
+                | "imre_float_exp2"
+                | "imre_float_expm1"
+                | "imre_float_gamma"
+                | "imre_float_lgamma"
                 | "imre_int_log10"
                 | "imre_float_int"
                 | "imre_float_parse"
