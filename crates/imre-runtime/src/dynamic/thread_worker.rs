@@ -168,8 +168,14 @@ impl WorkerExit {
         interpreter: &Arc<InterpreterState>,
         handle: Arc<Handle>,
         ready: &mpsc::SyncSender<std::result::Result<Started, String>>,
-        released: Option<mpsc::Receiver<WorkerStatus>>,
+        release: Option<Arc<PrimitiveLock>>,
     ) -> bool {
+        let (release, released) = release
+            .map(|lock| {
+                let (ack, released) = mpsc::channel();
+                ((lock, ack), released)
+            })
+            .unzip();
         interpreter.worker_count.fetch_add(1, Ordering::SeqCst);
         self.interpreter = Some(Arc::clone(interpreter));
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -182,7 +188,19 @@ impl WorkerExit {
             native_id,
             released,
         };
-        ready.send(Ok(start)).is_ok() && handle.ident.wait().is_some()
+        if ready.send(Ok(start)).is_err() || handle.ident.wait().is_none() {
+            return false;
+        }
+        if let Some((lock, ack)) = release {
+            // The creator waits for this release before returning from start().
+            let result = lock
+                .release()
+                .map_err(|error| Error::from(error).to_string());
+            let released = result.is_ok();
+            let _ = ack.send(result);
+            return released;
+        }
+        true
     }
 }
 
@@ -823,7 +841,7 @@ impl Start {
     }
 }
 
-fn launch(request: Start) -> Result<(Ready, Entry)> {
+fn launch(mut request: Start) -> Result<(Ready, Entry)> {
     let (handle, thread, detached_label) = match request.registration {
         Registration::Thread { handle, thread, .. } => (handle, Some(thread), None),
         Registration::Detached(label) => (Arc::default(), None, Some(label)),
@@ -833,7 +851,11 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
     let (ready, started) = mpsc::sync_channel(1);
     let starting = Arc::clone(&handle);
     handle.spawn(move |exit| {
-        let enter = |released| exit.enter(&request.interpreter, starting, &ready, released);
+        let release = match &mut request.operation {
+            Operation::Acquire { release, .. } => release.take(),
+            _ => None,
+        };
+        let enter = || exit.enter(&request.interpreter, starting, &ready, release);
         let wait = match request.operation {
             Operation::Python(callback) => {
                 // Preparation and cancellation both belong to this pthread.
@@ -843,7 +865,7 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                     .run(
                         Arc::clone(&request.interpreter),
                         request.fault_workers.as_ref().expect("Python worker"),
-                        || enter(None),
+                        enter,
                         detached_label,
                     )
                     .unwrap_or_else(|error| {
@@ -851,34 +873,12 @@ fn launch(request: Start) -> Result<(Ready, Entry)> {
                         Ok(())
                     });
             }
-            Operation::Acquire {
-                wait,
-                release: Some(release),
-            } => {
-                // start() waits for the outcome of the release before returning.
-                let (ack, released) = mpsc::channel();
-                if !enter(Some(released)) {
-                    return Ok(());
-                }
-                let result = release
-                    .release()
-                    .map_err(|error| Error::from(error).to_string());
-                let failed = result.is_err();
-                let _ = ack.send(result);
-                if failed {
-                    return Ok(());
-                }
-                wait
-            }
-            _ if !enter(None) => return Ok(()),
+            _ if !enter() => return Ok(()),
             Operation::Empty => return Ok(()),
             Operation::UpdateHash { hash, data } => {
                 return hash.lock().update(&data).map_err(|error| error.to_string());
             }
-            Operation::Acquire {
-                wait,
-                release: None,
-            } => wait,
+            Operation::Acquire { wait, .. } => wait,
         };
         wait.acquire(true, None);
         Ok(())
@@ -1021,17 +1021,7 @@ impl Start {
         // yields. A failed park drops Ready and cancels any queued publication.
         // SAFETY: readiness and its failure join use only native handles.
         let ready = unsafe { ParkedExecution::wait(context, move || ready.wait()) }.flatten();
-        let Some((owner, handle)) = receiver else {
-            let started = ready?;
-            let ident = started.ident;
-            // Detached callers receive only the ident. Actual exit still owns the roots.
-            started.handle.set_done()?;
-            // SAFETY: the creator is active again and owns the detached publication.
-            unsafe { started.publish(context) }?;
-            // SAFETY: publication has returned to the caller on its own thread.
-            return Ok(unsafe { &mut *context }.int(ident as i64));
-        };
-        let (started, ident, tid) = {
+        let (started, thread_ids) = if let Some((owner, handle)) = receiver {
             // SAFETY: the native wait has returned to the registered caller.
             let ctx = unsafe { &mut *context };
             ctx.set_attr(owner, "_handle", handle)?;
@@ -1042,14 +1032,23 @@ impl Start {
             });
             ctx.set_attr(owner, "_ident", ident)?;
             ctx.set_attr(owner, "_native_id", tid)?;
-            (started, ident, tid)
+            // Caller temporaries also retain these IDs if a hook redirects a write.
+            (started, Some([handle, ident, tid]))
+        } else {
+            let started = ready?;
+            // Detached callers receive only the ident. Actual exit still owns the roots.
+            started.handle.set_done()?;
+            (started, None)
         };
-        // Ordinary writes attach the IDs to the receiver. Allocation temporaries in the
-        // current frame also keep them live if an attribute hook redirects a write.
-        // SAFETY: the receiver owns both identity fields before any release acknowledgement.
+        let ident = started.ident;
+        // SAFETY: the creator has installed the registration and owns this publication.
         unsafe { started.publish(context) }?;
-        // SAFETY: native publication has finished and the caller again owns the context.
-        Ok(unsafe { &mut *context }.alloc(Value::Tuple(vec![handle, ident, tid])))
+        // SAFETY: native publication has returned to the active caller.
+        let ctx = unsafe { &mut *context };
+        Ok(match thread_ids {
+            Some(ids) => ctx.alloc(Value::Tuple(Vec::from(ids))),
+            None => ctx.int(ident as i64),
+        })
     }
 }
 
