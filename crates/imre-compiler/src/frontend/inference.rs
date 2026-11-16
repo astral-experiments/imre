@@ -2394,11 +2394,11 @@ impl Checker<'_> {
                 } else {
                     let value = argument.value(checker)?;
                     checker.keep_module_list_layout(&value);
+                    if !can_stop || !checker.terminating_operand(&value) {
+                        inference.learn_parameter(signature.id, index, value.ty);
+                    }
                     value
                 };
-                if !can_stop || !checker.terminating_operand(&value) {
-                    inference.learn_parameter(signature.id, index, value.ty);
-                }
                 Ok(value)
             },
         )
