@@ -23,9 +23,8 @@ class _ThreadingMixin:
         self.__dict__["_mock_calls_events_lock"] = _threading.Lock()
         self.__dict__["_mock_wait_timeout"] = timeout
 
-    def _reset_mock_state(self, return_value, side_effect):
-        # The bundled Mock resets each child in one iterative walk.
-        super()._reset_mock_state(return_value, side_effect)
+    def reset_mock(self, /, *args, **kwargs):
+        super().reset_mock(*args, **kwargs)
         self.__dict__["_mock_event"] = _threading.Event()
         self.__dict__["_mock_calls_events"] = []
 

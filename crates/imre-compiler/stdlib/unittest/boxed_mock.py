@@ -576,40 +576,37 @@ class NonCallableMock(_FixedMock):
         self._adopt(value, "()")
         self._nodes[self._return_index()]._configured_return = value
 
-    def _reset_mock_state(self, return_value, side_effect):
-        self._node._reset_state(return_value, side_effect)
-        if issubclass(type(self), AsyncMockMixin):
-            self._reset_await_state()
-        self.mock_calls = _CallList()
-        self.method_calls = _CallList()
-
     def reset_mock(self, visited=None, *, return_value=False, side_effect=False):
         if visited is None:
             visited = []
-        pending = [(self, return_value, side_effect)]
-        while pending:
-            current, clear_return, clear_effect = pending.pop()
-            if id(current) in visited:
-                continue
-            visited.append(id(current))
-            node = current._node
-            # A generated magic method retains its protocol return value on reset.
-            if clear_return and issubclass(type(current), MagicMock) and node._mock_name:
-                name = node._mock_name
-                if "__%s__" % name[2:-2] == name:
-                    clear_return = False
-            current._reset_mock_state(clear_return, clear_effect)
-            if node._result != -1:
-                if isinstance(node, _FunctionMockState):
-                    # The wrapper may since have been given a different return value.
-                    result = current._nodes[node._result]._configured_return
-                else:
-                    result = current.return_value
-                if _is_instance_mock(result):
-                    pending.append((result, False, False))
-            for child in current._mock_children.values():
-                if child is not _deleted:
-                    pending.append((child, clear_return, clear_effect))
+        if id(self) in visited:
+            return
+        visited.append(id(self))
+
+        # A generated magic method retains its protocol return value on reset.
+        if issubclass(type(self), MagicMock) and return_value and self._node._mock_name:
+            name = self._node._mock_name
+            if "__%s__" % name[2:-2] == name:
+                return_value = False
+        self.called = False
+        self.call_args = None
+        self.call_count = 0
+        self.mock_calls = _CallList()
+        self.call_args_list = _CallList()
+        self.method_calls = _CallList()
+
+        self._node._reset_storage(return_value, side_effect)
+
+        for child in self._mock_children.values():
+            if child is not _deleted:
+                child.reset_mock(visited, return_value=return_value, side_effect=side_effect)
+
+        index = self._node._result
+        if index != -1:
+            # Reset the stored result without creating a return value.
+            result = getattr(self._nodes[index], "_configured_return", DEFAULT)
+            if _is_instance_mock(result) and result is not self:
+                result.reset_mock(visited)
 
     def _calls_repr(self):
         if not self.mock_calls:
@@ -859,6 +856,10 @@ class AsyncMockMixin:
         object.__setattr__(self, "_is_coroutine_marker", marked._is_coroutine_marker)
         self._reset_await_state()
 
+    def reset_mock(self, /, *args, **kwargs):
+        super().reset_mock(*args, **kwargs)
+        self._reset_await_state()
+
     def _reset_await_state(self):
         object.__setattr__(self, "await_count", 0)
         object.__setattr__(self, "await_args", None)
@@ -1099,9 +1100,9 @@ class _FunctionMockState(_Node):
     def side_effect(self, effect):
         self._function.side_effect = effect
 
-    def _reset_state(self, reset_return, reset_effect):
+    def _reset_storage(self, reset_return, reset_effect):
         # Resetting the backing mock leaves the function's configured effect intact.
-        super()._reset_state(reset_return, False)
+        super()._reset_storage(reset_return, False)
 
 
 def _autospec_function(spec, mock, sig, return_value):
