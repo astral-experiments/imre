@@ -1738,7 +1738,7 @@ impl Checker<'_> {
         }
         let constructor = initializer.id;
         let id = self.call_result_adapter(params, constructor, returns, at, |args| {
-            self.register_logging_handler(
+            Ok(self.register_logging_handler(
                 class,
                 Expr {
                     ty: Type::Class(class),
@@ -1747,7 +1747,7 @@ impl Checker<'_> {
                         args,
                     },
                 },
-            )
+            ))
         })?;
         self.types.register_constructor(id, class);
         Ok(Expr {

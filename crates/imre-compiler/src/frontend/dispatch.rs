@@ -89,9 +89,9 @@ impl ClassInfo<'_> {
 }
 
 impl Checker<'_> {
-    /// Coerce the result at the selected native target. Retyping its function
-    /// pointer alone would leave the callee returning the old machine layout.
-    fn adapt_bound_method_results(
+    /// Expose positional inputs accepted by every target and a common result.
+    /// Each adapter calls its selected method with that method's native layout.
+    fn adapt_bound_methods(
         &self,
         alternatives: &mut [(usize, Expr)],
         at: &impl Ranged,
@@ -108,7 +108,7 @@ impl Checker<'_> {
         {
             return Ok(());
         }
-        let (inputs, _) = self.types.signature(abi).unwrap();
+        let (mut inputs, _) = self.types.signature(abi).unwrap();
         let mut methods = Vec::new();
         for (class, value) in alternatives {
             let ExprKind::Callable {
@@ -125,26 +125,48 @@ impl Checker<'_> {
                 return Ok(());
             }
             let (params, returns) = self.types.signature(value.ty).unwrap();
-            if params != inputs {
+            if params.len() != inputs.len() {
                 return Ok(());
             }
-            methods.push((function, &mut value.ty, receiver.ty, returns));
+            // A present operand is accepted by both T and Optional[T].
+            for (input, &param) in inputs.iter_mut().zip(&params) {
+                if *input != param && self.types.payload(param) != Some(*input) {
+                    if self.types.payload(*input) != Some(param) {
+                        return Ok(());
+                    }
+                    *input = param;
+                }
+            }
+            methods.push((function, &mut value.ty, receiver.ty, params, returns));
         }
-        let returns: Vec<_> = methods.iter().map(|method| method.3).collect();
-        let Some(result @ (Type::Union(_) | Type::Optional(_))) = self.types.union(&returns) else {
+        let returns: Vec<_> = methods.iter().map(|method| method.4).collect();
+        let Some(result) = self.types.union(&returns) else {
             return Ok(());
         };
-        for (function, ty, receiver, returns) in methods {
-            if returns == result {
+        if !matches!(result, Type::Union(_) | Type::Optional(_))
+            && !returns.iter().all(|&ty| ty == result)
+        {
+            return Ok(());
+        }
+        for (function, ty, receiver, formals, returns) in methods {
+            if returns == result && inputs == formals {
                 continue;
             }
             let target = *function;
             let params = std::iter::once(receiver)
                 .chain(inputs.iter().copied())
                 .collect();
-            *function = self.call_result_adapter(params, target, result, at, |args| Expr {
-                ty: returns,
-                kind: ExprKind::Call(target, args),
+            *function = self.call_result_adapter(params, target, result, at, |args| {
+                let operands = args
+                    .values
+                    .into_iter()
+                    .zip(std::iter::once(receiver).chain(formals))
+                    .map(|(value, formal)| self.coerce(value, formal, at))
+                    .collect::<Result<_, _>>()?;
+                Ok(Expr {
+                    ty: returns,
+                    kind: ExprKind::Call(target, ir::CallArgs::positional(operands)),
+                })
             })?;
             *ty = self.types.callable(inputs.clone(), result);
         }
@@ -170,7 +192,7 @@ impl Checker<'_> {
             };
             alternatives.push((class, invoke(self, class, view)?));
         }
-        self.adapt_bound_method_results(&mut alternatives, at)?;
+        self.adapt_bound_methods(&mut alternatives, at)?;
         // Start with a result layout supplied by a concrete override. A sibling can
         // also return None without changing any member of that union.
         let results = || alternatives.iter().map(|(_, expr)| expr.ty);
