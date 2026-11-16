@@ -4539,7 +4539,7 @@ impl Emitter<'_, '_> {
             | Builtin::RegisteredNamespaceAnnotation(_)
             | Builtin::RegisteredAnnotationFormat
             | Builtin::RegisteredAnnotations { .. }
-            | Builtin::BindAnnotationExpression { .. }
+            | Builtin::BindAnnotationExpression(_)
             | Builtin::RegisteredDeleteName(..)
             | Builtin::RegisteredDefinition(_)
             | Builtin::RegisteredClassNamespace(..)

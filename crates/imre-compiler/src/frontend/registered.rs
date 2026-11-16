@@ -1646,8 +1646,11 @@ pub(crate) fn registered_sites<'a, R>(
         &str,
         &ruff_python_parser::Parsed<ast::ModExpression>,
     ) -> Option<AnnotationBody<R>>,
-) -> (RegisteredSites<'a>, HashMap<String, AnnotationBody<R>>) {
-    let mut children = HashMap::new();
+) -> (
+    RegisteredSites<'a>,
+    indexmap::IndexMap<String, AnnotationBody<R>>,
+) {
+    let mut children = indexmap::IndexMap::new();
     let sites = collect_sites(
         body,
         scopes,
@@ -5103,8 +5106,10 @@ mod tests {
         };
         let names: Vec<_> = fields.iter().map(|field| field.name.as_str()).collect();
         assert_eq!(names, ["b", "a", "args", "c", "kw", "return"]);
-        assert!(matches!(&values[0].kind, ExprKind::Builtin(
-            Builtin::BindAnnotationExpression { site, .. }, _) if *site == fields[0].range.start()));
+        assert!(matches!(
+            &values[0].kind,
+            ExprKind::Builtin(Builtin::BindAnnotationExpression(_), _)
+        ));
         assert_eq!(provider.references["a"], "mod.T");
         assert_eq!(provider.references["return"], "None");
         assert!(!provider.references.contains_key("b"));
@@ -5217,9 +5222,13 @@ else:
             [(Some(0), "first"), (Some(1), "second"), (Some(2), "first")]
         );
         let bundled_sites = prepared(true).module_annotations.fields;
-        assert!(
-            matches!(&sites[3].value, Ok(Expr { kind: ExprKind::Builtin(Builtin::BindAnnotationExpression { site, .. }, _), .. }) if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())
-        );
+        assert!(matches!(
+            &sites[3].value,
+            Ok(Expr {
+                kind: ExprKind::Builtin(Builtin::BindAnnotationExpression(0), _),
+                ..
+            })
+        ));
         assert!(
             matches!(&bundled_sites[3].value, Ok(Expr {kind: ExprKind::Str(text), ..}) if text == "list[int]")
         );
@@ -5228,7 +5237,7 @@ else:
             Statement::Return(Expr { kind: ExprKind::Builtin(
                 Builtin::RegisteredAnnotations { .. }, values), .. })
                 if matches!(values.as_slice(), [Expr { kind: ExprKind::Builtin(
-                    Builtin::BindAnnotationExpression { site, .. }, _), .. }] if *site == stmts[3].as_ann_assign_stmt().unwrap().annotation.start())));
+                    Builtin::BindAnnotationExpression(0), _), .. }])));
         for slot in [2, 4, 6] {
             assert!(sites[slot].value.is_ok());
         }

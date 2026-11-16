@@ -2623,11 +2623,8 @@ pub(crate) enum Builtin {
     RegisteredAnnotations {
         fields: Box<[AnnotationField]>,
     },
-    /// Bind the string operand to a checked child function in this provider.
-    BindAnnotationExpression {
-        site: ruff_text_size::TextSize,
-        spelling: String,
-    },
+    /// Bind a runtime annotation string to its checked expression in the declaring module.
+    BindAnnotationExpression(usize),
     /// Delete one current-scope binding, reporting a missing name at its source target.
     RegisteredDeleteName(String, ruff_text_size::TextRange),
     /// Resolve the code name in the live registered Python scope.

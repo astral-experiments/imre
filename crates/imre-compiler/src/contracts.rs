@@ -706,7 +706,7 @@ impl Builtin {
             | Self::RegisteredNamespaceAnnotation(_)
             | Self::RegisteredAnnotationFormat
             | Self::RegisteredAnnotations { .. }
-            | Self::BindAnnotationExpression { .. }
+            | Self::BindAnnotationExpression(_)
             | Self::RegisteredDeleteName(..)
             | Self::RegisteredDefinition(_)
             | Self::RegisteredClassNamespace(..)

@@ -967,7 +967,8 @@ impl<'a> RegisteredBody<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
-    annotation_children: HashMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
+    annotation_children:
+        indexmap::IndexMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
     lambdas: HashMap<ruff_text_size::TextSize, RegisteredLambda>,
     generators: HashMap<TextRange, RegisteredGenerator>,
@@ -1201,12 +1202,16 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         self.compile_callable(range, callable)
     }
 
-    fn annotation_string(&mut self, site: TextSize, spelling: &str) -> String {
+    fn annotation_string(&mut self, child: usize) -> String {
+        let (spelling, body) = self
+            .source
+            .annotation_children
+            .get_index(child)
+            .expect("prepared annotation expression");
         let mut entries = self.source.callable_code.borrow_mut();
         let code = entries
-            .entry(RequiredSite::AnnotationString(site))
+            .entry(RequiredSite::AnnotationString(child))
             .or_insert_with(|| {
-                let body = &self.source.annotation_children[spelling];
                 let text = body.scope.text.as_ref();
                 let file = self.frame.output.data(b"<string>");
                 let location = SourceMap {

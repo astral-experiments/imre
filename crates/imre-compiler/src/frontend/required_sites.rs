@@ -13,7 +13,7 @@ pub(crate) enum RequiredSite {
     Lambda(TextSize),
     Generator(TextRange),
     Alias(TextSize),
-    AnnotationString(TextSize),
+    AnnotationString(usize),
     ExecLiteral(TextRange),
 }
 
