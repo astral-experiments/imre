@@ -818,6 +818,43 @@ impl Session {
             .is_some_and(|scope| *deferred_global(&self.db, file, scope, name.clone()))
     }
 
+    /// Visit the ordinary source functions that read one of these module bindings.
+    pub(crate) fn module_function_readers(
+        &self,
+        module: usize,
+        names: &std::collections::HashSet<&str>,
+        mut accepts: impl FnMut(&ruff_python_ast::StmtFunctionDef) -> bool,
+    ) -> Option<()> {
+        let file = self.files[module];
+        let index = ty_python_core::semantic_index(&self.db, self.db.program_file(file));
+        let parsed = self.parsed(file);
+        for scope in index.scope_ids() {
+            let scope = scope.file_scope_id(&self.db);
+            if scope.is_global() {
+                continue;
+            }
+            let places = index.place_table(scope);
+            let mut used = false;
+            for name in names {
+                if let Some(symbol) = places.symbol_id(name)
+                    && places.symbol(symbol).is_used()
+                {
+                    if !index.symbol_resolves_to_global_scope(symbol, scope) {
+                        return None;
+                    }
+                    used = true;
+                }
+            }
+            if used {
+                let function = index.scope(scope).node().as_function()?;
+                if !index.parent_scope_id(scope)?.is_global() || !accepts(function.node(&parsed)) {
+                    return None;
+                }
+            }
+        }
+        Some(())
+    }
+
     /// This scope has only local values and the supplied fixed globals, with no member or import bindings.
     pub(crate) fn function_uses_fixed_names(
         &self,

@@ -975,13 +975,90 @@ impl Inference {
         // Completed returns that use only bound locals survive unrelated revisions.
         let mut local_returns = HashMap::new();
         let mut checked_before_registration = HashSet::new();
-        // An unannotated None default still needs callers to establish its payload type.
-        let mut first_open_return = self
-            .pending
-            .borrow()
-            .iter()
-            .all(|p| !p.inferred_params.contains(&true) && p.none_defaults.is_empty())
-            .then_some(0);
+        let sources = (|| {
+            let pending = self.pending.borrow();
+            let mut inputs = HashSet::new();
+            let mut callers = HashSet::new();
+            for (module, function, signature) in &*definitions {
+                let state = &pending[signature.id];
+                if state.none_defaults.is_empty() && !state.inferred_params.contains(&true) {
+                    continue;
+                }
+                let owner = owners[signature.id];
+                if *module != graph.entry
+                    || signature.method.is_some()
+                    || !fixed_frame_provider(graph, owner, function)
+                {
+                    return None;
+                }
+                inputs.insert(owner);
+                callers.insert(function.start());
+            }
+            if inputs.is_empty() {
+                return Some(callers);
+            }
+            let mut names = HashSet::new();
+            for (id, module) in graph.modules.iter().enumerate() {
+                if id != graph.entry && !module.bundled {
+                    return None;
+                }
+                for (name, binding) in &module.bindings {
+                    match binding {
+                        Binding::Module(module) if *module == graph.entry => return None,
+                        Binding::Definition(def) if inputs.contains(def) => {
+                            if id != graph.entry {
+                                return None;
+                            }
+                            names.insert(name.as_str());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            let original = callers.len();
+            let identifies = |expr: &ast::Expr| {
+                expr.as_name_expr()
+                    .is_some_and(|n| names.contains(n.id.as_str()))
+            };
+            for statement in graph.modules[graph.entry].parsed.suite() {
+                let observed = if let ast::Stmt::FunctionDef(f) = statement {
+                    f.type_params.is_some()
+                        || imre_ast::function_definition_expressions(f)
+                            .chain(
+                                super::parameter_annotations(&f.parameters, f.returns.as_deref())
+                                    .map(|(_, value)| value),
+                            )
+                            .any(|value| ast::helpers::any_over_expr(value, &identifies))
+                } else {
+                    local_functions::reads_function_value(
+                        std::slice::from_ref(statement),
+                        &identifies,
+                        None,
+                        |_| false,
+                    )
+                };
+                if observed {
+                    return None;
+                }
+            }
+            graph
+                .session
+                .module_function_readers(graph.entry, &names, |function| {
+                    if local_functions::reads_function_value(
+                        &function.body,
+                        &identifies,
+                        None,
+                        |_| true,
+                    ) {
+                        return false;
+                    }
+                    callers.insert(function.start());
+                    true
+                })?;
+            (callers.len() > original).then_some(callers)
+        })();
+        let mut first_open_return = sources.as_ref().map(|_| 0);
+        let argument_sources = sources.as_ref().filter(|callers| !callers.is_empty());
         let mut before = self.revision.get();
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
@@ -1067,10 +1144,15 @@ impl Inference {
                         }
                         // The final body check owns settled functions and methods.
                         if signatures[signature.id].returns.is_some()
+                            && argument_sources.is_none_or(|sources| {
+                                *module == graph.entry
+                                    && physical
+                                    && !sources.contains(&function.start())
+                            })
                             && signature.physical_frame
                             && !graph.session.is_generator_definition(*module, function)
                         {
-                            skipped |= *slot < signatures.len();
+                            skipped |= argument_sources.is_some() || *slot < signatures.len();
                             continue;
                         }
                     }
@@ -1594,7 +1676,8 @@ impl Inference {
             }
             // A changed round with only resolved return slots has no input or layout
             // left to learn from the entry. Its ordinary check can own these operations.
-            let entry_callable = if first_open_return == Some(self.len())
+            let entry_callable = if argument_sources.is_none()
+                && first_open_return == Some(self.len())
                 && self.revision.get() != before
                 && !self.widened.get()
             {
