@@ -1230,6 +1230,8 @@ impl Inference {
                 }
                 checker.nonreturning_functions = &completed_calls;
                 if signature.registered_frame() {
+                    checker.bound_function_imports =
+                        self.source_checks.accepts(graph, *module, function.range());
                     checker.registered = Some(graph.modules[*module].registered_values());
                 }
                 checker.inference = Some(self);

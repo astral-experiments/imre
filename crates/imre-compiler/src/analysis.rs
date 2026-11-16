@@ -3076,6 +3076,23 @@ impl Session {
         })
     }
 
+    /// A checked union can bind a single Python argument even when its members have
+    /// no shared fixed layout.
+    pub(crate) fn has_union_parameter(
+        &self,
+        module: usize,
+        parameter: &ruff_python_ast::ParameterWithDefault,
+    ) -> bool {
+        use ruff_python_ast::HasNodeIndex;
+        use ty_python_semantic::types::Type;
+
+        if parameter.parameter.node_index().load().as_u32().is_none() {
+            return false;
+        }
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(parameter.inferred_type(&model), Some(Type::Union(_)))
+    }
+
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));

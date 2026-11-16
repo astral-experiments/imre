@@ -48,7 +48,28 @@ WRAPPED_MEASURE = (
     "print(result(), result.__name__, result.__doc__, result.__wrapped__ is scores.measure)\n"
 )
 
+NULLABLE_FORWARDER = {
+    "provider.py": (
+        "from __future__ import annotations\nfrom collections.abc import Sequence\nimport sys\n"
+        "def forward(argv: Sequence[str] | None = None) -> None:\n"
+        "    from sink import Run\n    Run(argv or sys.argv[1:])\n"
+    ),
+    "sink.py": (
+        "given = ('written',)\ndefault = ('replacement',)\n"
+        "def Run(value): print('first', value is given)\n"
+        "def second(value): print('second', value is default)\n"
+    ),
+}
+
 REJECTED = {
+    "nullable_forwarder_keeps_earlier_error": ({
+        **NULLABLE_FORWARDER,
+        "main.py": (
+            "from provider import forward\n"
+            "def typed(value: int) -> int: return value\n"
+            "typed('earlier')\nforward(42)\n"
+        ),
+    }, "main.py:3:7: Imre: expected int, got str"),
     "wraps_preserves_imported_return": ({
         "main.py": WRAPPED_MEASURE,
         "scores.py": "def measure() -> int:\n    return 'bad'\n",
@@ -891,6 +912,14 @@ REJECTED = {
 }
 
 ACCEPTED = {
+    "nullable_forwarder_uses_live_target_and_default": {
+        **NULLABLE_FORWARDER,
+        "main.py": (
+            "from provider import forward\nimport sink\nforward(sink.given)\n"
+            "setattr(sink, 'Run', sink.second)\n"
+            "setattr(forward, '__defaults__', (sink.default,))\nforward()\n"
+        ),
+    },
     "wraps_uses_source_defaults": {
         "main.py": WRAPPED_MEASURE,
         "scores.py": 'def measure() -> int:\n    """score doc"""\n    return 7\n',
@@ -2361,7 +2390,8 @@ def main() -> None:
                     "boxed_unittest_lazy_import", "builtin_importer", "bundled_source_loader_data", "frozen_importer",
                     "builtin_method_creation", "email_address_parsers", "filesystem_resources", "fractions_indirect",
                     "function_type_for_selected_callback", "lzma_formats_and_error",
-                    "optional_stdlib_probe_in_dependency", "platform_iot_indirect", "record_warnings",
+                    "nullable_forwarder_uses_live_target_and_default", "optional_stdlib_probe_in_dependency",
+                    "platform_iot_indirect", "record_warnings",
                     "sdk_import_after_provider_hint", "source_loader_external_code", "source_loader_namespace_directory",
                     "warn_named_helper",
                     "zip_source_spec",
