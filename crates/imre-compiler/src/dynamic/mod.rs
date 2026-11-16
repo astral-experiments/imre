@@ -21,7 +21,9 @@ use ruff_python_ast::visitor::{self, Visitor};
 use ruff_python_ast::{self as ast, Expr, Stmt};
 use ruff_text_size::{Ranged, TextRange};
 
-use crate::frontend::function_scope::{TypeParameterScope, type_parameter_scope};
+use crate::frontend::function_scope::{
+    TypeParameterScope, function_parameter_header, type_parameter_scope,
+};
 use crate::frontend::module_source::{self, CheckedFile, ParsedModule};
 use crate::{CompileOptions, SourceInputs, SourceKind};
 
@@ -420,6 +422,17 @@ fn boxed_operator(name: &str) -> bool {
                     .iter()
                     .any(|&name| name != "length_hint" && name.trim_end_matches('_') == alias)
             })
+}
+
+/// The enclosing module discovers imports in a lazy getter's header.
+struct GetterHeader<'a>(&'a mut Imports);
+
+impl<'a> Visitor<'a> for GetterHeader<'_> {
+    fn visit_expr(&mut self, expr: &'a Expr) {
+        self.0.visit_expr(expr);
+    }
+
+    fn visit_body(&mut self, _body: &'a [Stmt]) {}
 }
 
 impl<'a> Visitor<'a> for Imports {
@@ -846,7 +859,7 @@ fn imports_from_body(
     let module_flags = imre_ast::future_flags(body);
     let string_annotations = module_flags & imre_ast::code_flags::FUTURE_ANNOTATIONS != 0;
     let original = match body {
-        Cow::Borrowed(suite) if getter.is_none() => Some(*suite),
+        Cow::Borrowed(suite) => Some(*suite),
         _ => None,
     };
     let names = if checked.is_some_and(|types| !types.needs_name_lowering(normalized)) {
@@ -874,17 +887,24 @@ fn imports_from_body(
         ..Imports::default()
     };
     let mut getter_bodies = Vec::new();
-    if getter.is_some() {
-        for (index, stmt) in body.to_mut().iter_mut().enumerate() {
-            if let Stmt::FunctionDef(function) = stmt
-                && function.name.as_str() == "__getattr__"
-                && !function.body.is_empty()
+    for stmt in body.iter() {
+        if getter.is_some()
+            && let Stmt::FunctionDef(function) = stmt
+            && function.name.as_str() == "__getattr__"
+            && !function.body.is_empty()
+        {
+            if imports.private_names.string_annotations
+                && function_parameter_header(function, true, true, Some(&imports.private_names))
+                    .is_some()
             {
-                getter_bodies.push((index, std::mem::take(&mut function.body)));
+                imports.runtime_imports = true;
             }
+            GetterHeader(&mut imports).visit_stmt(stmt);
+            getter_bodies.push(&function.body);
+        } else {
+            imports.visit_stmt(stmt);
         }
     }
-    imports.visit_body(body);
     if let Some(getter) = getter
         && !getter_bodies.is_empty()
     {
@@ -893,12 +913,8 @@ fn imports_from_body(
         getter.pkgutil_names = std::mem::take(&mut imports.pkgutil_names);
         getter.get_data_names = std::mem::take(&mut imports.get_data_names);
         getter.machinery_names.clone_from(&imports.machinery_names);
-        for (index, statements) in getter_bodies {
-            getter.visit_body(&statements);
-            let Stmt::FunctionDef(function) = &mut body.to_mut()[index] else {
-                unreachable!("saved a module-level __getattr__ declaration");
-            };
-            function.body = statements;
+        for statements in getter_bodies {
+            getter.visit_body(statements);
         }
         imports.literal_calls.append(&mut getter.literal_calls);
         imports.has_open_exec |= getter.has_open_exec;
@@ -3242,6 +3258,40 @@ fn a_shipped_getter_keeps_its_body_and_executable_source_offsets() {
     let (_, module) =
         scan_imports_for_preparation(crlf, SourceKind::File, |_| None, None, Some(crlf)).unwrap();
     assert!(module.is_none());
+}
+
+#[test]
+fn shipped_getter_imports_borrow_the_parsed_suite() {
+    let source = r"from __future__ import annotations
+def __getattr__[T](name=__import__('decimal')):
+    import fractions
+    return [item for item in name]
+def nested():
+    def __getattr__(name):
+        import statistics
+def __getattr__(name):
+    loader.get_data('zoneinfo', name)
+import pkgutil as loader
+";
+    let module = ruff_python_parser::parse_module(source).unwrap();
+    let mut body = Cow::Borrowed(&module.syntax().body);
+    let mut getter = Imports::default();
+    let imports = imports_from_body(source, &mut body, Some(&mut getter), None, None).unwrap();
+    assert!(matches!(body, Cow::Borrowed(_)));
+    assert!(imports.runtime_imports);
+    let eager = imports
+        .names
+        .iter()
+        .map(|(_, name)| name.as_str())
+        .collect::<Vec<_>>();
+    let lazy = getter
+        .names
+        .iter()
+        .map(|(_, name)| name.as_str())
+        .collect::<Vec<_>>();
+    assert!(eager.contains(&"decimal") && eager.contains(&"statistics"));
+    assert!(!eager.contains(&"fractions") && !eager.contains(&"zoneinfo"));
+    assert_eq!(lazy, ["fractions", "zoneinfo"]);
 }
 
 #[test]
