@@ -4,6 +4,68 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU8, AtomicUsize, Ordering};
 use std::thread::ThreadId;
 
+macro_rules! signals {
+    ($($symbol:ident),+ $(,)?) => {
+        vec![$((stringify!($symbol), libc::$symbol)),+]
+    };
+}
+
+/// CPython orders Signals by numeric value, then by name to choose each canonical alias.
+pub(crate) fn numbers() -> &'static [(&'static str, i32)] {
+    static NUMBERS: OnceLock<Vec<(&str, i32)>> = OnceLock::new();
+    NUMBERS.get_or_init(|| {
+        let mut numbers = signals!(
+            SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGIOT, SIGBUS, SIGFPE, SIGKILL,
+            SIGUSR1, SIGSEGV, SIGUSR2, SIGPIPE, SIGALRM, SIGTERM, SIGCHLD, SIGCONT, SIGSTOP,
+            SIGTSTP, SIGTTIN, SIGTTOU, SIGURG, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH,
+            SIGIO, SIGSYS
+        );
+        #[cfg(target_os = "linux")]
+        {
+            numbers.extend(signals!(SIGPOLL, SIGPWR));
+            // musl omits the legacy SIGCLD spelling. Linux MIPS and SPARC have SIGEMT instead of SIGSTKFLT.
+            #[cfg(any(target_env = "gnu", target_env = "uclibc"))]
+            numbers.push(("SIGCLD", libc::SIGCHLD));
+            #[cfg(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+                target_arch = "sparc",
+                target_arch = "sparc64"
+            ))]
+            numbers.push(("SIGEMT", libc::SIGEMT));
+            #[cfg(not(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+                target_arch = "sparc",
+                target_arch = "sparc64"
+            )))]
+            numbers.push(("SIGSTKFLT", libc::SIGSTKFLT));
+            numbers.push(("SIGRTMIN", libc::SIGRTMIN()));
+            numbers.push(("SIGRTMAX", libc::SIGRTMAX()));
+        }
+        #[cfg(any(
+            target_vendor = "apple",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        ))]
+        numbers.extend(signals!(SIGINFO, SIGEMT));
+        numbers.sort_unstable_by_key(|&(name, number)| (number, name));
+        numbers
+    })
+}
+
+pub(crate) fn name(number: i32) -> Option<&'static str> {
+    numbers()
+        .iter()
+        .find_map(|&(name, value)| (value == number).then_some(name))
+}
+
 const LIMIT: usize = std::mem::size_of::<libc::sigset_t>() * 8 + 1;
 // A wakeup-fd report can reenter Python while an outer scan still owns later signals.
 static SIGNALS_PENDING: AtomicBool = AtomicBool::new(false);
