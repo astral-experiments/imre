@@ -157,6 +157,7 @@ pub(crate) use sign_parameters::only_compares_zero;
 mod single_dispatch;
 mod socket;
 mod statements;
+use statements::StatementLowering;
 mod stdlib;
 pub(crate) use stdlib::literal_replace_mismatch;
 mod string_io;
@@ -7421,7 +7422,9 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        statements::StatementLowering::source_statement(self, statement, self.module_scope, body)
+        let (operation, continues) = self.source_statement(statement, self.module_scope, body)?;
+        body.extend(operation);
+        Ok(continues)
     }
 
     fn specialized_statement(
