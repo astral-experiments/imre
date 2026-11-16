@@ -1830,8 +1830,13 @@ fn lower_graph(
                     && *module_id == graph.entry
                     && matches!(source, Cow::Borrowed(_))
                 {
-                    let mut checker = checker_for(*module_id);
-                    checker.nonreturning_functions = &completed_calls;
+                    let for_launch = |module| {
+                        let mut checker = checker_for(module);
+                        checker.nonreturning_functions = &completed_calls;
+                        checker.frame_arguments = FrameArguments::Pending;
+                        checker
+                    };
+                    let mut checker = for_launch(*module_id);
                     checker.boxed_calls = (recover_completed.get()
                         && !graph.has_registered_function(*module_id, definition.start())
                         && pending_capture
@@ -1871,8 +1876,7 @@ fn lower_graph(
                             if inputs.is_empty() {
                                 continue;
                             }
-                            let mut checker = checker_for(*module);
-                            checker.nonreturning_functions = &completed_calls;
+                            let checker = for_launch(*module);
                             if let Ok(Some((checked, frame))) =
                                 registered::prepare_checked_definition(
                                     &checker,

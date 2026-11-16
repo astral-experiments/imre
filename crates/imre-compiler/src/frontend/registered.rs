@@ -669,7 +669,8 @@ pub(super) fn prepare_checked_definition(
     checker.fixed_checks_tail = matches!(result, ReturnCheck::AfterFixed(_));
     checker.settled_attributes = callable_inputs;
     checker.inference = original.inference;
-    if deferred.is_some() {
+    // A provisional launch frame still needs to bind live arguments after admission.
+    if deferred.is_some() || original.frame_arguments == FrameArguments::Pending {
         checker.frame_arguments = FrameArguments::Pending;
     }
     checker.registered_local_start = Some(signature.params.len());
