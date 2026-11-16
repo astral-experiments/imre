@@ -830,11 +830,11 @@ impl Checker<'_> {
     /// arguments. Integer conversion stays in the runtime formatter.
     pub(super) fn string_format_call(
         &mut self,
-        receiver: Expr,
+        mut receiver: Expr,
         call: &ast::ExprCall,
         method: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let mut fields = vec![receiver];
+        let mut fields = Vec::with_capacity(call.arguments.len());
         let mut written_fields = call.arguments.args.is_empty();
         if !call.arguments.args.is_empty() {
             let template = match &*method.value {
@@ -850,7 +850,7 @@ impl Checker<'_> {
                     "str.format requires named arguments",
                 ));
             };
-            fields[0] = unpacking::string(&template);
+            receiver = unpacking::string(&template);
             for arg in &call.arguments.args {
                 let value = self.expr(arg)?;
                 if !matches!(value.ty, Type::Int | Type::Str | Type::StrLiteral(_)) {
@@ -860,22 +860,38 @@ impl Checker<'_> {
                         "positional str.format requires exact str or int",
                     ));
                 }
-                fields.push(Self::string_value(value));
+                fields.push(value);
             }
         }
+        let mut python_format = false;
         for keyword in &call.arguments.keywords {
             let value = self.expr(&keyword.value)?;
-            written_fields &= !matches!(value.ty, Type::StrEnum(_));
-            let value = Self::string_value(value);
-            if !matches!(value.ty, Type::Str | Type::Int) {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    "str.format fields require str or int",
-                ));
+            match value.ty {
+                Type::Str | Type::StrLiteral(_) | Type::Int => {}
+                Type::StrEnum(_) => written_fields = false,
+                Type::PythonObject => python_format = true,
+                _ => {
+                    return Err(error(
+                        self.source,
+                        keyword,
+                        "str.format fields require str or int",
+                    ));
+                }
             }
             fields.push(value);
         }
+        if python_format {
+            return self.registered_method_call_with_values(
+                call,
+                method,
+                receiver,
+                Type::Str,
+                Some(fields),
+            );
+        }
+        let fields = std::iter::once(receiver)
+            .chain(fields.into_iter().map(Self::string_value))
+            .collect();
         let layout = ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, false);
         let value = Expr {
             ty: Type::Str,
