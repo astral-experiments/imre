@@ -382,7 +382,28 @@ impl Checker<'_> {
                             .and_then(|name| checker.names.get(name.id.as_str()))
                             .is_some_and(|&slot| checker.can_widen_unbound_python_local(slot))
                 },
-                Self::coerce_supplied_result,
+                |checker, operand, expected, site| {
+                    if expected == Type::None
+                        && declaration.is_none()
+                        && matches!(operand.ty, Type::JsonValue | Type::JsonRoot)
+                        && !checker.terminating_call(&operand)
+                        && checker.graph.modules[checker.module].is_program_source()
+                        && let Some(slot) = target
+                            .as_name_expr()
+                            .and_then(|name| checker.stored_name(&name.id))
+                        && checker.locals[slot] == expected
+                        && checker
+                            .graph
+                            .session
+                            .inferred_local_definitions(checker.module, target)
+                            .is_some()
+                    {
+                        checker.require_registered_operation(site)?;
+                        checker.locals[slot] = Type::PythonObject;
+                        return Ok(operand);
+                    }
+                    checker.coerce_supplied_result(operand, expected, site)
+                },
                 declaration,
                 result,
             )
