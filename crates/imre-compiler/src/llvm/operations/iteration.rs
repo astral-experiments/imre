@@ -1,7 +1,7 @@
 //! Shared traversal of loop and unpacking IR for fixed and registered entries.
 use super::{CheckedBody, CheckedValue, Entry, Expr, ExprKind, Statement};
 use crate::ir::{Binary, Compare, ItemOrder, ItemUpdate, IterNextKind};
-use crate::llvm::{Cleanup, Emitter, LoopTarget, NativeLoop, small};
+use crate::llvm::{Emitter, LoopTarget, NativeLoop, small};
 
 #[derive(Clone)]
 pub(crate) struct LoopEdges {
@@ -172,7 +172,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     pub(super) fn scoped_suite(&mut self, statements: &[Statement], clear: &[usize]) {
         let cursor_unwind = match &mut self.0 {
             Entry::Native(e) => {
-                e.cleanups.push(Cleanup::Slots(clear.to_vec()));
+                e.push_slot_cleanup(clear);
                 None
             }
             Entry::Registered(f) => {
@@ -212,7 +212,7 @@ impl CheckedBody<'_, '_, '_, '_> {
     ) -> CheckedValue {
         let scope = match &mut self.0 {
             Entry::Native(e) => {
-                e.cleanups.push(Cleanup::Slots(clear.to_vec()));
+                e.push_slot_cleanup(clear);
                 None
             }
             Entry::Registered(f) => {
@@ -223,11 +223,14 @@ impl CheckedBody<'_, '_, '_, '_> {
         self.emit_block(statements);
         if let Entry::Native(e) = &mut self.0
             && let ExprKind::Local(slot) = value.kind
-            && clear == [slot]
+            && let Some((&first, rest)) = clear.split_first()
+            && slot == first
             && e.owns_slot(slot)
         {
             e.cleanups.pop();
-            return CheckedValue::owned(e.take_slot(slot));
+            let result = e.take_slot(slot);
+            e.clear_slots(rest);
+            return CheckedValue::owned(result);
         }
         let result = self.evaluate(value);
         if let Entry::Native(e) = &mut self.0 {

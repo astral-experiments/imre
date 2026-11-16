@@ -349,14 +349,16 @@ struct NativeLoop {
 /// Lexical cleanup obligations are separate from expression-owned SSA values.
 /// A handler can retain user locals while releasing temporary scopes exited by
 /// an error; finally bodies may replace the completion currently being routed.
-#[derive(Clone)]
 enum Cleanup {
     Finally(usize),
     PendingException {
         error: Value,
         previous: Value,
     },
-    Slots(Vec<usize>),
+    Slots {
+        slots: Vec<usize>,
+        error_entry: Option<String>,
+    },
     Active {
         previous: Value,
         name: Option<usize>,
@@ -1428,7 +1430,7 @@ impl Emitter<'_, '_> {
                 self.decode_word(word, expression.ty)
             }
             ExprKind::Scope { body, value, clear } => {
-                self.cleanups.push(Cleanup::Slots(clear.clone()));
+                self.push_slot_cleanup(clear);
                 self.block(body);
                 let value = self.borrow_projection(value);
                 self.cleanups.pop();
@@ -2044,6 +2046,13 @@ impl Emitter<'_, '_> {
         }
     }
 
+    fn push_slot_cleanup(&mut self, slots: &[usize]) {
+        self.cleanups.push(Cleanup::Slots {
+            slots: slots.to_vec(),
+            error_entry: None,
+        });
+    }
+
     fn clear_slots(&mut self, slots: &[usize]) {
         for &slot in slots {
             if self.borrowed_locals[slot] {
@@ -2070,27 +2079,47 @@ impl Emitter<'_, '_> {
     /// edges. A finally runs with its own lexical loop targets, which can differ
     /// from the loops surrounding the instruction that initiated unwinding.
     fn route(&mut self, completion: Completion) {
-        let cleanups = self.cleanups.clone();
-        self.unwind(completion);
-        self.cleanups = cleanups;
+        let mut exited = Vec::new();
+        self.unwind(completion, &mut exited);
+        self.cleanups.extend(exited.into_iter().rev());
     }
 
-    fn unwind(&mut self, completion: Completion) {
+    fn unwind(&mut self, completion: Completion, exited: &mut Vec<Cleanup>) {
         let stop = match &completion {
             Completion::Jump { depth, .. } => *depth,
             Completion::Error => self.handler_depth,
             Completion::Return(_) => 0,
         };
         while self.cleanups.len() > stop {
-            match self.cleanups.pop().unwrap() {
-                Cleanup::Slots(slots) => self.clear_slots(&slots),
-                Cleanup::Active { previous, name } => self.restore_active(&previous, name),
-                Cleanup::Owner(value) => self.release(&value),
+            exited.push(self.cleanups.pop().unwrap());
+            match exited.last_mut().unwrap() {
+                Cleanup::Slots { slots, error_entry } => {
+                    // Edge-specific owners and traceback are already handled.
+                    // A handler inside this scope stops before it. Only share
+                    // the remaining slot loads and drops to the outer handler.
+                    if matches!(completion, Completion::Error)
+                        && self.cleanups[stop..]
+                            .iter()
+                            .all(|c| matches!(c, Cleanup::Slots { .. }))
+                    {
+                        if let Some(entry) = error_entry {
+                            self.body.jump(entry);
+                            return;
+                        }
+                        let entry = self.body.label();
+                        self.body.jump(&entry);
+                        self.body.start(&entry);
+                        *error_entry = Some(entry);
+                    }
+                    self.clear_slots(slots);
+                }
+                Cleanup::Active { previous, name } => self.restore_active(previous, *name),
+                Cleanup::Owner(value) => self.release(value),
                 Cleanup::PendingException { error, previous } => {
-                    self.discard_pending_exception(&error, &previous);
+                    self.discard_pending_exception(error, previous);
                 }
                 Cleanup::Finally(region) => {
-                    self.enter_finalbody(region, completion);
+                    self.enter_finalbody(*region, completion);
                     return;
                 }
             }
@@ -13163,6 +13192,22 @@ def total(text: str) -> int:
                 assert!(body.contains(&format!("{instruction} i64")));
             }
         }
+    }
+
+    #[test]
+    fn another_fallible_operand_reuses_the_scopes_list_cleanup() {
+        let body = |term| {
+            function_body(&format!(
+                "def collect(values: list[int], d: int) -> list[int]:\n    return [{term} for x in values]\n\nprint(collect([12, 16], 2))\n"
+            ))
+        };
+        let once = body("x // d");
+        let twice = body("x // d // d");
+        let division = "call i64 @int_floordiv(";
+        let drop = "call void @list_release_if_present(";
+        assert!(twice.matches(division).count() > once.matches(division).count());
+        assert!(once.contains(drop));
+        assert_eq!(once.matches(drop).count(), twice.matches(drop).count());
     }
 
     #[test]
