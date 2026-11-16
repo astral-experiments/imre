@@ -1395,7 +1395,7 @@ pub(crate) fn compile(
             registrations.checked_units.entry(0).or_default().run_path =
                 declared_open_path(&sources[0].1, &identity, &mut inputs, &mut filesystem)?;
         }
-        inputs.files.push((path.to_owned(), identity, hash));
+        inputs.files.push((sources[0].1.clone(), identity, hash));
     }
     let mut selected_sources = Vec::new();
     let mut site_initializer = None;
