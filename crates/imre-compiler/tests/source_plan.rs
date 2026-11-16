@@ -60,7 +60,10 @@ print(rows([], False))
         .unwrap();
     assert!(!output.status.success());
     let error = String::from_utf8(output.stderr).unwrap();
-    assert!(error.contains("error[invalid-argument-type]"), "{error}");
+    assert!(
+        error.contains("expected int, got str; annotations are enforced contracts"),
+        "{error}"
+    );
     assert!(error.contains("main.py:7:47"), "{error}");
 }
 
