@@ -1958,6 +1958,62 @@ fn quoted_annotations_use_a_linked_class_reexported_for_type_checking() {
 }
 
 #[test]
+fn a_guarded_class_annotation_can_use_its_locally_imported_implementation() {
+    let app = tempdir().unwrap();
+    let site = tempdir().unwrap();
+    let pkg = site.path().join("pkg");
+    fs::create_dir(&pkg).unwrap();
+    let entry = app.path().join("main.py");
+    fs::write(&entry, "import pkg\nprint(pkg.get().value())\n").unwrap();
+    let check = || crate::check_file_with_extensions(&entry, None, &[site.path().to_owned()]);
+    let factory = |argument: &str| {
+        fs::write(pkg.join("__init__.py"), format!(concat!(
+            "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    from .model import Item\n",
+            "def get() -> 'Item':\n    from .model import Item\n    return Item({})\n"
+        ), argument)).unwrap();
+    };
+    let model = pkg.join("model.py");
+    fs::write(
+        &model,
+        concat!(
+            "class Item:\n    def __init__(self, width: int = 1): pass\n",
+            "    def value(self): return 42\n"
+        ),
+    )
+    .unwrap();
+    factory("");
+    check().unwrap();
+
+    factory("width='wrong'");
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("invalid-argument-type") && error.contains("__init__.py:6:17"),
+        "{error}"
+    );
+    factory("");
+
+    let stub = model.with_extension("pyi");
+    fs::write(&stub, "class Item:\n    def value(self) -> int: ...\n").unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("model.pyi:1:7 has no linked native layout"),
+        "{error}"
+    );
+
+    fs::remove_file(stub).unwrap();
+    fs::write(
+        &model,
+        "class Item:\n    def value(self): return eval(input())\n",
+    )
+    .unwrap();
+    let error = check().unwrap_err();
+    assert!(
+        error.contains("model.py:1:7 has no linked native layout"),
+        "{error}"
+    );
+}
+
+#[test]
 fn a_guarded_builtin_alias_uses_the_selected_stub() {
     let project = tempdir().unwrap();
     let root = project.path();

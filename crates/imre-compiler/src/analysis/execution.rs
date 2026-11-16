@@ -1218,6 +1218,31 @@ impl Session {
         check.first.map(|requirement| requirement.report)
     }
 
+    /// A declaration-only receiver has no fixed call targets. Check its methods before
+    /// requesting object registration on the strength of this class alone.
+    pub(super) fn class_methods_have_linked_execution(
+        &self,
+        definition: ty_python_core::definition::Definition<'_>,
+        path: &Path,
+    ) -> bool {
+        let file = definition.file(&self.db);
+        let parsed = self.parsed(file);
+        let Some(class) = definition.kind(&self.db).as_class() else {
+            return false;
+        };
+        let model = SemanticModel::new(&self.db, self.db.program_file(file));
+        class
+            .node(&parsed)
+            .body
+            .iter()
+            .filter_map(Stmt::as_function_def_stmt)
+            .all(|method| {
+                let mut visitor = self.execution_visitor(path, &parsed, &model);
+                visitor.visit_body(&method.body);
+                visitor.first.is_none()
+            })
+    }
+
     pub(super) fn generator_execution_error<'ast, 'db>(
         &'db self,
         (_, path): (usize, &'ast Path),

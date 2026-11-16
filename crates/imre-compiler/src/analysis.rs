@@ -152,7 +152,10 @@ impl Database {
 pub(crate) enum AnnotationClass {
     Builtin(Option<crate::ir::Type>),
     Linked(usize, TextRange),
-    Declaration(String),
+    Declaration {
+        location: String,
+        source: Option<ruff_db::files::FileRange>,
+    },
 }
 
 /// A project database shared by ty's checks and Ruff's cached parser.
@@ -694,17 +697,26 @@ pub(crate) fn check_registered_project<'a>(
     cache: Option<(&mut AnalysisCache, bool)>,
 ) -> Result<Option<RegisteredLayouts>, String> {
     let sources = sources.into_iter();
+    let (checked, providers) = checked.unzip();
+    let requested_class = checked
+        .zip(refusal)
+        .and_then(|(graph, report)| match report.kind {
+            crate::frontend::phase::Kind::SourceClassReturn { owner, class } => {
+                Some((graph, report, owner, class))
+            }
+            _ => None,
+        });
     let capacity = sources.len();
     let sources = sources.filter(|source| !source.uses_typeshed_interface());
     if sources.clone().next().is_none() {
-        return Ok(None);
+        return requested_class.map_or(Ok(None), |(_, report, ..)| Err(report.to_string()));
     }
-    let (checked, providers) = checked.unzip();
     let declarations = providers
         .into_iter()
         .flat_map(|p| p.values().copied())
         .filter(|(path, _)| path.extension().is_some_and(|ext| ext == "pyi"));
-    if let Some(graph) = checked
+    if requested_class.is_none()
+        && let Some(graph) = checked
         && !graph.has_checked_only_import
         // This result belongs to the checked adapter, before a native declaration won.
         && declarations.clone().next().is_none()
@@ -885,7 +897,15 @@ pub(crate) fn check_registered_project<'a>(
     }
     let winners = (first_winner..).zip(sources);
     session.check_registered_execution(
-        || session.closed_program_errors(&paths, None, &[], refusal, None),
+        || {
+            session.closed_program_errors(&paths, None, &[], refusal, None)?;
+            if let Some((graph, report, owner, class)) = requested_class {
+                session
+                    .check_selected_class_return(graph, owner, class, winners.clone())
+                    .ok_or_else(|| report.to_string())??;
+            }
+            Ok(())
+        },
         winners.clone(),
         has_file_body,
         checked.zip(refusal),
@@ -2979,10 +2999,57 @@ impl Session {
         let source = ruff_db::source::source_text(&self.db, file);
         let position = ruff_db::source::line_index(&self.db, file)
             .line_column(location.range().start(), source.as_str());
-        Some(AnnotationClass::Declaration(format!(
-            "{path}:{}:{}",
-            position.line, position.column
-        )))
+        Some(AnnotationClass::Declaration {
+            location: format!("{path}:{}:{}", position.line, position.column),
+            source: (path.extension() == Some("py")
+                && self.class_methods_have_linked_execution(definition, path.as_std_path()))
+            .then_some(location),
+        })
+    }
+
+    /// Match the guarded return to its executable providers before checking the selected body.
+    fn check_selected_class_return<'a>(
+        &self,
+        graph: &crate::modules::SourceGraph,
+        owner: crate::modules::DefinitionId,
+        class: ruff_db::files::FileRange,
+        winners: impl Iterator<Item = (usize, crate::dynamic::RegisteredSource<'a>)> + Clone,
+    ) -> Option<Result<(), String>> {
+        let physical = |path: &Path, source: &str| {
+            winners.clone().find_map(|(id, winner)| {
+                (winner.path == path && winner.source == source).then_some(id)
+            })
+        };
+        let module = &graph.modules[owner.module];
+        let function_module = physical(&module.path, module.original_source())?;
+        let db = &graph.session.db;
+        let class_module = physical(
+            class.file().path(db).as_system_path()?.as_std_path(),
+            ruff_db::source::source_text(db, class.file()).as_str(),
+        )?;
+        let file = self.files[function_module];
+        let parsed = self.parsed(file);
+        let function = parsed
+            .suite()
+            .get(owner.statement)?
+            .as_function_def_stmt()?;
+        if !matches!(
+            self.annotation_class(function_module, function.returns.as_deref()?),
+            Some(AnnotationClass::Linked(module, range)) if module == class_module && range == class.range()
+        ) {
+            return None;
+        }
+        let diagnostics = self.db.check_file(file);
+        let error = diagnostics.iter().find(|diagnostic| {
+            diagnostic.severity() >= Severity::Error
+                && primary_range(diagnostic, file)
+                    .is_some_and(|range| function.range().contains_range(range))
+        });
+        Some(error.map_or(Ok(()), |error| {
+            Err(error
+                .display(&self.db, &DisplayDiagnosticConfig::new("imre"))
+                .to_string())
+        }))
     }
 
     /// Resolve a bare `object` base at the point where the class is defined.

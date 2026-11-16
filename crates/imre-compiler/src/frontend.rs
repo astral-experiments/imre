@@ -753,7 +753,13 @@ fn lower_current(
         (defer_solved && !graph.session.uses_registered_body_rules()).then(Default::default);
     let mut layout_error = None;
     let result = lower_graph(graph, cache, key_reprs, &mut inference, &mut layout_error);
-    (layout_error.map_or(result, Err), inference.source_checks)
+    let result = layout_error.map_or(result, Err);
+    let result = match (inference.source_class_return.into_inner(), result) {
+        (Some(_), Err(error)) if error.kind.is_exact_contract() => Err(error),
+        (Some(guarded), _) => Err(guarded),
+        (None, result) => result,
+    };
+    (result, inference.source_checks)
 }
 
 /// The file driver checks this graph again before it can place a registered body.
@@ -981,6 +987,7 @@ fn lower_graph(
                                     error.classified(Kind::GuardedSignature {
                                         owner,
                                         missing_layout,
+                                        class: None,
                                     })
                                 },
                             );
@@ -1397,7 +1404,24 @@ fn lower_graph(
     let mut initializations = Vec::new();
     let mut unavailable = None;
     let mut available = HashSet::new();
+    let guarded_owner = inference
+        .source_class_return
+        .borrow()
+        .as_ref()
+        .and_then(|report| match report.kind {
+            Kind::GuardedSignature {
+                owner,
+                class: Some(_),
+                ..
+            } => Some(owner.module),
+            _ => None,
+        });
     for (module_id, range) in graph.initializers(entry_declarations) {
+        // The selected provider checks its initializer. Its fixed storage need not
+        // be available for the application's own declarations to be checked.
+        if guarded_owner == Some(module_id) && !graph.modules[module_id].checks_source_contracts() {
+            continue;
+        }
         let checker = Checker::new(
             graph,
             module_id,
@@ -1514,8 +1538,17 @@ fn lower_graph(
     });
     // An entry checked at the final layout revision can schedule the ordinary check.
     // Its own reached call prefix decides whether fixed IR can be released.
-    let mut early_entry = (defer_capture && unavailable.is_none() && entry_needs_object)
+    let guarded = guarded_owner.is_some();
+    let mut early_entry = (guarded || defer_capture && unavailable.is_none() && entry_needs_object)
         .then(|| lower_entry(&classes.nonreturning_functions, false));
+    if guarded
+        && let Some(Err(Failure::Diagnostic(error))) = &early_entry
+        && error.kind.is_exact_contract()
+    {
+        return Err((**error)
+            .clone()
+            .with_path(&graph.modules[graph.entry].path));
+    }
     let discard_unplaced = matches!(&early_entry, Some(Err(reason)) if Failure::is_object(reason))
         && entry_refusal_calls.take().is_some_and(|calls| {
             // An implicitly returning callee cannot later make the refusal unreachable.
@@ -3308,6 +3341,39 @@ fn signature(
                 annotation_in_class(value, graph, module, classes, types, owner)
             };
             layout.or_else(|error| {
+                let source = &graph.modules[module];
+                if method.is_none()
+                    && error.kind == Kind::UnsupportedRepresentation
+                    && error.operand_range() == Some(value.range())
+                    && let Some(crate::analysis::AnnotationClass::Declaration {
+                        source: Some(class),
+                        ..
+                    }) = graph.session.annotation_class(module, value)
+                {
+                    let statements = source.parsed.suite();
+                    let statement =
+                        statements.partition_point(|stmt| stmt.end() <= function.start());
+                    if source
+                        .type_guards
+                        .iter()
+                        .any(|&guard| guard < statement && statements[guard].is_if_stmt())
+                    {
+                        let owner = DefinitionId { module, statement };
+                        inference
+                            .source_class_return
+                            .borrow_mut()
+                            .get_or_insert_with(|| {
+                                error
+                                    .classified(Kind::GuardedSignature {
+                                        owner,
+                                        missing_layout: true,
+                                        class: Some(class),
+                                    })
+                                    .with_path(&source.path)
+                            });
+                        return Ok(Type::PythonObject);
+                    }
+                }
                 if graph.modules[module].archive.is_some()
                     || !graph.session.bottom_return_annotation(module, value)
                     || !inference
@@ -3648,7 +3714,7 @@ fn annotation_with_aliases(
                 return layout.ok_or_else(|| invalid("unsupported exact type annotation"));
             }
             crate::analysis::AnnotationClass::Linked(origin, name) => (origin, name),
-            crate::analysis::AnnotationClass::Declaration(location) => {
+            crate::analysis::AnnotationClass::Declaration { location, .. } => {
                 return Err(invalid(&format!(
                     "class declared at {location} has no linked native layout"
                 ))

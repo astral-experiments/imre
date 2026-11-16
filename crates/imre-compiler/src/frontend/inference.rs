@@ -394,6 +394,8 @@ pub(super) struct Inference {
     document_fields: RefCell<HashSet<(usize, usize)>>,
     /// Source contract checks shared by discovery, recovery and final body lowering.
     pub(super) source_checks: registered::SourceChecks,
+    /// An unavailable class return uses a Python handle while its source neighbors are checked.
+    pub(super) source_class_return: RefCell<Option<Diagnostic>>,
     revision: Cell<usize>,
     widened: Cell<bool>,
 }
