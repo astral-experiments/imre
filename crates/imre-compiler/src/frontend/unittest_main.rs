@@ -457,13 +457,7 @@ impl Checker<'_> {
             .into()]
             .into();
             let case = self.construct(&constructor, id)?;
-            let add = self.record_slot(
-                suite_class,
-                self.local(group),
-                "_addCase",
-                &[case, self.unittest_display(call, id, &name)?],
-                call,
-            )?;
+            let add = self.record_slot(suite_class, self.local(group), "addTest", &[case], call)?;
             register.push(Statement::If(include, vec![Statement::Expr(add)], vec![]));
         }
         Ok(vec![Statement::Scope {
