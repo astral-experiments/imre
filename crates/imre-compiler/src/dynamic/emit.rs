@@ -429,7 +429,7 @@ impl<'a> PreparedBody<'a> {
     fn prepare(
         name: &'a str,
         path: Cow<'a, Path>,
-        (module, normalized): ParsedInput<'a, '_>,
+        (module, mut normalized): ParsedInput<'a, '_>,
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
@@ -464,18 +464,31 @@ impl<'a> PreparedBody<'a> {
             .filter(|source| std::ptr::eq(source.parsed.syntax(), syntax))
             .and_then(|source| source.cached_registered_values());
         let mut bindings = BTreeSet::new();
-        let (replacements, has_templates) = module_source::validate(
+        let file_validated =
+            if let Some(super::LoweredRoot::Validated(_, imports)) = &mut normalized {
+                bindings = std::mem::take(imports);
+                true
+            } else {
+                let checked_scope = match origin {
+                    ModuleOrigin::ExecLiteral { checked, .. } => Some(checked),
+                    _ => checked_source.map(|module| &*module.parsed),
+                };
+                module_source::validate_syntax(
+                    &path,
+                    source,
+                    &parsed,
+                    checked_scope,
+                    registered_values.is_none().then_some(&mut bindings),
+                )?;
+                false
+            };
+        let (replacements, has_templates) = module_source::literal_values(
             &path,
             source,
             &parsed,
             checked_source,
-            match origin {
-                ModuleOrigin::ExecLiteral { checked, .. } => Some(checked),
-                _ => None,
-            },
             keep_docstrings
                 && !(interactive && syntax.body.first().is_some_and(ast::Stmt::is_expr_stmt)),
-            registered_values.is_none().then_some(&mut bindings),
         )?;
         let docs = Self::sealed_docs(name, bundled && keep_docstrings);
         let template_fields = if has_templates {
@@ -521,7 +534,9 @@ impl<'a> PreparedBody<'a> {
         };
         let (body, private_names) = match normalized {
             Some(super::LoweredRoot::Complete(body, names)) => (Cow::Owned(body), names),
-            Some(super::LoweredRoot::Unchanged(names)) => (module_source::into_body(parsed), names),
+            Some(
+                super::LoweredRoot::Unchanged(names) | super::LoweredRoot::Validated(names, _),
+            ) => (module_source::into_body(parsed), names),
             None => {
                 let mut body = module_source::into_body(parsed);
                 let names = imre_ast::lower_in(
@@ -532,7 +547,9 @@ impl<'a> PreparedBody<'a> {
                 (body, names)
             }
         };
-        module_source::validate_names(&path, source, &body, &private_names)?;
+        if !file_validated {
+            module_source::validate_names(&path, source, &body, &private_names)?;
+        }
         let values = crate::frontend::RegisteredSource {
             python_optimization,
             operand_types,
