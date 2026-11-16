@@ -2615,26 +2615,6 @@ pub(super) unsafe extern "C" fn imre_dyn_scoped_call_at(
     }
 }
 
-/// Look up an immediate call before evaluating its arguments. Exact string methods
-/// can pass their receiver as the first positional operand without allocating a method.
-///
-/// # Safety
-/// The caller supplies the active context, a NUL-terminated ordinary str method symbol, and a
-/// writable receiver slot. The slot is initialized on successful lookup.
-#[unsafe(no_mangle)]
-pub(super) unsafe extern "C" fn imre_dyn_string_method_target(
-    ctx: *mut Context,
-    receiver: Id,
-    name: *const c_char,
-    bound_receiver: *mut Id,
-) -> Id {
-    // SAFETY: generated code owns the context and passes a UTF-8 constant and one writable slot.
-    let (ctx, name, bound_receiver) = unsafe { (&mut *ctx, cstr(name), &mut *bound_receiver) };
-    method_target(ctx, bound_receiver, |ctx| {
-        ctx.string_method_target(receiver, name)
-    })
-}
-
 /// Prepare an ordinary positional method call before evaluating its arguments.
 ///
 /// # Safety

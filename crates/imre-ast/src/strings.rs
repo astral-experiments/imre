@@ -6,8 +6,22 @@ use ruff_python_ast::{
 use ruff_text_size::{Ranged, TextRange, TextSize};
 use std::collections::HashMap;
 
-/// String methods exposed by the boxed runtime's native method descriptors.
-pub const STR_METHODS: &[&str] = &[
+macro_rules! string_methods {
+    ($($name:literal),* $(,)?) => {
+        /// String methods exposed by the boxed runtime's native method descriptors.
+        pub const STR_METHODS: &[&str] = &[$($name),*];
+
+        /// Return the interned builtin's spelling for a method on an exact string.
+        pub fn str_method_symbol(name: &str) -> Option<&'static str> {
+            match name {
+                $($name => Some(concat!("str.", $name)),)*
+                _ => None,
+            }
+        }
+    };
+}
+
+string_methods! {
     "__add__",
     "__contains__",
     "__eq__",
@@ -65,7 +79,7 @@ pub const STR_METHODS: &[&str] = &[
     "translate",
     "upper",
     "zfill",
-];
+}
 
 /// Raw and byte literals have no cooked Unicode escapes.
 pub fn cooked_content(token: &Token) -> Option<TextRange> {
