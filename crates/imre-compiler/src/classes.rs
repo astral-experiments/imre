@@ -595,6 +595,9 @@ fn collect_class<'syntax>(
     let base = parents[0];
     if defines_pickle_reducer(node) {
         graph.needs_object_runtime.set(true);
+        if !graph.entry_profile.requires_fixed_entry() {
+            return Ok(None);
+        }
         return Err(module.diagnostic(node, "pickle reducers require the object runtime"));
     }
     let http = enums::HttpEnum::bundled(module, node);
