@@ -510,6 +510,29 @@ impl<'session> OperandTypes<'session> {
         *deferred_global(&session.db, file, scope, name.id.clone())
     }
 
+    /// A nested function can publish a name that has no assignment in the module body.
+    pub(crate) fn reads_nested_module_binding(self, expression: &Expr) -> bool {
+        let parsed = self.parsed();
+        let Some((original, scope, file)) = self.original_operand(&parsed, expression.into())
+        else {
+            return false;
+        };
+        if !scope.is_global() {
+            return false;
+        }
+        let db = &self.session.db;
+        let index = ty_python_core::semantic_index(db, file);
+        let Some(usage) = index.try_expression_use_id(original.into()) else {
+            return false;
+        };
+        index.use_def_map(scope).bindings_at_use(usage).any(|binding| {
+            binding.binding.definition().is_some_and(|definition| {
+                matches!(definition.kind(db), ty_python_core::definition::DefinitionKind::NestedBindings(bindings)
+                    if bindings.visible_binding_sources(index, scope).next().is_some())
+            })
+        })
+    }
+
     pub(crate) fn is_bound_method(self, method: &Expr) -> bool {
         let parsed = self.parsed();
         let Some((original, _, file)) = self.original_operand(&parsed, method.into()) else {
@@ -2490,6 +2513,27 @@ impl Session {
             .filter(|symbol| symbol.is_global() && symbol.is_bound())
             .map(|symbol| symbol.name().to_string())
             .collect()
+    }
+
+    /// An unused declaration in a top-level function cannot change a closure's binding.
+    pub(crate) fn unused_global_declaration(
+        &self,
+        module: usize,
+        name: &ruff_python_ast::Identifier,
+    ) -> bool {
+        let index =
+            ty_python_core::semantic_index(&self.db, self.db.program_file(self.files[module]));
+        index.try_expression_scope_id(name).is_some_and(|scope| {
+            index
+                .parent_scope_id(scope)
+                .is_some_and(FileScopeId::is_global)
+                && index
+                    .place_table(scope)
+                    .symbol_by_name(name.as_str())
+                    .is_some_and(|symbol| {
+                        symbol.is_global() && !symbol.is_bound() && !symbol.is_used()
+                    })
+        })
     }
 
     pub(crate) fn explicitly_global(&self, module: usize, target: &Expr) -> bool {
