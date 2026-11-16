@@ -584,58 +584,14 @@ pub(super) fn lower_definition(
         })
 }
 
-/// Check an explicitly declared result in the Python frame selected for this definition.
-pub(super) fn check_live_result(
-    original: &Checker<'_>,
-    definition: &ast::StmtFunctionDef,
-    signature: &Signature,
-    inference: &inference::Inference,
-    checked_calls: bool,
-) -> Result<Option<RegisteredFunction>, String> {
-    let graph = original.graph;
-    let module = original.module;
-    let helpers = Helpers::new(inference.len());
-    let values = ModuleValues::default();
-    let mut checker = Checker::new(
-        graph,
-        module,
-        original.functions,
-        original.classes,
-        original.types,
-        &helpers,
-        &values,
-    );
-    checker.nonreturning_functions = original.nonreturning_functions;
-    checker.checked_call_contracts = checked_calls;
-    if checked_calls {
-        checker.boxed_calls = original.boxed_calls.as_ref().map(|_| HashSet::new());
-        checker.inference = original.inference;
-        checker.frame_arguments = original.frame_arguments;
-    }
-    checker.registered_result_contract = Some(signature.returns);
-    checker.registered_local_start = Some(signature.params.len());
-    let mut signature = signature.clone();
-    signature.returns = Type::PythonObject;
-    let mut failure = None;
-    let frame = graph.try_registered_body(module, || {
-        match checked_definition(checker, definition, &signature) {
-            Ok(frame) => frame.map(|(_, frame)| frame),
-            Err(error) => {
-                failure = Some(error);
-                None
-            }
-        }
-    });
-    if let Some(failure) = failure {
-        return Err(failure);
-    }
-    Ok(frame)
-}
-
 /// Which checker owns the function's result contract.
 pub(super) enum ReturnCheck<'a> {
     Declared,
     Infer,
+    /// The emitting Python frame checks the declaration while returning a live handle.
+    Live {
+        check_calls: bool,
+    },
     /// A Python statement can finish the frame while the fixed checker validates its cases.
     AfterFixed(&'a mut Option<CheckedPlacement>),
 }
@@ -756,21 +712,46 @@ pub(super) fn prepare_checked_definition(
     if matches!(result, ReturnCheck::Infer) {
         checker.python_result_tail = definition.body.last().map(Ranged::start);
     }
-    checker.checked_call_contracts = true;
-    checker.boxed_calls = original.boxed_calls.as_ref().map(|_| HashSet::new());
+    let live = matches!(result, ReturnCheck::Live { .. });
+    checker.checked_call_contracts = !matches!(result, ReturnCheck::Live { check_calls: false });
+    if checker.checked_call_contracts {
+        checker.boxed_calls = original.boxed_calls.as_ref().map(|_| HashSet::new());
+        checker.inference = original.inference;
+        if live {
+            checker.frame_arguments = original.frame_arguments;
+        } else if deferred.is_some() || original.frame_arguments == FrameArguments::Pending {
+            // A provisional launch frame still needs to bind live arguments after admission.
+            checker.frame_arguments = FrameArguments::Pending;
+        }
+    }
     checker.fixed_checks_tail = matches!(result, ReturnCheck::AfterFixed(_));
     checker.settled_attributes = callable_inputs;
-    checker.inference = original.inference;
-    // A provisional launch frame still needs to bind live arguments after admission.
-    if deferred.is_some() || original.frame_arguments == FrameArguments::Pending {
-        checker.frame_arguments = FrameArguments::Pending;
-    }
     checker.registered_local_start = Some(signature.params.len());
+    let mut live_signature;
+    let signature = if live {
+        checker.registered_result_contract = Some(signature.returns);
+        live_signature = signature.clone();
+        live_signature.returns = Type::PythonObject;
+        &live_signature
+    } else {
+        signature
+    };
+    let mut live_error = None;
     let placed = graph
         .try_registered_body(module, || {
-            checked_definition(checker, definition, signature).transpose()
+            match checked_definition(checker, definition, signature) {
+                // A representation trial may be discarded. A live result still owns its diagnostic.
+                Err(error) if live => {
+                    live_error = Some(error);
+                    None
+                }
+                checked => checked.transpose(),
+            }
         })
         .transpose()?;
+    if let Some(error) = live_error {
+        return Err(error);
+    }
     let Some((facts, frame)) = placed else {
         return Ok(None);
     };

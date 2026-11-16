@@ -1802,11 +1802,18 @@ fn lower_graph(
                     && signature.returns.builtin_scalar_name().is_some()
                     && *implicit_return)
         {
-            match registered::check_live_result(
-                &checker, definition, signature, inference, procedure,
+            match registered::prepare_checked_definition(
+                &checker,
+                definition,
+                signature,
+                inference,
+                None,
+                registered::ReturnCheck::Live {
+                    check_calls: procedure,
+                },
             ) {
-                Ok(Some(frame)) => {
-                    graph.register_function(*module_id, definition.start(), frame);
+                Ok(Some((_, placement))) => {
+                    placement.place(graph, &inference.source_checks);
                     continue;
                 }
                 Err(failure) if !failure.is_representation() => {
