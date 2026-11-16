@@ -62,6 +62,16 @@ def current():
     name = Name("fresh")
     getattr(module, name)
     assert calls[-1] is name
+    class Stored(str):
+        __hash__ = str.__hash__
+
+        def __eq__(self, other):
+            return other is name
+
+    module.__dict__[Stored("fresh")] = failure
+    assert getattr(module, name) is failure
+    assert object.__getattribute__(module, name) is failure
+    assert module.fresh == []
     # A synthesized native export is visible before a module namespace hook.
     import math
     math.__getattr__ = lambda key: name

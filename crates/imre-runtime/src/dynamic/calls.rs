@@ -3294,6 +3294,51 @@ impl Context {
     ) -> Result<Id> {
         let spelling = attr.text(self)?;
         let name = spelling.as_ref();
+        if let Value::Module {
+            name: ref provider,
+            scope,
+            constructor,
+            ..
+        } = *self.heap.get(obj)
+        {
+            let lazy = stdlib::has_lazy_attributes(provider);
+            let class = constructor.unwrap_or_else(|| self.builtin("module"));
+            let nonexact = attr.nonexact_key(self).is_some();
+            let member = if nonexact {
+                self.class_attr_with_name(class, attr)
+            } else {
+                self.instance_class_member(class, name)
+                    .or_else(|| self.raw_object_member(name))
+            };
+            let field = |ctx: &mut Self| {
+                if name == "builtin_module_names" {
+                    ctx.publish_builtin_module_names(scope)?;
+                }
+                if lazy && nonexact && ctx.scalar_scope_name(scope, name) == Some(None) {
+                    // A lazy export must be in the dictionary before the supplied key probes it.
+                    ctx.lazy_module_field(obj, scope, name)?;
+                }
+                let value = if let Some(key) = attr.original() {
+                    let dict = ctx.module_globals_storage(scope)?;
+                    ctx.dictionary_field_with_key(dict, key)?
+                } else {
+                    ctx.lookup_scope_name(scope, name)?
+                };
+                if lazy && !nonexact && value.is_none() {
+                    ctx.lazy_module_field(obj, scope, name)
+                } else {
+                    Ok(value)
+                }
+            };
+            if let Some(member) = member {
+                return self.read_instance_member(member, obj, class, &mut lookup, field);
+            }
+            if let Some(value) = field(self)? {
+                return Ok(value);
+            }
+            let error = self.missing_attribute(obj, name);
+            return self.attribute_error_context(error, obj, attr, attr.original());
+        }
         if let Value::Socket { class, .. } = *self.heap.get(obj)
             && let Some(member) = self.class_attr(class, name)
         {
@@ -6143,52 +6188,6 @@ impl Context {
             }
             Value::Native(ref class) if class == "str" && name == "__new__" => {
                 return Ok(self.builtin("str.__new__"));
-            }
-            Value::Module {
-                scope, constructor, ..
-            } => {
-                if let Some(class) = constructor
-                    && matches!(self.heap.get(class), Value::Class { .. })
-                    && self.class_attr(class, name).is_some()
-                {
-                    return self.module_instance_attribute(obj, class, scope, name);
-                }
-                if name == "__dict__" {
-                    return self.module_globals(scope);
-                }
-                if !name.starts_with("__")
-                    && attr.nonexact_key(self).is_none()
-                    && let Some(field) = self.lookup_scope_name(scope, name)?
-                {
-                    return Ok(field);
-                }
-                if let Value::Module { name: module, .. } = self.heap.get(obj)
-                    && stdlib::has_lazy_attributes(module)
-                {
-                    if let Some(value) = self.scope_name(scope, name) {
-                        return Ok(value);
-                    }
-                    let bind_to_module = module == "functools" && name == "cmp_to_key";
-                    match stdlib::attribute(self, &module.to_owned(), name) {
-                        Ok(value) => {
-                            let value = if bind_to_module {
-                                self.alloc(Value::Method {
-                                    callable: value,
-                                    receiver: obj,
-                                    explicit: false,
-                                })
-                            } else {
-                                value
-                            };
-                            self.bind(scope, name, value);
-                            return Ok(value);
-                        }
-                        Err(error) if self.is_attribute_error(&error) => {}
-                        Err(error) => return Err(error),
-                    }
-                }
-                let class = constructor.unwrap_or_else(|| self.builtin("module"));
-                return self.module_instance_attribute(obj, class, scope, name);
             }
             Value::Class { scope, .. } => {
                 if name == "__dict__" {
