@@ -445,3 +445,26 @@ except OSError as outer:
     except KeyError as caught:
         pass
     assert released == [(outer, None)]
+
+
+class ClearingExit(Manager):
+    def __exit__(self, kind, error, tb):
+        self.frame = tb.tb_frame
+        self.raised_at = tb.tb_lineno
+        assert self.frame.f_lineno < self.raised_at
+        error.__traceback__ = None
+
+
+def fail_in_with(manager):
+    with manager:
+        raise LookupError()
+
+
+manager = ClearingExit()
+try:
+    fail_in_with(manager)
+except LookupError as error:
+    assert error.__traceback__.tb_next is None
+    assert manager.frame.f_lineno == manager.raised_at
+else:
+    raise AssertionError("exit suppressed the exception")
