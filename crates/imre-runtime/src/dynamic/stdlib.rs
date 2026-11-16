@@ -576,13 +576,6 @@ pub(super) fn attribute(ctx: &mut Context, module: &str, name: &str) -> Result<I
         ("_codecs", "_imre_idna_label") => ctx.builtin("_codecs._imre_idna_label"),
         ("_codecs", "_imre_native_search") => ctx.builtin("encodings.search_function"),
         ("_io", "open_code") => ctx.builtin("io.open_code"),
-        (
-            "math",
-            "trunc" | "floor" | "ceil" | "modf" | "copysign" | "acos" | "acosh" | "atan2" | "cos"
-            | "dist" | "exp" | "fma" | "frexp" | "fsum" | "gcd" | "hypot" | "isclose" | "isfinite"
-            | "isinf" | "isnan" | "isqrt" | "lcm" | "ldexp" | "log" | "log2" | "pow" | "prod"
-            | "sin" | "sqrt" | "sumprod" | "tan" | "ulp",
-        ) => ctx.builtin(&format!("math.{name}")),
         ("enum", "auto") => ctx.enum_auto_class()?,
         ("enum", "Enum" | "Flag" | "IntEnum" | "IntFlag" | "StrEnum") => {
             ctx.builtin("enum.Enum.__copy__");
