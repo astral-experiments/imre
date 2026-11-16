@@ -153,20 +153,24 @@ impl Checker<'_> {
         if self.unevaluated_views.contains(&(slot, ty)) {
             return Expr::local(slot, ty);
         }
-        if self.types.payload(value.ty).unwrap_or(value.ty) == Type::Calendar(CalendarType::Date)
+        let storage = self.types.payload(value.ty).unwrap_or(value.ty);
+        if storage == Type::Calendar(CalendarType::Date)
             && ty == Type::Calendar(CalendarType::DateTime)
+            || matches!((storage, ty), (Type::Class(parent), Type::Class(child))
+                if self.classes.parsers.child_of(child, parent)
+                    || self.classes.declarations.definitions[child].bases.contains(&parent))
         {
-            let date = if self.types.payload(value.ty).is_some() {
+            let record = if storage == value.ty {
+                value
+            } else {
                 Expr {
-                    ty: Type::Calendar(CalendarType::Date),
+                    ty: storage,
                     kind: ExprKind::Unwrap(Box::new(value)),
                 }
-            } else {
-                value
             };
             return Expr {
                 ty,
-                kind: ExprKind::Builtin(Builtin::RecordView, vec![date]),
+                kind: ExprKind::Builtin(Builtin::RecordView, vec![record]),
             };
         }
         if self
@@ -223,15 +227,6 @@ impl Checker<'_> {
                     ty,
                     kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
                 }
-            };
-        }
-        if matches!((value.ty, ty), (Type::Class(parent), Type::Class(child))
-            if self.classes.parsers.child_of(child, parent)
-                || self.classes.declarations.definitions[child].bases.contains(&parent))
-        {
-            return Expr {
-                ty,
-                kind: ExprKind::Builtin(Builtin::RecordView, vec![value]),
             };
         }
         if matches!(ty, Type::StrLiteral(_)) && matches!(value.ty, Type::Str | Type::StrLiteral(_))
@@ -1033,14 +1028,23 @@ impl Checker<'_> {
                 }
                 continue;
             }
-            if let (Type::Class(_), Type::Class(mut base)) = (self.locals[slot], current) {
+            let storage = self.locals[slot];
+            if matches!(
+                self.types.payload(storage).unwrap_or(storage),
+                Type::Class(_)
+            ) && let Type::Class(mut base) = self.types.payload(current).unwrap_or(current)
+            {
+                let mut narrowed = current;
                 for (classes, positive) in &constraints {
                     if *positive && let Some(child) = self.tested_subclass(base, classes) {
                         base = child;
+                        narrowed = Type::Class(child);
                     }
                 }
-                self.narrowed.insert_mut(slot, Type::Class(base));
-                continue;
+                if matches!(narrowed, Type::Class(_)) {
+                    self.narrowed.insert_mut(slot, narrowed);
+                    continue;
+                }
             }
             if matches!(current, Type::Document(_)) {
                 for (classes, truth) in &constraints {
