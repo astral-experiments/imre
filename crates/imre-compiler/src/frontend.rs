@@ -1257,6 +1257,7 @@ fn lower_graph(
         mut checked_bodies,
         suspended_bodies,
         needs_registered_entry,
+        entry_needs_object,
     } = inference.solve(
         graph,
         &entry_statements,
@@ -1445,6 +1446,7 @@ fn lower_graph(
     let mut startup = Vec::new();
     let mut entry_source = None;
     let mut python_entry = false;
+    let call_free_refusal = std::cell::Cell::new(false);
     let mut lower_entry = |nonreturning: &HashSet<usize>, placement_only: bool| {
         startup.clear();
         entry_source = None;
@@ -1453,6 +1455,7 @@ fn lower_graph(
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = nonreturning;
+        checker.record_entry_refusal = Some(&call_free_refusal);
         checker.placement_only = placement_only;
         let mut fixed_entry =
             if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
@@ -1514,7 +1517,12 @@ fn lower_graph(
                 .map_or(0, |last| last + 1),
         )
     });
-    let mut early_entry = None;
+    // An entry checked at the final layout revision can schedule the ordinary check.
+    // Its own reached call prefix decides whether fixed IR can be released.
+    let mut early_entry = (defer_capture && unavailable.is_none() && entry_needs_object)
+        .then(|| lower_entry(&classes.nonreturning_functions, false));
+    let discard_unplaced = call_free_refusal.get()
+        && matches!(&early_entry, Some(Err(reason)) if Failure::is_object(reason));
     // The ordinary checker supplies the unfinished physical definitions below.
     // Capture the other definitions from inference's settled results now.
     let place_live = |slot: usize| {
@@ -1710,6 +1718,7 @@ fn lower_graph(
         checker.fixed_sites = (collect_sites && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method || live));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
+        checker.discard_unplaced = discard_unplaced && physical_function && collect_sites;
         checker.python_method_frame =
             checker.placement_only && signature.method.is_some() && signature.physical_frame;
         let mut attributes = ((signature.method.is_none() || checker.python_method_frame)
@@ -1930,6 +1939,10 @@ fn lower_graph(
             && !needs_registered_entry
         {
             body_checks = None;
+            if entry_needs_object {
+                // Later calls can change the diagnostic from the rest of the initializer.
+                early_entry = None;
+            }
         }
         let Some((mut body, sums)) = placed else {
             continue;
@@ -4141,6 +4154,8 @@ struct Checker<'a> {
     fixed_sites: Option<fixed_body_source::SourceSites>,
     /// After a layout refusal the outer fixed body can only be used with its source sites.
     placement_only: bool,
+    // Keep checking the fixed ABI after a confirmed initializer refusal releases its IR.
+    discard_unplaced: bool,
     // These reads exist only while validating a statically impossible isinstance arm.
     unevaluated_views: Vec<(usize, Type)>,
     /// A physical method checked for Python placement can bind its written operands.
@@ -4166,6 +4181,8 @@ struct Checker<'a> {
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
+    // The ordinary entry can record the reached prefix of its first representation loss.
+    record_entry_refusal: Option<&'a std::cell::Cell<bool>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
     /// Stored short circuits whose selected value has immutable builtin truth.
     stable_selections: HashSet<TextRange>,
@@ -4301,6 +4318,7 @@ impl<'a> Checker<'a> {
             wrapper_link: Default::default(),
             fixed_sites: None,
             placement_only: false,
+            discard_unplaced: false,
             unevaluated_views: Vec::new(),
             python_method_frame: false,
             checked_call_contracts: false,
@@ -4315,6 +4333,7 @@ impl<'a> Checker<'a> {
             registered_local_start: None,
             frame_arguments: FrameArguments::Checked,
             unrepresented: Default::default(),
+            record_entry_refusal: None,
             namespace_calls: HashSet::new(),
             stable_selections: HashSet::new(),
             module_namespace: Default::default(),
@@ -6865,6 +6884,7 @@ impl<'a> Checker<'a> {
         self.block_depth == 1
             && self.fixed_sites.is_none()
             && (self.placement_only
+                || self.discard_unplaced
                 || self.registered.is_none()
                     && matches!(self.frame, LexicalFrame::Named(_))
                     && self.unrepresented.borrow().is_some())
@@ -7167,9 +7187,12 @@ impl<'a> Checker<'a> {
         if !failure.is_representation() || !self.graph.modules[self.module].is_program_source() {
             return false;
         }
-        self.unrepresented
-            .borrow_mut()
-            .get_or_insert_with(|| failure.clone());
+        self.unrepresented.borrow_mut().get_or_insert_with(|| {
+            if let Some(prefix) = self.record_entry_refusal {
+                prefix.set(self.reachable && self.calls.is_empty());
+            }
+            failure.clone()
+        });
         self.registered_local_start.is_none()
     }
 

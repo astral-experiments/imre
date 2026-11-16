@@ -405,6 +405,7 @@ pub(super) struct Solution {
     pub(super) checked_bodies: HashSet<usize>,
     pub(super) suspended_bodies: HashSet<usize>,
     pub(super) needs_registered_entry: bool,
+    pub(super) entry_needs_object: bool,
 }
 
 impl Inference {
@@ -1078,6 +1079,7 @@ impl Inference {
         let mut first_open_return = sources.as_ref().map(|_| 0);
         let argument_sources = sources.as_ref().filter(|callers| !callers.is_empty());
         let mut before = self.revision.get();
+        let mut entry_object_revision = None;
         let fixed_dependencies = loop {
             let widened = self.widened.replace(false);
             let signatures_settled = !self.unresolved();
@@ -1749,7 +1751,12 @@ impl Inference {
                 checker.nonreturning_functions = &completed_calls;
                 let entry_revision = self.revision.get();
                 let result = checker.lower_block(entry_statements, None);
-                match checker.finish_region(result) {
+                let result = checker.finish_region(result);
+                entry_object_revision = result
+                    .as_ref()
+                    .is_err_and(Failure::is_object)
+                    .then_some(entry_revision);
+                match result {
                     Err(Failure::PendingSignature {
                         signature,
                         missing_callable_parameters: true,
@@ -2009,6 +2016,7 @@ impl Inference {
             checked_bodies,
             suspended_bodies,
             needs_registered_entry,
+            entry_needs_object: entry_object_revision == Some(self.revision.get()),
         })
     }
 }

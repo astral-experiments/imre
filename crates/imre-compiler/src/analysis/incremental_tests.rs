@@ -254,3 +254,27 @@ fn quiet_never_checks_follow_an_imported_enum_and_failed_revisions() {
     fs::write(package.join("__init__.py"), two).unwrap();
     run().unwrap();
 }
+
+#[test]
+fn a_saved_initializer_call_is_rechecked_after_rebinding() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    let source = "from argparse import ArgumentParser\n\
+def stop() -> int: raise SystemExit(13)\n\
+def ready() -> int: return 41\n\
+def take(first: int, second: int) -> int: return first + second\n\
+parser = ArgumentParser()\n\
+saved = TARGET\n\
+print(take(saved(), 'wrong'))\n";
+    let mut compiler = IncrementalCompiler::default();
+    for (target, expected) in [
+        ("ready", "expected int, got str"),
+        ("stop", "invalid-argument-type"),
+        ("ready", "expected int, got str"),
+    ] {
+        fs::write(&entry, source.replace("TARGET", target)).unwrap();
+        let error = compiler.check_file(&entry, None).unwrap_err();
+        assert_eq!(check_file(&entry, None).unwrap_err(), error);
+        assert!(error.contains(":7:21") && error.contains(expected), "{error}");
+    }
+}
