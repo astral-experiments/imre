@@ -1786,17 +1786,13 @@ fn lower_graph(
                 callable_inputs.as_mut(),
                 registered::ReturnCheck::Declared,
             )
-            .ok()
-            .flatten()
-            .map(|body| (body, Default::default()))
-            .map_or_else(|| lower_body(checker, definition, signature), Ok)
+            .unwrap_or_else(|| lower_body(checker, definition, signature))
         } else if physical_function
             && (named
                 && unavailable.is_none()
                 && (named_scalar || types.element(signature.returns).is_some())
-                || named
-                    && recover_completed.get()
-                    && unavailable.is_some()
+                || (defer_capture && unavailable.is_none()
+                    || named && recover_completed.get() && unavailable.is_some())
                     && signature.params.is_empty()
                     && definition.returns.is_some()
                     && signature.returns == Type::None)
@@ -1836,7 +1832,7 @@ fn lower_graph(
                 if let Some(body) = refusal.prepared
                     && let Some(prepared) = pending_capture.borrow_mut().as_mut()
                 {
-                    prepared.insert(signature.id, PreparedBody::Fixed(*body));
+                    prepared.insert(signature.id, *body);
                 }
                 refusal.failure
             }),
@@ -2528,7 +2524,7 @@ struct FunctionFacts {
 type CompletedBody = (LoweredBody, HashMap<usize, zip_sums::Sum>);
 struct BodyRefusal {
     /// A complete source frame can survive a refusal of the native calling convention.
-    prepared: Option<Box<CompletedBody>>,
+    prepared: Option<Box<PreparedBody>>,
     failure: Failure,
     cannot_return: bool,
 }
@@ -2666,7 +2662,16 @@ fn lower_function(
                         || !cx
                             .helpers
                             .only_direct_locals_since(helpers, &cx.local_functions)
-                        || cx.unrepresented.borrow().is_some()
+                        || cx.unrepresented.borrow().as_ref().is_some_and(|reason| {
+                            !reason.is_object()
+                                || signature.returns != Type::None
+                                || !signature.params.is_empty()
+                                || !inference.source_checks.accepts(
+                                    cx.graph,
+                                    cx.module,
+                                    definition.range(),
+                                )
+                        })
                         || signature.returns == Type::None
                             && cx
                                 .settled_attributes
@@ -2683,9 +2688,7 @@ fn lower_function(
                         inference,
                         inputs.as_deref_mut(),
                         registered::ReturnCheck::AfterFixed(&mut after_fixed),
-                    )
-                    .ok()
-                    .flatten();
+                    );
                     cx.settled_attributes = inputs;
                     placed.is_some()
                 }),
@@ -2693,8 +2696,8 @@ fn lower_function(
         } else {
             checker.function_body(definition, statements, Some(&mut body), None)
         };
-        if let Some(body) = placed {
-            return Ok((body, HashMap::new()));
+        if let Some(result) = placed {
+            return result;
         }
         match result {
             Ok(falls) => {
@@ -2813,7 +2816,7 @@ fn lower_function(
         Some(failure) => Err(BodyRefusal {
             failure,
             cannot_return,
-            prepared: reusable.then(|| Box::new(finish())),
+            prepared: reusable.then(|| Box::new(PreparedBody::Fixed(finish()))),
         }),
         None => Ok(finish()),
     }

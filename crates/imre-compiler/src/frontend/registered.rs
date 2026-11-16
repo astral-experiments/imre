@@ -564,7 +564,8 @@ pub(super) enum ReturnCheck<'a> {
     AfterFixed(&'a mut Option<CheckedPlacement>),
 }
 
-/// Keep the Python entry's physical operations and return their existing facts to the graph.
+/// Keep the checked Python entry and the calling convention the original function requires.
+/// A native layout refusal carries that frame to the definition that will publish it.
 pub(super) fn place_checked_definition(
     original: &Checker<'_>,
     definition: &ast::StmtFunctionDef,
@@ -572,27 +573,36 @@ pub(super) fn place_checked_definition(
     inference: &inference::Inference,
     callable_inputs: Option<&mut HashMap<TextRange, FixedAttribute>>,
     result: ReturnCheck<'_>,
-) -> Result<Option<LoweredBody>, String> {
-    Ok(prepare_checked_definition(
+) -> Option<BodyResult> {
+    let (facts, placement) = prepare_checked_definition(
         original,
         definition,
         signature,
         inference,
         callable_inputs,
         result,
-    )?
-    .map(|(facts, placement)| {
-        let frame = &placement.frame.function;
-        // Native call validation still consumes the checked formal and local layouts.
-        let function = ir::Function {
-            params: frame.params.clone(),
-            returns: signature.returns,
-            locals: frame.locals.clone(),
-            body: Vec::new(),
-        };
-        placement.place(original.graph, &inference.source_checks);
-        LoweredBody { function, facts }
-    }))
+    )
+    .ok()??;
+    if original.unrepresented.borrow().is_some() {
+        if facts.needs_fixed_callee {
+            return None;
+        }
+        return Some(Err(BodyRefusal {
+            failure: original.unrepresented.take()?,
+            cannot_return: facts.cannot_return,
+            prepared: Some(Box::new(PreparedBody::Python(placement))),
+        }));
+    }
+    let frame = &placement.frame.function;
+    // Native call validation still consumes the checked formal and local layouts.
+    let function = ir::Function {
+        params: frame.params.clone(),
+        returns: signature.returns,
+        locals: frame.locals.clone(),
+        body: Vec::new(),
+    };
+    placement.place(original.graph, &inference.source_checks);
+    Some(Ok((LoweredBody { function, facts }, HashMap::new())))
 }
 
 pub(super) struct CheckedPlacement {
