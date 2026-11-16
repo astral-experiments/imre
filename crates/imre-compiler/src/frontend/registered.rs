@@ -2515,14 +2515,18 @@ impl<'a> SuitePreparation<'a> {
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        let otherwise =
-            self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
-        if body.falls_through {
-            self.refusal = self.refusal.or(otherwise.refusal);
-        }
         let body_continues = body.falls_through;
-        let body = body.into_child(&mut suites);
-        let orelse = otherwise.into_child(&mut suites);
+        let body = (body.into_child(&mut suites), body_continues);
+        let orelse = if stmt.orelse.is_empty() {
+            Vec::new()
+        } else {
+            let otherwise =
+                self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
+            if body_continues {
+                self.refusal = self.refusal.or(otherwise.refusal);
+            }
+            otherwise.into_child(&mut suites)
+        };
         let mut handlers = Vec::with_capacity(stmt.handlers.len());
         for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
             let matcher = exception_matcher(handler, stmt.is_star, |class, site| {
@@ -2548,13 +2552,7 @@ impl<'a> SuitePreparation<'a> {
         };
         let mut statements = Vec::with_capacity(2);
         statements.push(checkpoint);
-        let falls_through = registered_try(
-            &mut statements,
-            (body, body_continues),
-            handlers,
-            orelse,
-            finalbody,
-        );
+        let falls_through = registered_try(&mut statements, body, handlers, orelse, finalbody);
         RegisteredSuite {
             checked: scope.finish(statements),
             operands,
