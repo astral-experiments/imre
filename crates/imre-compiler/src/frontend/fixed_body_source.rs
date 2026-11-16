@@ -851,8 +851,32 @@ impl SourceSites {
         let Some(node) = FixedNode::checked(&ir::Node::Expression(value)) else {
             return false;
         };
+        let receiver = &operands[0];
         let range = call.range();
         if let Some(site) = self.site_at(range) {
+            self.commit(site, node);
+        } else if self.inside_site(range)
+            && let Some(index) = self.first_operand(field.value.range(), receiver)
+        {
+            if let Some(FixedAttribute::CallValue { checked, placed }) =
+                self.attributes.get_mut(&range)
+            {
+                // Keep the original bound parameter call, including its written arguments.
+                if !matches!(receiver.kind, ExprKind::Local(slot) if slot == checked.slot && receiver.ty == checked.ty)
+                {
+                    return false;
+                }
+                *placed = true;
+            }
+            self.sites.insert(index, (range, Some(node)));
+            self.next_index += 1;
+        } else {
+            return false;
+        }
+        if !matches!(
+            self.attributes.get(&range),
+            Some(FixedAttribute::CallValue { placed: true, .. })
+        ) {
             let mut invoke = ir::RegisteredCall::new(
                 range,
                 registered::values::method_target(field),
@@ -861,26 +885,13 @@ impl SourceSites {
                     _ => ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, false),
                 },
             );
-            invoke.checked_nullable_receiver = matches!(operands[0].ty, Type::Optional(_))
+            invoke.checked_nullable_receiver = matches!(receiver.ty, Type::Optional(_))
                 && matches!(
                     value.kind,
                     ExprKind::Builtin(Builtin::RegexCapture { .. }, _)
                 );
             self.attributes
                 .insert(range, FixedAttribute::Call(None, invoke));
-            self.commit(site, node);
-        } else if self.inside_site(range)
-            && let Some(index) = self.first_operand(field.value.range(), &operands[0])
-            && let Some(FixedAttribute::CallValue { checked, placed }) =
-                self.attributes.get_mut(&range)
-            && matches!(operands[0].kind, ExprKind::Local(slot) if slot == checked.slot && operands[0].ty == checked.ty)
-        {
-            // The binder saved this parameter method at the same physical call, before adding defaults.
-            *placed = true;
-            self.sites.insert(index, (range, Some(node)));
-            self.next_index += 1;
-        } else {
-            return false;
         }
         true
     }
