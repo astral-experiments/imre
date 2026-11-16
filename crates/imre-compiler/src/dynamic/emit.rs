@@ -84,7 +84,7 @@ pub(super) enum ModuleOrigin<'a, 'syntax> {
     Program(Option<&'a super::CheckedFunctions>),
     ExecLiteral {
         checked: &'syntax ruff_python_parser::Parsed<ast::ModModule>,
-        inherited_flags: u32,
+        flags: u32,
         python_annotations: bool,
     },
     Interactive(u32, &'syntax mut HashSet<TextRange>),
@@ -450,13 +450,6 @@ impl<'a> PreparedBody<'a> {
         let keep_docstrings = python_optimization < 2;
         let source = text.as_ref();
         let bundled = matches!(origin, ModuleOrigin::Bundled(_));
-        let inherited_flags = match origin {
-            ModuleOrigin::ExecLiteral {
-                inherited_flags, ..
-            }
-            | ModuleOrigin::Interactive(inherited_flags, _) => inherited_flags,
-            _ => 0,
-        };
         let python_provider = matches!(origin, ModuleOrigin::Provider(_));
         let checked_bodies = match origin {
             ModuleOrigin::Program(bodies)
@@ -519,7 +512,13 @@ impl<'a> PreparedBody<'a> {
         let method_imports = registered_values.map_or(Cow::Owned(bindings), |values| {
             Cow::Borrowed(&values.method_imports)
         });
-        let future_flags = inherited_flags | imre_ast::future_flags(&syntax.body);
+        let future_flags = match origin {
+            ModuleOrigin::ExecLiteral { flags, .. } => flags,
+            ModuleOrigin::Interactive(inherited, _) => {
+                inherited | imre_ast::future_flags(&syntax.body)
+            }
+            _ => imre_ast::future_flags(&syntax.body),
+        };
         let (body, private_names) = match normalized {
             Some(super::LoweredRoot::Complete(body, names)) => (Cow::Owned(body), names),
             Some(super::LoweredRoot::Unchanged(names)) => (module_source::into_body(parsed), names),
