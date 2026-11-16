@@ -96,6 +96,7 @@ pub(in crate::dynamic) struct Wrapper {
     utf8_signature_pending: Cell<bool>,
     output: RefCell<Vec<u8>>,
     input: RefCell<Reader>,
+    snapshot: Cell<Option<Id>>,
 }
 
 pub(super) fn invoke(ctx: &mut Context, obj: Id, name: &str, args: Vec<Id>) -> Result<Id> {
@@ -311,6 +312,7 @@ fn initialize(ctx: &mut Context, receiver: Id, args: &[Id], kwargs: &[(String, I
         utf8_signature_pending: Cell::new(true),
         output: RefCell::default(),
         input: RefCell::default(),
+        snapshot: Cell::new(None),
     };
     let Value::Instance { memory_stream, .. } = ctx.heap.get_mut(receiver) else {
         return Err(Error::new("TypeError", "expected a TextIOWrapper instance"));
@@ -488,6 +490,7 @@ impl Wrapper {
             ctx.heap.weak_edge_removed(old.errors);
         }
         self.output.take();
+        self.snapshot.set(None);
         self.input.take();
     }
 
@@ -506,6 +509,7 @@ impl Wrapper {
         visit: &mut impl crate::dynamic::value::VisitReferences,
     ) {
         visit.extend(self.buffer_id());
+        visit.extend(self.snapshot.get());
         visit.extend([
             self.encoding.get(),
             self.errors.get(),
@@ -651,7 +655,9 @@ impl Wrapper {
             Self::invoke_buffer(ctx, receiver, "flush", vec![])?;
         }
         let w = Self::current(ctx, receiver)?;
-        w.input.borrow_mut().after_write();
+        w.input
+            .borrow_mut()
+            .after_write(w.snapshot.take().is_some());
         Ok(ctx.int(count as i64))
     }
 
@@ -696,7 +702,7 @@ impl Wrapper {
             };
             // A Python read method may seek or reinitialize the wrapper. The snapshot
             // describes the decoder before the call, as in TextIOWrapper._read_chunk.
-            let mut snapshot = if all {
+            let snapshot = if all {
                 None
             } else {
                 w.input.borrow().capture(
@@ -727,18 +733,23 @@ impl Wrapper {
             let decoder = w.decoder.get();
             let newline = w.decoder_newline.get();
             let telling = w.telling.get();
-            if let Some(saved) = &mut snapshot {
-                let raw = Rc::make_mut(&mut saved.input);
-                raw.try_reserve(bytes.len())
-                    .map_err(|_| crate::Error::allocation())?;
-                raw.extend_from_slice(bytes);
-            }
             let byte_count = bytes.len();
             let chunk = w.input.borrow().chunk(bytes, decoder.codec)?;
-            let count = decode_chunk(ctx, &w.input, decoder, newline, chunk, end)?;
+            let decode =
+                |ctx: &mut Context| decode_chunk(ctx, &w.input, decoder, newline, chunk, end);
+            let count = if all {
+                decode(ctx)
+            } else {
+                ctx.with_buffer_export(data, decode)
+            }?;
+            // A codec error handler can change the mutable buffer returned by read1.
+            let snapshot = snapshot.map(|saved| saved.finish(ctx, data)).transpose()?;
             let mut input = w.input.borrow_mut();
             if !all {
-                input.record(snapshot, byte_count, count, telling);
+                if let Some(snapshot) = snapshot {
+                    w.snapshot.set(Some(snapshot));
+                }
+                input.record(byte_count, count, telling);
                 let nonempty = count != 0;
                 input.decoded_chunk_nonempty = (!line || !end || nonempty).then_some(nonempty);
                 if nonempty && end {
@@ -747,6 +758,7 @@ impl Wrapper {
                     continue;
                 }
                 if line && end {
+                    w.snapshot.set(None);
                     input.clear_snapshot();
                 }
             }
@@ -755,7 +767,7 @@ impl Wrapper {
                     .take(limit, line, w.newline.get(), true)?
                     .expect("read at EOF returns remaining text");
                 if all {
-                    input.after_read_all();
+                    input.after_read_all(w.snapshot.take().is_some());
                 }
                 drop(input);
                 return Ok(ctx.alloc(part));
@@ -908,6 +920,7 @@ pub(super) fn next(
         return Ok(line);
     }
     let w = Wrapper::from_receiver(ctx, receiver)?;
+    w.snapshot.set(None);
     w.input.borrow_mut().clear_snapshot();
     w.telling.set(w.seekable.get());
     Err(Error::new("StopIteration", ""))
@@ -1144,6 +1157,7 @@ pub(super) fn call(
             if whence == 2 {
                 let w = Wrapper::from_receiver(ctx, receiver)?;
                 let mut input = w.input.borrow_mut();
+                w.snapshot.set(None);
                 input.discard();
                 input.reset_decoder();
                 drop(input);
@@ -1167,6 +1181,11 @@ pub(super) fn call(
                 .borrow_mut()
                 .after_seek(state, w.decoder.get().codec, w.decoder_newline.get());
 
+            w.snapshot.set((state.skip == 0).then(|| {
+                let empty = ctx.alloc(Value::Bytes(Vec::new()));
+                reader::snapshot(ctx, state.flags, empty)
+            }));
+
             if state.skip != 0 {
                 // Even an EOF-only cookie must issue read(0). The underlying file
                 // may have changed since tell(), so decode the actual bytes returned.
@@ -1184,9 +1203,11 @@ pub(super) fn call(
                 let w = Wrapper::from_receiver(ctx, receiver)?;
                 let decoder = w.decoder.get();
                 let mut input = w.input.borrow_mut();
-                input.seek_input(state.flags, bytes)?;
+                input.seek_input(bytes.is_empty());
                 let chunk = input.chunk(bytes, decoder.codec)?;
                 drop(input);
+                w.snapshot
+                    .set(Some(reader::snapshot(ctx, state.flags, data)));
                 let chars = decode_chunk(
                     ctx,
                     &w.input,

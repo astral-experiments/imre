@@ -4,6 +4,8 @@ original_type = type(sys.stdout)
 
 import _io
 import _locale
+import codecs
+import gc
 import io
 import locale
 import os
@@ -163,7 +165,61 @@ def check_chunk_size_reinitializes_wrapper():
         assert text.read() == "new"
 
 
+def check_mutable_read_snapshot():
+    class Buffer(io.BytesIO):
+        def read1(self, size):
+            self.chunk = bytearray(super().read1(size))
+            return self.chunk
+
+    raw = Buffer(b"\xffAB")
+    calls = []
+
+    def change(error):
+        calls.append(error.start)
+        raw.chunk[0] = 88
+        try:
+            raw.chunk.append(0)
+        except BufferError:
+            pass
+        else:
+            raise AssertionError("resized the chunk during decoding")
+        return "??", error.end
+
+    codecs.register_error("snapshot_mutation", change)
+    with io.TextIOWrapper(raw, encoding="utf-8", errors="snapshot_mutation") as text:
+        assert text.read(2) == "??"
+        assert text.tell() == 2 and calls == [0]
+        assert text.read() == "AB"
+
+
+def check_seek_input_owner():
+    released = []
+
+    class Chunk(bytes):
+        def __del__(self):
+            released.append(id(self))
+
+    class Buffer(io.BytesIO):
+        def read(self, size):
+            data = Chunk(super().read(size))
+            self.last = id(data)
+            return data
+
+    raw = Buffer(b"\rX")
+    with io.TextIOWrapper(raw, encoding="utf-8") as text:
+        assert text.read(1) == "\n"
+        cookie = text.tell()
+        text.seek(cookie)
+        gc.collect()
+        assert raw.last not in released and text.tell() == cookie
+        text.seek(0)
+        gc.collect()
+        assert raw.last in released
+
+
 def current():
+    check_mutable_read_snapshot()
+    check_seek_input_owner()
     check_chunk_size_reinitializes_wrapper()
     check_write_reinitializes_wrapper()
     check_split_multibyte()

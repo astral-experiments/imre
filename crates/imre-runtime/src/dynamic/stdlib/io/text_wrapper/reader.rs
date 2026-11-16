@@ -1,10 +1,31 @@
 use super::{Codec, Context, Cookie, Error, Id, NATIVE_ORDER, Result, StreamCodec, Value};
-use std::rc::Rc;
 
-#[derive(Clone)]
-pub(super) struct Snapshot {
-    pub flags: i32,
-    pub input: Rc<Vec<u8>>,
+/// The decoder state captured before an underlying Python read can reenter the wrapper.
+pub(super) struct ReadSnapshot {
+    flags: i32,
+    prefix: Vec<u8>,
+}
+
+impl ReadSnapshot {
+    pub(super) fn finish(mut self, ctx: &mut Context, data: Id) -> Result<Id> {
+        let input = if self.prefix.is_empty() && matches!(ctx.heap.get(data), Value::Bytes(_)) {
+            data
+        } else {
+            let bytes = ctx.bytes_like(data)?;
+            self.prefix
+                .try_reserve(bytes.len())
+                .map_err(|_| crate::Error::allocation())?;
+            self.prefix.extend_from_slice(bytes);
+            ctx.alloc(Value::Bytes(self.prefix))
+        };
+        Ok(snapshot(ctx, self.flags, input))
+    }
+}
+
+/// The saved decoder state is a Python (flags, bytes) tuple held by the stream.
+pub(super) fn snapshot(ctx: &mut Context, flags: i32, input: Id) -> Id {
+    let flags = ctx.int(i64::from(flags));
+    ctx.alloc(Value::Tuple(vec![flags, input]))
 }
 
 /// Keep incomplete encoding sequences and CRLF pairs across arbitrary binary read boundaries.
@@ -21,7 +42,6 @@ pub(super) struct Reader {
     pub(super) beginning: bool,
     pub(super) order: i32,
     pub(super) seen: u8,
-    pub(super) snapshot: Option<Snapshot>,
     seek_seed: bool,
     pub(super) bytes_per_char: f64,
 }
@@ -45,7 +65,6 @@ impl Reader {
             beginning,
             order: 0,
             seen: 0,
-            snapshot: None,
             seek_seed: false,
             bytes_per_char: 0.0,
         }
@@ -59,20 +78,18 @@ impl Reader {
         self.beginning = true;
     }
 
-    pub(super) fn after_read_all(&mut self) {
+    pub(super) fn after_read_all(&mut self, had_snapshot: bool) {
         // A full read clears decoded_chars only when there was a saved snapshot.
-        let retained = self
-            .snapshot
-            .is_none()
+        let retained = (!had_snapshot)
             .then_some(self.decoded_chunk_nonempty)
             .flatten();
         self.discard();
         self.decoded_chunk_nonempty = retained;
     }
 
-    pub(super) fn after_write(&mut self) {
+    pub(super) fn after_write(&mut self, had_snapshot: bool) {
         // An unseekable stream can still have unread decoded characters after a write.
-        if self.snapshot.is_some() {
+        if had_snapshot {
             self.discard();
         }
         self.reset_decoder();
@@ -90,7 +107,6 @@ impl Reader {
     }
 
     pub(super) fn clear_snapshot(&mut self) {
-        self.snapshot = None;
         self.seek_seed = false;
     }
 
@@ -140,13 +156,7 @@ impl Reader {
     pub(super) fn after_seek(&mut self, cookie: Cookie, codec: StreamCodec, newline: Option<&str>) {
         self.discard();
         self.set_state(cookie, codec, newline);
-        if cookie.skip == 0 {
-            self.snapshot = Some(Snapshot {
-                flags: cookie.flags,
-                input: Rc::default(),
-            });
-            self.seek_seed = true;
-        }
+        self.seek_seed = cookie.skip == 0;
     }
 
     pub(super) fn capture(
@@ -154,7 +164,7 @@ impl Reader {
         codec: StreamCodec,
         newline: Option<&str>,
         telling: bool,
-    ) -> Result<Option<Snapshot>> {
+    ) -> Result<Option<ReadSnapshot>> {
         if !telling && !self.seek_seed {
             return Ok(None);
         }
@@ -163,46 +173,25 @@ impl Reader {
             .try_reserve_exact(self.tail.len())
             .map_err(|_| crate::Error::allocation())?;
         input.extend_from_slice(&self.tail);
-        Ok(Some(Snapshot {
+        Ok(Some(ReadSnapshot {
             flags: self.flags(codec, newline),
-            input: Rc::new(input),
+            prefix: input,
         }))
     }
 
-    pub(super) fn record(
-        &mut self,
-        snapshot: Option<Snapshot>,
-        bytes: usize,
-        chars: usize,
-        telling: bool,
-    ) {
+    pub(super) fn record(&mut self, bytes: usize, chars: usize, telling: bool) {
         self.bytes_per_char = if chars == 0 {
             0.0
         } else {
             bytes as f64 / chars as f64
         };
-        // After an absolute seek the saved input is empty. Keep actual read-ahead bytes
-        // during iteration so reconstruction can never index beyond that empty input.
-        if let Some(snapshot) = snapshot {
-            self.snapshot = Some(snapshot);
-        }
         if telling {
             self.seek_seed = false;
         }
     }
 
-    pub(super) fn seek_input(&mut self, flags: i32, data: &[u8]) -> Result<()> {
-        let mut input = Vec::new();
-        input
-            .try_reserve_exact(data.len())
-            .map_err(|_| crate::Error::allocation())?;
-        input.extend_from_slice(data);
-        self.snapshot = Some(Snapshot {
-            flags,
-            input: Rc::new(input),
-        });
-        self.seek_seed = data.is_empty();
-        Ok(())
+    pub(super) fn seek_input(&mut self, empty: bool) {
+        self.seek_seed = empty;
     }
 
     /// Sized reads estimate the byte count from the previous successful decoder refill.
