@@ -4134,15 +4134,10 @@ impl SourceScope<'_> {
     }
 
     fn store(&mut self, name: &str, value: Expr) -> Statement {
-        if let Some(slot) = self.comprehension_target(name) {
-            return Statement::Assign(slot, value);
-        }
-        let slot = self.slot(name);
-        if matches!(self.kind, RegisteredScope::Module) {
-            Statement::store_global(slot, value)
-        } else {
-            Statement::Assign(slot, value)
-        }
+        let slot = self
+            .comprehension_target(name)
+            .unwrap_or_else(|| self.slot(name));
+        Statement::Assign(slot, value)
     }
 
     fn is_async_function(&self) -> bool {
@@ -4500,16 +4495,19 @@ mod tests {
         .unwrap();
         let mut stores = Vec::new();
         let mut calls = Vec::new();
-        ir::walk_expressions(&suite.function.body, &mut |expr| match &expr.kind {
-            ExprKind::Builtin(Builtin::GlobalSet(slot), values)
+        ir::walk_nodes(&suite.function.body, &mut |node, _| match node {
+            ir::Node::Statement(Statement::Assign(slot, value))
                 if matches!(
-                    values[0].kind,
+                    value.kind,
                     ExprKind::Builtin(Builtin::RegisteredDefinition(_), _)
                 ) =>
             {
                 stores.push(*slot);
             }
-            ExprKind::Invoke { callable, .. } => {
+            ir::Node::Expression(Expr {
+                kind: ExprKind::Invoke { callable, .. },
+                ..
+            }) => {
                 ir::walk_operand_expressions(callable, &mut |target| {
                     if let ExprKind::Local(slot) = target.kind {
                         calls.push(slot);
@@ -4612,14 +4610,7 @@ mod tests {
         let frame = &suite.checked;
         let mut stores = Vec::new();
         for statement in &frame.function.body {
-            if let Statement::Expr(Expr {
-                kind: ExprKind::Builtin(Builtin::GlobalSet(slot), args),
-                ..
-            }) = statement
-            {
-                let [value] = args.as_slice() else {
-                    panic!("one value per binding");
-                };
+            if let Statement::Assign(slot, value) = statement {
                 let site = match &value.kind {
                     ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), _) => Some(*site),
                     _ => None,
@@ -5305,10 +5296,7 @@ else:
         assert!(matches!(
             after,
             [
-                Statement::Expr(Expr {
-                    kind: ExprKind::Builtin(Builtin::GlobalSet(_), _),
-                    ..
-                }),
+                Statement::Assign(_, _),
                 Statement::Expr(Expr {
                     kind: ExprKind::Builtin(Builtin::RegisteredNamespaceAnnotation(_), _),
                     ..
@@ -5835,19 +5823,10 @@ else:
                     }
                 )])
             );
-            let [Statement::Position(..), store] = suite.function.body.as_slice() else {
+            let [Statement::Position(..), Statement::Assign(0, operand)] =
+                suite.function.body.as_slice()
+            else {
                 panic!("expected one checkpoint followed by one store")
-            };
-            let operand = match (module, store) {
-                (false, Statement::Assign(0, value)) => value,
-                (
-                    true,
-                    Statement::Expr(Expr {
-                        kind: ExprKind::Builtin(Builtin::GlobalSet(0), operands),
-                        ..
-                    }),
-                ) => &operands[0],
-                _ => panic!("expected the destination's namespace store"),
             };
             let ExprKind::Builtin(Builtin::RegisteredLocation(site, ..), operands) = &operand.kind
             else {
