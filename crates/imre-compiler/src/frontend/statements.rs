@@ -243,7 +243,7 @@ impl StatementLowering for Checker<'_> {
         {
             return Ok((Some(Statement::Expr(value)), true));
         }
-        let mut value = self.expr(expr)?;
+        let mut value = self.expr_for(expr, ResultUse::Python)?;
         // Only a direct call selects one implementation; a dispatched override may return.
         let continues = !self.terminating_call(&value);
         if self.inference.is_some() && self.discarded_function_body() {

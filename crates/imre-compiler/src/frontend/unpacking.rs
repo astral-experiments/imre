@@ -344,14 +344,20 @@ impl Checker<'_> {
         rhs: Option<&ast::Expr>,
     ) -> Option<(Type, Option<TypeDeclaration>)> {
         if let ast::Expr::Name(name) = target {
-            self.names
-                .get(name.id.as_str())
-                .filter(|slot| !self.unstored_targets.contains(slot))
-                .map(|&slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
+            self.stored_name(name.id.as_str())
+                .map(|slot| (self.locals[slot], self.declared_slots.get(&slot).copied()))
         } else if self.registered.is_some() && target.is_attribute_expr() {
             None
         } else {
             self.assignment_context(target, rhs)
+        }
+    }
+
+    /// Query the actual destination after argument evaluation, which can bind the name.
+    pub(super) fn stores_python_result(&self, name: &str) -> bool {
+        match self.stored_name(name) {
+            Some(slot) => self.locals[slot] == Type::PythonObject,
+            None => !self.nullable_assignments.contains_key(name),
         }
     }
 
@@ -360,12 +366,13 @@ impl Checker<'_> {
         target: &ast::Expr,
         value: &ast::Expr,
         (expected, declaration): (Type, Option<TypeDeclaration>),
+        result: ResultUse<'_>,
     ) -> Result<Expr, String> {
         if self.inference.is_some() && expected == Type::JsonObject && target.is_attribute_expr() {
             // Keep a mutable owner until the resolved target decides its storage.
             self.document_annotation_value(value, expected, documents::MAP)
         } else {
-            self.expr_in_context(
+            self.expr_in_context_for(
                 value,
                 expected,
                 |checker, ty| {
@@ -377,6 +384,7 @@ impl Checker<'_> {
                 },
                 Self::coerce_supplied_result,
                 declaration,
+                result,
             )
         }
     }
@@ -495,6 +503,10 @@ impl Checker<'_> {
                 // the next function's parameter types.
                 context = None;
             }
+            let result = target
+                .as_name_expr()
+                .filter(|_| context.is_none_or(|(ty, _)| ty == Type::PythonObject))
+                .map_or(ResultUse::Fixed, |name| ResultUse::Store(name.id.as_str()));
             let scalar_item = context
                 .filter(|(ty, _)| target.is_subscript_expr() && ty.builtin_scalar_name().is_some());
             let value = if let Some((_, old)) = previous {
@@ -505,9 +517,9 @@ impl Checker<'_> {
                 // Keep the scalar operand. Its RHS can change which container receives the store.
                 self.expr_expected_if(rhs, expected, |_, _| true)?
             } else if let Some(expected) = context {
-                self.assignment_rhs(target, rhs, expected)?
+                self.assignment_rhs(target, rhs, expected, result)?
             } else {
-                self.typed_expr(rhs)?
+                self.typed_expr_for(rhs, result)?
             };
             if self.ends_before_assignment(&value, targets)? {
                 output.push(self.statement_at(rhs, Statement::Expr(value)));
@@ -562,7 +574,7 @@ impl Checker<'_> {
                 .map(|ty| (target, ty))
         });
         let value = if let Some((target, expected)) = context {
-            assignments::unpromoted(self.assignment_rhs(target, rhs, expected)?)
+            assignments::unpromoted(self.assignment_rhs(target, rhs, expected, ResultUse::Fixed)?)
         } else {
             let target = targets
                 .iter()
@@ -720,7 +732,7 @@ impl Checker<'_> {
                         self.registered_local_start,
                         self.class,
                         &attribute.value,
-                        &receiver,
+                        registered::values::receiver_facts(&receiver),
                     );
                     if receiver.ty != Type::PythonObject && !method_receiver {
                         return Err(error(
@@ -1198,7 +1210,7 @@ impl Checker<'_> {
         }
         if let Some(expected) = self.target_expectation(target, Some(value)) {
             return self
-                .assignment_rhs(target, value, expected)
+                .assignment_rhs(target, value, expected, ResultUse::Fixed)
                 .map(assignments::unpromoted);
         }
         self.expr(value)

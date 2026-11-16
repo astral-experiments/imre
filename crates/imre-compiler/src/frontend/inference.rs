@@ -2065,7 +2065,7 @@ impl Checker<'_> {
             ControlFlow::Continue(args) => args,
             ControlFlow::Break(stop) => return Ok(scope.finish(stop)),
         };
-        let ty = self.enter_source_call(call, signature)?;
+        let ty = self.enter_source_call(call, signature, false)?;
         // A successfully bound source call can enter the definition's registered body.
         self.globals
             .missing_bindings
@@ -2086,7 +2086,7 @@ impl Checker<'_> {
             .source_arguments(call, signature, receiver, skip, scope, false)?
             .continue_value()
             .expect("this caller owns the loaded receiver");
-        Ok((self.enter_source_call(call, signature)?, args))
+        Ok((self.enter_source_call(call, signature, false)?, args))
     }
 
     /// The caller needs the return layout only after evaluating its arguments.
@@ -2094,14 +2094,23 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         signature: &Signature,
+        boxed: bool,
     ) -> Result<Type, String> {
-        self.calls.insert(signature.id);
-        match self.inference {
+        let returned = match self.inference {
             Some(inference) => inference
                 .lookup(signature, SignatureUse::Return, self.module, call.range())
                 .map_err(|failure| failure.at(self.source, call)),
             None => Ok(signature.returns),
+        };
+        if returned.is_ok()
+            && boxed
+            && let Some(calls) = &mut self.boxed_calls
+        {
+            calls.insert(signature.id);
+        } else {
+            self.calls.insert(signature.id);
         }
+        returned
     }
 
     fn source_arguments(

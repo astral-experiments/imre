@@ -112,28 +112,28 @@ impl<'a> RegisteredSource<'a> {
         self,
         node: &ast::Expr,
         placed: Option<FixedAttribute>,
-        allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
+        allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, (Type, Option<usize>)) -> bool,
         dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
-        mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+        mut child: impl FnMut(&ast::Expr, ResultUse<'_>) -> StdResult<Expr, E>,
     ) -> StdResult<Option<Expr>, E> {
-        let receiver = |node: &ast::Expr, needs_protocol: bool, method| {
+        let receiver = |node: &ast::Expr, needs_protocol: bool, method, result| {
             if needs_protocol && !dynamic_receiver(node) {
                 return Ok(None);
             }
-            let value = child(node)?;
-            Ok(
-                (allow_typed_receiver(method, node, &value) || value.ty == Type::PythonObject)
-                    .then_some(value),
-            )
+            let value = child(node, result)?;
+            let accepts = allow_typed_receiver(method, node, receiver_facts(&value));
+            Ok((accepts || value.ty == Type::PythonObject).then_some(value))
         };
         match node {
             ast::Expr::Call(call) => {
                 let field = self.direct_method(call);
                 let input = field.map_or(call.func.as_ref(), |field| field.value.as_ref());
                 let method = field.map(|_| call.func.as_ref());
-                let Some(target) = receiver(input, field.is_some(), method)? else {
+                let Some(target) = receiver(input, field.is_some(), method, ResultUse::Fixed)?
+                else {
                     return Ok(None);
                 };
+                let child = |node: &ast::Expr| child(node, ResultUse::Fixed);
                 if let (Some(field), Some(FixedAttribute::Call(None, site))) = (field, placed)
                     && let ir::RegisteredCallTarget::Method {
                         name,
@@ -151,7 +151,8 @@ impl<'a> RegisteredSource<'a> {
                 Ok(Some(selection.prepare(call, target, child)?))
             }
             ast::Expr::Attribute(field) => {
-                Ok(receiver(&field.value, true, None)?.map(|value| loaded_attribute(field, value)))
+                Ok(receiver(&field.value, true, None, ResultUse::Python)?
+                    .map(|value| loaded_attribute(field, value)))
             }
             _ => Ok(None),
         }
@@ -365,17 +366,25 @@ pub(in crate::frontend) fn located(
     )
 }
 
+pub(in crate::frontend) fn receiver_facts(value: &Expr) -> (Type, Option<usize>) {
+    let local = match value.without_location().kind {
+        ExprKind::Local(slot) => Some(slot),
+        _ => None,
+    };
+    (value.ty, local)
+}
+
 /// A physical bound method reads its first argument from the Python frame.
 pub(in crate::frontend) fn method_receiver(
     first_local: Option<usize>,
     class: Option<usize>,
     source: &ast::Expr,
-    operand: &Expr,
+    (ty, local): (Type, Option<usize>),
 ) -> bool {
     first_local.is_some_and(|first| first != 0)
         && source.is_name_expr()
-        && matches!(operand.without_location().kind, ExprKind::Local(0))
-        && class.map(Type::Class) == Some(operand.ty)
+        && local == Some(0)
+        && class.map(Type::Class) == Some(ty)
 }
 
 pub(in crate::frontend) fn loaded_attribute(field: &ast::ExprAttribute, receiver: Expr) -> Expr {
@@ -1157,10 +1166,11 @@ pub(super) fn operation<E>(
     node: &ast::Expr,
     source: RegisteredSource<'_>,
     placed: Option<FixedAttribute>,
-    allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, &Expr) -> bool,
+    allow_typed_receiver: impl FnOnce(Option<&ast::Expr>, &ast::Expr, (Type, Option<usize>)) -> bool,
     dynamic_receiver: impl FnOnce(&ast::Expr) -> bool,
-    mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
+    mut operand: impl FnMut(&ast::Expr, ResultUse<'_>) -> StdResult<Expr, E>,
 ) -> StdResult<Option<Expr>, E> {
+    let mut child = |node: &ast::Expr| operand(node, ResultUse::Fixed);
     if let ast::Expr::BinOp(operation) = node {
         return Ok(Some(binary(
             operation,
@@ -1196,9 +1206,11 @@ pub(super) fn operation<E>(
             return Ok(None);
         }
         let value = child(&unary.operand)?;
-        return Ok((allow_typed_receiver(None, &unary.operand, &value)
-            || value.ty == Type::PythonObject)
-            .then(|| Expr::unary(unary.op, value, Type::PythonObject)));
+        return Ok(
+            (allow_typed_receiver(None, &unary.operand, receiver_facts(&value))
+                || value.ty == Type::PythonObject)
+                .then(|| Expr::unary(unary.op, value, Type::PythonObject)),
+        );
     }
     let kind = match node {
         ast::Expr::Generator(generator)
@@ -1268,7 +1280,7 @@ pub(super) fn operation<E>(
                 placed,
                 allow_typed_receiver,
                 dynamic_receiver,
-                child,
+                operand,
             );
         }
     };
@@ -1389,7 +1401,7 @@ impl Region {
                 None,
                 |_, _, _| false,
                 |_| true,
-                |child| self.operand(child, source).ok_or(()),
+                |child, _| self.operand(child, source).ok_or(()),
             )
             .ok()??,
         };
@@ -1486,6 +1498,7 @@ impl Checker<'_> {
         &mut self,
         node: &ast::Expr,
         module: &ModuleSource,
+        result: ResultUse<'_>,
     ) -> Result<Option<Expr>, String> {
         let source = module.operands(self.source, self.graph.python_optimization());
         if let ast::Expr::Await(awaited) = node
@@ -1673,12 +1686,21 @@ impl Checker<'_> {
             let fixed_result = fixed_result
                 && !signature.asynchronous
                 && !self.classes.generators.contains(&signature.id);
+            let boxed = self.boxed_calls.is_some()
+                && located.ty == Type::PythonObject
+                && located.python_call().is_some()
+                && !(self.inference.is_some() && self.discarded_function_body())
+                && match result {
+                    ResultUse::Fixed => false,
+                    ResultUse::Python => true,
+                    ResultUse::Store(name) => self.stores_python_result(name),
+                };
             if definition.is_none() {
                 if fixed_result {
                     located.ty = signature.returns;
                 }
             } else if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
-                *hint = Some(self.enter_source_call(call, signature)?);
+                *hint = Some(self.enter_source_call(call, signature, boxed)?);
             } else {
                 self.calls.insert(signature.id);
             }
@@ -1788,31 +1810,27 @@ impl Checker<'_> {
             node,
             source,
             placed,
-            |method, receiver, operand| {
+            |method, receiver, (ty, slot)| {
                 let Some(first) = first_local else {
                     return false;
                 };
                 // This operand and its frame already use the Python protocol.
-                if python_frame && operand.ty == Type::PythonObject {
+                if python_frame && ty == Type::PythonObject {
                     return true;
                 }
-                let local = match operand.without_location().kind {
-                    ExprKind::Local(slot) if receiver.is_name_expr() => Some(slot),
-                    _ => None,
-                };
+                let local = slot.filter(|_| receiver.is_name_expr());
                 let parameter = local.is_some_and(|slot| slot < first);
                 if let Some(callee) = method {
-                    let list_parameter =
-                        parameter && matches!(operand.ty, Type::ListInt | Type::List(_));
+                    let list_parameter = parameter && matches!(ty, Type::ListInt | Type::List(_));
                     live_receiver = !list_parameter
-                        && (local.is_some() || operand.ty == Type::Str)
+                        && (local.is_some() || ty == Type::Str)
                         && is_bound_method(callee);
                     list_parameter || live_receiver
                 } else {
                     node.as_attribute_expr().is_some_and(|attribute| {
                         // A bound method reads this attribute on its live Python receiver.
                         live_receiver =
-                            method_receiver(first_local, class, &attribute.value, operand);
+                            method_receiver(first_local, class, &attribute.value, (ty, slot));
                         local.is_some()
                     })
                 }
@@ -1825,7 +1843,7 @@ impl Checker<'_> {
                         .as_call_expr()
                         .is_some_and(|call| is_bound_method(&call.func))
             },
-            |child| self.expr(child),
+            |child, result| self.expr_for(child, result),
         )?
         else {
             return Ok(None);

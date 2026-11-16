@@ -335,7 +335,7 @@ fn bound_operation(
         None,
         |_, _, _| true,
         |_| true,
-        |node| Ok::<_, std::convert::Infallible>(child(node)),
+        |node, _| Ok::<_, std::convert::Infallible>(child(node)),
     );
     value
 }

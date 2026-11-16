@@ -6,6 +6,72 @@ mod tests {
     use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
+    fn a_discarded_call_does_not_hide_a_sibling_argument_contract() {
+        let project = tempfile::tempdir().unwrap();
+        let path = project.path().join("app.py");
+        let prefix = concat!(
+            "import json\nfrom pathlib import Path\n\n",
+            "def value() -> int:\n    sorted(Path(\".\").glob(\"*.py\"))\n    return 7\n\n",
+            "def take(number: int) -> None:\n    print(number)\n\n",
+            "def run() -> None:\n",
+            "    item = json.loads(\"0\")\n    print(f\"{item}\")\n",
+        );
+        for (calls, result_hint) in [
+            (["value()", "value()"], Some(Type::Int)),
+            (["value()", "take(value())"], None),
+            (["take(value())", "value()"], None),
+        ] {
+            let source = format!("{prefix}    {}\n    {}\n\nrun()\n", calls[0], calls[1]);
+            std::fs::write(&path, &source).unwrap();
+            let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+            crate::checked_lower(&mut graph).unwrap();
+            let start = TextSize::try_from(source.find("def run").unwrap()).unwrap();
+            let (functions, _) = graph.take_registered_functions();
+            let frame = &functions[&graph.entry][&start];
+            let mut hints = Vec::new();
+            ir::walk_nodes(&frame.function.body, &mut |node, _| {
+                if let ir::Node::Expression(value) = node
+                    && let Some(call) = value.python_call()
+                    && &source[call.range] == "value()"
+                {
+                    hints.push(call.position.unwrap().1);
+                }
+            });
+            assert_eq!(hints, [result_hint; 2], "{calls:?}");
+        }
+    }
+
+    #[test]
+    fn a_call_argument_can_bind_its_own_assignment_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        for (name, hint) in [("other", Some(Type::Int)), ("x", None)] {
+            let call = format!("value({name} := 3)");
+            let source = format!(
+                "import json\nfrom pathlib import Path\n\n\
+                 def value(n: int) -> int:\n    sorted(Path('.').glob('*.txt'))\n    return n + 4\n\n\
+                 def run() -> None:\n    item = json.loads('0')\n    print(f'{{item}}')\n    x = {call}\n    print(x)\n\nrun()\n"
+            );
+            std::fs::write(&path, &source).unwrap();
+            let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+            crate::checked_lower(&mut graph).unwrap();
+            let start = TextSize::try_from(source.find("def run").unwrap()).unwrap();
+            let (functions, _) = graph.take_registered_functions();
+            let body = &functions[&graph.entry][&start].function.body;
+            let mut hints = Vec::new();
+            ir::walk_nodes(body, &mut |node, _| {
+                if let ir::Node::Expression(value) = node
+                    && let Some(site) = value.python_call()
+                    && &source[site.range] == call
+                {
+                    hints.push(site.position.unwrap().1);
+                }
+            });
+            assert_eq!(hints, [hint], "{call}");
+        }
+    }
+
+    #[test]
     fn a_direct_local_function_preserves_its_callers_checked_return() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.py");
