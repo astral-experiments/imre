@@ -14,6 +14,14 @@ pub(crate) struct FixedBodySource {
 pub(super) type PlacedBody = StdResult<RegisteredFunction, HashMap<TextRange, FixedAttribute>>;
 
 impl FixedBodySource {
+    pub(super) fn has_method_store(&self) -> bool {
+        self.method.is_some()
+            && self
+                .sites
+                .iter()
+                .any(|(_, node)| matches!(node, Some(FixedNode::StoreField(..))))
+    }
+
     /// Place the owned operations only if every physical site still belongs to them.
     /// The ordinary Python binder can still use the resolved attributes if placement fails.
     pub(crate) fn place(self, function: ir::Function) -> PlacedBody {
@@ -34,28 +42,8 @@ impl FixedBodySource {
             let Some((range, Some(expected))) = sites.next() else {
                 return false;
             };
-            if let FixedNode::StoreField(expected_op) = expected {
-                let (op, field) = match node {
-                    ir::Node::Statement(Statement::SetField(
-                        _,
-                        ir::StoreField::Written(key, _),
-                        _,
-                    )) => (None, key),
-                    ir::Node::Statement(Statement::AugmentField(
-                        _,
-                        ir::StoreField::Written(key, _),
-                        op,
-                        _,
-                    )) => (Some(*op), key),
-                    _ => return false,
-                };
-                if expected_op != op
-                    || !matches!(self.attributes.get(&range), Some(FixedAttribute::Store(original)) if original == field)
-                {
-                    return false;
-                }
-                python_arguments = true;
-            } else if !expected.matches_in(&node, condition, parent, |expr| {
+            python_arguments |= matches!(expected, FixedNode::StoreField(..));
+            if !expected.matches_in(&node, condition, parent, |expr| {
                 let attr = self.attributes.get(&range)?;
                 let next = sites.as_slice().first().map(|site| site.0);
                 let (_, args) = attr.call_operands(range, next, expr)?;
@@ -100,7 +88,6 @@ impl FixedBodySource {
 pub(crate) enum FixedAttribute {
     /// The statement owns this whole call's traceback display.
     UnhighlightedCall(TextRange),
-    Store(ir::FieldUse),
     CallValue(Box<registered::values::CheckedCall>),
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
@@ -159,7 +146,7 @@ pub(super) enum FixedNode {
         message: bool,
     },
     Store(usize),
-    StoreField(Option<Binary>),
+    StoreField(ir::FieldUse, Option<Binary>),
     NativeCall(
         TextRange,
         std::mem::Discriminant<ir::ProcessOperation>,
@@ -286,6 +273,15 @@ impl FixedNode {
                 cause: raised.cause.is_some(),
             },
             ir::Node::Statement(Statement::Assign(slot, _)) => Self::Store(*slot),
+            ir::Node::Statement(Statement::SetField(_, ir::StoreField::Written(field, _), _)) => {
+                Self::StoreField(*field, None)
+            }
+            ir::Node::Statement(Statement::AugmentField(
+                _,
+                ir::StoreField::Written(field, _),
+                op,
+                _,
+            )) => Self::StoreField(*field, Some(*op)),
             ir::Node::Expression(expr) => match expr.kind {
                 ExprKind::None if expr.ty != Type::None => return None,
                 ExprKind::None | ExprKind::Bool(_) | ExprKind::Float(_) | ExprKind::Bytes(_) => {
@@ -802,9 +798,7 @@ impl SourceSites {
                 target: field.range(),
             };
             *destination = ir::StoreField::Written(key, field.attr.clone());
-            self.attributes
-                .insert(site.range, FixedAttribute::Store(key));
-            self.commit(site, FixedNode::StoreField(op));
+            self.commit(site, FixedNode::StoreField(key, op));
         }
     }
 
@@ -1226,13 +1220,13 @@ mod tests {
         rhs.kind = ExprKind::Str("replaced".into());
         assert!(source.clone().place(changed).is_err());
 
-        assert_eq!(source.attributes.len(), 4);
+        let stores = source.sites.iter().filter_map(|(range, node)| match node {
+            Some(FixedNode::StoreField(field, None)) => Some((&text[*range], &text[field.target])),
+            _ => None,
+        });
+        assert!(stores.eq([("self.other = suffix", "self.other"); 2]));
+        assert_eq!(source.attributes.len(), 2);
         for (range, field) in &source.attributes {
-            if let FixedAttribute::Store(key) = field {
-                assert_eq!(&text[*range], "self.other = suffix");
-                assert_eq!(&text[key.target], "self.other");
-                continue;
-            }
             let FixedAttribute::Load(name) = field else {
                 panic!("expected attribute load")
             };
