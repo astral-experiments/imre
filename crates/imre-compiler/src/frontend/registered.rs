@@ -2536,16 +2536,17 @@ impl<'a> SuitePreparation<'a> {
 
         // Preserve the first refusal from the body, entered else, handlers and finally.
         let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        let body_continues = body.falls_through;
-        let body = (body.into_child(&mut suites), body_continues);
+        let mut normal_exit = body.falls_through;
+        let body = body.into_child(&mut suites);
         let orelse = if stmt.orelse.is_empty() {
             Vec::new()
         } else {
             let otherwise =
                 self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
-            if body_continues {
+            if normal_exit {
                 self.refusal = self.refusal.or(otherwise.refusal);
             }
+            normal_exit &= otherwise.falls_through;
             otherwise.into_child(&mut suites)
         };
         let mut handlers = Vec::with_capacity(stmt.handlers.len());
@@ -2556,12 +2557,13 @@ impl<'a> SuitePreparation<'a> {
                 Ok::<_, std::convert::Infallible>(values::located(site, class.start(), operand))
             })
             .expect("prepared exception matcher");
+            let name = handler.name.as_ref().map(|name| scope.slot(name.as_str()));
+            let handler = self.physical_suite(&handler.body, kind, selection, suspended);
+            normal_exit |= handler.falls_through;
             handlers.push(ir::ExceptHandler {
                 matcher,
-                name: handler.name.as_ref().map(|name| scope.slot(name.as_str())),
-                body: self
-                    .physical_suite(&handler.body, kind, selection, suspended)
-                    .into_child(&mut suites),
+                name,
+                body: handler.into_child(&mut suites),
             });
         }
         let finalbody = if stmt.finalbody.is_empty() {
@@ -2573,7 +2575,14 @@ impl<'a> SuitePreparation<'a> {
         };
         let mut statements = Vec::with_capacity(2);
         statements.push(checkpoint);
-        let falls_through = registered_try(&mut statements, body, handlers, orelse, finalbody);
+        let falls_through = statements::finish_try(
+            Some(&mut statements),
+            body,
+            handlers,
+            orelse,
+            normal_exit,
+            finalbody,
+        );
         RegisteredSuite {
             checked: scope.finish(statements),
             operands,
@@ -3072,18 +3081,6 @@ pub(super) fn exception_matcher<E>(
     })
 }
 
-/// Registered dispatch retains a join after the handlers, including its exceptional entry.
-fn registered_try(
-    output: &mut Vec<Statement>,
-    (body, body_falls): statements::Block,
-    handlers: Vec<ir::ExceptHandler>,
-    orelse: Vec<Statement>,
-    finalbody: statements::Block,
-) -> bool {
-    let normal_exit = body_falls || !handlers.is_empty();
-    statements::finish_try(Some(output), body, handlers, orelse, normal_exit, finalbody)
-}
-
 /// A target's Python expression inputs in evaluation order. The receiver is evaluated
 /// once, including for an in-place operation that both reads and writes its descriptor.
 pub(crate) struct AttributeEffect<'a> {
@@ -3388,21 +3385,33 @@ impl SourceScope<'_> {
                 Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
-                let body = self.block(&region.body)?;
+                let (body, body_falls) = self.block(&region.body)?;
                 let mut handlers = Vec::with_capacity(region.handlers.len());
+                let mut handler_falls = false;
                 for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
                     let matcher = exception_matcher(handler, region.is_star, |class, _| {
                         self.frame_value(class).ok_or(())
                     })?;
+                    let name = handler.name.as_ref().map(|name| self.slot(name.as_str()));
+                    let (body, falls) = self.block(&handler.body)?;
+                    handler_falls |= falls;
                     handlers.push(ir::ExceptHandler {
                         matcher,
-                        name: handler.name.as_ref().map(|name| self.slot(name.as_str())),
-                        body: self.suite(&handler.body)?,
+                        name,
+                        body,
                     });
                 }
-                let orelse = self.suite(&region.orelse)?;
+                let (orelse, else_falls) = self.block(&region.orelse)?;
                 let finalbody = self.block(&region.finalbody)?;
-                return Ok(registered_try(output, body, handlers, orelse, finalbody));
+                let normal_exit = body_falls && else_falls || handler_falls;
+                return Ok(statements::finish_try(
+                    Some(output),
+                    body,
+                    handlers,
+                    orelse,
+                    normal_exit,
+                    finalbody,
+                ));
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => {
                 contexts::python_with(
@@ -4447,6 +4456,15 @@ mod tests {
             ("for item in items:\n    item\n", true),
             ("try:\n    act()\nfinally:\n    finish()\n", true),
             ("try:\n    act()\nfinally:\n    raise Error()\n", false),
+            ("try:\n    raise E\nexcept E:\n    raise F\n", false),
+            (
+                "try:\n    act()\nexcept E:\n    raise F\nelse:\n    raise G\n",
+                false,
+            ),
+            (
+                "try:\n    act()\nexcept E:\n    pass\nelse:\n    raise G\n",
+                true,
+            ),
             ("raise Error()\n", false),
             ("del first, second\n", true),
         ] {
