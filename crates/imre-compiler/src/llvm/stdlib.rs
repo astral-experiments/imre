@@ -121,54 +121,58 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
-            Builtin::StringFormat => {
+            Builtin::StringFormat(layout) => {
                 let (template, fields) = args.split_first().unwrap();
-                let (pairs, tail) = fields.as_chunks::<2>();
-                debug_assert!(tail.is_empty());
-                if pairs.iter().any(|pair| pair[1].value.ty == Type::Int) {
-                    let count = fields.len() / 2;
-                    let storage = self.entry_alloca(format!("[{} x i64]", count * 3));
-                    for (index, pair) in pairs.iter().enumerate() {
-                        let name = &pair[0].value;
-                        let value = &pair[1].value;
-                        let word = self.word(value);
-                        let kind = representation_kind(value.ty, &self.module.types).to_string();
-                        for (offset, (ty, operand)) in [
-                            ("ptr", name.operand.as_str()),
-                            ("i64", word.as_str()),
-                            ("i64", kind.as_str()),
-                        ]
-                        .into_iter()
-                        .enumerate()
-                        {
-                            let slot = self.instruction(format!(
-                                "getelementptr i64, ptr {storage}, i64 {}",
-                                index * 3 + offset
-                            ));
-                            self.line(format!("store {ty} {operand}, ptr {slot}"));
-                        }
-                    }
-                    return Value {
-                        ty: Type::Str,
-                        operand: self.checked_instruction(format!(
-                            "call ptr @imre_str_format_fields(ptr {}, ptr {storage}, i64 {count})",
-                            template.value.operand
-                        )),
-                        small_integer: false,
-                    };
-                }
-                let handles = self.entry_alloca(format!("[{} x ptr]", fields.len()));
+                let count = fields.len();
+                let tagged = fields.iter().any(|field| field.value.ty == Type::Int);
+                let (function, slot_type, width) = if tagged {
+                    ("imre_str_format_fields", "i64", 3)
+                } else {
+                    ("imre_str_format", "ptr", 2)
+                };
+                let table = self.entry_alloca(format!("[{} x {slot_type}]", count * width));
                 for (index, field) in fields.iter().enumerate() {
-                    let slot =
-                        self.instruction(format!("getelementptr ptr, ptr {handles}, i64 {index}"));
-                    self.line(format!("store ptr {}, ptr {slot}", field.value.operand));
+                    let positional;
+                    let name = match layout {
+                        ir::RegisteredArguments::Keywords { names, .. } => names[index].as_str(),
+                        ir::RegisteredArguments::Packed(packed) if !packed.keywords.is_empty() => {
+                            packed.keywords[index]
+                                .as_deref()
+                                .expect("named format field")
+                        }
+                        _ => {
+                            positional = format!("arg{index}");
+                            &positional
+                        }
+                    };
+                    let name = self.literal_root(name.as_bytes(), Type::Str);
+                    let value = &field.value;
+                    let tagged_field = tagged.then(|| {
+                        (
+                            self.word(value),
+                            representation_kind(value.ty, &self.module.types),
+                        )
+                    });
+                    let mut store = |offset: usize, ty: &str, operand: &str| {
+                        let slot = self.instruction(format!(
+                            "getelementptr {slot_type}, ptr {table}, i64 {}",
+                            index * width + offset
+                        ));
+                        self.line(format!("store {ty} {operand}, ptr {slot}"));
+                    };
+                    store(0, "ptr", &name.operand);
+                    if let Some((word, kind)) = tagged_field {
+                        store(1, "i64", &word);
+                        store(2, "i64", &kind.to_string());
+                    } else {
+                        store(1, "ptr", &value.operand);
+                    }
                 }
                 Value {
                     ty: Type::Str,
                     operand: self.checked_instruction(format!(
-                        "call ptr @imre_str_format(ptr {}, ptr {handles}, i64 {})",
-                        template.value.operand,
-                        fields.len() / 2
+                        "call ptr @{function}(ptr {}, ptr {table}, i64 {count})",
+                        template.value.operand
                     )),
                     small_integer: false,
                 }

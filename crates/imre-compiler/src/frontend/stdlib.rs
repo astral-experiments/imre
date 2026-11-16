@@ -784,12 +784,11 @@ impl Checker<'_> {
         &mut self,
         receiver: Expr,
         call: &ast::ExprCall,
+        method: &ast::ExprAttribute,
     ) -> Result<Expr, String> {
-        let mut args = vec![receiver];
+        let mut fields = vec![receiver];
+        let mut written_fields = call.arguments.args.is_empty();
         if !call.arguments.args.is_empty() {
-            let ast::Expr::Attribute(method) = &*call.func else {
-                unreachable!()
-            };
             let template = match &*method.value {
                 ast::Expr::StringLiteral(s) if call.arguments.keywords.is_empty() => {
                     positional_template(s.value.to_str(), call.arguments.args.len())
@@ -803,8 +802,8 @@ impl Checker<'_> {
                     "str.format requires named arguments",
                 ));
             };
-            args[0] = unpacking::string(&template);
-            for (index, arg) in call.arguments.args.iter().enumerate() {
+            fields[0] = unpacking::string(&template);
+            for arg in &call.arguments.args {
                 let value = self.expr(arg)?;
                 if !matches!(value.ty, Type::Int | Type::Str | Type::StrLiteral(_)) {
                     return Err(error(
@@ -813,17 +812,13 @@ impl Checker<'_> {
                         "positional str.format requires exact str or int",
                     ));
                 }
-                args.push(unpacking::string(format!("arg{index}")));
-                args.push(Self::string_value(value));
+                fields.push(Self::string_value(value));
             }
         }
-        let mut names = HashSet::new();
         for keyword in &call.arguments.keywords {
-            let name = keyword.arg.as_ref().expect("unpacking was rejected");
-            if !names.insert(name.as_str()) {
-                return Err(error(self.source, keyword, "repeated str.format keyword"));
-            }
-            let value = Self::string_value(self.expr(&keyword.value)?);
+            let value = self.expr(&keyword.value)?;
+            written_fields &= !matches!(value.ty, Type::StrEnum(_));
+            let value = Self::string_value(value);
             if !matches!(value.ty, Type::Str | Type::Int) {
                 return Err(error(
                     self.source,
@@ -831,16 +826,21 @@ impl Checker<'_> {
                     "str.format fields require str or int",
                 ));
             }
-            args.push(Expr {
-                ty: Type::Str,
-                kind: ExprKind::Str(name.to_string()),
-            });
-            args.push(value);
+            fields.push(value);
         }
-        Ok(Expr {
+        let layout = ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, false);
+        let value = Expr {
             ty: Type::Str,
-            kind: ExprKind::Builtin(Builtin::StringFormat, args),
-        })
+            kind: ExprKind::Builtin(Builtin::StringFormat(layout), fields),
+        };
+        // A rewritten positional template or a StrEnum display no longer has its written operands.
+        if written_fields
+            && let Some(sites) = &mut self.fixed_sites
+            && sites.method(call, method, &value)
+        {
+            self.frame_arguments = FrameArguments::Python;
+        }
+        Ok(value)
     }
 
     pub(super) fn replace_call(

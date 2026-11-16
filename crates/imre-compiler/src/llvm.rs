@@ -5680,7 +5680,7 @@ impl Emitter<'_, '_> {
             | Builtin::ListExtendUnhinted
             | Builtin::SortRestore
             | Builtin::StringJoin
-            | Builtin::StringFormat
+            | Builtin::StringFormat(_)
             | Builtin::FormatField(_)
             | Builtin::StringReplace
             | Builtin::FloatFormat { .. }
