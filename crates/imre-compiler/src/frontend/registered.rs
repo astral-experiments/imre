@@ -810,6 +810,25 @@ impl SourceChecks {
             .map(|errors| Self::accepts_range(errors, definition))
     }
 
+    /// First-party return sites have a final contract check. For an installed
+    /// declaration, use the existing source checks at its implicit and explicit exits.
+    pub(super) fn accepts_return(
+        &self,
+        graph: &SourceGraph,
+        module: ModuleId,
+        function: &ast::StmtFunctionDef,
+        annotation: &ast::Expr,
+    ) -> bool {
+        if graph.modules[module].checks_source_contracts() {
+            return true;
+        }
+        let accepts = |range| self.accepts(graph, module, range);
+        accepts(annotation.range())
+            && crate::analysis::explicit_returns(function)
+                .into_iter()
+                .all(|ret| accepts(ret.range()))
+    }
+
     pub(super) fn accepts(
         &self,
         graph: &SourceGraph,

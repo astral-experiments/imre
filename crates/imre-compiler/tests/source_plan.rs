@@ -127,3 +127,26 @@ fn an_incoming_union_keeps_its_written_argument_contract() {
         "{error}"
     );
 }
+
+#[test]
+fn a_bottom_return_keeps_the_python_call_and_the_written_contract() {
+    let root = tempfile::tempdir().unwrap();
+    let main = root.path().join("main.py");
+    let child = root.path().join("child.py");
+    std::fs::write(
+        &main,
+        "from child import stop\ndef consume(value: int) -> int: return value + 1\nprint(consume(stop()))\n",
+    )
+    .unwrap();
+    let header = "import sys\nfrom typing import Never as End\ndef stop() -> End:\n";
+    std::fs::write(&child, format!("{header}    return sys.exit(7)\n")).unwrap();
+    check_file(&main, None).unwrap();
+    compile_file(&main, None, &CompileOptions::default()).unwrap();
+
+    for (body, location) in [("return 42", "4:12"), ("pass", "3:15")] {
+        std::fs::write(&child, format!("{header}    {body}\n")).unwrap();
+        let error = check_file(&main, None).unwrap_err();
+        assert!(error.contains(&format!("child.py:{location}")), "{error}");
+        assert!(error.contains("Never"), "{error}");
+    }
+}

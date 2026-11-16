@@ -3093,6 +3093,19 @@ impl Session {
         matches!(parameter.inferred_type(&model), Some(Type::Union(_)))
     }
 
+    pub(crate) fn bottom_return_annotation(&self, module: usize, value: &Expr) -> bool {
+        use ruff_python_ast::HasNodeIndex;
+
+        if value.node_index().load().as_u32().is_none() {
+            return false;
+        }
+        let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
+        matches!(
+            annotation_type(&self.db, &model, value),
+            Some(ty_python_semantic::types::Type::Never)
+        )
+    }
+
     pub(crate) fn is_never(&self, module: usize, value: &ruff_python_ast::Expr) -> bool {
         self.hint_reads.set(self.hint_reads.get() + 1);
         let model = SemanticModel::new(&self.db, self.db.program_file(self.files[module]));
@@ -3307,6 +3320,7 @@ impl Session {
         for name in [
             "invalid-argument-type",
             "invalid-return-type",
+            "empty-body",
             "invalid-assignment",
             "unresolved-import",
         ]
@@ -4278,7 +4292,10 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                     scalar.map(|annotation| (file, annotation))
                 }
                 _ if checks == FileChecks::DeclaredSignatures
-                    && diagnostic.id().is_lint_named("invalid-return-type") =>
+                    && matches!(
+                        diagnostic.id().as_str(),
+                        "invalid-return-type" | "empty-body"
+                    ) =>
                 {
                     let scope = return_scope(db, file, range?)?;
                     checked.result_scopes(db).binary_search(&scope).ok()?;
@@ -4794,8 +4811,8 @@ pub(crate) fn explicit_returns(
     exits.returns
 }
 
-/// Resolve an explicit return site to its indexed function. An implicit fallthrough
-/// points at the annotation, outside any return statement.
+/// Resolve an explicit return, or the annotation where ty reports a bottom
+/// function's implicit return, to its original scope.
 fn return_scope(db: &dyn Db, file: File, range: TextRange) -> Option<FileScopeId> {
     use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
     use ty_python_core::scope::NodeWithScopeRef;
@@ -4808,12 +4825,26 @@ fn return_scope(db: &dyn Db, file: File, range: TextRange) -> Option<FileScopeId
         return None;
     }
     let nodes = covering_node(AnyNodeRef::from(stmt), range);
-    let mut ancestors = nodes.ancestors();
-    ancestors.find(|node| matches!(node, AnyNodeRef::StmtReturn(_)))?;
-    let function = ancestors.find_map(|node| match node {
+    let mut explicit = false;
+    let function = nodes.ancestors().find_map(|node| match node {
+        AnyNodeRef::StmtReturn(_) => {
+            explicit = true;
+            None
+        }
         AnyNodeRef::StmtFunctionDef(function) => Some(function),
         _ => None,
     })?;
+    if !explicit {
+        let annotation = function.returns.as_deref()?;
+        if annotation.range() != range
+            || !matches!(
+                annotation_type(db, &SemanticModel::new(db, program), annotation),
+                Some(ty_python_semantic::types::Type::Never)
+            )
+        {
+            return None;
+        }
+    }
     Some(
         ty_python_core::semantic_index(db, program)
             .node_scope(NodeWithScopeRef::Function(function)),
