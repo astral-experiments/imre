@@ -81,7 +81,10 @@ struct OperandPlan {
 }
 
 impl OperandPlan {
-    fn new(root: &ast::Expr, is_async: bool) -> Self {
+    fn for_function(root: &ast::Expr, is_async: bool) -> Option<Self> {
+        if !is_async && !code_flags::yields_in_expression(root) {
+            return None;
+        }
         let mut sites = smallvec::SmallVec::new();
         let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
         work.push(root);
@@ -149,11 +152,7 @@ impl OperandPlan {
             }
         }
         sites.sort_unstable();
-        Self { sites }
-    }
-
-    fn for_function(expr: &ast::Expr, is_async: bool) -> Option<Self> {
-        (is_async || code_flags::yields_in_expression(expr)).then(|| Self::new(expr, is_async))
+        (!sites.is_empty()).then_some(Self { sites })
     }
 
     fn suspends(&self, expr: &ast::Expr) -> bool {
