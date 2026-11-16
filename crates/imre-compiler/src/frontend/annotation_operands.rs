@@ -3,39 +3,17 @@
 use indexmap::IndexMap;
 use ruff_python_ast as ast;
 use ruff_python_parser::Parsed;
-use ruff_text_size::{Ranged, TextRange};
+use ruff_text_size::Ranged;
 #[cfg(test)]
 use std::collections::HashMap;
 
 use super::registered::values::Region;
-use super::{
-    RegisteredOperand, RegisteredScope, RegisteredSource, annotation_expression,
-    annotation_spelling,
-};
+use super::{RegisteredFunction, RegisteredSource, annotation_expression, annotation_spelling};
 use crate::ir::{Builtin, Expr, ExprKind, Type};
 
 pub(crate) struct AnnotationBody<R> {
-    pub(crate) code: AnnotationCode,
+    pub(crate) code: Box<RegisteredFunction>,
     pub(crate) scope: R,
-}
-
-pub(crate) struct AnnotationCode {
-    pub(crate) range: TextRange,
-    pub(crate) operand: Box<RegisteredOperand>,
-}
-
-impl AnnotationCode {
-    pub(crate) fn prepare(expr: &ast::Expr, source: RegisteredSource<'_>) -> Option<Self> {
-        let operand = RegisteredOperand::prepare(
-            expr,
-            source,
-            RegisteredScope::Function { is_async: false },
-        )?;
-        Some(Self {
-            range: expr.range(),
-            operand: Box::new(operand),
-        })
-    }
 }
 
 pub(super) fn checked_annotation_value(
@@ -143,7 +121,7 @@ pub(super) fn test_annotation_body(
         private_names: None,
     };
     Some(AnnotationBody {
-        code: AnnotationCode::prepare(&parsed.syntax().body, source)?,
+        code: super::AnnotationExpression::Decoded.prepare(&parsed.syntax().body, source)?,
         scope: (),
     })
 }
@@ -220,7 +198,13 @@ mod tests {
         let sites = observe(&parsed.syntax().body, source, false, false);
         assert_eq!(sites.values.len(), 4);
         assert_eq!(sites.children.len(), 2);
-        let range = sites.children["list[int]"].code.range;
+        let [
+            crate::ir::Statement::Position(range, None),
+            crate::ir::Statement::Return(_),
+        ] = sites.children["list[int]"].code.function.body.as_slice()
+        else {
+            panic!("expected the decoded expression's position and return");
+        };
         assert_eq!((range.start().to_u32(), range.end().to_u32()), (0, 9));
         for (start, _) in text.match_indices("'list[int]'") {
             let start = TextSize::try_from(start).unwrap();

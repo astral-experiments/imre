@@ -25,7 +25,7 @@ use phase::{Diagnostic, Failure, Kind, Result, TypeDeclaration};
 
 mod annotation_operands;
 mod annotations;
-pub(crate) use annotation_operands::{AnnotationBody, AnnotationCode};
+pub(crate) use annotation_operands::AnnotationBody;
 pub(crate) use annotations::{parameter_annotations, spelling as annotation_spelling};
 pub(crate) use function_scope::ClassAnnotations;
 mod argparse;
@@ -131,7 +131,6 @@ mod required_sites;
 #[cfg(test)]
 pub(crate) use registered::booleans::{ExpressionInput, SourceOperand};
 pub(crate) use registered::booleans::{ExpressionSites, Selection as ExpressionSelection};
-pub(crate) use registered::type_alias_body;
 #[cfg(test)]
 pub(crate) use registered::values::registered_value;
 pub(crate) use registered::values::{
@@ -140,11 +139,11 @@ pub(crate) use registered::values::{
     validate_docstring_literals,
 };
 pub(crate) use registered::{
-    AnnotationProvider, CheckedProvider, DeclarationSite, FixedFunctions, FrameArguments,
-    FrameInputs, FrameSite, FrameSlots, LexicalOperands, NamedBody, ParameterAnnotations,
-    ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBody, RegisteredFunction,
-    RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite, SuitePreparation,
-    TypeParameterValues, annotation_expression, registered_sites,
+    AnnotationExpression, AnnotationProvider, CheckedProvider, DeclarationSite, FixedFunctions,
+    FrameArguments, FrameInputs, FrameSite, FrameSlots, LexicalOperands, NamedBody, OperandRefusal,
+    ParameterAnnotations, ParameterEvaluator, PhysicalOperand, PreparedRefusal, RegisteredBody,
+    RegisteredFunction, RegisteredGenerator, RegisteredLambda, RegisteredScope, RegisteredSuite,
+    SuitePreparation, TypeParameterValues, annotation_expression, registered_sites,
 };
 pub(crate) use registered::{LocalBinding, RegisteredClass, RegisteredOperand, RegisteredRegion};
 #[cfg(test)]

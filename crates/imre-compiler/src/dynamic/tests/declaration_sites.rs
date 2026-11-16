@@ -308,7 +308,6 @@ invalid: 'Child['
     assert!(
         !child("[x for x in Child]")
             .code
-            .operand
             .region()
             .private_slots()
             .is_empty()
@@ -343,7 +342,6 @@ invalid: 'Child['
     assert!(
         !child("t'{client.lookup(*args)}{[v for v in values]}'")
             .code
-            .operand
             .region()
             .private_slots()
             .is_empty()
@@ -351,7 +349,6 @@ invalid: 'Child['
     assert!(
         !child("resolve([Child for _ in (0,)])")
             .code
-            .operand
             .region()
             .private_slots()
             .is_empty()
