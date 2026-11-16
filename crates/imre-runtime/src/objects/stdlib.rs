@@ -648,65 +648,22 @@ fn format_named<'a>(
 ) -> crate::Result<Str> {
     // A long template can consist entirely of fields with empty replacements.
     let mut result = Str::default();
-    let mut rest = template;
-    while let Some(at) = memchr::memchr2(b'{', b'}', rest.as_bytes()) {
-        result.push_str(&rest[..at]);
-        let brace = rest.as_bytes()[at];
-        rest = &rest[at + 1..];
-        if rest.as_bytes().first() == Some(&brace) {
-            result.push(char::from(brace));
-            rest = &rest[1..];
+    let mut pos = 0;
+    while let Some(row) = crate::format_grammar::markup(template, &mut pos)
+        .map_err(|message| Error::new(Kind::ValueError, message))?
+    {
+        result.push_str(&template[row.literal]);
+        let Some(span) = row.field else {
             continue;
-        }
-        if brace == b'}' || rest.is_empty() {
-            return Err(Error::new(
-                Kind::ValueError,
-                if brace == b'}' {
-                    "Single '}' encountered in format string"
-                } else {
-                    "Single '{' encountered in format string"
-                },
-            ));
-        }
-        let Some(end) = rest.find(['{', '}', '!', ':']) else {
-            return Err(Error::new(
-                Kind::ValueError,
-                "expected '}' before end of string",
-            ));
         };
-        let (field_name, mut tail) = rest.split_at(end);
-        if tail.starts_with('{') {
-            return Err(Error::new(Kind::ValueError, "unexpected '{' in field name"));
-        }
+        let field_name = &template[span];
         let name = field_name.split(['.', '[']).next().unwrap();
-        let mut supported = name.len() == field_name.len();
-        let unmatched = || Error::new(Kind::ValueError, "unmatched '{' in format spec");
-        if let Some(conversion) = tail.strip_prefix('!') {
-            let mut chars = conversion.chars();
-            let flag = chars.next().ok_or_else(|| {
-                Error::new(
-                    Kind::ValueError,
-                    "end of string while looking for conversion specifier",
-                )
-            })?;
-            supported &= flag == 's';
-            tail = chars.as_str();
-            if !tail.is_empty() && !tail.starts_with([':', '}']) {
-                return Err(Error::new(
-                    Kind::ValueError,
-                    "expected ':' after conversion specifier",
-                ));
-            }
-        }
-        if let Some(spec) = tail.strip_prefix(':') {
-            let end = spec.find('}').ok_or_else(unmatched)?;
-            supported &= end == 0;
-            tail = &spec[end..];
-        }
-        rest = tail.strip_prefix('}').ok_or_else(unmatched)?;
         check_keyword_field(name)?;
         let text = field(name).ok_or_else(|| Error::string_key(Str::new(name)))?;
-        if !supported {
+        if name.len() != field_name.len()
+            || row.conversion.is_some_and(|span| &template[span] != "s")
+            || row.spec.is_some_and(|span| !span.is_empty())
+        {
             return Err(Error::new(
                 Kind::ValueError,
                 "Imre str.format supports plain named fields and !s",
@@ -719,7 +676,6 @@ fn format_named<'a>(
             }
         }
     }
-    result.push_str(rest);
     Ok(result)
 }
 
