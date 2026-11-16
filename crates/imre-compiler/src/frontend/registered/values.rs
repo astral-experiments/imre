@@ -1645,6 +1645,15 @@ impl Checker<'_> {
                         });
                     match contract {
                         Some(crate::analysis::ArgumentContract::Checked) => {}
+                        _ if matches!(
+                            signature.parameter_declarations.get(index),
+                            Some(ParameterOrigin::Stub)
+                        ) =>
+                        {
+                            // The Python callable receives the original object. The stub
+                            // describes a fixed layout usable when the operand matches.
+                            fixed_result = false;
+                        }
                         _ if actual == Type::PythonObject
                             && self.inference.is_none()
                             && (declaration.is_none()

@@ -5704,6 +5704,21 @@ else:
     }
 
     #[test]
+    fn a_stub_layout_does_not_discard_the_checked_python_call() {
+        let text =
+            "from textwrap import dedent\nif __name__ == '__main__':\n    print(dedent(0))\n";
+        let graph = checked_named_source(text);
+        let (_, initializers) = graph.take_registered_functions();
+        let mut calls = Vec::new();
+        ir::walk_expressions(&initializers[&graph.entry].function.body, &mut |expr| {
+            if let Some(site) = expr.python_call() {
+                calls.push(&text[site.range]);
+            }
+        });
+        assert!(calls.contains(&"dedent(0)"), "{calls:?}");
+    }
+
+    #[test]
     fn a_replaced_named_frame_keeps_its_source_error() {
         let dir = tempfile::tempdir().unwrap();
         let entry = dir.path().join("main.py");
