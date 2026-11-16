@@ -16,12 +16,10 @@ class Handler:
         self._closed = False
         self.createLock()
 
-    def handle(self, record: LogRecord | None) -> LogRecord | bool | None:
+    def filter(self, record: LogRecord | None) -> LogRecord | bool | None:
         if record is None:
             return None
         for item in self.filters:
             if not item.filter(record):
                 return False
-        with self.lock:
-            self.emit(record)
         return record

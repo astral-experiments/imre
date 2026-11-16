@@ -16,6 +16,11 @@ def handle_result(handler: logging.Handler, record: logging.LogRecord) -> None:
         print(rv is record)
 
 
+class RejectingStream(StreamHandler):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return False
+
+
 def exercise() -> None:
     child = logging.getLogger("delivery.child")
     parent = logging.getLogger("delivery")
@@ -46,6 +51,7 @@ def exercise() -> None:
     print(output.getvalue())
     record = logging.LogRecord("delivery.child", 30, "source.py", 7, "checked", (), None)
     handle_result(first, record)
+    handle_result(RejectingStream(output), record)
     first.filters.append(logging.Filter("different"))
     handle_result(first, record)
     handle_result(logging.NullHandler(), record)
