@@ -4271,6 +4271,11 @@ impl SourceScope<'_> {
                 |method, _, value| {
                     let ty = value.ty;
                     class
+                        || expr.is_unary_op_expr()
+                            && matches!(
+                                value.without_location().kind,
+                                ExprKind::Int(_) | ExprKind::Float(_)
+                            )
                         || ty == Type::Str
                             && method
                                 .and_then(ast::Expr::as_attribute_expr)
@@ -7179,6 +7184,20 @@ print(choose({left}), choose({right}))
             _ => panic!("expected a registered Python callable"),
         }
         graph
+    }
+
+    #[test]
+    fn written_assignments_accept_unary_operations_on_numeric_literals() {
+        let text = "x = 1 - ---1 * 1\ny = -+2.0\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let suite = registered_suite(
+            &module.parsed.syntax().body,
+            RegisteredScope::Function { is_async: false },
+            module.registered_values().context(text),
+        )
+        .expect("the written assignments should lower in their own frame");
+        crate::verify::registered(suite.region()).unwrap();
     }
 
     #[test]
