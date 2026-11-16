@@ -362,17 +362,30 @@ impl StatementLowering for Checker<'_> {
                     self.registered.is_some() && self.return_declaration.is_some()
                 };
             if !terminates && !source_result {
-                value = self
-                    .coerce(value, self.returns, &origin)
-                    .map_err(|failure| {
-                        if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
-                            failure
-                                .expected_from(self.return_declaration, origin)
-                                .classify(Kind::ReturnType)
-                        } else {
-                            failure
-                        }
-                    })?;
+                let expected = self.registered_result_contract.unwrap_or(self.returns);
+                let checked = if self.registered_result_contract.is_some()
+                    && value.ty == Type::PythonObject
+                {
+                    // The Python frame returns the original handle, even when its source
+                    // operand carries a checked type from a live call.
+                    let actual = value.checked_operand_type();
+                    if actual == Type::PythonObject {
+                        Ok(value)
+                    } else {
+                        self.expect(expected, actual, &origin).map(|()| value)
+                    }
+                } else {
+                    self.coerce(value, expected, &origin)
+                };
+                value = checked.map_err(|failure| {
+                    if matches!(&failure, Failure::Diagnostic(d) if d.kind == Kind::ExactType) {
+                        failure
+                            .expected_from(self.return_declaration, origin)
+                            .classify(Kind::ReturnType)
+                    } else {
+                        failure
+                    }
+                })?;
             }
             ret.value.as_deref()
         };

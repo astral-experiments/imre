@@ -361,6 +361,31 @@ impl<'session> OperandTypes<'session> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
 
+    /// The linked class that owns a nominal receiver at this physical operand.
+    pub(crate) fn instance_declaration(
+        self,
+        operand: &Expr,
+    ) -> Option<crate::modules::DefinitionId> {
+        use ty_python_semantic::types::Type;
+
+        let parsed = self.parsed();
+        let (original, _, owner) = self.original_operand(&parsed, operand.into())?;
+        let session = self.session;
+        let model = SemanticModel::new(&session.db, owner);
+        let ty @ Type::NominalInstance(_) = original.inferred_type(&model)? else {
+            return None;
+        };
+        let name = ty
+            .definition(&session.db, &model.program_environment())?
+            .focus_range(&session.db)?;
+        let module = session.files.iter().position(|&file| file == name.file())?;
+        let parsed = session.parsed(name.file());
+        let body = parsed.suite();
+        let statement = body.partition_point(|stmt| stmt.end() <= name.range().start());
+        (body.get(statement)?.as_class_def_stmt()?.name.range() == name.range())
+            .then_some(crate::modules::DefinitionId { module, statement })
+    }
+
     /// Check a boxed source operand against the defining class of a fixed instance.
     pub(crate) fn matches_instance(
         self,

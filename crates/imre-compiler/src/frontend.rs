@@ -1733,11 +1733,12 @@ fn lower_graph(
             && source_function
             && definition.returns.is_some()
             && signature.returns.builtin_scalar_name().is_some();
-        let live_return = live
-            && unavailable.is_some()
-            && !graph
+        let implicit_return = std::cell::LazyCell::new(|| {
+            graph
                 .session
-                .call_may_return_implicitly(*module_id, definition);
+                .call_may_return_implicitly(*module_id, definition)
+        });
+        let live_return = live && unavailable.is_some() && !*implicit_return;
         let procedure = inferred.is_none()
             && physical_function
             && signature
@@ -1786,6 +1787,35 @@ fn lower_graph(
                 recover_completed.set(true);
             }
             early_entry = Some(entry);
+        }
+        if live
+            && physical_function
+            && !procedure
+            && inferred.is_none()
+            && !prior_report
+            && matches!(source, Cow::Borrowed(_))
+            && fixed_frame_entry(definition)
+            && definition.returns.is_some()
+            && signature.returns.builtin_scalar_name().is_some()
+            && registered::SourceChecks::cached(graph, *module_id, definition.range()) == Some(true)
+            && *implicit_return
+        {
+            match registered::check_live_result(&checker, definition, signature, inference) {
+                Ok(Some(frame)) => {
+                    graph.register_function(*module_id, definition.start(), frame);
+                    continue;
+                }
+                Err(failure) if !failure.is_representation() => {
+                    if let Some(pending) = pending_capture.borrow_mut().as_mut() {
+                        pending.insert(signature.id, PreparedBody::Rejected);
+                    }
+                    if !refused(failure.terminal_in(graph, *module_id)) {
+                        break;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
         }
         let result = if let Some(body) = inferred {
             Ok(body)
@@ -2569,6 +2599,8 @@ enum PreparedBody {
     Fixed(CompletedBody),
     Attributes(HashMap<TextRange, FixedAttribute>),
     Python(registered::CheckedPlacement),
+    /// This definition already reported its checked source error.
+    Rejected,
 }
 
 type FunctionDefinition<'a> = (ModuleId, Cow<'a, ast::StmtFunctionDef>, Signature);
@@ -2734,7 +2766,10 @@ fn lower_function(
         match checker.returns {
             Type::None => {}
             // A registered frame returns the None handle on fallthrough.
-            Type::PythonObject if checker.registered.is_some() => {}
+            Type::PythonObject
+                if checker.registered.is_some()
+                    && (checker.registered_result_contract.is_none()
+                        || checker.assigned.suppressed_exit) => {}
             Type::PythonObject
                 if definition.returns.as_deref().is_some_and(|value| {
                     checker
@@ -4093,6 +4128,8 @@ struct Checker<'a> {
     python_method_frame: bool,
     /// The graph keeps this physical function's declaration and first-party call edges.
     checked_call_contracts: bool,
+    /// The explicit return operand contract of a function whose execution uses a Python result.
+    registered_result_contract: Option<Type>,
     /// An enclosing fixed checker will validate the final source statement before using this frame.
     fixed_checks_tail: bool,
     /// A result trial can finish its last statement even when the native result
@@ -4255,6 +4292,7 @@ impl<'a> Checker<'a> {
             unevaluated_views: Vec::new(),
             python_method_frame: false,
             checked_call_contracts: false,
+            registered_result_contract: None,
             boxed_calls: None,
             fixed_checks_tail: false,
             python_result_tail: None,
@@ -8124,7 +8162,13 @@ impl<'a> Checker<'a> {
                             }
                             Ok(manager)
                         },
-                        |cx, suite, output| cx.lower_block(suite, Some(output)),
+                        |cx, suite, output| {
+                            let falls = cx.lower_block(suite, Some(output))?;
+                            if cx.registered_result_contract.is_some() && !falls {
+                                cx.assigned.suppressed_exit = true;
+                            }
+                            Ok(falls)
+                        },
                     );
                 }
                 let keep_body = !self.discarded_function_body();

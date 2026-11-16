@@ -1,5 +1,6 @@
 //! Lower values evaluated against a registered Python scope into the expression IR.
 use super::*;
+use crate::classes::MethodKind;
 use crate::ir::DisplayKind;
 use std::collections::BTreeSet;
 
@@ -1611,6 +1612,25 @@ impl Checker<'_> {
         None
     }
 
+    fn checked_receiver_class(&self, receiver: &ast::Expr) -> Option<usize> {
+        if let Some(name) = receiver.as_name_expr()
+            && let Some(&slot) = self.names.get(name.id.as_str())
+            && let Type::Class(class) = self.locals[slot]
+        {
+            return Some(class);
+        }
+        // A sealed compiler namespace has no user-class method declaration.
+        if matches!(self.resolve(receiver), Some(Binding::IntrinsicModule(_))) {
+            return None;
+        }
+        let declaration = self
+            .graph
+            .session
+            .operand_types(self.module)
+            .instance_declaration(receiver)?;
+        self.classes.declarations.ids.get(&declaration).copied()
+    }
+
     pub(in crate::frontend) fn registered_operand(
         &mut self,
         node: &ast::Expr,
@@ -1676,7 +1696,25 @@ impl Checker<'_> {
                     .map(|(method, receiver)| (Some(method), usize::from(receiver.is_some()), None))
             }
             Some(call)
-                if self.checked_call_contracts
+                if self.registered_result_contract.is_some()
+                    && let Some(method) = source.direct_method(call)
+                    && let Some(class) = self.checked_receiver_class(&method.value)
+                    && let Some(signature) =
+                        self.classes.methods[class].get(method.attr.as_str())
+                    && let Some(context) = signature.method
+                    && let kind @ (MethodKind::Instance
+                    | MethodKind::Class
+                    | MethodKind::Static) = context.kind(self.classes.declarations) =>
+            {
+                Some((
+                    Some(signature),
+                    usize::from(kind != MethodKind::Static),
+                    None,
+                ))
+            }
+            Some(call)
+                if (self.checked_call_contracts
+                    || self.registered_result_contract.is_some() && call.func.is_name_expr())
                     && let Some(Binding::Definition(id)) = self.resolve(&call.func)
                     && !self.classes.declarations.ids.contains_key(&id) =>
             {
@@ -1732,18 +1770,19 @@ impl Checker<'_> {
         {
             let refused = || self.scoped_builtin_error("declared Python call", call);
             let signature = signature.ok_or_else(refused)?;
-            if !call.func.is_name_expr() {
-                return Err(refused());
-            }
             let indices = calls::checked_parameter_indices(call, &signature.params[skip..])
                 .ok_or_else(refused)?;
-            let target = self.expr(&call.func)?;
+            if !call.func.is_name_expr() && self.registered_result_contract.is_none() {
+                return Err(refused());
+            }
+            let (binding, target) = source.call_target(call);
+            let target = self.expr(target)?;
             // A live Python argument can satisfy an inferred layout only at dispatch.
             // Forward it unchanged and leave the result untyped on that edge.
             let mut fixed_result = true;
             // Positional calls use their written order. Keyword calls already have a slot per operand.
             let mut indices = indices.into_iter().chain(0..call.arguments.len());
-            let value = callable_target(call).prepare(call, target, |arg| {
+            let value = binding.prepare(call, target, |arg| {
                 let index = skip + indices.next().expect("checked parameter for each argument");
                 let parameter = &signature.params[index];
                 let value = self.expr(arg)?;
@@ -1804,6 +1843,14 @@ impl Checker<'_> {
             let fixed_result = fixed_result
                 && !signature.asynchronous
                 && !self.classes.generators.contains(&signature.id);
+            if self.registered_result_contract.is_some() {
+                // Keep the checked result hint on the handle. The Python namespace
+                // owns the callable, so this frame needs no native call edge.
+                if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
+                    *hint = Some(signature.returns);
+                }
+                return Ok(Some(located));
+            }
             let boxed = self.boxed_calls.is_some()
                 && located.ty == Type::PythonObject
                 && located.python_call().is_some()
