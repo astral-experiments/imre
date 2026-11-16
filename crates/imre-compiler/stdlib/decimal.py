@@ -78,10 +78,7 @@ def _canonical(value: str) -> str:
     result = sign + digits[:1]
     if len(digits) > 1:
         result += "." + digits[1:]
-    adjusted = point - 1
-    if adjusted >= 0:
-        return result + "E+" + str(adjusted)
-    return result + "E" + str(adjusted)
+    return result + ("E%+d" % (point - 1))
 
 
 def _parts(text: str) -> tuple[str, int]:
