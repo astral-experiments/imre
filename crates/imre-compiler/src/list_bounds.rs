@@ -116,6 +116,12 @@ impl Analysis<'_> {
     fn block(&mut self, body: &mut [Statement], state: &mut State) {
         for statement in body {
             match statement {
+                Statement::ContainerFor(input) => {
+                    self.expression(&mut input.iterable, state);
+                    state.fill(None);
+                    self.block(&mut input.body, state);
+                    state.fill(None);
+                }
                 Statement::Assign(slot, value) => {
                     let fact = self.expression(value, state);
                     state[*slot] = fact;

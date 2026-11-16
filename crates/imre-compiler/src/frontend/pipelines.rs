@@ -50,6 +50,106 @@ pub(super) struct IndexedPull {
     pub(super) advance: Statement,
 }
 
+impl IndexedPull {
+    pub(super) fn over(
+        iterable: Expr,
+        [source, index]: [usize; 2],
+        acquire: &mut Vec<Statement>,
+    ) -> Self {
+        let ty = iterable.ty;
+        acquire.push(Statement::Assign(source, iterable));
+        Self::at(
+            index,
+            false,
+            || collection_length(Expr::local(source, ty)),
+            acquire,
+        )
+    }
+
+    fn at(
+        cursor: usize,
+        reverse: bool,
+        length: impl Fn() -> Expr,
+        acquire: &mut Vec<Statement>,
+    ) -> Self {
+        acquire.push(Statement::Assign(
+            cursor,
+            if reverse {
+                binary(Binary::Subtract, length(), Expr::integer(1))
+            } else {
+                Expr::integer(0)
+            },
+        ));
+        let in_bounds = compare(Compare::Less, Expr::local(cursor, Type::Int), length());
+        let available = if reverse {
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Boolean(
+                    true,
+                    vec![
+                        compare(
+                            Compare::GreaterEqual,
+                            Expr::local(cursor, Type::Int),
+                            Expr::integer(0),
+                        ),
+                        in_bounds,
+                    ],
+                ),
+            }
+        } else {
+            in_bounds
+        };
+        let direction = if reverse {
+            Binary::Subtract
+        } else {
+            Binary::Add
+        };
+        let advance = Statement::Assign(
+            cursor,
+            binary(direction, Expr::local(cursor, Type::Int), Expr::integer(1)),
+        );
+        IndexedPull {
+            slot: cursor,
+            available,
+            advance,
+        }
+    }
+}
+
+impl ir::ContainerFor {
+    pub(crate) fn fixed(self) -> Statement {
+        let Self {
+            slots: [source, index],
+            iterable,
+            target,
+            body,
+            item,
+            ..
+        } = self;
+        let mut acquire = Vec::new();
+        let step = IndexedPull::over(iterable, [source, index], &mut acquire);
+        let mut next = vec![Statement::Assign(target, *item), step.advance];
+        next.extend(body);
+        acquire.push(Statement::While(step.available, next, Vec::new()));
+        Statement::Scope {
+            body: acquire,
+            clear: vec![source, index],
+        }
+    }
+}
+
+impl Statement {
+    /// Native range and fusion analysis consumes the selected indexed cursor.
+    pub(crate) fn select_native_loop(&mut self) {
+        if matches!(self, Statement::ContainerFor(_)) {
+            let Statement::ContainerFor(input) = std::mem::replace(self, Statement::Exhaust) else {
+                unreachable!()
+            };
+            *self = input.fixed();
+        }
+    }
+}
+
 /// Read the current length of a concrete collection.
 pub(super) fn collection_length(source: Expr) -> Expr {
     Expr {
@@ -1902,43 +2002,7 @@ impl<'s> Checker<'s> {
                 collection_length(source)
             }
         };
-        acquire.push(Statement::Assign(
-            cursor,
-            if reverse {
-                binary(Binary::Subtract, length(), Expr::integer(1))
-            } else {
-                Expr::integer(0)
-            },
-        ));
-        let in_bounds = compare(Compare::Less, self.local(cursor), length());
-        let available = if reverse {
-            Expr {
-                ty: Type::Bool,
-                kind: ExprKind::Boolean(
-                    true,
-                    vec![
-                        compare(Compare::GreaterEqual, self.local(cursor), Expr::integer(0)),
-                        in_bounds,
-                    ],
-                ),
-            }
-        } else {
-            in_bounds
-        };
-        let direction = if reverse {
-            Binary::Subtract
-        } else {
-            Binary::Add
-        };
-        let advance = Statement::Assign(
-            cursor,
-            binary(direction, self.local(cursor), Expr::integer(1)),
-        );
-        IndexedPull {
-            slot: cursor,
-            available,
-            advance,
-        }
+        IndexedPull::at(cursor, reverse, length, acquire)
     }
 
     /// List cursors re-read the live length; reverse cursors capture only their

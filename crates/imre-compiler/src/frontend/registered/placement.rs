@@ -1251,6 +1251,39 @@ mod tests {
     }
 
     #[test]
+    fn placed_container_loop_keeps_the_checked_suite_and_acquires_the_live_global() {
+        let text = concat!(
+            "from pathlib import Path\nimport shutil\n",
+            "NAMES = ('first', 'second')\n",
+            "def copy(source: Path, destination: Path) -> None:\n",
+            "    for name in (\n        NAMES\n    ):\n",
+            "        shutil.copy2(source / name, destination / name)\n",
+            "def patches(root: Path) -> list[Path]:\n",
+            "    return sorted(root.glob('*.patch'))\n",
+            "copy(Path('source'), Path('destination'))\n",
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowered) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        assert_eq!(lowered.iter().filter(|name| *name == "copy").count(), 1);
+        let copy = TextSize::try_from(text.find("def copy").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&copy];
+        assert!(matches!(
+            frame.function.body.as_slice(),
+            [Statement::ContainerFor(input)] if input.body.len() == 1 && &text[input.range] == "NAMES"
+        ));
+        assert!(frame.fixed_sites.iter().any(|site| &text[*site] == "NAMES"
+            && matches!(
+                frame.fixed_attribute(*site),
+                Some(FixedAttribute::ModuleName(_))
+            )));
+    }
+
+    #[test]
     fn file_object_recovery_places_the_checked_arithmetic_body() {
         let text = concat!(
             "def scale(n: int) -> int:\n    return n * 31415927 + 17\n\n",

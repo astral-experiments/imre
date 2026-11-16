@@ -977,6 +977,7 @@ impl Checker<'_> {
             input,
             &[],
             before_iteration,
+            None,
             |checker, body| {
                 let slot = checker.names[&name];
                 let statements = consume(checker, checker.local(slot))?;

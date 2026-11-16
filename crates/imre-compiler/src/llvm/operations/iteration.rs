@@ -170,6 +170,10 @@ impl CheckedBody<'_, '_, '_, '_> {
     }
 
     pub(super) fn scoped_suite(&mut self, statements: &[Statement], clear: &[usize]) {
+        self.in_slot_scope(clear, |this| this.emit_block(statements));
+    }
+
+    fn in_slot_scope(&mut self, clear: &[usize], body: impl FnOnce(&mut Self)) {
         let cursor_unwind = match &mut self.0 {
             Entry::Native(e) => {
                 e.push_slot_cleanup(clear);
@@ -181,7 +185,7 @@ impl CheckedBody<'_, '_, '_, '_> {
                 unwind
             }
         };
-        self.emit_block(statements);
+        body(self);
         match &mut self.0 {
             Entry::Native(e) => {
                 e.cleanups.pop();
@@ -243,6 +247,17 @@ impl CheckedBody<'_, '_, '_, '_> {
         result
     }
 
+    pub(super) fn container_suite(
+        &mut self,
+        statement: &Statement,
+        input: &crate::ir::ContainerFor,
+    ) {
+        self.in_slot_scope(&input.slots, |this| {
+            this.python().begin_container(input);
+            this.while_suite(statement, &Expr::boolean(true), &input.body, &[]);
+        });
+    }
+
     pub(super) fn while_suite(
         &mut self,
         stmt: &Statement,
@@ -295,7 +310,11 @@ impl CheckedBody<'_, '_, '_, '_> {
                 } else if let Some(mark) = &mark {
                     this.python().begin_step(mark);
                 }
-                this.branch_condition(test, yes, no);
+                if matches!(stmt, Statement::ContainerFor(_)) {
+                    this.jump_open(yes);
+                } else {
+                    this.branch_condition(test, yes, no);
+                }
             },
             |this, edges, ()| {
                 match &mut this.0 {
@@ -307,6 +326,9 @@ impl CheckedBody<'_, '_, '_, '_> {
                         raw_subtotal: optimized.as_ref().and_then(|(_, _, s)| s.clone()),
                     }),
                     Entry::Registered(f) => f.enter_loop(edges),
+                }
+                if let Statement::ContainerFor(input) = stmt {
+                    this.python().container_item(input, &edges.exhausted);
                 }
                 this.emit_block(body);
                 match &mut this.0 {

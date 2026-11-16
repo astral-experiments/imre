@@ -527,7 +527,7 @@ fn object_fallback(
                 let error = match lower(&mut graph, cache.as_deref_mut(), call_error)? {
                     CheckedProgram::Registered(reason) => break reason,
                     CheckedProgram::Native(mut fixed) => {
-                        let (module, owners) = &mut fixed.ir;
+                        let module = &mut fixed.ir.0;
                         verify_after(module, "lowering")?;
                         match callables::layouts(module, std::mem::take(&mut fixed.callables)) {
                             Ok(program) => {
@@ -540,6 +540,8 @@ fn object_fallback(
                                 let Some(output) = output.as_deref_mut() else {
                                     return Ok(graph.inputs);
                                 };
+                                fixed.prepare_native_sources(&graph);
+                                let (module, owners) = &mut fixed.ir;
                                 for original in specialize(module)? {
                                     owners.push(owners[original]);
                                 }
@@ -1104,6 +1106,11 @@ pub(crate) struct FixedProgram {
 
 impl FixedProgram {
     fn prepare_native_sources(&mut self, graph: &modules::SourceGraph) {
+        for function in &mut self.ir.0.functions {
+            for statement in &mut function.body {
+                statement.select_native_loop();
+            }
+        }
         // The registered launcher inventories its own winning providers. Only a
         // committed native entry needs the fixed graph's built-in module list.
         if self.uses_builtin_module_names {

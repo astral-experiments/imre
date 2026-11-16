@@ -358,6 +358,7 @@ impl Plan<'_> {
                 | Statement::AugmentItem(..)
                 | Statement::SetField(..)
                 | Statement::AugmentField(..)
+                | Statement::ContainerFor(_)
                 | Statement::While(..)
                 | Statement::For { .. }
                 | Statement::IterNext { .. }

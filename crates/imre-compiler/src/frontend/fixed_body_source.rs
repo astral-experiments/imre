@@ -24,10 +24,7 @@ impl FixedBodySource {
 
     /// Place the owned operations only if every physical site still belongs to them.
     /// The ordinary Python binder can still use the resolved attributes if placement fails.
-    pub(crate) fn place(self, function: ir::Function) -> PlacedBody {
-        if self.local_names.len() != function.locals.len() {
-            return Err(self.attributes);
-        }
+    pub(crate) fn place(self, mut function: ir::Function) -> PlacedBody {
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
         let mut python_arguments = self.arguments == FrameArguments::Python;
@@ -42,7 +39,10 @@ impl FixedBodySource {
             let Some((range, Some(expected))) = sites.next() else {
                 return false;
             };
-            python_arguments |= matches!(expected, FixedNode::StoreField(..));
+            python_arguments |= matches!(
+                expected,
+                FixedNode::StoreField(..) | FixedNode::Container(..)
+            );
             if !expected.matches_in(&node, condition, parent, |expr| {
                 let attr = self.attributes.get(&range)?;
                 let next = sites.as_slice().first().map(|site| site.0);
@@ -50,6 +50,14 @@ impl FixedBodySource {
                 Some(FixedNode::indexed(&expr.kind, args.len(), expr.ty))
             }) {
                 return false;
+            }
+            if let ir::Node::Statement(Statement::ContainerFor(input)) = node {
+                for slot in input.slots {
+                    let Some(ty) = function.locals.get_mut(slot) else {
+                        return false;
+                    };
+                    *ty = Type::PythonObject;
+                }
             }
             fixed_sites.push(range);
             true
@@ -72,9 +80,11 @@ impl FixedBodySource {
             frame_slots: Default::default(),
             fixed_attributes: (!self.attributes.is_empty()).then(|| Box::new(self.attributes)),
         };
-        if matches!(frame.inputs, FrameInputs::Checked { .. })
+        if (matches!(frame.inputs, FrameInputs::Checked { .. })
             && python_arguments
-            && !frame.bind_python_arguments()
+            && !frame.bind_python_arguments())
+            || frame.local_names.len() + frame.frame_slots.slots().len()
+                != frame.function.locals.len()
         {
             return Err(frame
                 .fixed_attributes
@@ -149,6 +159,7 @@ impl FixedAttribute {
 pub(super) enum FixedNode {
     Position(TextRange),
     Return,
+    Container(usize, TextRange),
     Effect,
     Raise {
         cause: bool,
@@ -278,6 +289,9 @@ impl FixedNode {
                 && let ir::ExceptionMatcher::WrittenCategory(kind, range, _) = &handler.matcher =>
             {
                 Self::TryExcept(body.len(), *kind, *range, handler.body.len())
+            }
+            ir::Node::Statement(Statement::ContainerFor(loop_)) => {
+                Self::Container(loop_.target, loop_.range)
             }
             ir::Node::Statement(Statement::Return(_)) => Self::Return,
             ir::Node::Statement(Statement::Expr(_)) => Self::Effect,
@@ -423,6 +437,7 @@ pub(super) struct SourceSites {
     sites: Vec<(TextRange, Option<FixedNode>)>,
     current: Option<PendingSite>,
     next_index: usize,
+    private_slots: usize,
 }
 
 impl SourceSites {
@@ -788,7 +803,7 @@ impl SourceSites {
         true
     }
 
-    fn first_operand(&self, range: TextRange, value: &Expr) -> Option<usize> {
+    pub(super) fn first_operand(&self, range: TextRange, value: &Expr) -> Option<usize> {
         let index = self.current?.index + 1;
         let (written, original) = self.sites.get(index)?;
         (*written == range && original.as_ref()?.matches(&ir::Node::Expression(value)))
@@ -813,6 +828,14 @@ impl SourceSites {
         {
             self.commit(site, node);
         }
+    }
+
+    pub(super) fn container_loop(&mut self, input: ir::ContainerFor) -> Statement {
+        let range = input.range;
+        self.private_slots += input.slots.len();
+        let statement = Statement::ContainerFor(input);
+        self.statement(range, &statement);
+        statement
     }
 
     /// The Python frame stores through the actual receiver at the original attribute range.
@@ -852,10 +875,11 @@ impl SourceSites {
         method: Option<&crate::classes::MethodSource>,
         arguments: FrameArguments,
     ) -> Option<FixedBodySource> {
+        let named_slots = locals.len().checked_sub(self.private_slots)?;
         if body.is_empty()
             || self.current.is_some()
             || source_statements != body.len()
-            || names.len() != locals.len()
+            || names.len() != named_slots
         {
             return None;
         }
@@ -875,7 +899,7 @@ impl SourceSites {
                 ))
             })
             .collect::<Option<_>>()?;
-        if local_names.len() != locals.len() {
+        if local_names.len() != named_slots {
             return None;
         }
         Some(FixedBodySource {

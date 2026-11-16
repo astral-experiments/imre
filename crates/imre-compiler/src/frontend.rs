@@ -6431,7 +6431,31 @@ impl<'a> Checker<'a> {
             iterable.ty = self.types.tuple(vec![Type::Str; values.len()]);
             iterable.kind = ExprKind::Tuple(std::mem::take(values));
         }
-        if index.is_none()
+        // Only the function's own statements retain a cursor until its calling convention is chosen.
+        let written = if !self.module_scope
+            && self.block_depth == 1
+            && !loop_.is_async
+            && !self.asynchronous
+            && loop_.orelse.is_empty()
+            && target.is_name_expr()
+            && index.is_none()
+            && let Iteration::Container {
+                iterable,
+                items: false,
+            } = &input
+            && (self.types.homogeneous_tuple_element(iterable.ty).is_some()
+                || self.types.element(iterable.ty).is_some())
+            && self
+                .fixed_sites
+                .as_ref()
+                .is_some_and(|s| s.first_operand(loop_.iter.range(), iterable).is_some())
+        {
+            Some(loop_.iter.range())
+        } else {
+            None
+        };
+        if written.is_none()
+            && index.is_none()
             && matches!(&input, Iteration::Container { iterable, items: false }
             if matches!(iterable.ty, Type::Tuple(_)) || self.consumes_list(iterable.ty, loop_.iter.range()))
         {
@@ -6456,6 +6480,7 @@ impl<'a> Checker<'a> {
             input,
             &loop_.orelse,
             Vec::new(),
+            written,
             |checker, body| {
                 if let Some(domain) = item_strings
                     && let Some(name) = loop_.target.as_name_expr()
@@ -6563,6 +6588,7 @@ impl<'a> Checker<'a> {
         input: Iteration,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,
+        written: Option<TextRange>,
         lower_body: impl FnOnce(&mut Self, &mut Vec<Statement>) -> Result<bool, String>,
     ) -> Result<(Vec<Statement>, bool), String> {
         if let Iteration::Prepared(input) = input {
@@ -6612,7 +6638,8 @@ impl<'a> Checker<'a> {
         let Iteration::Container { iterable, items } = input else {
             unreachable!("range iteration returned above")
         };
-        if !items
+        if written.is_none()
+            && !items
             && (matches!(iterable.ty, Type::Tuple(_))
                 || self.types.sequence_union_element(iterable.ty).is_some())
         {
@@ -6663,6 +6690,7 @@ impl<'a> Checker<'a> {
         let element = self
             .types
             .iteration_element(iterable.ty, items)
+            .or_else(|| written.and_then(|_| self.types.homogeneous_tuple_element(iterable.ty)))
             .ok_or_else(|| {
                 let reason = error(
                     self.source,
@@ -6712,12 +6740,10 @@ impl<'a> Checker<'a> {
         let mut body = Vec::new();
         let (item, pull, step) = if indexed {
             let source = self.hidden(iterable.ty);
-            output.push(Statement::Assign(source, iterable));
-            cleanup.push(source);
-            let index = self.indexed_pull(source, false, &mut output, &mut cleanup);
+            let index = self.hidden(Type::Int);
             let item =
-                pipelines::indexed_item(self.local(source), self.local(index.slot), element, false);
-            (item, None, Some(index))
+                pipelines::indexed_item(self.local(source), self.local(index), element, false);
+            (item, None, Some((iterable, [source, index])))
         } else {
             let (key_type, value_type) = mapping.expect("items iteration requires a dictionary");
             let iterator = self.hidden(Type::Iterator);
@@ -6751,7 +6777,7 @@ impl<'a> Checker<'a> {
         if let Some(index) = index {
             self.store_value(
                 index,
-                self.local(step.as_ref().expect("indexed enumeration").slot),
+                self.local(step.as_ref().expect("indexed enumeration").1[1]),
                 None,
                 Some(&mut body),
             )?;
@@ -6762,12 +6788,31 @@ impl<'a> Checker<'a> {
             cleanup.extend([key, value]);
             body.extend([key, value].map(Statement::Clear));
         }
-        let test = match step {
-            Some(index) => {
-                body.push(index.advance);
-                index.available
+        let mut source = None;
+        let test = if let Some((iterable, slots)) = step {
+            if let Some(range) = written
+                && matches!(body.as_slice(), [Statement::Assign(..)])
+            {
+                let Some(Statement::Assign(target, item)) = body.pop() else {
+                    unreachable!()
+                };
+                source = Some(ir::ContainerFor {
+                    iterable,
+                    slots,
+                    range,
+                    target,
+                    item: Box::new(item),
+                    body: Vec::new(),
+                });
+                None
+            } else {
+                cleanup.extend(slots);
+                let step = pipelines::IndexedPull::over(iterable, slots, &mut output);
+                body.push(step.advance);
+                Some(step.available)
             }
-            None => Expr::boolean(true),
+        } else {
+            None
         };
         self.loop_breaks.push(None);
         let emit = lower_body(self, &mut body)?;
@@ -6778,9 +6823,18 @@ impl<'a> Checker<'a> {
         if !emit {
             return Ok((Vec::new(), falls));
         }
+        if let Some(mut input) = source {
+            input.body = body;
+            let operation = if let Some(sites) = &mut self.fixed_sites {
+                sites.container_loop(input)
+            } else {
+                input.fixed()
+            };
+            return Ok((vec![operation], falls));
+        }
         output.extend(before_iteration);
         let output = pipelines::scoped_loop(output, cleanup, orelse, |orelse| {
-            Statement::While(test, body, orelse)
+            Statement::While(test.unwrap_or_else(|| Expr::boolean(true)), body, orelse)
         });
         Ok((output, falls))
     }

@@ -3948,6 +3948,19 @@ impl StoreField {
     }
 }
 
+/// A checked target binding and suite. The calling convention selects native
+/// indexing or Python iteration over the written iterable.
+#[derive(Clone)]
+pub(crate) struct ContainerFor {
+    pub(crate) iterable: Expr,
+    pub(crate) range: ruff_text_size::TextRange,
+    pub(crate) target: usize,
+    pub(crate) slots: [usize; 2],
+    pub(crate) body: Vec<Statement>,
+    /// The actual typed right-hand side returned by the target binder.
+    pub(crate) item: Box<Expr>,
+}
+
 #[derive(Clone)]
 pub(crate) enum Statement {
     /// An original statement checkpoint and its optional call without a separate highlight.
@@ -3981,6 +3994,8 @@ pub(crate) enum Statement {
         body: Vec<Statement>,
         orelse: Vec<Statement>,
     },
+    /// A source for-loop whose frame has not yet selected its cursor.
+    ContainerFor(ContainerFor),
     /// Transfers iterator results into owned output locals only on success.
     /// `ready` is always written; exhausted cursors preserve both output locals.
     IterNext {
@@ -4101,6 +4116,10 @@ macro_rules! statement_children {
                     }
                     ($suite)(body);
                 }
+            }
+            Statement::ContainerFor(ContainerFor { iterable, body, .. }) => {
+                ($expression)(iterable);
+                ($suite)(body);
             }
             Statement::If(test, yes, no) | Statement::While(test, yes, no) => {
                 ($expression)(test);
@@ -4304,7 +4323,9 @@ pub(crate) fn contains_loop(body: &[Statement]) -> bool {
     let loop_free = all_nodes(body, &mut |node, _| {
         !matches!(
             node,
-            Node::Statement(Statement::For { .. } | Statement::While(..))
+            Node::Statement(
+                Statement::For { .. } | Statement::While(..) | Statement::ContainerFor(_)
+            )
         )
     });
     !loop_free
@@ -4610,6 +4631,12 @@ fn node_writes(node: Node<'_>, visit: &mut impl FnMut(usize, Option<&Expr>)) {
     };
     match statement {
         Statement::Assign(slot, value) => visit(*slot, Some(value)),
+        Statement::ContainerFor(input) => {
+            visit(input.target, None);
+            for slot in input.slots {
+                visit(slot, None);
+            }
+        }
         Statement::Match(_, cases) => {
             for &slot in cases.iter().flat_map(|case| &case.captures) {
                 visit(slot, None);
