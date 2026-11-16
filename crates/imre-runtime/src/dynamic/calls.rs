@@ -393,8 +393,7 @@ impl Context {
         let value = result?;
         if let Some(check) = check {
             self.require_scalar(
-                check.callable,
-                "return",
+                Some((check.callable, "return")),
                 value,
                 (check.declared.0, None),
                 false,
@@ -9946,8 +9945,7 @@ impl Context {
                             .then_some(canonical)
                     });
                     self.require_scalar(
-                        function,
-                        param,
+                        Some((function, param)),
                         id,
                         (builtin.or_else(|| expected.as_str()), target),
                         sig.integer_sign_parameters[param] == true,
@@ -10140,10 +10138,10 @@ impl Context {
         Ok(target.map_or(ScalarAnnotation::Unresolved, ScalarAnnotation::Value))
     }
 
-    fn require_scalar(
+    /// A local's indexed contract needs no lookup in a function's published annotations.
+    pub(super) fn require_scalar(
         &self,
-        function: Id,
-        slot: &str,
+        callable_slot: Option<(Id, &str)>,
         value: Id,
         declaration: (Option<&str>, Option<Id>),
         integer_sign: bool,
@@ -10160,11 +10158,13 @@ impl Context {
         };
         let boxed = self.heap.get(value);
         let (expected, checked_builtin) = declaration;
-        let integer_argument = slot != "return" && matches!(boxed, Value::Int(_));
-        let annotation = if let Some(target) = checked_builtin {
-            ScalarAnnotation::Value(target)
-        } else {
-            self.checked_annotation(function, slot, integer_argument)?
+        let argument = callable_slot.is_some_and(|(_, slot)| slot != "return");
+        let annotation = match (checked_builtin, callable_slot) {
+            (Some(target), _) => ScalarAnnotation::Value(target),
+            (None, Some((function, slot))) => {
+                self.checked_annotation(function, slot, argument && matches!(boxed, Value::Int(_)))?
+            }
+            (None, None) => ScalarAnnotation::Unresolved,
         };
         let target = match annotation {
             ScalarAnnotation::Value(target) => Some(target),
@@ -10201,7 +10201,7 @@ impl Context {
             return Ok(());
         };
         // Resolved numeric arguments keep their original objects in the frame.
-        let resolved_argument = bound.is_some() && slot != "return";
+        let resolved_argument = bound.is_some() && argument;
         let accepted = match (expected, boxed) {
             ("int", Value::Bool(_)) => resolved_argument,
             ("float", Value::Int(_)) => resolved_argument || integer_sign,

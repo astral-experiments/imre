@@ -411,6 +411,12 @@ impl Context {
                 }
                 self.lookup(a, &name)
             }
+            "check_local_scalar" => {
+                let expected = self.str_value(b)?;
+                let declared = (Some(expected), self.builtins.get(expected).copied());
+                self.require_scalar(None, a, declared, false, format_args!("annotated local"))?;
+                Ok(a)
+            }
             "assign" | "assign_target" | "assign_named_target" => {
                 let name = self.copy_name(b)?;
                 let scope = if op == "assign_named_target" {

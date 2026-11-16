@@ -2583,6 +2583,8 @@ pub(crate) enum Builtin {
     RegisteredInput(usize),
     /// Evaluate each operand for its effects and release it before evaluating the next.
     RegisteredDiscard,
+    /// Validate an annotated local without replacing the stored Python object.
+    RegisteredLocalScalar(&'static str),
     /// Pass a completed interactive expression to the current sys.displayhook.
     RegisteredDisplayHook,
     /// The source position of this operand and its optional checked scalar type.

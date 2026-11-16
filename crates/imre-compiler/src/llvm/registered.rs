@@ -387,7 +387,7 @@ pub(crate) fn frame_inputs(
                 uses_python_protocol = true;
                 operands.is_empty()
             }
-            ExprKind::Builtin(Builtin::RegisteredIndexConstant(_), args) => args.len() == 1,
+            ExprKind::Builtin(Builtin::RegisteredIndexConstant(_) | Builtin::RegisteredLocalScalar(_), args) => args.len() == 1,
             ExprKind::Builtin(Builtin::RegisteredSlice, args) => matches!(args.len(), 2 | 3),
             ExprKind::Builtin(Builtin::DeleteItem | Builtin::RegisteredInPlace(_), args) => {
                 uses_python_protocol = true;
@@ -1545,6 +1545,11 @@ impl<'f> Frame<'f, '_, '_> {
                     .clone();
                 self.bind(&name, &value);
                 return CheckedValue::handle("0".into());
+            }
+            (Builtin::RegisteredLocalScalar(expected), [value]) => {
+                let value = self.evaluate_handle(value);
+                self.code
+                    .named_op("check_local_scalar", &value, expected, "0")
             }
             (Builtin::RegisteredIndexConstant(key), [value]) => self.index_constant(key, value),
             (Builtin::Slice, [receiver, rest @ ..]) => {

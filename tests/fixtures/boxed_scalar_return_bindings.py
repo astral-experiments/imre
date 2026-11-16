@@ -105,3 +105,12 @@ globals()["__debug__"] = b.str
 assert debug_annotation(23) == 23
 debug_annotation.__annotations__
 assert debug_annotation(23) == 23
+
+
+def checked_local(factory):
+    saved: b.int = factory()
+    return 73
+
+
+assert checked_local(lambda: 17) == 73
+reject(checked_local, lambda: "wrong")

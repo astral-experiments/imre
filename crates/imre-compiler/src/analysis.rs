@@ -361,6 +361,21 @@ impl<'session> OperandTypes<'session> {
         self.checked_scalar(operand.into(), ScalarMatch::Assignable)
     }
 
+    /// Resolve a local annotation once, without evaluating its Python spelling.
+    pub(crate) fn local_scalar_annotation(self, annotation: &Expr) -> Option<crate::ir::Type> {
+        let parsed = self.parsed();
+        let (original, _, file) = self.original_operand(&parsed, annotation.into())?;
+        let db = &self.session.db;
+        let model = SemanticModel::new(db, file);
+        let declared = annotation_type(db, &model, original)?;
+        Session::scalar_layout(
+            db,
+            &model.program_environment(),
+            declared,
+            ScalarMatch::Exact,
+        )
+    }
+
     /// Check the source contract of an argument that stays boxed for a live call.
     pub(crate) fn argument_contract(
         self,

@@ -718,6 +718,7 @@ impl Builtin {
             | Self::RegisteredDiscard
             | Self::RegisteredDisplayHook
             | Self::RegisteredName(_)
+            | Self::RegisteredLocalScalar(_)
             | Self::RegisteredInPlace(_)
             | Self::RegisteredAttribute { .. }
             | Self::RegisteredSpread
