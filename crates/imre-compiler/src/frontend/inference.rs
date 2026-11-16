@@ -1361,10 +1361,7 @@ impl Inference {
                             classes.parsers.has_fixed_call(*module, range)
                         })
                 {
-                    if !graph.registered_startup
-                        && !checker.fault_enabled()
-                        && signature.params.is_empty()
-                    {
+                    if !checker.fault_enabled() && signature.params.is_empty() {
                         checker.placement_only = false;
                         return_body = Some((Vec::new(), Vec::new()));
                         method_storage = Some((helpers.len(), globals.types().len()));
@@ -1659,7 +1656,10 @@ impl Inference {
                         // With a literal description, the schema and process argv need no other
                         // signature or module storage. Keep the operation that settled the return.
                         checker.returns = value.ty;
-                        let result = checker.completed_body(std::mem::take(params), std::mem::take(body), None, false);
+                        // The Python launcher will bind and call the live parser. Its native
+                        // slot needs the checked return type, but has no instructions to emit.
+                        let body = if graph.registered_startup { Vec::new() } else { std::mem::take(body) };
+                        let result = checker.completed_body(std::mem::take(params), body, None, false);
                         local_returns.insert(signature.id, PreparedBody::Fixed(result));
                     } else if let Some((params, body)) = return_body
                         && checked_return && !checked_call_cannot_return && body_revision == revision
