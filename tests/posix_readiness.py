@@ -178,7 +178,11 @@ def main():
     reports = {"select": [], "poll": [], "selectors": []}
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        def build(source, level, timeout=180):
+        def build(source, level):
+            selector_fixture = source in (
+                HERE / "selector_reuse.py", HERE / "boxed_fileobjs.py"
+            )
+            timeout = 360 if level == 3 and selector_fixture else 180
             exe = work / "native"
             require([args.compiler, "build", source, "--no-cache", "--runtime", args.runtime,
                      "--opt-level", str(level), "--clang", args.clang, "-o", exe], timeout=timeout)
@@ -201,7 +205,7 @@ def main():
                 ):
                     observations[name] = ({"body": "cpython", "assertions": "cpython", "operation": "imre", "fixture": "mixed"},
                                           {"operation": operation, "fixture": fixture})
-                reuse = build(HERE / "selector_reuse.py", level, timeout=360 if level == 3 else 180)
+                reuse = build(HERE / "selector_reuse.py", level)
                 print(require([sys.executable, "-B", HERE / "host_selector_reuse.py", reuse]).strip())
                 for owner in ("PollSelectorTestCase", "DefaultSelectorTestCase"):
                     observations[f"test.test_selectors.{owner}.test_unregister_after_fd_close_and_reuse"] = (
