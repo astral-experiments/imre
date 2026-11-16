@@ -1253,6 +1253,7 @@ impl Inference {
                         self.source_checks.accepts(graph, *module, function.range());
                     checker.registered = Some(graph.modules[*module].registered_values());
                 }
+                globals.provisional_return.set(false);
                 checker.inference = Some(self);
                 checker.discover_document_return = document_return;
                 checker.inferred_returns = discover_returns.then(Vec::new);
@@ -1498,6 +1499,8 @@ impl Inference {
                     checked_bodies.clear();
                     checked_revision = revision;
                 }
+                // A later round can select a different operand if this body used a provisional return.
+                let settled_return_inputs = !globals.provisional_return.get();
                 let mut result = checker.finish_region(result);
                 if let Err(diagnostic) = &mut result {
                     if let Failure::Diagnostic(report) = diagnostic
@@ -1518,7 +1521,10 @@ impl Inference {
                     {
                         if checked_return {
                             staged_returns.push(signature.id);
-                        } else if implicit_none && revision == body_revision + 1 {
+                        } else if implicit_none
+                            && revision == body_revision + 1
+                            && settled_return_inputs
+                        {
                             // The body reached its end and only its return changed. Widening
                             // or a stalled diagnostic pass will revisit the original calls.
                             self.pending.borrow_mut()[signature.id].discovery =
@@ -1601,6 +1607,7 @@ impl Inference {
                         signature: callee, ..
                     } = &diagnostic
                         && infer_return
+                        && settled_return_inputs
                         && {
                             let pending = self.pending.borrow();
                             pending[*callee].returns.is_none()
@@ -1653,6 +1660,7 @@ impl Inference {
                         }
                     }
                     if infer_return
+                        && settled_return_inputs
                         && signature.params.is_empty()
                         && !signature.registered_frame()
                         && self.pending.borrow()[signature.id]
@@ -1674,7 +1682,7 @@ impl Inference {
                     {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Independent;
-                    } else if retrying {
+                    } else if retrying && settled_return_inputs {
                         self.pending.borrow_mut()[signature.id].discovery =
                             ReturnDiscovery::Checked;
                     }
@@ -2027,6 +2035,16 @@ impl Inference {
 }
 
 impl Checker<'_> {
+    /// A method's round-start layout remains usable while its return is being inferred.
+    pub(super) fn published_return(&self, signature: &Signature) -> Type {
+        if let Some(inference) = self.inference
+            && inference.pending.borrow()[signature.id].returns != Some(signature.returns)
+        {
+            self.globals.provisional_return.set(true);
+        }
+        signature.returns
+    }
+
     /// A call can supply a value only if its checked body has a normal exit.
     pub(super) fn checked_call_cannot_return(
         &self,
@@ -2413,6 +2431,44 @@ impl Checker<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_provisional_method_result_preserves_the_first_argument_supplier() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("main.py");
+        for initializer in ["list(map(Item().read, [0]))[0]", "copy.copy(Item())"] {
+            let source = format!(
+                r#"import copy
+
+class Item:
+    def __copy__(self): return self
+    def read(self, n=0): return self
+    def __getitem__(self, key) -> bool: return True
+
+SOURCE = {initializer}
+VALUE = SOURCE
+
+def first():
+    def get(): return [VALUE]
+    values = get()
+    (values[0] or [False])[0]
+    values += values
+
+def rival(item: Item): return item[later()]
+def later(): return "key"
+
+first()
+rival(Item())
+"#
+            );
+            std::fs::write(&file, source).unwrap();
+            let error = crate::check_file(&file, None).unwrap_err();
+            assert!(
+                error.contains(":17:31: Imre: expected int, got str"),
+                "{error}"
+            );
+        }
+    }
 
     #[test]
     fn a_saved_method_uses_its_later_inferred_return() {

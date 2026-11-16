@@ -1,12 +1,17 @@
 //! Module values with ordered initialization and typed storage.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ops::Range;
 use std::rc::Rc;
 
 use super::*;
 
 type ClassLiteral = (Option<ModuleId>, Rc<[String]>);
+
+struct ModuleSlot {
+    index: usize,
+    provisional_return: bool,
+}
 
 #[derive(Default)]
 pub(super) struct ModuleValues {
@@ -16,7 +21,9 @@ pub(super) struct ModuleValues {
     /// A concrete source read supplies the registered function's ordinary Python binding.
     pub(super) missing_bindings: RefCell<std::collections::BTreeMap<usize, Diagnostic>>,
     pub(super) class_data: RefCell<class_data::Storage>,
-    definitions: RefCell<HashMap<(DefinitionId, usize), usize>>,
+    /// The current body or initializer used a return that can still change this round.
+    pub(super) provisional_return: Cell<bool>,
+    definitions: RefCell<HashMap<(DefinitionId, usize), ModuleSlot>>,
     list_origins: RefCell<HashMap<usize, DefinitionId>>,
     class_slots: RefCell<HashMap<(DefinitionId, usize), usize>>,
     pub(super) unittest_skips: RefCell<HashMap<(DefinitionId, usize), (usize, usize)>>,
@@ -169,15 +176,22 @@ impl ModuleValues {
             return Err(wait.clone());
         }
         Ok(self
-            .slot(definition, member)
-            .map(|slot| self.slot_value(slot)))
+            .definitions
+            .borrow()
+            .get(&(definition, member))
+            .map(|slot| {
+                if slot.provisional_return {
+                    self.provisional_return.set(true);
+                }
+                self.slot_value(slot.index)
+            }))
     }
 
     pub(super) fn slot(&self, definition: DefinitionId, member: usize) -> Option<usize> {
         self.definitions
             .borrow()
             .get(&(definition, member))
-            .copied()
+            .map(|slot| slot.index)
     }
 
     fn insert(&self, definition: DefinitionId, ty: Type) -> usize {
@@ -191,7 +205,13 @@ impl ModuleValues {
         assert!(
             self.definitions
                 .borrow_mut()
-                .insert((definition, member), slot)
+                .insert(
+                    (definition, member),
+                    ModuleSlot {
+                        index: slot,
+                        provisional_return: self.provisional_return.get(),
+                    }
+                )
                 .is_none()
         );
         slot
@@ -518,9 +538,13 @@ impl Checker<'_> {
             // Read every source before allocating slots: inference can retry a pending initializer.
             let values = sources
                 .iter()
-                .map(|&source| self.read_module_value(source, None, statement))
+                .map(|&source| {
+                    let value = self.read_module_value(source, None, statement)?;
+                    Ok((value, self.globals.provisional_return.take()))
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            for (member, value) in values.into_iter().enumerate() {
+            for (member, (value, provisional)) in values.into_iter().enumerate() {
+                self.globals.provisional_return.set(provisional);
                 let slot = self.globals.insert_member(definition, member, value.ty);
                 if let Some(origin) = self.globals.list_origin(&value) {
                     self.globals.list_origins.borrow_mut().insert(slot, origin);
@@ -727,6 +751,7 @@ impl Initialization {
         .then(|| module.executable_suffix())
         .flatten();
         for index in range {
+            checker.globals.provisional_return.set(false);
             // A refused region cannot publish a fixed initializer. Continue checking
             // its bindings and diagnostics without retaining stores or their checkpoints.
             if checker.unrepresented.get_mut().is_some() {
