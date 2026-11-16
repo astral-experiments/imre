@@ -1072,7 +1072,11 @@ fn display_operands<E>(
         .collect()
 }
 
-fn refine_operand(types: crate::analysis::OperandTypes<'_>, node: &ast::Expr, value: &mut Expr) {
+pub(in crate::frontend) fn refine_operand(
+    types: crate::analysis::OperandTypes<'_>,
+    node: &ast::Expr,
+    value: &mut Expr,
+) {
     if value.ty == Type::PythonObject
         && let Some((range, hint)) = value.source_hint_mut()
         && range == node.range()

@@ -15118,7 +15118,14 @@ impl<'a> Checker<'a> {
                     let arg = &call.arguments.args[0];
                     let live = self.checked_call_contracts && matches!(append, Builtin::Append);
                     let coerce_item =
-                        |checker: &Self, value: Expr, expected: Type, site: &ast::Expr| {
+                        |checker: &Self, mut value: Expr, expected: Type, site: &ast::Expr| {
+                            if live && site.is_name_expr() {
+                                registered::values::refine_operand(
+                                    checker.graph.session.operand_types(checker.module),
+                                    site,
+                                    &mut value,
+                                );
+                            }
                             if live
                                 && value.ty == Type::PythonObject
                                 && value.checked_operand_type() == expected
