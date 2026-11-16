@@ -1225,8 +1225,6 @@ impl Checker<'_> {
             if let Some(target) =
                 source.imported_call(name, call, self.graph.session.operand_types(self.module))
             {
-                let mut values = args.values;
-                let defaults = values.split_off(call.arguments.len());
                 let ir::CallSite::Written(range, end) = args.site else {
                     unreachable!()
                 };
@@ -1234,12 +1232,12 @@ impl Checker<'_> {
                 let site = ir::ProcessSite::Written(Box::new(ir::NativeArguments {
                     origin,
                     range,
-                    defaults,
+                    written: call.arguments.len(),
                     order: args.order,
                 }));
                 let value = Expr {
                     ty,
-                    kind: ExprKind::Builtin(Builtin::Process(op, site), values),
+                    kind: ExprKind::Builtin(Builtin::Process(op, site), args.values),
                 };
                 let sites = self.fixed_sites.as_mut().unwrap();
                 sites.written_call(call, &value, || Some(target));
@@ -1819,7 +1817,10 @@ mod tests {
                     assert!(
                         matches!(site, ir::ProcessSite::Written(site) if site.range == bound.range)
                     );
-                    assert_eq!(args.len(), 4);
+                    let written = expr.named_call_arguments().unwrap();
+                    assert_eq!(written.len(), 4);
+                    assert!(args.len() > written.len());
+                    assert!(std::ptr::eq(written.as_ptr(), args.as_ptr()));
                     assert!(std::ptr::eq(site.formal(args, 7), &args[1]));
                     assert!(std::ptr::eq(site.formal(args, 15), &args[2]));
                     assert!(matches!(site.formal(args, 7).kind, ExprKind::Bool(true)));

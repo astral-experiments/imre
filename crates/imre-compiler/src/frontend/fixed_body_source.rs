@@ -450,11 +450,11 @@ impl FixedNode {
                 ) => Self::Copy(op, operands.len(), expr.ty),
                 ExprKind::Builtin(
                     Builtin::Process(op, ir::ProcessSite::Written(ref binding)),
-                    ref operands,
+                    _,
                 ) => Self::NativeCall(
                     binding.range,
                     std::mem::discriminant(&op),
-                    operands.len(),
+                    expr.named_call_arguments()?.len(),
                     expr.ty,
                 ),
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {
