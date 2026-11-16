@@ -5398,8 +5398,9 @@ impl<'a> Checker<'a> {
             });
         }
         if let ast::Expr::Call(call) = expression
+            && let Some(arguments) = call.arguments.args.split_first()
             && self.is_defaultdict_constructor(&call.func)
-            && let Some(raised) = self.defaultdict_factory_error(call, expected)?
+            && let Some(raised) = self.defaultdict_factory_error(call, arguments, expected)?
         {
             return Ok(raised);
         }
@@ -12740,8 +12741,9 @@ impl<'a> Checker<'a> {
         }
         if receiver.is_none()
             && binding == Some(Binding::Intrinsic(Intrinsic::DefaultDict))
+            && let Some(arguments) = call.arguments.args.split_first()
             && !self.local_collection_root(&call.func)
-            && let Some(raised) = self.defaultdict_factory_error(call, Type::None)?
+            && let Some(raised) = self.defaultdict_factory_error(call, arguments, Type::None)?
         {
             return Ok(raised);
         }
