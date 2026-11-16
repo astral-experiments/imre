@@ -146,16 +146,7 @@ pub(super) fn module_source(
             include_str!("../../stdlib/unittest/loader_boxed.py"),
         )),
         "threading" => bundled_source!("threading.py"),
-        "textwrap" => Some((
-            "textwrap.py",
-            // The public functions forward the caller's **kwargs to the module's TextWrapper.
-            concat!(
-                include_str!("../../stdlib/textwrap/wrapper.py"),
-                "\n\n",
-                include_str!("../../stdlib/textwrap/functions.py"),
-                "\n",
-            ),
-        )),
+        "textwrap" => bundled_source!("textwrap.py", from "textwrap"),
         "importlib.resources._adapters" => bundled_source!("importlib/resources/_adapters.py"),
         "importlib.resources" => bundled_source!("importlib/resources/__init__.py"),
         "importlib.readers" => bundled_source!("importlib/readers.py"),

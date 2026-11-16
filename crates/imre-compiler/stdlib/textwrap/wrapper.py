@@ -2,9 +2,10 @@
 
 import re
 
+_whitespace = '\t\n\x0b\x0c\r '
 
 def _space(c: str) -> bool:
-    return c in " \t\n\v\f\r"
+    return c in _whitespace
 
 
 def _word(c: str) -> bool:
@@ -94,6 +95,8 @@ def _sentence(text: str) -> bool:
 
 
 class TextWrapper:
+    unicode_whitespace_trans = dict.fromkeys(map(ord, _whitespace), ord(' '))
+
     width: int
     initial_indent: str
     subsequent_indent: str
@@ -143,10 +146,7 @@ class TextWrapper:
         if self.expand_tabs:
             text = text.expandtabs(self.tabsize)
         if self.replace_whitespace:
-            values: list[str] = []
-            for c in text:
-                values.append(" " if _space(c) else c)
-            return "".join(values)
+            text = text.translate(self.unicode_whitespace_trans)
         return text
 
     def _fix_sentence_endings(self, chunks: list[str]) -> None:
