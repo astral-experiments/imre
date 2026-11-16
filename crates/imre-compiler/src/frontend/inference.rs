@@ -1440,6 +1440,7 @@ impl Inference {
                         None,
                         Some(function),
                     )?;
+                    checker.finish_caller_frame_stores(signature, falls_through);
                     // An outstanding call cannot establish an implicit return, even
                     // when checking subsequent statements reached the end of the body.
                     if matches!(
@@ -2152,6 +2153,9 @@ impl Checker<'_> {
             }
             None => Ok(signature.returns),
         };
+        if returned.is_ok() {
+            self.apply_caller_frame_stores(signature, call);
+        }
         if returned.is_ok()
             && boxed
             && let Some(calls) = &mut self.boxed_calls

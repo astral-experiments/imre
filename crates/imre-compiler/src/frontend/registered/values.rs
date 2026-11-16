@@ -1820,6 +1820,7 @@ impl Checker<'_> {
             } else if fixed_result && let Some((_, hint)) = located.source_hint_mut() {
                 *hint = Some(self.enter_source_call(call, signature, boxed)?);
             } else {
+                self.apply_caller_frame_stores(signature, call);
                 self.calls.insert(signature.id);
             }
             return Ok(Some(located));
