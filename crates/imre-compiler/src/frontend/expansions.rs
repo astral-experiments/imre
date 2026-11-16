@@ -990,7 +990,8 @@ impl Checker<'_> {
                 // file finalization or make an iterator's tuple cache shared.
                 body.push(Statement::Clear(slot));
                 Ok(true)
-            })?;
+            },
+        )?;
         let target = self.names.remove(&name).unwrap();
         Ok(vec![Statement::Scope {
             body,

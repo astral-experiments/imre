@@ -34,9 +34,11 @@ pub(super) fn call(
                     // The default type reader uses the stored flag even if the class defines __flags__.
                     if metaclass.is_some_and(|meta| {
                         ctx.class_attr(meta, "__flags__").is_some()
-                            || ctx.class_attr(meta, "__getattribute__").is_some_and(|hook| {
-                                Some(&hook) != ctx.builtins.get("type.__getattribute__")
-                            })
+                            || ctx
+                                .class_attr(meta, "__getattribute__")
+                                .is_some_and(|hook| {
+                                    Some(&hook) != ctx.builtins.get("type.__getattribute__")
+                                })
                     }) {
                         return ctx.lookup_attr(obj, "__flags__");
                     }
