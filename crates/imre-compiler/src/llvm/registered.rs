@@ -1227,8 +1227,7 @@ impl<'f> Frame<'f, '_, '_> {
         } else if matches!(
             expr.kind,
             ExprKind::Builtin(
-                Builtin::GlobalSet(_)
-                    | Builtin::RegisteredImport(_)
+                Builtin::RegisteredImport(_)
                     | Builtin::RegisteredDeleteName(..)
                     | Builtin::RegisteredNamespaceAnnotation(_)
                     | Builtin::RegisteredDiscard
@@ -1538,14 +1537,6 @@ impl<'f> Frame<'f, '_, '_> {
                 "0".to_owned()
             }
             (Builtin::RegisteredDeleteName(name, range), []) => self.code.delete_name(name, *range),
-            (Builtin::GlobalSet(slot), [value]) => {
-                let value = self.evaluate_handle(value);
-                let name = self.names.expect("registered local names")[slot]
-                    .name
-                    .clone();
-                self.bind(&name, &value);
-                return CheckedValue::handle("0".into());
-            }
             (Builtin::RegisteredLocalScalar(expected), [value]) => {
                 let value = self.evaluate_handle(value);
                 self.code
@@ -1577,11 +1568,6 @@ impl<'f> Frame<'f, '_, '_> {
             _ => unreachable!("unsupported registered operation"),
         };
         CheckedValue::handle(handle)
-    }
-
-    pub(crate) fn bind(&mut self, name: &str, handle: &str) {
-        let scope = self.code.scope.clone();
-        self.code.assign_owned_name(&scope, name, handle);
     }
 
     pub(super) fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {

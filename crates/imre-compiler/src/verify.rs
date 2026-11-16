@@ -151,12 +151,6 @@ pub(crate) fn registered(frame: crate::frontend::RegisteredRegion<'_>) -> Result
                     },
                     "inconsistent checked set element type",
                 ),
-                ExprKind::Builtin(Builtin::GlobalSet(slot), args) => local(*slot, &mut required).and_then(|()| {
-                    require(
-                        args.len() == 1,
-                        "registered namespace write needs one operand",
-                    )
-                }),
                 ExprKind::Builtin(Builtin::RegisteredAssertionFailure { .. }, args) => require(
                     value.ty == Type::None && args.len() <= 1,
                     "registered assertion failure takes at most one message",

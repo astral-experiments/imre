@@ -5962,16 +5962,11 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
         .unwrap();
         let initializer = prepared.initializer();
         assert!(initializer.fully_checked());
-        let [_, Statement::Expr(binding)] = initializer.checked.function.body.as_slice() else {
+        let [_, Statement::Assign(slot, alias)] = initializer.checked.function.body.as_slice()
+        else {
             panic!("expected one declaration after the statement marker");
         };
-        let ExprKind::Builtin(Builtin::GlobalSet(slot), operands) = &binding.kind else {
-            panic!("expected the alias binding");
-        };
         assert_eq!(initializer.checked.local_names[slot].name, "CharBuffer");
-        let [alias] = operands.as_slice() else {
-            panic!("expected one lazy alias");
-        };
         let ExprKind::Builtin(Builtin::RegisteredTypeAlias(site), args) = &alias.kind else {
             panic!("expected the prepared alias site");
         };
