@@ -123,23 +123,13 @@ impl Checker<'_> {
         {
             return Ok(None);
         }
-        let module = match (
+        match (
             call.arguments.args.as_ref(),
             call.arguments.keywords.as_ref(),
         ) {
-            ([], []) => self
-                .module_docs(Binding::Module(self.module), call)?
-                .ok_or_else(|| {
-                    error(
-                        self.source,
-                        call,
-                        "DocTestSuite requires module documentation",
-                    )
-                })?,
-            ([arg], []) => self.expr(arg)?,
-            ([], [kw]) if kw.arg.as_ref().is_some_and(|arg| arg == "module") => {
-                self.expr(&kw.value)?
-            }
+            ([], []) => {}
+            ([_], []) => return Ok(None),
+            ([], [kw]) if kw.arg.as_ref().is_some_and(|arg| arg == "module") => return Ok(None),
             _ => {
                 return Err(self.classified_error(
                     Kind::ScopedObject,
@@ -147,14 +137,18 @@ impl Checker<'_> {
                     "DocTestSuite options require the live Python suite",
                 ));
             }
-        };
-        let sig = &self.functions[&def];
-        let module = self.coerce(module, sig.params[0].ty, call)?;
-        self.calls.insert(sig.id);
-        Ok(Some(Expr {
-            ty: sig.returns,
-            kind: ExprKind::Call(sig.id, ir::CallArgs::positional(vec![module])),
-        }))
+        }
+        let module = self
+            .module_docs(Binding::Module(self.module), call)?
+            .ok_or_else(|| {
+                error(
+                    self.source,
+                    call,
+                    "DocTestSuite requires module documentation",
+                )
+            })?;
+        self.source_call(call, &self.functions[&def], Some(module), 1)
+            .map(Some)
     }
 
     /// Module references consumed by a doctest suite retain one identity when
