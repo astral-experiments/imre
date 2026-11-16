@@ -22,9 +22,29 @@ impl FixedBodySource {
                 .any(|(_, node)| matches!(node, Some(FixedNode::StoreField(..))))
     }
 
+    /// Layout-only tests have no source owner. A deferred call requires `place_in`.
+    #[cfg(test)]
+    pub(crate) fn place(self, function: ir::Function) -> PlacedBody {
+        self.place_with(function, |_| false)
+    }
+
+    pub(crate) fn place_in(
+        self,
+        function: ir::Function,
+        graph: &SourceGraph,
+        module: ModuleId,
+    ) -> PlacedBody {
+        let source = std::cell::LazyCell::new(|| registered::function_source(graph, module));
+        self.place_with(function, |attribute| attribute.bind_original(*source))
+    }
+
     /// Place the owned operations only if every physical site still belongs to them.
     /// The ordinary Python binder can still use the resolved attributes if placement fails.
-    pub(crate) fn place(self, mut function: ir::Function) -> PlacedBody {
+    fn place_with(
+        mut self,
+        mut function: ir::Function,
+        bind_original: impl Fn(&mut FixedAttribute) -> bool,
+    ) -> PlacedBody {
         let mut sites = self.sites.into_iter();
         let mut fixed_sites = Vec::with_capacity(sites.len());
         let mut python_arguments = self.arguments == FrameArguments::Python;
@@ -66,6 +86,13 @@ impl FixedBodySource {
             return Err(self.attributes);
         }
         drop(sites);
+        if self
+            .attributes
+            .values_mut()
+            .any(|attr| matches!(attr, FixedAttribute::OriginalCall(_)) && !bind_original(attr))
+        {
+            return Err(self.attributes);
+        }
         let mut frame = RegisteredFunction {
             placed_from: 0,
             fixed_sites: fixed_sites.into_boxed_slice(),
@@ -105,11 +132,31 @@ pub(crate) enum FixedAttribute {
     /// A placed module read retains its native slot in the IR and its Python name here.
     ModuleName(ast::name::Name),
     Load(ast::Identifier),
+    /// The original indexed call supplies the live imported callable if a Python frame is selected.
+    OriginalCall(ast::NodeIndex),
     /// The fixed builtin already carries its method receiver. A standalone callee is saved here.
     Call(Option<Box<Expr>>, Box<ir::RegisteredCall>),
 }
 
 impl FixedAttribute {
+    pub(super) fn bound_call(
+        call: &ast::ExprCall,
+        target: Expr,
+        layout: Option<ir::RegisteredArguments>,
+    ) -> Self {
+        let (site, target) = registered::values::callable_target(call).bind(call, target, layout);
+        Self::Call(Some(target), site)
+    }
+
+    pub(super) fn is_standalone_call(&self) -> bool {
+        matches!(self, Self::Call(Some(_), _) | Self::OriginalCall(_))
+    }
+
+    /// A statement can retain its call position before the Python entry binds the target.
+    pub(super) fn has_call_binding(&self) -> bool {
+        matches!(self, Self::OriginalCall(_)) || self.call_binding().is_some()
+    }
+
     pub(crate) fn call_binding(&self) -> Option<(Option<&Expr>, &ir::RegisteredCall)> {
         match self {
             Self::Call(target, site) => Some((target.as_deref(), site)),
@@ -678,7 +725,7 @@ impl SourceSites {
         &mut self,
         call: &ast::ExprCall,
         value: &Expr,
-        target: impl FnOnce() -> Option<Expr>,
+        target: impl FnOnce() -> Option<FixedAttribute>,
     ) {
         if let Some(args) = value.named_call_arguments().or_else(|| {
             value
@@ -687,12 +734,7 @@ impl SourceSites {
         }) && args.len() == call.arguments.args.len()
             && registered::values::fixed_positional_arguments(call)
         {
-            self.written_call(
-                call,
-                value,
-                Some(ir::RegisteredArguments::Positional),
-                target,
-            );
+            self.written_call(call, value, target);
         }
     }
 
@@ -701,17 +743,13 @@ impl SourceSites {
         &mut self,
         call: &ast::ExprCall,
         value: &Expr,
-        layout: Option<ir::RegisteredArguments>,
-        target: impl FnOnce() -> Option<Expr>,
+        target: impl FnOnce() -> Option<FixedAttribute>,
     ) {
         if let Some(site) = self.site_at(call.range())
             && let Some(node) = FixedNode::checked(&ir::Node::Expression(value))
             && let Some(target) = target()
         {
-            let (invoke, target) =
-                registered::values::callable_target(call).bind(call, target, layout);
-            self.attributes
-                .insert(site.range, FixedAttribute::Call(Some(target), invoke));
+            self.attributes.insert(site.range, target);
             self.commit(site, node);
         }
     }
@@ -730,8 +768,7 @@ impl SourceSites {
                 && self
                     .attributes
                     .get(&call.func.range())
-                    .and_then(FixedAttribute::call_binding)
-                    .is_some())
+                    .is_some_and(FixedAttribute::has_call_binding))
         {
             return;
         }

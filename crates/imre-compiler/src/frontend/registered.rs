@@ -533,7 +533,7 @@ pub(super) fn finish_source_checks(
     retry_fixed
 }
 
-fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
+pub(super) fn function_source(graph: &SourceGraph, id: ModuleId) -> RegisteredSource<'_> {
     let module = &graph.modules[id];
     RegisteredSource {
         operand_types: Some(graph.session.operand_types(id)),
@@ -1005,7 +1005,7 @@ impl FixedFunctions {
             let module = owners[slot];
             if selected(module)
                 && !graph.has_registered_function(module, definition.start())
-                && let Ok(mut placed) = source.place(function)
+                && let Ok(mut placed) = source.place_in(function, graph, module)
                 && (!graph.modules[module].bundled || placed.bind_python_arguments())
             {
                 publish(module, definition, placed);
@@ -1115,7 +1115,7 @@ pub(super) fn capture(
             };
             body.facts
                 .source
-                .and_then(|source| match source.place(body.function) {
+                .and_then(|source| match source.place_in(body.function, graph, id) {
                     Ok(placed) => Some(placed),
                     Err(settled) => {
                         attributes = settled;
@@ -2046,6 +2046,7 @@ enum SuiteSelection {
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
 pub(crate) struct SuitePreparation<'a> {
+    call_operands: Option<&'a std::cell::RefCell<crate::dynamic::CallOperands>>,
     /// Import occurrences whose binding is lexical but whose instruction has no incoming edge.
     pub(crate) unreachable_imports: Option<&'a mut HashSet<TextRange>>,
     operations: &'a HashMap<TextRange, Expr>,
@@ -2064,6 +2065,7 @@ impl<'a> SuitePreparation<'a> {
     ) -> Self {
         Self {
             unreachable_imports: None,
+            call_operands: None,
             operations,
             source,
             sites: StatementSites {
@@ -2077,12 +2079,14 @@ impl<'a> SuitePreparation<'a> {
     }
 
     fn source_scope(&self, kind: RegisteredScope) -> SourceScope<'a> {
-        SourceScope::new(
+        let mut scope = SourceScope::new(
             kind,
             self.source,
             Some(self.operations),
             self.sites.omit_assertions,
-        )
+        );
+        scope.call_operands = self.call_operands;
+        scope
     }
 
     pub(crate) fn class_suite(
@@ -2238,6 +2242,7 @@ impl<'a> SuitePreparation<'a> {
         header: &mut super::function_scope::NamedFunction<'p>,
         site: FunctionSite<'_>,
         checked: Option<&'p RegisteredFunction>,
+        call_operands: Option<&'a std::cell::RefCell<crate::dynamic::CallOperands>>,
     ) {
         let def = site.def;
         header.type_params = site.parameters;
@@ -2280,8 +2285,10 @@ impl<'a> SuitePreparation<'a> {
                 is_async: def.is_async,
             };
             let statements = function_text::executable_body(&def.body, header.doc.is_some());
+            self.call_operands = call_operands;
             let suite =
                 self.function_suite(statements, kind, header.metadata.suspension_flags() != 0);
+            self.call_operands = None;
             let refusal = suite.refusal;
             (NamedBody::from_suite(suite), refusal)
         };
@@ -3576,6 +3583,7 @@ struct SourceScope<'a> {
     omit_assertions: bool,
     // Only source statement suites own namespace operations; expression providers have none.
     suite_operations: Option<&'a HashMap<TextRange, Expr>>,
+    call_operands: Option<&'a std::cell::RefCell<crate::dynamic::CallOperands>>,
     source: values::RegisteredSource<'a>,
     names: HashMap<String, usize>,
     namespaces: Vec<(usize, LocalBinding)>,
@@ -3690,6 +3698,7 @@ impl<'a> SourceScope<'a> {
             interactive: false,
             source,
             suite_operations,
+            call_operands: None,
             omit_assertions,
             names: HashMap::new(),
             namespaces: Vec::new(),
@@ -4303,10 +4312,22 @@ impl SourceScope<'_> {
                 return Some(self.source.located(expr, local));
             }
             let class = matches!(self.kind, RegisteredScope::Class);
+            let placed = self
+                .call_operands
+                .filter(|_| self.comprehension.is_none())
+                .and_then(|sites| {
+                    let call = expr.as_call_expr()?;
+                    values::take_source_call(
+                        &mut sites.borrow_mut(),
+                        call,
+                        self.source.operand_types?,
+                        &self.names,
+                    )
+                });
             values::operation(
                 expr,
                 self.source,
-                None,
+                placed,
                 |method, _, value| {
                     let ty = value.ty;
                     class

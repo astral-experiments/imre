@@ -893,6 +893,10 @@ fn imports_from_body(
     Ok(imports)
 }
 
+pub(crate) type CallOperands = HashMap<TextRange, crate::frontend::FixedAttribute>;
+pub(crate) type FunctionCallOperands =
+    HashMap<ruff_text_size::TextSize, std::cell::RefCell<CallOperands>>;
+
 pub(crate) type CheckedFunctions =
     HashMap<ruff_text_size::TextSize, crate::frontend::RegisteredFunction>;
 
@@ -2823,6 +2827,7 @@ pub(crate) fn compile(
     let modules = project
         .take()
         .map(|graph| {
+            registrations.call_operands = graph.registered_call_operands.into_inner();
             registrations.bundled_doctest_prompts = graph.bundled_doctest_prompts;
             graph.modules
         })

@@ -67,6 +67,61 @@ pub(crate) struct RegisteredSource<'a> {
     pub(crate) private_names: Option<&'a imre_ast::Names>,
 }
 
+fn nonlocal_callable(call: &ast::ExprCall, locals: &HashMap<String, usize>) -> bool {
+    call.func
+        .as_name_expr()
+        .or_else(|| call.func.as_attribute_expr()?.value.as_name_expr())
+        .is_some_and(|name| !locals.contains_key(name.id.as_str()))
+}
+
+impl FixedAttribute {
+    /// Materialize a proven source call only after its Python placement is selected.
+    pub(in crate::frontend) fn bind_original(&mut self, source: RegisteredSource<'_>) -> bool {
+        let Self::OriginalCall(index) = self else {
+            return true;
+        };
+        let Some(types) = source.operand_types else {
+            return false;
+        };
+        let parsed = types.parsed();
+        let ast::AnyRootNodeRef::Expr(ast::Expr::Call(call)) = parsed.get_by_index(*index) else {
+            return false;
+        };
+        let Some(target) = source.imported_target(call) else {
+            return false;
+        };
+        *self = Self::bound_call(call, target, None);
+        true
+    }
+
+    fn original_callable(
+        self,
+        call: &ast::ExprCall,
+        types: crate::analysis::OperandTypes<'_>,
+    ) -> Option<Self> {
+        let original = match &self {
+            Self::OriginalCall(index) => types.original_call_index(call) == Some(*index),
+            Self::Call(Some(_), site) => {
+                site.target == callable_target(call) && types.is_original_operand(&call.func)
+            }
+            _ => false,
+        };
+        original.then_some(self)
+    }
+}
+
+pub(super) fn take_source_call(
+    sites: &mut crate::dynamic::CallOperands,
+    call: &ast::ExprCall,
+    types: crate::analysis::OperandTypes<'_>,
+    locals: &HashMap<String, usize>,
+) -> Option<FixedAttribute> {
+    if !nonlocal_callable(call, locals) {
+        return None;
+    }
+    sites.remove(&call.range())?.original_callable(call, types)
+}
+
 impl<'a> RegisteredSource<'a> {
     pub(crate) fn with_children(
         self,
@@ -84,19 +139,38 @@ impl<'a> RegisteredSource<'a> {
         imre_ast::direct_method(call, self.method_imports, self.private_names)
     }
 
+    fn imported_target(self, call: &ast::ExprCall) -> Option<Expr> {
+        registered_value(
+            &call.func,
+            Self {
+                operand_types: None,
+                private_names: None,
+                ..self
+            },
+        )
+    }
+
     /// Load the original imported module member before evaluating the written arguments.
-    pub(in crate::frontend) fn imported_callable(
+    pub(in crate::frontend) fn imported_call(
         self,
         module: &ast::ExprName,
         call: &ast::ExprCall,
         types: crate::analysis::OperandTypes<'_>,
-    ) -> Option<Expr> {
+    ) -> Option<FixedAttribute> {
         if !self.method_imports.contains(module.id.as_str())
             || !types.is_original_operand(&call.func)
         {
             return None;
         }
-        registered_value(&call.func, self)
+        if let Some(index) = types.original_call_index(call) {
+            return Some(FixedAttribute::OriginalCall(index));
+        }
+        // Forwarding may keep the imported callable and replace the written arguments.
+        Some(FixedAttribute::bound_call(
+            call,
+            self.imported_target(call)?,
+            None,
+        ))
     }
 
     fn call_target(self, call: &ast::ExprCall) -> (ir::RegisteredCallTarget, &ast::Expr) {
@@ -128,6 +202,26 @@ impl<'a> RegisteredSource<'a> {
                     if accepts(Some(&call.func), &field.value, callable))
             });
             return Ok(admitted.then_some(checked.call));
+        }
+        if let ast::Expr::Call(call) = node
+            && let Some(FixedAttribute::OriginalCall(_)) = placed
+            && let Some(target) = self.imported_target(call)
+        {
+            // The selected source still owns this call. Bind its written operands once.
+            return Ok(Some(callable_target(call).prepare(
+                call,
+                target,
+                |arg| child(arg, ResultUse::Fixed),
+            )?));
+        }
+        if let ast::Expr::Call(call) = node
+            && let Some(FixedAttribute::Call(Some(target), mut site)) = placed
+        {
+            // Forwarding can preserve the original callable and replace its arguments.
+            let (layout, args) =
+                prepared_arguments(call, site.arguments, |arg| child(arg, ResultUse::Fixed))?;
+            site.arguments = layout;
+            return Ok(Some(invoke_value(site, target, args)));
         }
         let receiver = |node: &ast::Expr, needs_protocol: bool, method, result| {
             if needs_protocol && !dynamic_receiver(node) {
@@ -316,27 +410,33 @@ fn fixed_arguments(args: &ast::Arguments, expanded: bool) -> bool {
     args.len() <= 64 && !expanded
 }
 
-fn argument_layout(args: &ast::Arguments, expanded: bool) -> ir::RegisteredArguments {
-    if fixed_arguments(args, expanded) {
-        fixed_argument_layout(args)
-    } else {
-        ir::RegisteredArguments::Packed(packed_arguments(args))
+impl ir::RegisteredArguments {
+    fn bind_arguments(self, args: &ast::Arguments, fixed: bool) -> Self {
+        if !fixed {
+            return Self::Packed(packed_arguments(args));
+        }
+        if args.keywords.is_empty() {
+            return Self::Positional;
+        }
+        let mut names = match self {
+            Self::Keywords { names, .. } => names,
+            _ => Vec::new(),
+        };
+        names.clear();
+        names.extend(
+            args.keywords
+                .iter()
+                .map(|key| key.arg.as_ref().unwrap().id.clone()),
+        );
+        Self::Keywords {
+            positional: args.args.len(),
+            names,
+        }
     }
 }
 
 pub(in crate::frontend) fn fixed_argument_layout(args: &ast::Arguments) -> ir::RegisteredArguments {
-    if args.keywords.is_empty() {
-        ir::RegisteredArguments::Positional
-    } else {
-        ir::RegisteredArguments::Keywords {
-            positional: args.args.len(),
-            names: args
-                .keywords
-                .iter()
-                .map(|key| key.arg.as_ref().unwrap().id.clone())
-                .collect(),
-        }
-    }
+    ir::RegisteredArguments::Positional.bind_arguments(args, true)
 }
 
 pub(crate) fn packed_arguments(args: &ast::Arguments) -> ir::PackedArguments {
@@ -521,6 +621,7 @@ pub(in crate::frontend) fn call_arguments<E>(
 /// Check the written values and select their calling convention in the same visit.
 fn prepared_arguments<E>(
     call: &ast::ExprCall,
+    layout: ir::RegisteredArguments,
     mut child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
 ) -> StdResult<(ir::RegisteredArguments, Vec<Expr>), E> {
     let mut expanded = false;
@@ -529,7 +630,8 @@ fn prepared_arguments<E>(
         expanded |= unpack;
         values.push(child(arg)?);
     }
-    Ok((argument_layout(&call.arguments, expanded), values))
+    let fixed = fixed_arguments(&call.arguments, expanded);
+    Ok((layout.bind_arguments(&call.arguments, fixed), values))
 }
 
 /// Keep the evaluated callable and its argument layout together on the invocation.
@@ -550,7 +652,8 @@ impl ir::RegisteredCallTarget {
         target: Expr,
         child: impl FnMut(&ast::Expr) -> StdResult<Expr, E>,
     ) -> StdResult<Expr, E> {
-        let (layout, arguments) = prepared_arguments(call, child)?;
+        let (layout, arguments) =
+            prepared_arguments(call, ir::RegisteredArguments::Positional, child)?;
         let (site, target) = self.bind(call, target, Some(layout));
         Ok(invoke_value(site, target, arguments))
     }
@@ -562,11 +665,10 @@ impl ir::RegisteredCallTarget {
         target: Expr,
         layout: Option<ir::RegisteredArguments>,
     ) -> (Box<ir::RegisteredCall>, Box<Expr>) {
-        let arguments = layout.unwrap_or_else(|| match self {
-            Self::Method { .. } => fixed_argument_layout(&call.arguments),
-            Self::Callable { .. } | Self::FixedExec { .. } => {
-                argument_layout(&call.arguments, calls::has_unpacking(call))
-            }
+        let arguments = layout.unwrap_or_else(|| {
+            let fixed = matches!(self, Self::Method { .. })
+                || fixed_arguments(&call.arguments, calls::has_unpacking(call));
+            ir::RegisteredArguments::Positional.bind_arguments(&call.arguments, fixed)
         });
         (
             ir::RegisteredCall::new(call.range(), self, arguments),
@@ -1792,31 +1894,14 @@ impl Checker<'_> {
                         && self.locals[saved.slot] == saved.ty
                         && source.direct_method(call).is_some() == saved.call.python_call().is_some_and(|call| matches!(call.target, ir::RegisteredCallTarget::Method { .. }))
                         && operands.is_original_operand(node) => {}
-                _ if self.namespace.is_none()
-                    && call.func.as_name_expr().or_else(|| call.func.as_attribute_expr()?.value.as_name_expr())
-                        .is_some_and(|name| !self.names.contains_key(name.id.as_str())) =>
-                {
-                    let attr = site.remove();
-                    return matches!(&attr, FixedAttribute::Call(Some(_), saved)
-                        if saved.target == callable_target(call) && operands.is_original_operand(&call.func))
-                        .then_some(attr);
+                _ if self.namespace.is_none() && nonlocal_callable(call, &self.names) => {
+                    return site.remove().original_callable(call, operands);
                 }
                 FixedAttribute::Call(None, _) if operands.is_original_operand(node) => {}
                 _ => return None,
             }
             Some(site.remove())
         });
-        let placed = match (node.as_call_expr(), placed) {
-            (Some(call), Some(FixedAttribute::Call(Some(target), mut site))) => {
-                // Forwarding can preserve the imported target and replace its arguments.
-                let (layout, args) = prepared_arguments(call, |arg| self.expr(arg))?;
-                site.arguments = layout;
-                return Ok(Some(
-                    source.located_operation(node, invoke_value(site, target, args)),
-                ));
-            }
-            (_, attribute) => attribute,
-        };
         let bound_imports = self.bound_function_imports;
         let mut live_receiver = false;
         let Some(mut value) = operation(

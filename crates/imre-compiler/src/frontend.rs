@@ -1861,7 +1861,7 @@ fn lower_graph(
                             .is_some_and(|pending| !pending.contains_key(&signature.id)))
                 {
                     let launch = |slot: usize,
-                                  inputs: Option<&mut HashMap<_, _>>,
+                                  mut inputs: Option<&mut HashMap<_, _>>,
                                   collect_calls: bool,
                                   independent: bool| {
                         let (module, def, sig) = definitions.get(slot)?;
@@ -1869,6 +1869,21 @@ fn lower_graph(
                             || sig.method.is_some()
                             || !matches!(def, Cow::Borrowed(_))
                         {
+                            return None;
+                        }
+                        if let Some(inputs) = inputs.as_deref_mut()
+                            && inputs.values().all(|value| match value {
+                                FixedAttribute::UnhighlightedCall(call) => inputs
+                                    .get(call)
+                                    .is_some_and(FixedAttribute::is_standalone_call),
+                                site => site.is_standalone_call(),
+                            })
+                        {
+                            graph.retain_lexical_operands(
+                                *module,
+                                def.start(),
+                                std::mem::take(inputs),
+                            );
                             return None;
                         }
                         let mut checker = checker_for(*module);
@@ -2033,7 +2048,7 @@ fn lower_graph(
     });
     if reason.is_some() || needs_registered_entry {
         if let (Some(source), Some(entry)) = (entry_source, entry)
-            && let Ok(frame) = source.place(entry)
+            && let Ok(frame) = source.place_in(entry, graph, graph.entry)
         {
             graph.register_initializer(graph.entry, frame);
         }
@@ -2283,7 +2298,7 @@ fn lower_graph(
             .zip(completed.functions.drain(initializer_ids))
         {
             if let Some(source) = order.source
-                && let Ok(frame) = source.place(function)
+                && let Ok(frame) = source.place_in(function, graph, order.module)
             {
                 graph.register_initializer(order.module, frame);
             }
@@ -2291,7 +2306,7 @@ fn lower_graph(
         let frame = if python_entry && entry.locals.is_empty() {
             RegisteredFunction::from_checked_body(entry, HashMap::new(), FrameArguments::Python)
         } else {
-            entry_source.and_then(|source| source.place(entry).ok())
+            entry_source.and_then(|source| source.place_in(entry, graph, graph.entry).ok())
         };
         if let Some(frame) = frame {
             graph.register_initializer(graph.entry, frame);
@@ -7307,8 +7322,7 @@ impl<'a> Checker<'a> {
             && sites
                 .attributes
                 .get(&call)
-                .and_then(FixedAttribute::call_binding)
-                .is_some()
+                .is_some_and(FixedAttribute::has_call_binding)
         {
             sites
                 .attributes
@@ -16494,11 +16508,7 @@ impl<'a> Checker<'a> {
                 let source = self.graph.modules[self.module]
                     .registered_values()
                     .operands(self.source, self.graph.python_optimization());
-                source.imported_callable(
-                    module,
-                    call,
-                    self.graph.session.operand_types(self.module),
-                )
+                source.imported_call(module, call, self.graph.session.operand_types(self.module))
             });
         } else {
             self.record_named_call(call, value);
@@ -16510,7 +16520,13 @@ impl<'a> Checker<'a> {
         if let Some(name) = self.placed_call_name(call)
             && let Some(sites) = &mut self.fixed_sites
         {
-            sites.positional_call(call, value, || Some(registered::values::located_name(name)));
+            sites.positional_call(call, value, || {
+                Some(FixedAttribute::bound_call(
+                    call,
+                    registered::values::located_name(name),
+                    Some(ir::RegisteredArguments::Positional),
+                ))
+            });
         }
     }
 

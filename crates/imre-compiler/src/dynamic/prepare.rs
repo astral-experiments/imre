@@ -231,7 +231,12 @@ pub(super) fn units<'a>(
                     python_optimization,
                     origin,
                     literals.unwrap_or_default(),
-                    (types, checked_source, initializer),
+                    (
+                        types,
+                        checked_source,
+                        initializer,
+                        module_id.and_then(|id| registrations.call_operands.get(&id)),
+                    ),
                 )?;
                 body.prompts = bundled_prompts
                     .or_else(|| {
