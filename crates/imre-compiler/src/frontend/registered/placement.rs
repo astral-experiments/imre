@@ -62,7 +62,7 @@ mod tests {
             ir::walk_nodes(body, &mut |node, _| {
                 if let ir::Node::Expression(value) = node
                     && let Some(site) = value.python_call()
-                    && &source[site.range] == call
+                    && source[site.range] == call
                 {
                     hints.push(site.position.unwrap().1);
                 }

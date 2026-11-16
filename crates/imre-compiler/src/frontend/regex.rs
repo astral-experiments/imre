@@ -649,10 +649,9 @@ impl Checker<'_> {
         ) {
             if self.fixed_sites.is_some() && call.arguments.len() == 2 {
                 let (spelling, checked, _) = self.parse_regex_literal(pattern, flags)?;
-                self.fixed_sites
-                    .as_mut()
-                    .unwrap()
-                    .leaf(pattern.range(), &spelling);
+                if let Some(sites) = self.fixed_sites.as_mut() {
+                    sites.leaf(pattern.range(), &spelling);
+                }
                 literal = Some(checked);
                 spelling
             } else {

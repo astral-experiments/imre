@@ -354,6 +354,13 @@ impl<'a> PreparedUnit<'a> {
 
 pub(super) type ParsedInput<'a, 'p> = (ParsedModule<'a, 'p>, Option<super::LoweredRoot>);
 
+type CheckedInputs<'a, 'b> = (
+    Option<crate::analysis::OperandTypes<'b>>,
+    Option<&'a crate::modules::SourceModule>,
+    Option<Box<crate::frontend::RegisteredFunction>>,
+    Option<&'a super::FunctionCallOperands>,
+);
+
 impl<'a, 'p> From<ParsedModule<'a, 'p>> for ParsedInput<'a, 'p> {
     fn from(module: ParsedModule<'a, 'p>) -> Self {
         (module, None)
@@ -425,12 +432,7 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         literal_sites: LiteralSites,
-        (operand_types, checked_source, checked_entry, call_operands): (
-            Option<crate::analysis::OperandTypes<'_>>,
-            Option<&'a crate::modules::SourceModule>,
-            Option<Box<crate::frontend::RegisteredFunction>>,
-            Option<&'a super::FunctionCallOperands>,
-        ),
+        checked: CheckedInputs<'a, '_>,
     ) -> Result<Self, String> {
         let body = Self::prepare(
             name,
@@ -439,7 +441,7 @@ impl<'a> PreparedBody<'a> {
             python_optimization,
             origin,
             literal_sites,
-            (operand_types, checked_source, checked_entry, call_operands),
+            checked,
         )?;
         if let Some(refusal) = body.initializer.refusal {
             use crate::frontend::PreparedRefusal;
@@ -471,12 +473,7 @@ impl<'a> PreparedBody<'a> {
         python_optimization: i32,
         origin: ModuleOrigin<'a, '_>,
         exec_literals: LiteralSites,
-        (operand_types, checked_source, checked_entry, call_operands): (
-            Option<crate::analysis::OperandTypes<'_>>,
-            Option<&'a crate::modules::SourceModule>,
-            Option<Box<crate::frontend::RegisteredFunction>>,
-            Option<&'a super::FunctionCallOperands>,
-        ),
+        (operand_types, checked_source, checked_entry, call_operands): CheckedInputs<'a, '_>,
     ) -> Result<Self, String> {
         let ParsedModule { text, parsed } = module;
         #[cfg(test)]
