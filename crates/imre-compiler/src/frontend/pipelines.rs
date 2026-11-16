@@ -2463,7 +2463,7 @@ impl<'s> Checker<'s> {
         }
         let ready = self.hidden(Type::Bool);
         let done = self.hidden(Type::Bool);
-        let resume_pc = self.hidden(Type::Int);
+        let resume_pc = (pulls.len() > 1).then(|| self.hidden(Type::Int));
         let exported: HashSet<_> = self.leave_comprehension(scope).into_values().collect();
         let mut writes = pulls
             .iter()
@@ -2476,10 +2476,10 @@ impl<'s> Checker<'s> {
         let mut clear = pulls[0].input.clear.clone();
         clear.extend((first_private..self.locals.len()).filter(|slot| !exported.contains(slot)));
         let mut evaluate = std::mem::take(&mut pulls[0].input.evaluate);
-        evaluate.extend([
-            Statement::Assign(resume_pc, Expr::integer(0)),
-            Statement::Assign(done, Expr::boolean(false)),
-        ]);
+        if let Some(slot) = resume_pc {
+            evaluate.push(Statement::Assign(slot, Expr::integer(0)));
+        }
+        evaluate.push(Statement::Assign(done, Expr::boolean(false)));
         let retry = pulls.len() > 1 || !pulls[0].filters.is_empty();
         let mut cases = Vec::new();
         let mut accepted = vec![
@@ -2494,6 +2494,7 @@ impl<'s> Checker<'s> {
             let (roots, jump) = if depth == 0 {
                 (&clear, Statement::Assign(done, Expr::boolean(true)))
             } else {
+                let resume_pc = resume_pc.expect("an inner clause has a resume slot");
                 accepted.extend(pull.input.acquire);
                 accepted.push(Statement::Assign(resume_pc, Expr::integer(depth as i64)));
                 (
@@ -2509,15 +2510,19 @@ impl<'s> Checker<'s> {
                 self.generator_body(available),
                 exhausted,
             ));
-            cases = vec![Statement::If(
-                compare(
-                    Compare::Equal,
-                    self.local(resume_pc),
-                    Expr::integer(depth as i64),
-                ),
-                step,
-                cases,
-            )];
+            // The innermost clause is the only remaining destination.
+            cases = match resume_pc {
+                Some(slot) if !cases.is_empty() => vec![Statement::If(
+                    compare(
+                        Compare::Equal,
+                        self.local(slot),
+                        Expr::integer(depth as i64),
+                    ),
+                    step,
+                    cases,
+                )],
+                _ => step,
+            };
         }
         // The leftmost iterator is already acquired. Restore the caller on yield or unwind.
         // A single unfiltered pull either yields, exhausts, or raises.
