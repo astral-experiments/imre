@@ -1339,7 +1339,11 @@ ACCEPTED = {
         ),
     },
     "optional_stdlib_from_in_dependency": {
-        "main.py": "from pkg.consumer import witness\nprint(witness.checked)\n",
+        "main.py": (
+            "from os.path import expandvars, isabs\n"
+            "from pkg.consumer import witness\n"
+            "print(witness.checked, isabs(b'/'), expandvars('relative'))\n"
+        ),
         "pkg/__init__.py": "",
         "pkg/consumer.py": (
             "try:\n    from os.path import basename as leaf\nexcept ImportError:\n    leaf = None\n"
