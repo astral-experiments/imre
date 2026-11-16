@@ -1441,7 +1441,7 @@ fn lower_graph(
     let mut startup = Vec::new();
     let mut entry_source = None;
     let mut python_entry = false;
-    let call_free_refusal = std::cell::Cell::new(false);
+    let entry_refusal_calls = std::cell::Cell::new(None);
     let mut lower_entry = |nonreturning: &HashSet<usize>, placement_only: bool| {
         startup.clear();
         entry_source = None;
@@ -1450,7 +1450,7 @@ fn lower_graph(
         let mut checker = checker_for(module_id);
         checker.module_scope = true;
         checker.nonreturning_functions = nonreturning;
-        checker.record_entry_refusal = Some(&call_free_refusal);
+        checker.record_entry_refusal = Some(&entry_refusal_calls);
         checker.placement_only = placement_only;
         let mut fixed_entry =
             if let Some((prefix, tail)) = graph.modules[module_id].executable_suffix() {
@@ -1501,14 +1501,15 @@ fn lower_graph(
 
     // A declaration that can still prove a call never returns can change which
     // module operations are reachable. Check the entry once that set is settled.
+    let may_return_implicitly = |(module, def, _): &FunctionDefinition<'_>| {
+        graph.session.call_may_return_implicitly(*module, def)
+    };
     let after_nonreturning = std::cell::LazyCell::new(|| {
         graph.modules[graph.entry].executable_suffix()?;
         Some(
             definitions
                 .iter()
-                .rposition(|(module, source, _)| {
-                    !graph.session.call_may_return_implicitly(*module, source)
-                })
+                .rposition(|definition| !may_return_implicitly(definition))
                 .map_or(0, |last| last + 1),
         )
     });
@@ -1516,8 +1517,13 @@ fn lower_graph(
     // Its own reached call prefix decides whether fixed IR can be released.
     let mut early_entry = (defer_capture && unavailable.is_none() && entry_needs_object)
         .then(|| lower_entry(&classes.nonreturning_functions, false));
-    let discard_unplaced = call_free_refusal.get()
-        && matches!(&early_entry, Some(Err(reason)) if Failure::is_object(reason));
+    let discard_unplaced = matches!(&early_entry, Some(Err(reason)) if Failure::is_object(reason))
+        && entry_refusal_calls.take().is_some_and(|calls| {
+            // An implicitly returning callee cannot later make the refusal unreachable.
+            calls
+                .into_iter()
+                .all(|id| definitions.get(id).is_some_and(may_return_implicitly))
+        });
     // The ordinary checker supplies the unfinished physical definitions below.
     // Capture the other definitions from inference's settled results now.
     let place_live = |slot: usize| {
@@ -1713,7 +1719,7 @@ fn lower_graph(
         checker.fixed_sites = (collect_sites && inferred.is_none())
             .then(|| fixed_body_source::SourceSites::new(python_method || live));
         checker.placement_only = (named || unavailable.is_some()) && cache.is_none();
-        checker.discard_unplaced = discard_unplaced && physical_function && collect_sites;
+        checker.discard_unplaced = discard_unplaced;
         checker.python_method_frame =
             checker.placement_only && signature.method.is_some() && signature.physical_frame;
         let mut attributes = ((signature.method.is_none() || checker.python_method_frame)
@@ -4104,8 +4110,8 @@ struct Checker<'a> {
     /// The first operation whose execution requires a different representation. All
     /// later source operations still see the facts from the ordinary checker.
     unrepresented: std::cell::RefCell<Option<Failure>>,
-    // The ordinary entry can record the reached prefix of its first representation loss.
-    record_entry_refusal: Option<&'a std::cell::Cell<bool>>,
+    // Native callees reached before the ordinary entry first needs a Python operation.
+    record_entry_refusal: Option<&'a std::cell::Cell<Option<HashSet<usize>>>>,
     namespace_calls: HashSet<ruff_text_size::TextRange>,
     /// Stored short circuits whose selected value has immutable builtin truth.
     stable_selections: HashSet<TextRange>,
@@ -7250,7 +7256,7 @@ impl<'a> Checker<'a> {
         }
         self.unrepresented.borrow_mut().get_or_insert_with(|| {
             if let Some(prefix) = self.record_entry_refusal {
-                prefix.set(self.reachable && self.calls.is_empty());
+                prefix.set(self.reachable.then(|| self.calls.clone()));
             }
             failure.clone()
         });
