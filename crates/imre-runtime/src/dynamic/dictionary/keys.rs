@@ -1175,18 +1175,8 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (_, index) = self.find_dictionary_key(dict, key, Some(hash))?;
-        let entries = self.stored_entries_mut(dict);
-        if let Some(index) = index {
-            let resident = entries[index].0;
-            let previous = std::mem::replace(&mut entries[index].1, value);
-            if previous != value {
-                self.heap.weak_edge_removed(previous);
-            }
-            Ok(resident)
-        } else {
-            entries.push((key, value), hash)?;
-            Ok(key)
-        }
+        let (resident, _) = self.store_dictionary_value(dict, key, value, hash, index)?;
+        Ok(resident)
     }
 
     pub(in super::super) fn set_dictionary_key(
@@ -1199,7 +1189,11 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, known_hash)?;
-        self.store_dictionary_value(dict, key, value, hash, index, overwrite)
+        if !overwrite && let Some(index) = index {
+            return Ok(self.stored_entries(dict)[index].1);
+        }
+        self.store_dictionary_value(dict, key, value, hash, index)?;
+        Ok(value)
     }
 
     /// A source binding drops the displaced dictionary value after the new value
@@ -1219,11 +1213,8 @@ impl Context {
         }
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, None)?;
-        let previous = index.map(|i| self.stored_entries(dict)[i].1);
-        self.store_dictionary_value(dict, key, value, hash, index, true)?;
-        if let Some(previous) = previous
-            && previous != value
-        {
+        let (_, displaced) = self.store_dictionary_value(dict, key, value, hash, index)?;
+        if let Some(previous) = displaced {
             let released =
                 self.heap.tracks_finalizers() && self.heap.could_own_finalizer(previous, false);
             self.release_list_owner(previous);
@@ -1240,7 +1231,7 @@ impl Context {
     ) -> Result<Id> {
         self.heap.keep(value);
         let (hash, index) = self.find_dictionary_key(dict, key, None)?;
-        self.store_dictionary_value(dict, key, value, hash, index, true)?;
+        self.store_dictionary_value(dict, key, value, hash, index)?;
         // The backing value is visible to equality hooks during the separate node lookup.
         if let Err(error) = self.add_ordered_node(dict, key, hash) {
             for root in error.roots() {
@@ -1270,20 +1261,13 @@ impl Context {
         value: Id,
         hash: i64,
         index: Option<usize>,
-        overwrite: bool,
-    ) -> Result<Id> {
-        let entries = self.stored_entries_mut(dict);
-        if let Some(i) = index {
-            if !overwrite {
-                return Ok(entries[i].1);
-            }
-            let previous = std::mem::replace(&mut entries[i].1, value);
-            if previous != value {
-                self.heap.weak_edge_removed(previous);
-            }
-            return Ok(value);
+    ) -> Result<(Id, Option<Id>)> {
+        let (resident, displaced) = self
+            .stored_entries_mut(dict)
+            .store(index, key, value, hash)?;
+        if let Some(previous) = displaced {
+            self.heap.weak_edge_removed(previous);
         }
-        entries.push((key, value), hash)?;
-        Ok(value)
+        Ok((resident, displaced))
     }
 }
