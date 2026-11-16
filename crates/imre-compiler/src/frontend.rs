@@ -3863,7 +3863,7 @@ fn annotation_with_aliases(
                 Some(Binding::Intrinsic(Intrinsic::Callable))
             ) =>
         {
-            callable_annotation(types, &value.slice, nested, |reason| invalid(reason))
+            callable_annotation(types, &value.slice, nested, invalid)
         }
         ast::Expr::Subscript(value)
             if graph.resolve_type(module, &value.value)
@@ -6596,8 +6596,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.lower_iteration_after(
-            target,
-            index,
+            (target, index),
             input,
             &loop_.orelse,
             Vec::new(),
@@ -6704,8 +6703,7 @@ impl<'a> Checker<'a> {
     /// The callback returns whether its checked body needs an executable loop.
     fn lower_iteration_after(
         &mut self,
-        target: &ast::Expr,
-        index: Option<&ast::Expr>,
+        (target, index): (&ast::Expr, Option<&ast::Expr>),
         input: Iteration,
         orelse: &[ast::Stmt],
         before_iteration: Vec<Statement>,

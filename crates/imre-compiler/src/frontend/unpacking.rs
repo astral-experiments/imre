@@ -1562,8 +1562,7 @@ impl Checker<'_> {
             items: false,
         };
         let (iteration, _) = self.lower_iteration_after(
-            &item_target,
-            None,
+            (&item_target, None),
             input,
             &[],
             Vec::new(),

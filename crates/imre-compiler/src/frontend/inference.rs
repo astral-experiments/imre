@@ -1051,7 +1051,7 @@ impl Inference {
                 } else {
                     local_functions::reads_function_value(
                         std::slice::from_ref(statement),
-                        &identifies,
+                        identifies,
                         None,
                         |_| false,
                     )
@@ -1065,7 +1065,7 @@ impl Inference {
                 .module_function_readers(graph.entry, &names, |function| {
                     if local_functions::reads_function_value(
                         &function.body,
-                        &identifies,
+                        identifies,
                         None,
                         |_| true,
                     ) {

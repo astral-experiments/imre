@@ -972,8 +972,7 @@ impl Checker<'_> {
             ctx: ast::ExprContext::Store,
         });
         let (body, _) = self.lower_iteration_after(
-            &target,
-            None,
+            (&target, None),
             input,
             &[],
             before_iteration,

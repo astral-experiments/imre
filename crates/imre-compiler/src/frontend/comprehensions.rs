@@ -333,8 +333,7 @@ impl ClauseLowering for Checker<'_> {
         body: impl FnOnce(&mut Self) -> Result<(Vec<Expr>, Vec<Statement>), String>,
     ) -> Result<Vec<Statement>, String> {
         self.lower_iteration_after(
-            target,
-            None,
+            (target, None),
             input,
             &[],
             Vec::new(),
