@@ -1281,7 +1281,7 @@ mod tests {
     }
 
     #[test]
-    fn file_recovery_checks_a_later_procedure_in_its_selected_frame_once() {
+    fn file_and_pythonpath_recovery_check_a_later_procedure_in_its_selected_frame_once() {
         let text = concat!(
             "from pathlib import Path\n",
             "def first(directory: Path) -> Path:\n    return sorted(directory.glob('*.py'))[0]\n",
@@ -1293,7 +1293,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.py");
         std::fs::write(&path, text).unwrap();
-        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        assert_one_inventory_body(SourceGraph::load(&path, None, &[]).unwrap(), text);
+
+        let options = crate::CompileOptions {
+            extension_paths: vec![dir.path().to_owned()],
+            pythonpath: 0..1,
+            ..Default::default()
+        };
+        let mut named = SourceGraph::module_entry(
+            std::path::Path::new("-m"),
+            "app",
+            &options,
+            Default::default(),
+            &mut Default::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(named.modules[named.entry].is_program_source());
+        assert!(!named.modules[named.entry].checks_source_contracts());
+        named.registered_startup = true;
+        assert_one_inventory_body(named, text);
+    }
+
+    fn assert_one_inventory_body(mut graph: SourceGraph, text: &str) {
         let (_, lowerings) =
             caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
         let start = TextSize::try_from(text.find("def inventory").unwrap()).unwrap();
