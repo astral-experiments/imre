@@ -4890,6 +4890,7 @@ for name in ("md4", "ripemd160"):
         compare_module(fixtures / "boxed_doctest_results.py")
         compare_module(fixtures.parents[1] / "benchmarks/cpython_stdlib/full/doctest/controls/prompt_imports.py")
         compare_module(fixtures / "boxed_doctest_bundled.py")
+        compare_module(fixtures / "boxed_doctest_case_options.py")
         compare_module(fixtures / "boxed_decorator_operand_lifetime.py")
         mock_compile_flags = {"IMREFLAGS": "--opt-level 0"}
         patch_multiple = root / "patch_multiple.py"

@@ -141,10 +141,10 @@ impl Checker<'_> {
                 self.expr(&kw.value)?
             }
             _ => {
-                return Err(error(
-                    self.source,
+                return Err(self.classified_error(
+                    Kind::ScopedObject,
                     call,
-                    "DocTestSuite supports a module and its default local fixture",
+                    "DocTestSuite options require the live Python suite",
                 ));
             }
         };

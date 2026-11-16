@@ -43,13 +43,9 @@ def _module_docs(name: str, filename: str | None, docs: list[tuple[str, str, int
     return _modules[name]
 
 
-def _default_case(test: DocTest) -> DocTestCase:
-    return DocTestCase(test)
-
-
 def DocTestSuite(module: _ModuleDocs) -> _DocTestSuite:
     parser = DocTestParser()
     tests: list[DocTest] = []
     for name, docstring, lineno in module._docs:
         tests.append(parser.get_doctest(docstring, {}, name, module._filename, lineno))
-    return _suite_from_tests(tests, _default_case)
+    return _suite_from_tests(tests, {})
