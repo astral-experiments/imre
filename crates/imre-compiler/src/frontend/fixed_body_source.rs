@@ -462,8 +462,8 @@ impl FixedNode {
                 ExprKind::Builtin(Builtin::Path(op), ref operands) => {
                     Self::Path(op, operands.len(), expr.ty)
                 }
-                ExprKind::Builtin(Builtin::Text(op), ref operands) => {
-                    Self::Text(op, operands.len(), expr.ty)
+                ExprKind::Builtin(Builtin::Text(op), _) => {
+                    Self::Text(op, expr.attribute_operands()?.len(), expr.ty)
                 }
                 ExprKind::Builtin(ref op, ref operands) => {
                     Self::Builtin(std::mem::discriminant(op), operands.len(), expr.ty)
@@ -1145,8 +1145,14 @@ mod tests {
                 Type::Bool,
             ),
             (
-                TextOperation::Split(false),
-                TextOperation::Split(true),
+                TextOperation::Split {
+                    reverse: false,
+                    written: Some(3),
+                },
+                TextOperation::Split {
+                    reverse: true,
+                    written: Some(3),
+                },
                 Type::List(0),
             ),
         ] {
@@ -1156,7 +1162,7 @@ mod tests {
                         ty: Type::Str,
                         kind: ExprKind::Local(0),
                     }];
-                    if matches!(operation, TextOperation::Split(_)) {
+                    if matches!(operation, TextOperation::Split { .. }) {
                         operands.extend([Expr::absent(Type::Optional(0)), Expr::integer(-1)]);
                     }
                     operands
