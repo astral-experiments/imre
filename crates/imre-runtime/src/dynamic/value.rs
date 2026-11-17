@@ -60,14 +60,27 @@ pub(super) struct CodeDefinition {
     pub module_definition: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
-    /// Runtime source retains execution flags even when its complete co_flags is unknown.
-    pub flags_complete: bool,
+    /// Low bit: complete Python flags; upper bits: authenticated source-body provenance.
+    pub flags_and_body: u8,
     pub generator_lambda: bool,
     pub freevars: Option<Arc<[String]>>,
     pub closure_supported: bool,
 }
 
 impl CodeDefinition {
+    pub(super) fn flags_complete(&self) -> bool {
+        self.flags_and_body & 1 != 0
+    }
+
+    pub(super) fn provider_body(&self) -> u8 {
+        self.flags_and_body >> 1
+    }
+
+    pub(super) fn set_provider_body(&mut self, body: u8) {
+        debug_assert!(body < 128);
+        self.flags_and_body = (self.flags_and_body & 1) | (body << 1);
+    }
+
     pub(super) fn freevars(&self) -> &[String] {
         self.freevars.as_deref().unwrap_or_default()
     }
@@ -109,7 +122,9 @@ mod permanent {
     include!("../../native/boxed-handles.rs");
 }
 pub(super) use permanent::{
-    ELLIPSIS, EMPTY_TUPLE, FALSE, NATIVE_SUSPENDED_BODY, NONE, NOT_IMPLEMENTED, TRUE,
+    DIFFLIB_CHAIN_B_BODY, DIFFLIB_FIND_BODY, DIFFLIB_INIT_BODY, DIFFLIB_SET_SEQ1_BODY,
+    DIFFLIB_SET_SEQ2_BODY, DIFFLIB_SET_SEQS_BODY, ELLIPSIS, EMPTY_TUPLE, FALSE,
+    NATIVE_SUSPENDED_BODY, NONE, NOT_IMPLEMENTED, TRUE,
 };
 use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =

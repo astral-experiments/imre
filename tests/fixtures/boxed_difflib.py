@@ -20,6 +20,8 @@ def current():
         "--- \n", "+++ \n", "@@ -1 +1 @@\n", "-old\n", "+new\n"
     ]
     check_live_matcher_state()
+    check_gc_chain_source()
+    check_constructor_dispatch()
 
 
 def check_live_matcher_state():
@@ -65,6 +67,20 @@ def check_live_matcher_state():
     finally:
         Match.__new__ = previous_new
 
+    constructor_globals = Match.__new__.__globals__
+    previous_tuple_new = constructor_globals["_tuple_new"]
+
+    def inspect_tuple_new(cls, parts):
+        frame = sys._getframe(2)
+        assert (frame.f_locals["besti"], frame.f_locals["bestj"], frame.f_locals["bestsize"]) == parts
+        return tuple.__new__(cls, parts)
+
+    constructor_globals["_tuple_new"] = inspect_tuple_new
+    try:
+        assert tuple(SequenceMatcher(None, "xab", "yab").find_longest_match()) == (1, 1, 2)
+    finally:
+        constructor_globals["_tuple_new"] = previous_tuple_new
+
     events = []
 
     def finalize(value):
@@ -80,3 +96,50 @@ def check_live_matcher_state():
                            [("y", [0]), ("a", [1]), ("b", [2])])]
     finally:
         del SequenceMatcher.__del__
+
+
+def check_gc_chain_source():
+    import gc
+    import sys
+
+    seen = []
+    old = gc.get_threshold()
+
+    def observe(phase, info):
+        if phase != "start":
+            return
+        frame = sys._getframe(1)
+        while frame is not None:
+            if frame.f_code.co_name == "__chain_b":
+                seen.append(True)
+                break
+            frame = frame.f_back
+
+    gc.callbacks.append(observe)
+    try:
+        gc.set_threshold(1, 1, 1)
+        matcher = SequenceMatcher(None, "", "abcdefghij" * 20, False)
+    finally:
+        gc.callbacks.remove(observe)
+        gc.set_threshold(*old)
+    assert seen and len(matcher.b2j) == 10
+
+
+def check_constructor_dispatch():
+    matcher = SequenceMatcher(None, "a", "b", False)
+    assert list(matcher.__dict__) == [
+        "isjunk", "a", "b", "autojunk", "matching_blocks", "opcodes",
+        "fullbcount", "b2j", "bjunk", "bpopular",
+    ]
+    seen = []
+    original = SequenceMatcher.set_seqs
+
+    def observe(self, a, b):
+        seen.append((self.isjunk, self.a, self.b, self.autojunk, a, b))
+
+    SequenceMatcher.set_seqs = observe
+    try:
+        SequenceMatcher(None, "a", "b", False)
+    finally:
+        SequenceMatcher.set_seqs = original
+    assert seen == [(None, None, None, False, "a", "b")]

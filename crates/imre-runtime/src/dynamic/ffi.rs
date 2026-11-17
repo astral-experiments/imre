@@ -3088,7 +3088,9 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
         // SAFETY: the emitter initializes the union with the function ABI selected by the tag.
         let body = unsafe {
             match definition.tag {
-                0 => value::Body::Native(definition.entry.native, NONE),
+                0 | value::DIFFLIB_INIT_BODY..=value::DIFFLIB_FIND_BODY => {
+                    value::Body::Native(definition.entry.native, NONE)
+                }
                 value::NATIVE_SUSPENDED_BODY => value::Body::Suspended(definition.entry.suspended),
                 _ => {
                     return finish(
@@ -3106,6 +3108,12 @@ pub(super) unsafe extern "C" fn imre_dyn_define(
             (qualname, doc),
             (filename, definition.first_line),
         );
+        if (value::DIFFLIB_INIT_BODY..=value::DIFFLIB_FIND_BODY).contains(&definition.tag) {
+            let Value::Code(code) = ctx.heap.get_mut(code) else {
+                unreachable!()
+            };
+            code.definition.set_provider_body(definition.tag as u8);
+        }
         let constants = match ctx.heap.compilation_constants(owner) {
             Ok(constants) => constants,
             Err(error) => return finish(ctx, Err(error)),
@@ -3306,7 +3314,7 @@ impl Context {
             parsed_parameters: Default::default(),
             module_definition,
             flags: flags.unwrap_or_default(),
-            flags_complete: flags.is_some(),
+            flags_and_body: u8::from(flags.is_some()),
             generator_lambda: metadata.generator_lambda,
             freevars: (!freevars.is_empty()).then(|| freevars.into()),
             closure_supported,

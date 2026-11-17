@@ -244,7 +244,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
     }
 
     pub(crate) fn finish_callable(self, start: Option<TextSize>) -> String {
-        self.finish_callable_with_accelerator(start, None)
+        self.finish_callable_with_accelerator(start, None, 0)
     }
 
     /// Enter an authenticated source function through a native attempt, retaining its source body as fallback.
@@ -252,6 +252,7 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         mut self,
         start: Option<TextSize>,
         accelerator: Option<&str>,
+        provider_tag: u32,
     ) -> String {
         let entry = self.finish(false);
         let entry = if let Some(accelerator) = accelerator {
@@ -273,9 +274,10 @@ impl<'a, 'p> RegisteredFrame<'a, 'p> {
         // Python definitions keep distinct addresses even if LLVM merges their bodies.
         let site = self.output.code_symbol("code_site", self.id);
         let tag = if self.native_suspension {
+            debug_assert_eq!(provider_tag, 0);
             permanent::NATIVE_SUSPENDED_BODY
         } else {
-            0
+            provider_tag
         };
         // The defining Code owns the filename. Preserve its reserved ABI slot without a relocation.
         let offset = self.output.constants.len();

@@ -19,3 +19,11 @@ pub(crate) fn small_integer_id(value: i64) -> Option<u64> {
 
 /// Prelinked code-site tag for a native resumable definition.
 pub(crate) const NATIVE_SUSPENDED_BODY: u32 = u32::MAX;
+
+/// Authenticated bundled difflib definition tags; zero remains an ordinary native body.
+pub(crate) const DIFFLIB_INIT_BODY: u32 = 1;
+pub(crate) const DIFFLIB_SET_SEQS_BODY: u32 = 2;
+pub(crate) const DIFFLIB_SET_SEQ1_BODY: u32 = 3;
+pub(crate) const DIFFLIB_SET_SEQ2_BODY: u32 = 4;
+pub(crate) const DIFFLIB_CHAIN_B_BODY: u32 = 5;
+pub(crate) const DIFFLIB_FIND_BODY: u32 = 6;

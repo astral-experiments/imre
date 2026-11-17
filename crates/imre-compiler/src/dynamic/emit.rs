@@ -22,7 +22,9 @@ use crate::llvm::registered::sites::{
     CallableSite, CheckedSites, CompiledClassNamespace, CompiledDefinition, CompiledTypeParameters,
     Declaration,
 };
-use crate::llvm::registered::{AnnotationScope, Output, RegisteredFrame, SourcePositions, sites};
+use crate::llvm::registered::{
+    AnnotationScope, Output, RegisteredFrame, SourcePositions, permanent, sites,
+};
 use crate::llvm::{ModuleLauncher, ProviderBody};
 use serde_json::json;
 
@@ -1220,17 +1222,31 @@ impl SourceMap<'_> {
                 }
             }
         }
-        let accelerator = (self.bundled && self.path == Path::new("<imre stdlib>/difflib.py"))
+        let provider = (self.bundled && self.path == Path::new("<imre stdlib>/difflib.py"))
             .then_some(prefix.name)
             .and_then(|name| match name {
-                "SequenceMatcher.__chain_b" => Some("imre_dyn_difflib_chain_b"),
-                "SequenceMatcher.find_longest_match" => Some("imre_dyn_difflib_find_longest"),
+                "SequenceMatcher.__init__" => {
+                    Some((Some("imre_dyn_difflib_init"), permanent::DIFFLIB_INIT_BODY))
+                }
+                "SequenceMatcher.set_seqs" => Some((None, permanent::DIFFLIB_SET_SEQS_BODY)),
+                "SequenceMatcher.set_seq1" => Some((None, permanent::DIFFLIB_SET_SEQ1_BODY)),
+                "SequenceMatcher.set_seq2" => Some((None, permanent::DIFFLIB_SET_SEQ2_BODY)),
+                "SequenceMatcher.__chain_b" => Some((
+                    Some("imre_dyn_difflib_chain_b"),
+                    permanent::DIFFLIB_CHAIN_B_BODY,
+                )),
+                "SequenceMatcher.find_longest_match" => Some((
+                    Some("imre_dyn_difflib_find_longest"),
+                    permanent::DIFFLIB_FIND_BODY,
+                )),
                 _ => None,
             });
-        match accelerator {
-            Some(accelerator) => function
-                .frame
-                .finish_callable_with_accelerator(start, Some(accelerator)),
+        match provider {
+            Some((accelerator, tag)) => {
+                function
+                    .frame
+                    .finish_callable_with_accelerator(start, accelerator, tag)
+            }
             None => function.frame.finish_callable(start),
         }
     }

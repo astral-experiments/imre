@@ -2,10 +2,44 @@
 
 use super::super::{
     Context, ffi,
-    value::{Code, Id, NONE, Result, Value},
+    value::{self, Code, Id, NONE, Result, Value},
 };
 
+mod constructor;
 mod matcher;
+
+/// Provenance packed into the authenticated bundled function's code definition.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum DifflibBody {
+    Init = value::DIFFLIB_INIT_BODY as u8,
+    SetSeqs = value::DIFFLIB_SET_SEQS_BODY as u8,
+    SetSeq1 = value::DIFFLIB_SET_SEQ1_BODY as u8,
+    SetSeq2 = value::DIFFLIB_SET_SEQ2_BODY as u8,
+    ChainB = value::DIFFLIB_CHAIN_B_BODY as u8,
+}
+
+/// Fuse a pristine constructor only after normal lookup, binding, and Python frame entry.
+///
+/// # Safety
+/// The compiler passes a live context, entered scope, and original source entry.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_init(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: this wrapper is reachable only from an authenticated entered Python frame.
+    let ctx = unsafe { &mut *raw };
+    match constructor::attempt(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: the original source body uses the same context and bound frame.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
 
 /// Run the canonical string constructor path after Python method lookup, binding, and frame entry.
 ///
@@ -89,6 +123,31 @@ fn canonical_builtins(ctx: &Context, root: Id, names: &[&str]) -> bool {
     })
 }
 
+/// Validate the direct original descriptor and its immutable defining class/scope provenance.
+fn trusted_method(ctx: &Context, class: Id, root: Id, name: &str, body: DifflibBody) -> bool {
+    let Value::Class {
+        scope: class_scope,
+        ancestors,
+        ..
+    } = ctx.heap.get(class)
+    else {
+        return false;
+    };
+    if ctx.scope_data(*class_scope).parent != Some(root)
+        || ancestors.len() != 1
+        || ancestors.first() != ctx.builtins.get("object")
+    {
+        return false;
+    }
+    let Some(function) = ctx.own_class_attr(class, name) else {
+        return false;
+    };
+    let Value::Function { code, scope, .. } = ctx.heap.get(function) else {
+        return false;
+    };
+    *scope == root && ctx.code_object(*code).definition.provider_body() == body as u8
+}
+
 /// Build the public b2j dictionary and junk/popular sets from flat ASCII character positions.
 fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let Some(receiver) = receiver(ctx, scope) else {
@@ -127,7 +186,12 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     {
         return Ok(None);
     }
+    build_chain_ascii(ctx, receiver, b, autojunk)?;
+    Ok(Some(NONE))
+}
 
+/// Materialize public ASCII character positions after the caller has completed every fallback guard.
+fn build_chain_ascii(ctx: &mut Context, receiver: Id, b: Id, autojunk: bool) -> Result<()> {
     let mut counts = [0usize; 256];
     let mut offsets = [0usize; 257];
     let mut order = [0u8; 256];
@@ -135,7 +199,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
     let mut positions = Vec::new();
     let n = {
         let Value::Str(b) = ctx.heap.get(b) else {
-            return Ok(None);
+            unreachable!()
         };
         let bytes = b.as_bytes();
         debug_assert!(bytes.is_ascii());
@@ -211,7 +275,7 @@ fn chain_b(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         ctx.heap.keep(key);
         super::super::builtins::set_add(ctx, popular, key)?;
     }
-    Ok(Some(NONE))
+    Ok(())
 }
 
 /// Search the current public `b2j`/`bjunk` state from the original bound source method.

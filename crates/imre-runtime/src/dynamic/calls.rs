@@ -4649,7 +4649,7 @@ impl Context {
                     return self.code_local_field(obj, name);
                 }
                 "co_flags" => {
-                    if !code.definition.flags_complete {
+                    if !code.definition.flags_complete() {
                         return Err(Error::new(
                             "NotImplementedError",
                             "co_flags unavailable for this code object",
