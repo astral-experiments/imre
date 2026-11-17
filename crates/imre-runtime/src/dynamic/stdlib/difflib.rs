@@ -941,10 +941,46 @@ fn ratio(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
         {
             return Ok(None);
         }
-        let Some(list) = get_blocks(ctx, scope)? else {
+        let list = match get_blocks(ctx, scope)? {
+            Some(list) => list,
+            None => {
+                #[cfg(unix)]
+                {
+                    if !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
+                        || !crate::signals::is_main()
+                        || !crate::signals::interrupt_pending()
+                    {
+                        return Ok(None);
+                    }
+                    // The signal arrived while ratio was logically inside the getter. Enter
+                    // its real frame before its source checkpoint delivers the interrupt.
+                    let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
+                        unreachable!()
+                    };
+                    let getter = ctx
+                        .own_class_attr(*class, "get_matching_blocks")
+                        .expect("authenticated getter");
+                    let filename = ctx.code_object(ctx.heap.current_code()).filename;
+                    let file = ctx.filename_display(filename)?.as_ref().into();
+                    ctx.heap.publish_statement(
+                        &[],
+                        value::Location {
+                            file,
+                            line: 619,
+                            span: None,
+                        },
+                        NONE,
+                    );
+                    ctx.call(getter, vec![receiver], Vec::new())?
+                }
+                #[cfg(not(unix))]
+                return Ok(None);
+            }
+        };
+        let Some(matches) = block_sum(ctx, list) else {
             return Ok(None);
         };
-        block_sum(ctx, list).expect("native blocks contain bounded exact integer sizes")
+        matches
     };
     if length == 0 {
         // The source returns its code-owned 1.0 constant; preserve that exact object.
