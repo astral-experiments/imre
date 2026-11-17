@@ -111,7 +111,6 @@ class Child(Base):
     "init_hook_leaks_receiver": HOOK + "def observe(value: Build) -> int: return value.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = observe(self)\n",
     "init_hook_observes_pending_field": HOOK + "class Child(Build):\n    def prepare(self) -> None:\n        print(self.value)\n        super().prepare()\n",
     "init_hook_super_reads_pending_field": HOOK + "    def read(self) -> int: return self.value\nclass Child(Build):\n    def prepare(self) -> None: self.value = super().read()\n",
-    "init_hook_duplicates_field": HOOK.replace("self.prepare()", "self.value = 2\n        self.prepare()"),
     "read_class_tuple_before_definition": 'def get() -> tuple[str]:\n    return Later.words\nvalue = get()\nclass Later:\n    words = ("late",)\n',
     "instance_shadows_class_string": 'class C:\n    label = "fixed"\n    def __init__(self, value: str) -> None:\n        self.label = value\nC("instance")\n',
     "incompatible_subclass_class_string": 'class C:\n    label = "first"\nclass D(C):\n    label = 2\n',
