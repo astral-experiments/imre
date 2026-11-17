@@ -1794,7 +1794,9 @@ print("result", call(b=2, a=1))
         )
         .unwrap();
         std::fs::write(&path, "from difflib import SequenceMatcher\nprint(SequenceMatcher()._SequenceMatcher__chain_b())\n").unwrap();
-        let shadow = super::compile_file(&path, None, &CompileOptions::default()).unwrap_err();
+        let shadow = super::compile_file(&path, None, &CompileOptions::default())
+            .err()
+            .unwrap();
         assert!(shadow.contains("standard-library shadowing is unsupported"));
     }
 
