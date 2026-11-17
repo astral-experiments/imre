@@ -73,6 +73,37 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/fnmatch/stock.stderr": "67ec08bc05fab81f6452cec6243a88db6dc7947db15c8dc01e82a2ad6dd4288d"
       }
     },
+    "pathlib": {
+      "adapter": "pathlib-leaf-v1",
+      "receipt": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/pathlib.jsonl",
+      "sources": {
+        "toolchain": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/gate.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/gate.json",
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/run.json",
+        "withdrawal": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/run.json",
+        "poison_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/architecture_control.py",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/test_join_posix.py"
+      },
+      "files": {
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/pathlib.jsonl": "6f647224961a24cc071651d79327170dd1e994d5d1639ff5e11263341ba14f1b",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.baseline.stderr": "3d4ba91effc6b8357dc97cecbbb68c8cd736eac919f7e432b03d5182fe045669",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.baseline.trace": "378eb6fade70155ac4546dbcad5baf1b3492b5e0bd6202d823ec8ab4599519eb",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.readelf.stdout": "e5fccc176b8a503b2eed3d8f23b9ae572d6b73bcfa65ee9f3af32e68f46f86d9",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.withdrawn.stderr": "95fe137938803a17fe232b43808fb7adb8f13837581bf35858b92828f3fac1d7",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O0.withdrawn.trace": "a0bd9bb65f114bbebafb7c14298d89ba83372816718f575cf3c4f81f33ec18d6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.baseline.stderr": "00612338cc0d2531acb2f4058426f43e9a8d45039645464f9292db47c4f833a7",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.baseline.trace": "d6c51696100a38183c52041e031340ede24cd3ba3337de8b4b034b6c7ede61d5",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.readelf.stdout": "5f8cfc25f5831fcaada50261dadb0392dbd30ab94fca23e197b2a1d2c8ab0453",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.withdrawn.stderr": "3d4ba91effc6b8357dc97cecbbb68c8cd736eac919f7e432b03d5182fe045669",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/O3.withdrawn.trace": "343ce3f8fc9e64fe32bcc54eb36cd3d14d818b127e453c4635535445a95181c6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/architecture_control.py": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/gate.json": "cf0ce55ec40bdc3e3e4d11cd038fc117f36bb43dfa7f00142c204a5bb50466d2",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/gate.stderr": "1e977adb8c5b856a532d7d79d803e9b074e8064b40977341012f7a734f62a7ef",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/run.json": "7e59804673cdd0f4168e3d47d5c66d22ac3d7bb620ca1da1b4294ea227c1aaf6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/stock.stderr": "b5fb1505f85c525018f0d74a70beac793f683291a02b6b2dc8e9fec82b233c26",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/pathlib/test_join_posix.py": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e"
+      }
+    },
     "urllib": {
       "adapter": "urllib-modules-v1",
       "receipt": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/urllib.jsonl",
