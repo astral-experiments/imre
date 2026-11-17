@@ -1222,9 +1222,8 @@ impl SourceMap<'_> {
                 }
             }
         }
-        let provider = (self.bundled && self.path == Path::new("<imre stdlib>/difflib.py"))
-            .then_some(prefix.name)
-            .and_then(|name| match name {
+        let provider = if self.bundled && self.path == Path::new("<imre stdlib>/difflib.py") {
+            match prefix.name {
                 "SequenceMatcher.__init__" => {
                     Some((Some("imre_dyn_difflib_init"), permanent::DIFFLIB_INIT_BODY))
                 }
@@ -1239,8 +1238,20 @@ impl SourceMap<'_> {
                     Some("imre_dyn_difflib_find_longest"),
                     permanent::DIFFLIB_FIND_BODY,
                 )),
+                "SequenceMatcher.get_matching_blocks" => Some((
+                    Some("imre_dyn_difflib_get_blocks"),
+                    permanent::DIFFLIB_GET_BLOCKS_BODY,
+                )),
                 _ => None,
-            });
+            }
+        } else if self.bundled
+            && self.path == Path::new("<imre stdlib>/collections/__init__.py")
+            && prefix.name == "_namedtuple_make.<locals>._make"
+        {
+            Some((None, permanent::COLLECTIONS_NAMEDTUPLE_MAKE_BODY))
+        } else {
+            None
+        };
         match provider {
             Some((accelerator, tag)) => {
                 function

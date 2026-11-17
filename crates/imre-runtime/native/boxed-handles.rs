@@ -27,3 +27,5 @@ pub(crate) const DIFFLIB_SET_SEQ1_BODY: u32 = 3;
 pub(crate) const DIFFLIB_SET_SEQ2_BODY: u32 = 4;
 pub(crate) const DIFFLIB_CHAIN_B_BODY: u32 = 5;
 pub(crate) const DIFFLIB_FIND_BODY: u32 = 6;
+pub(crate) const DIFFLIB_GET_BLOCKS_BODY: u32 = 7;
+pub(crate) const COLLECTIONS_NAMEDTUPLE_MAKE_BODY: u32 = 8;

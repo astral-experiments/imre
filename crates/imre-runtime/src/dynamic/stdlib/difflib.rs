@@ -5,6 +5,7 @@ use super::super::{
     value::{self, Code, Id, NONE, Result, Value},
 };
 
+mod blocks;
 mod chain_unicode;
 mod constructor;
 mod matcher;
@@ -18,6 +19,8 @@ enum DifflibBody {
     SetSeq1 = value::DIFFLIB_SET_SEQ1_BODY as u8,
     SetSeq2 = value::DIFFLIB_SET_SEQ2_BODY as u8,
     ChainB = value::DIFFLIB_CHAIN_B_BODY as u8,
+    Find = value::DIFFLIB_FIND_BODY as u8,
+    GetBlocks = value::DIFFLIB_GET_BLOCKS_BODY as u8,
 }
 
 /// Fuse a pristine constructor only after normal lookup, binding, and Python frame entry.
@@ -333,6 +336,28 @@ pub(super) unsafe extern "C" fn imre_dyn_difflib_find_longest(
     }
 }
 
+/// Run the canonical matching-block path after ordinary binding and source frame entry.
+///
+/// # Safety
+/// The compiler supplies the entered source frame and its original linked fallback entry.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_difflib_get_blocks(
+    raw: *mut Context,
+    scope: Id,
+    fallback: Code,
+) -> Id {
+    // SAFETY: the authenticated compiler wrapper enters this exact source frame first.
+    let ctx = unsafe { &mut *raw };
+    match get_blocks(ctx, scope) {
+        Ok(Some(value)) => ffi::finish(ctx, Ok(value)),
+        Ok(None) => {
+            // SAFETY: fallback is the original source body for this context and bound frame.
+            unsafe { fallback(raw, scope) }
+        }
+        Err(error) => ffi::finish(ctx, Err(error)),
+    }
+}
+
 fn exact_index(ctx: &Context, value: Id) -> Option<usize> {
     let Value::Int(value) = ctx.heap.get(value) else {
         return None;
@@ -587,6 +612,160 @@ fn plain_match_constructor(ctx: &Context, root: Id) -> Option<Id> {
         return None;
     }
     Some(constructor)
+}
+
+/// Require the genuine callback-free namedtuple classmethod and its live captured values.
+fn plain_match_make(ctx: &Context, class: Id) -> bool {
+    if [
+        "__iter__",
+        "__lt__",
+        "__gt__",
+        "__eq__",
+        "__ne__",
+        "__le__",
+        "__ge__",
+        "__len__",
+        "__del__",
+        "__getattribute__",
+    ]
+    .iter()
+    .any(|name| ctx.own_class_attr(class, name).is_some())
+    {
+        return false;
+    }
+    let Some(descriptor) = ctx.own_class_attr(class, "_make") else {
+        return false;
+    };
+    let Value::ClassMethod { callable, .. } = ctx.heap.get(descriptor) else {
+        return false;
+    };
+    let Value::Function { code, scope, .. } = ctx.heap.get(*callable) else {
+        return false;
+    };
+    if ctx.code_object(*code).definition.provider_body()
+        != value::COLLECTIONS_NAMEDTUPLE_MAKE_BODY as u8
+    {
+        return false;
+    }
+    let environment = ctx.scope_data(*scope);
+    if !environment.closure.environment || environment.closure.cells.len() != 3 {
+        return false;
+    }
+    let Some(root) = environment.parent else {
+        return false;
+    };
+    let globals = ctx.scope_data(root);
+    if globals.module != "collections" || globals.parent.is_some() || globals.exec_globals.is_some()
+    {
+        return false;
+    }
+    let Some(module) = ctx.dict_named_item(ctx.modules, "collections") else {
+        return false;
+    };
+    if !matches!(ctx.heap.get(module), Value::Module { scope, .. } if *scope == root) {
+        return false;
+    }
+    ctx.scope_name(*scope, "tuple_new") == ctx.builtins.get("tuple.__new__").copied()
+        && ctx.scope_name(*scope, "_len") == ctx.builtins.get("len").copied()
+        && ctx
+            .scope_name(*scope, "num_fields")
+            .and_then(|value| exact_index(ctx, value))
+            == Some(3)
+}
+
+/// Reject a virtual-method shadow even if an exposed instance dictionary contains callback-capable keys.
+fn no_instance_shadow(ctx: &Context, receiver: Id, name: &str) -> bool {
+    let Value::Instance {
+        fields, namespace, ..
+    } = ctx.heap.get(receiver)
+    else {
+        return false;
+    };
+    if fields.contains_key(name) {
+        return false;
+    }
+    namespace.is_none_or(|namespace| {
+        ctx.dict_storage(namespace)
+            .and_then(|dict| ctx.scalar_dict_name(dict, name))
+            == Some(None)
+    })
+}
+
+/// Source global and builtin lookup must neither enter Python nor select replacements.
+fn block_builtins(ctx: &Context, root: Id) -> bool {
+    let Some(builtins) = ctx.source_builtins else {
+        return false;
+    };
+    ["len", "range", "list", "map"].iter().all(|name| {
+        ctx.scalar_scope_name(root, name) == Some(None)
+            && ctx.scalar_dict_name(builtins, name) == Some(ctx.builtins.get(*name).copied())
+    })
+}
+
+/// Preserve the public matching-block list while computing canonical ASCII matches from one flat index.
+fn get_blocks(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {
+    let Some(receiver) = receiver(ctx, scope) else {
+        return Ok(None);
+    };
+    let Some(current) = ctx.plain_instance_field(receiver, "matching_blocks") else {
+        return Ok(None);
+    };
+    if current != NONE {
+        return Ok(unobserved_checkpoints(ctx).then_some(current));
+    }
+    let root = ctx.root_scope(scope);
+    let Value::Instance { class, .. } = ctx.heap.get(receiver) else {
+        unreachable!()
+    };
+    if !trusted_method(
+        ctx,
+        *class,
+        root,
+        "get_matching_blocks",
+        DifflibBody::GetBlocks,
+    ) || !trusted_method(ctx, *class, root, "find_longest_match", DifflibBody::Find)
+        || !no_instance_shadow(ctx, receiver, "find_longest_match")
+        || !block_builtins(ctx, root)
+    {
+        return Ok(None);
+    }
+    let Some(constructor) = plain_match_constructor(ctx, root) else {
+        return Ok(None);
+    };
+    if ctx.scalar_scope_name(root, "Match") != Some(Some(constructor))
+        || !plain_match_make(ctx, constructor)
+    {
+        return Ok(None);
+    }
+    let Some(a) = ctx.plain_instance_field(receiver, "a") else {
+        return Ok(None);
+    };
+    let Some(b) = ctx.plain_instance_field(receiver, "b") else {
+        return Ok(None);
+    };
+    let (left, b_len) = match (ctx.heap.get(a), ctx.heap.get(b)) {
+        (Value::Str(left), Value::Str(right)) if left.is_ascii() && right.is_ascii() => {
+            (left.as_bytes(), right.len())
+        }
+        _ => return Ok(None),
+    };
+    let Some(b2j) = ctx.plain_instance_field(receiver, "b2j") else {
+        return Ok(None);
+    };
+    let Some(bjunk) = ctx.plain_instance_field(receiver, "bjunk") else {
+        return Ok(None);
+    };
+    let mut active = [false; 256];
+    for &byte in left {
+        active[byte as usize] = true;
+    }
+    if !unobserved_checkpoints(ctx) {
+        return Ok(None);
+    }
+    let Some(index) = ascii_positions(ctx, b2j, bjunk, &active, 0, b_len)? else {
+        return Ok(None);
+    };
+    blocks::build(ctx, receiver, a, b, &index, constructor).map(Some)
 }
 
 fn find_longest(ctx: &mut Context, scope: Id) -> Result<Option<Id>> {

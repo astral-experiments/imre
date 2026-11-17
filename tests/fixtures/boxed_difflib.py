@@ -23,6 +23,7 @@ def current():
     check_gc_chain_source()
     check_constructor_dispatch()
     check_unicode_index_order_and_popularity()
+    check_matching_blocks_dispatch()
 
 
 def check_live_matcher_state():
@@ -155,3 +156,36 @@ def check_unicode_index_order_and_popularity():
     matcher = SequenceMatcher(None, "", text, autojunk=False)
     assert list(matcher.b2j) == ["雪", "Ω", "é", "🧪", "x"]
     assert matcher.b2j["雪"] == [0, 1, 2, 3]
+
+
+def check_matching_blocks_dispatch():
+    import sys
+
+    matcher = SequenceMatcher(None, "abxcd", "abycd")
+    state = matcher.__dict__
+    blocks = matcher.get_matching_blocks()
+    assert state["matching_blocks"] is blocks
+    assert blocks == [Match(0, 0, 2), Match(3, 3, 2), Match(5, 5, 0)]
+    blocks[0] = Match(0, 0, 1)
+    assert matcher.get_matching_blocks() is blocks and matcher.ratio() == 0.6
+    marker = object()
+    matcher.matching_blocks = marker
+    assert matcher.get_matching_blocks() is marker
+
+    previous_make = Match.__dict__["_make"]
+    seen = []
+
+    def inspect_make(cls, triple):
+        caller = sys._getframe(1)
+        assert caller.f_code.co_name == "get_matching_blocks"
+        seen.append(tuple(caller.f_locals["non_adjacent"]))
+        return tuple.__new__(cls, triple)
+
+    Match._make = classmethod(inspect_make)
+    try:
+        assert SequenceMatcher(None, "a", "a").get_matching_blocks() == [
+            Match(0, 0, 1), Match(1, 1, 0)
+        ]
+    finally:
+        Match._make = previous_make
+    assert seen == [((0, 0, 1), (1, 1, 0))] * 2
