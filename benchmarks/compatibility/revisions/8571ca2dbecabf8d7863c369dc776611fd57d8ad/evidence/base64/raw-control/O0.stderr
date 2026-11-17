@@ -1,0 +1,110 @@
+IMRE_UNITTEST {"event": "collection", "count": 36}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_ErrorHeritage"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_RFC4648_test_cases"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_a85_padding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_a85decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_a85decode_errors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_a85encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b16decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b16encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32decode_casefold"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32decode_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32decode_map01"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_other_types"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode_other_types"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b64decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b64decode_altchars"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b64decode_invalid_chars"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b64decode_padding_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b64encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b85_padding"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b85decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b85decode_errors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_b85encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_decode_nonascii_str"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_z85decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_z85decode_errors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.BaseXYTestCase.test_z85encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.LazyImportTest.test_lazy_import"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.LegacyBase64TestCase.test_decode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.LegacyBase64TestCase.test_decodebytes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.LegacyBase64TestCase.test_encode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_base64.LegacyBase64TestCase.test_encodebytes"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_ErrorHeritage"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_ErrorHeritage", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_RFC4648_test_cases"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_RFC4648_test_cases", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_a85_padding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_a85_padding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_a85decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_a85decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_a85decode_errors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_a85decode_errors", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_a85encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_a85encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b16decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b16decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b16encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b16encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32decode_casefold"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32decode_casefold", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32decode_error"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32decode_error", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32decode_map01"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32decode_map01", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_error"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_error", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_other_types"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32hexdecode_other_types", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode_other_types"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b32hexencode_other_types", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b64decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b64decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b64decode_altchars"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b64decode_altchars", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b64decode_invalid_chars"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b64decode_invalid_chars", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b64decode_padding_error"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b64decode_padding_error", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b64encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b64encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b85_padding"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b85_padding", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b85decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b85decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b85decode_errors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b85decode_errors", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_b85encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_b85encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_decode_nonascii_str"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_decode_nonascii_str", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_z85decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_z85decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_z85decode_errors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_z85decode_errors", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.BaseXYTestCase.test_z85encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.BaseXYTestCase.test_z85encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.LazyImportTest.test_lazy_import"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.LazyImportTest.test_lazy_import", "outcome": "skip", "details": ["implementation detail specific to cpython"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.LegacyBase64TestCase.test_decode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.LegacyBase64TestCase.test_decode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.LegacyBase64TestCase.test_decodebytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.LegacyBase64TestCase.test_decodebytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.LegacyBase64TestCase.test_encode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.LegacyBase64TestCase.test_encode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_base64.LegacyBase64TestCase.test_encodebytes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_base64.LegacyBase64TestCase.test_encodebytes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 36, "successful": true}

@@ -1,0 +1,386 @@
+IMRE_UNITTEST {"event": "collection", "count": 128}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.KeyOrderingTest.test_ordered_dict_reader"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.KeyOrderingTest.test_ordering_for_the_dict_reader_and_writer"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.MiscTestCase.test__all__"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.MiscTestCase.test_disallow_instantiation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.MiscTestCase.test_lazy_import"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.MiscTestCase.test_subclassable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestArrayWrites.test_char_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestArrayWrites.test_double_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestArrayWrites.test_float_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestArrayWrites.test_int_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_blankline"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_dubious_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_empty_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_inline_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_inline_quotes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_lone_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_newlines"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_null"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quote_and_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quote_fieldsep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quoted"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quoted_nl"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quoted_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quoted_quotes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quotes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_quotes_and_more"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_simple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_simple_writer"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_single"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_single_quoted_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_single_writer"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_singlequoted"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_singlequoted_left_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_singlequoted_right_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectExcel.test_space_and_quote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_copy"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_dialect_apply"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_incomplete_dialect"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_pickle"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs_override"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_registry"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_registry_badargs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectRegistry.test_space_dialect"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectUnix.test_simple_reader"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectUnix.test_simple_writer"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectValidity.test_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectValidity.test_escapechar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectValidity.test_invalid_chars"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectValidity.test_lineterminator"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDialectValidity.test_quoting"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_iter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_is_optional"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_reader_set_fieldnames"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_accepts_list"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_rejects_iter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_chain"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_from_file"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_dict_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_dict_no_fieldnames"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_long"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_long_with_rest"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_long_with_rest_no_fieldnames"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_multi"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_semi_sep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_short"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_read_with_blanks"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_typo_in_extrasaction_raises_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_ignore"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_raise"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_fields_not_in_fieldnames"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_multiple_dict_rows"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_no_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_write_simple_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestDictFields.test_writeheader_return_value"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestEscapedExcel.test_escape_fieldsep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestEscapedExcel.test_read_escape_fieldsep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestLeaks.test_create_read"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestLeaks.test_create_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestLeaks.test_read"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestLeaks.test_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestQuotedEscapedExcel.test_read_escape_fieldsep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestQuotedEscapedExcel.test_write_escape_fieldsep"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_delimiters"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_doublequote"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_guess_quote_and_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_has_header"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_has_header_checks_20_rows"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_has_header_regex_special_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_has_header_strings"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_issue43625"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestSniffer.test_sniff"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestUnicode.test_unicode_read"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.TestUnicode.test_unicode_write"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_bigfield"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_eof"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_eol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_linenum"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_nul"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_oddinputs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_quoting"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_skipinitialspace"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_read_space_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_reader_arg_valid"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_reader_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_reader_dialect_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_reader_kw_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_reader_reentrant_iterator"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_roundtrip_escaped_unquoted_newlines"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_roundtrip_quoteed_newlines"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_arg_valid"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_bigfield"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_empty_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_empty_fields_space_delimiter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_iterable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_lineterminator"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_write_quoting"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writer_arg_valid"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writer_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writer_dialect_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writer_kw_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writerows"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writerows_errors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_csv.Test_Csv.test_writerows_with_none"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.KeyOrderingTest.test_ordered_dict_reader"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.KeyOrderingTest.test_ordered_dict_reader", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.KeyOrderingTest.test_ordering_for_the_dict_reader_and_writer"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.KeyOrderingTest.test_ordering_for_the_dict_reader_and_writer", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.MiscTestCase.test__all__"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.MiscTestCase.test__all__", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.MiscTestCase.test_disallow_instantiation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.MiscTestCase.test_disallow_instantiation", "outcome": "skip", "details": ["implementation detail specific to cpython"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.MiscTestCase.test_lazy_import"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.MiscTestCase.test_lazy_import", "outcome": "skip", "details": ["implementation detail specific to cpython"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.MiscTestCase.test_subclassable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.MiscTestCase.test_subclassable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestArrayWrites.test_char_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestArrayWrites.test_char_write", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestArrayWrites.test_double_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestArrayWrites.test_double_write", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestArrayWrites.test_float_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestArrayWrites.test_float_write", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestArrayWrites.test_int_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestArrayWrites.test_int_write", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_blankline"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_blankline", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_dubious_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_dubious_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_empty_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_empty_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_inline_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_inline_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_inline_quotes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_inline_quotes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_lone_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_lone_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_newlines"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_newlines", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_null"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_null", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quote_and_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quote_and_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quote_fieldsep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quote_fieldsep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quoted"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quoted", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quoted_nl"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quoted_nl", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quoted_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quoted_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quoted_quotes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quoted_quotes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quotes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quotes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_quotes_and_more"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_quotes_and_more", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_simple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_simple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_simple_writer"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_simple_writer", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_single"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_single", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_single_quoted_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_single_quoted_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_single_writer"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_single_writer", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_singlequoted"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_singlequoted", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_singlequoted_left_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_singlequoted_left_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_singlequoted_right_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_singlequoted_right_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectExcel.test_space_and_quote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectExcel.test_space_and_quote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_copy"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_copy", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_dialect_apply"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_dialect_apply", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_incomplete_dialect"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_incomplete_dialect", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_pickle"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_pickle", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs_override"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_register_kwargs_override", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_registry"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_registry", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_registry_badargs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_registry_badargs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectRegistry.test_space_dialect"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectRegistry.test_space_dialect", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectUnix.test_simple_reader"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectUnix.test_simple_reader", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectUnix.test_simple_writer"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectUnix.test_simple_writer", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectValidity.test_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectValidity.test_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectValidity.test_escapechar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectValidity.test_escapechar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectValidity.test_invalid_chars"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectValidity.test_invalid_chars", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectValidity.test_lineterminator"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectValidity.test_lineterminator", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDialectValidity.test_quoting"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDialectValidity.test_quoting", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_iter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_iter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_accepts_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_is_optional"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_reader_fieldnames_is_optional", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_reader_set_fieldnames"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_reader_set_fieldnames", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_accepts_list"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_accepts_list", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_rejects_iter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_dict_writer_fieldnames_rejects_iter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_chain"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_chain", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_from_file"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_dict_fieldnames_from_file", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_dict_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_dict_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_dict_no_fieldnames"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_dict_no_fieldnames", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_long"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_long", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_long_with_rest"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_long_with_rest", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_long_with_rest_no_fieldnames"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_long_with_rest_no_fieldnames", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_multi"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_multi", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_semi_sep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_semi_sep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_short"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_short", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_read_with_blanks"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_read_with_blanks", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_typo_in_extrasaction_raises_error"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_typo_in_extrasaction_raises_error", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_ignore"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_ignore", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_raise"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_field_not_in_field_names_raise", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_fields_not_in_fieldnames"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_fields_not_in_fieldnames", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_multiple_dict_rows"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_multiple_dict_rows", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_no_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_no_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_write_simple_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_write_simple_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestDictFields.test_writeheader_return_value"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestDictFields.test_writeheader_return_value", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestEscapedExcel.test_escape_fieldsep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestEscapedExcel.test_escape_fieldsep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestEscapedExcel.test_read_escape_fieldsep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestEscapedExcel.test_read_escape_fieldsep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestLeaks.test_create_read"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestLeaks.test_create_read", "outcome": "skip", "details": ["requires sys.gettotalrefcount()"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestLeaks.test_create_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestLeaks.test_create_write", "outcome": "skip", "details": ["requires sys.gettotalrefcount()"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestLeaks.test_read"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestLeaks.test_read", "outcome": "skip", "details": ["requires sys.gettotalrefcount()"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestLeaks.test_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestLeaks.test_write", "outcome": "skip", "details": ["requires sys.gettotalrefcount()"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestQuotedEscapedExcel.test_read_escape_fieldsep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestQuotedEscapedExcel.test_read_escape_fieldsep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestQuotedEscapedExcel.test_write_escape_fieldsep"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestQuotedEscapedExcel.test_write_escape_fieldsep", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_delimiters"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_delimiters", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_doublequote"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_doublequote", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_guess_quote_and_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_guess_quote_and_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_has_header"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_has_header", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_has_header_checks_20_rows"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_has_header_checks_20_rows", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_has_header_regex_special_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_has_header_regex_special_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_has_header_strings"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_has_header_strings", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_issue43625"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_issue43625", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestSniffer.test_sniff"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestSniffer.test_sniff", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestUnicode.test_unicode_read"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestUnicode.test_unicode_read", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.TestUnicode.test_unicode_write"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.TestUnicode.test_unicode_write", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_bigfield"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_bigfield", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_eof"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_eof", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_eol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_eol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_linenum"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_linenum", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_nul"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_nul", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_oddinputs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_oddinputs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_quoting"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_quoting", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_skipinitialspace"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_skipinitialspace", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_read_space_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_read_space_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_reader_arg_valid"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_reader_arg_valid", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_reader_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_reader_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_reader_dialect_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_reader_dialect_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_reader_kw_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_reader_kw_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_reader_reentrant_iterator"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_reader_reentrant_iterator", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_roundtrip_escaped_unquoted_newlines"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_roundtrip_escaped_unquoted_newlines", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_roundtrip_quoteed_newlines"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_roundtrip_quoteed_newlines", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_arg_valid"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_arg_valid", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_bigfield"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_bigfield", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_empty_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_empty_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_empty_fields_space_delimiter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_empty_fields_space_delimiter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_iterable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_iterable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_lineterminator"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_lineterminator", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_write_quoting"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_write_quoting", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writer_arg_valid"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writer_arg_valid", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writer_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writer_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writer_dialect_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writer_dialect_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writer_kw_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writer_kw_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writerows"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writerows", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writerows_errors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writerows_errors", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_csv.Test_Csv.test_writerows_with_none"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_csv.Test_Csv.test_writerows_with_none", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 128, "successful": true}

@@ -11,6 +11,7 @@ import json
 import os
 import posixpath
 import re
+import sys
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
@@ -560,6 +561,9 @@ def adapt_urllib(root, revision, source_path, source_sha, source_blob):
 
 def validate_activated_family_record(r, eligible, check, entry):
     adapter = entry.get("adapter"); source = r["source"]; family = r["family"]; d = DATA_ROOT / "evidence" / family
+    if adapter == "raw-control-v1":
+        import raw_control
+        return raw_control.validate_record(sys.modules[__name__], r, eligible, check, entry)
     if adapter == "shared-family-v1": return validate_family_artifact_record(r, eligible, check)
     if adapter == "pathlib-leaf-v1":
         manifest = adapt_pathlib(DATA_ROOT, COHORT["imre_revision"], source["path"], source["sha256"], source["git_blob"]); stock = manifest["stock"]
@@ -776,6 +780,8 @@ def verify_stdlib_evidence(r):
     if vendored.is_file():
         stat = vendored.stat()
         require(source_digests(vendored, stat.st_mtime_ns, stat.st_size) == (source["sha256"], source["git_blob"]), f"{r['id']}: source hash differs from vendored upstream")
+    if is_snapshot() and (activation_entry(r["family"]) or {}).get("adapter") == "raw-control-v1":
+        return  # validate_snapshot_record already verified raw finite-runner events and locators.
     module = source_module(source["path"])
     for tier, run in r["runs"].items():
         if run["outcome"] not in {"pass", "fail", "error", "skip"} and not (is_snapshot() and run["outcome"] == "timeout"): continue
