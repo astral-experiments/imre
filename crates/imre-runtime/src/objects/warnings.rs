@@ -90,7 +90,7 @@ impl Pattern {
 }
 
 /// Unicode IGNORECASE also groups dotted and dotless I with ASCII i.
-fn literal_fold(ch: char) -> u32 {
+pub(super) fn literal_fold(ch: char) -> u32 {
     match ch {
         'İ' | 'ı' => u32::from('i'),
         _ => unicode_case_mapping::case_folded(ch).map_or(u32::from(ch), |n| n.get()),
