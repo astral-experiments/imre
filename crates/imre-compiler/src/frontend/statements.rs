@@ -80,6 +80,7 @@ pub(super) trait StatementLowering {
 
     fn assignment(
         &mut self,
+        annotation: Option<&ast::StmtAnnAssign>,
         targets: &[ast::Expr],
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
@@ -125,7 +126,10 @@ pub(super) trait StatementLowering {
             _ if !matches!(stmt, ast::Stmt::AnnAssign(a) if a.target.is_name_expr())
                 && let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) =>
             {
-                (None, self.assignment(targets, rhs, body)?)
+                (
+                    None,
+                    self.assignment(stmt.as_ann_assign_stmt(), targets, rhs, body)?,
+                )
             }
             ast::Stmt::If(branch) => (None, self.branch(branch, body)?),
             ast::Stmt::FunctionDef(def) => (self.definition(def, body)?, true),
@@ -167,6 +171,7 @@ impl StatementLowering for Checker<'_> {
 
     fn assignment(
         &mut self,
+        _annotation: Option<&ast::StmtAnnAssign>,
         targets: &[ast::Expr],
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
