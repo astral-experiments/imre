@@ -1,0 +1,19 @@
+[
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "home"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "scripts"
+  },
+  {
+    "bytes": 6891,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "scripts/publish-crates.py",
+    "sha256": "c6f13456d53d1dd1cc155d72d9e63cd999e361e1c983d366e477c8432693a021"
+  }
+]
