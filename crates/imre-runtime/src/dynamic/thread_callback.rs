@@ -62,6 +62,82 @@ pub(super) fn unsupported_target() -> Error {
     )
 }
 
+/// Admission remains owner-local until canonical call preparation has selected an operation.
+pub(super) enum Capture {
+    Ready(Operation, Vec<Id>),
+    Projected {
+        operand: Id,
+        selector: String,
+        roots: Vec<Id>,
+    },
+}
+
+/// Prepare an already selected native callable against an exact primitive receiver.
+/// Preparation classifies the operation but never runs it or a Python callback.
+pub(super) fn prepare_primitive_acquire(
+    ctx: &mut Context,
+    callable: Id,
+    bound_receiver: Id,
+    expected: Id,
+) -> Result<Option<Operation>> {
+    if !matches!(ctx.heap.get(expected), Value::PrimitiveLock(_)) {
+        return Ok(None);
+    }
+    let (callable, receiver) = match *ctx.heap.get(callable) {
+        Value::Method {
+            callable, receiver, ..
+        } if bound_receiver == NONE => (callable, receiver),
+        _ => (callable, bound_receiver),
+    };
+    // A forged bound native callable could perform conversions or reenter Python during
+    // preparation. Restrict preparation to the exact receiver's canonical method family.
+    if receiver != expected
+        || !matches!(ctx.heap.get(callable), Value::Native(symbol)
+            if symbol.strip_prefix(super::thread_lock::CLASS)
+                .and_then(|suffix| suffix.strip_prefix('.'))
+                .is_some_and(super::thread_lock::is_method))
+    {
+        return Ok(None);
+    }
+    let args = [receiver];
+    let super::calls::RegisteredCall::Acquire(acquire) =
+        ctx.prepare_call(callable, std::borrow::Cow::Borrowed(&args), Vec::new())?
+    else {
+        return Ok(None);
+    };
+    Ok(acquire
+        .native_primitive(ctx, expected)
+        .map(|wait| Operation::Acquire {
+            wait,
+            release: None,
+        }))
+}
+
+impl Capture {
+    /// Resolve only the projected case after releasing the immutable capture borrows.
+    pub(super) fn resolve(self, ctx: &mut Context) -> Result<Option<(Operation, Vec<Id>)>> {
+        let (operand, selector, roots) = match self {
+            Self::Ready(operation, roots) => return Ok(Some((operation, roots))),
+            Self::Projected {
+                operand,
+                selector,
+                roots,
+            } => (operand, selector, roots),
+        };
+        let mark = ctx.heap.temporary_mark();
+        let result = (|| {
+            let (callable, receiver) = ctx.builtin_method_target(operand, &selector)?;
+            prepare_primitive_acquire(ctx, callable, receiver, operand)
+                .map(|operation| operation.map(|operation| (operation, roots)))
+        })();
+        ctx.heap.release_temporaries_since(mark);
+        match result {
+            Err(error) if error.kind != "MemoryError" => Ok(None),
+            value => value,
+        }
+    }
+}
+
 impl Callback {
     pub(super) fn capture(
         ctx: &Context,
@@ -70,7 +146,7 @@ impl Callback {
         pos: &[Id],
         kwargs: Option<Id>,
         high_level: bool,
-    ) -> Result<Option<(Operation, Vec<Id>)>> {
+    ) -> Result<Option<Capture>> {
         let (callable, method) = match *target {
             Value::Method {
                 callable, receiver, ..
@@ -106,10 +182,19 @@ impl Callback {
         let mut meta: serde_json::Value = serde_json::from_str(signature)
             .map_err(|e| Error::new("SystemError", e.to_string()))?;
         if let Some((function, receiver)) = method
-            && let Some(serde_json::Value::String(field)) = meta
-                .get_mut("thread_bound_lock_field")
+            && let Some(serde_json::Value::Array(mut site)) = meta
+                .get_mut("thread_projected_call")
                 .map(serde_json::Value::take)
         {
+            let [
+                serde_json::Value::String(field),
+                serde_json::Value::String(selector),
+            ] = site.as_mut_slice()
+            else {
+                return Ok(None);
+            };
+            let field = std::mem::take(field);
+            let selector = std::mem::take(selector);
             if !matches!(code.body, Body::Native(_, NONE)) {
                 return Ok(None);
             }
@@ -141,19 +226,17 @@ impl Callback {
             let Some(operand) = ctx.plain_instance_field(receiver, &field) else {
                 return Ok(None);
             };
-            let Value::PrimitiveLock(lock) = ctx.heap.get(operand) else {
+            let Value::PrimitiveLock(_) = ctx.heap.get(operand) else {
                 return Ok(None);
             };
-            // The lookup is bound before startup returns. The worker owns the native
-            // lock and the parent retains the original method and Python lock wrapper.
+            // Retain the original method and projected wrapper until actual worker exit.
+            // Canonical resolution remains on the creator before startup publication.
             let roots = super::concat_ids(roots, &[operand])?;
-            return Ok(Some((
-                Operation::Acquire {
-                    wait: Arc::clone(lock),
-                    release: None,
-                },
+            return Ok(Some(Capture::Projected {
+                operand,
+                selector,
                 roots,
-            )));
+            }));
         }
         let receiver = method.map(|(_, receiver)| receiver);
         if receiver.is_some() && !code.definition.freevars().is_empty() {
@@ -184,7 +267,10 @@ impl Callback {
             let roots = super::concat_ids(roots, &[id])?;
             let mut callback = Self::from_code(ctx, code, scope, entry, Vec::new())?;
             callback.captured_lock = Some(lock);
-            return Ok(Some((Operation::Python(Box::new(callback)), roots)));
+            return Ok(Some(Capture::Ready(
+                Operation::Python(Box::new(callback)),
+                roots,
+            )));
         }
         if !code.definition.freevars().is_empty() {
             if high_level
@@ -227,7 +313,7 @@ impl Callback {
                 // The prefix has been consumed when the parent resumes. Only the final
                 // receiver must outlive a subsequent replacement of its closure cell.
                 let roots = super::concat_ids(roots, &[id])?;
-                return Ok(Some((
+                return Ok(Some(Capture::Ready(
                     Operation::Acquire {
                         wait: Arc::clone(lock),
                         release: Some(Arc::clone(release)),
@@ -364,7 +450,10 @@ impl Callback {
         }
         retained.truncate(roots.len() + kept);
         let callback = Self::from_code(ctx, code, scope, entry, values)?;
-        Ok(Some((Operation::Python(Box::new(callback)), retained)))
+        Ok(Some(Capture::Ready(
+            Operation::Python(Box::new(callback)),
+            retained,
+        )))
     }
 
     fn from_code(

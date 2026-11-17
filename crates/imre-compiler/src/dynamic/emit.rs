@@ -6010,8 +6010,8 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             (
                 include_str!("../../../../tests/fixtures/boxed_thread_bound_lock.py"),
                 "def task(",
-                "thread_bound_lock_field",
-                json!("gate"),
+                "thread_projected_call",
+                json!(["gate", "acquire"]),
                 1,
                 "def replacement(",
             ),
@@ -6051,7 +6051,7 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
             let excluded = functions[&start(excluded)].metadata.signature(0, false);
             assert!(
                 [
-                    "thread_bound_lock_field",
+                    "thread_projected_call",
                     "thread_captured_locks",
                     "thread_lock_only"
                 ]

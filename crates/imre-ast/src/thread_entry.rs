@@ -7,7 +7,6 @@ use ruff_python_ast as ast;
 pub enum ThreadEntry {
     Parameters { lock_only: bool },
     Captured(Vec<String>),
-    Bound(String),
 }
 
 pub fn thread_entry(def: &ast::StmtFunctionDef) -> Option<ThreadEntry> {
@@ -23,7 +22,7 @@ pub fn thread_entry(def: &ast::StmtFunctionDef) -> Option<ThreadEntry> {
             names.into_iter().map(str::to_owned).collect(),
         ))
     } else {
-        bound_lock_field(stmts, params).map(|name| ThreadEntry::Bound(name.to_owned()))
+        None
     }
 }
 
@@ -132,38 +131,6 @@ fn parameters(stmts: &[ast::Stmt], params: &ast::Parameters) -> Option<bool> {
     proof.suite(stmts).then_some(proof.lock_only)
 }
 
-/// The only heap lookup in this method precedes the blocking native acquire.
-fn bound_lock_field<'a>(stmts: &'a [ast::Stmt], params: &ast::Parameters) -> Option<&'a str> {
-    if params.vararg.is_some() || params.kwarg.is_some() || !params.kwonlyargs.is_empty() {
-        return None;
-    }
-    let mut positional = params.posonlyargs.iter().chain(&params.args);
-    let receiver = positional.next()?.name();
-    if positional.next().is_some() || receiver.starts_with("__") {
-        return None;
-    }
-    let [ast::Stmt::Expr(statement)] = stmts else {
-        return None;
-    };
-    let ast::Expr::Call(call) = &*statement.value else {
-        return None;
-    };
-    let ast::Expr::Attribute(method) = &*call.func else {
-        return None;
-    };
-    let ast::Expr::Attribute(field) = &*method.value else {
-        return None;
-    };
-    let ast::Expr::Name(owner) = &*field.value else {
-        return None;
-    };
-    (call.arguments.is_empty()
-        && method.attr.as_str() == "acquire"
-        && owner.id.as_str() == receiver.as_str()
-        && !field.attr.starts_with("__"))
-    .then(|| field.attr.as_str())
-}
-
 /// Certify a final lock acquire with at most one unconditional release before it.
 /// No cell can be read after a potentially blocking operation.
 pub fn captured_thread_locks<'a>(
@@ -231,7 +198,7 @@ mod tests {
         );
         assert_eq!(
             entry("def wait(self: Receiver): self._lock.acquire()"),
-            Some(ThreadEntry::Bound("_lock".into()))
+            None
         );
     }
 
