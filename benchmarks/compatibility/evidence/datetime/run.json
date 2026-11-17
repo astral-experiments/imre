@@ -170,5 +170,7 @@
   "wrapper_sha256": "0bb7fdbb9315268840015c93c1e7b56b7d7db39a97bcaac4ff462c6af67c9356",
   "inventory_evidence": "benchmarks/compatibility/evidence/datetime/inventory.json",
   "finite_runner_evidence": "benchmarks/compatibility/evidence/datetime/finite.run.json",
-  "receipt_build_commands": "Exact build argv and environment are stored once per tier in this file."
+  "receipt_build_commands": "Exact build argv and environment are stored once per tier in this file.",
+  "architecture_control": "benchmarks/compatibility/evidence/datetime/architecture/control.json",
+  "paired_credit_status": "withheld for failed negative control"
 }

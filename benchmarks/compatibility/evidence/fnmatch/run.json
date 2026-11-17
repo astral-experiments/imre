@@ -83,5 +83,7 @@
       "exit_code": 0,
       "timed_out": false
     }
-  }
+  },
+  "architecture_control": "benchmarks/compatibility/evidence/fnmatch/architecture/control.json",
+  "paired_credit_status": "retained subject to passed negative control and delegation checks"
 }

@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/datetime-architecture/poison/datetime_poison.py (-O0)
+/workspace/scratch/datetime-architecture/poison/datetime_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts
