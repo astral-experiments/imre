@@ -4,6 +4,15 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn bytearray_fallback_preserves_a_source_calls_exact_argument_contract() {
+    let project = tempdir().unwrap();
+    let entry = project.path().join("main.py");
+    fs::write(&entry, "buffer = bytearray()\nprint(buffer)\ndef score(x: int) -> int:\n    return x\nscore(True)\n").unwrap();
+    let error = crate::check_file(&entry, None).unwrap_err();
+    assert!(error.contains("expected int, got bool"), "{error}");
+}
+
+#[test]
 fn object_fallback_checks_first_party_scalar_stores() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
