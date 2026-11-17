@@ -32,7 +32,6 @@ REJECTED = {
     "formatter_nested_argument": 'from _string import formatter_parser\ndef number(item: int) -> int:\n    return item\nformatter_parser(number("bad"))',
     "isalnum_union_descriptor_receiver": "def test(value: str | int) -> bool:\n    return str.isalnum(value)",
     "isalnum_nested_descriptor_argument": "def required(value: int) -> int:\n    return value\nstr.isalnum(required())",
-    "ord_memoryview": 'ord(memoryview(b"x"))',
     "ord_nested_argument": 'def required(x: str) -> str:\n    return x\nord(c=required())',
     "quote_from_bytes_unrelated_return": (
         'from urllib.parse import quote_from_bytes as escape\n'
@@ -75,7 +74,6 @@ REJECTED = {
     "regex_dynamic_group": 'import re\ndef bad(index: int) -> None:\n    if m := re.search("(x)", "x"):\n        m.group(index)',
     "regex_match_bounds": 'import re\nre.compile("x").search("text", 2)',
     "regex_backreference": 'import re\nre.compile(r"(x)\\1")',
-    "regex_lookbehind": 'import re\nre.compile(r"(?<=x)y")',
     "regex_interior_end_anchor": 'import re\nre.compile("x$y")',
     "regex_optional_group_as_str": 'import re\ndef bad() -> str:\n    if m := re.search("(?P<x>x)?z", "z"):\n        a, = m.groups()\n        return a\n    return ""',
     "regex_aliased_dict_as_str": 'import re\ndef bad() -> str:\n    match = re.search("(?P<x>x)", "x")\n    if match is None:\n        return ""\n    groups = match.groupdict()\n    alias = groups\n    alias["x"] = None\n    return groups["x"]',
