@@ -1315,7 +1315,7 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
         return text;
     }
     if let Value::Code(code) = ctx.heap.get(text)
-        && let value::Body::Parsed { constants, source } = &code.body
+        && let value::Body::ParsedExec { constants, source } = &code.body
         && code.definition.flags == flags
         && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
     {
@@ -1336,9 +1336,43 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     ctx.native_module_code(entry, filename, Some(flags))
 }
 
+/// Link a checked non-expression interactive statement only when builtin `exec`
+/// consumes the exact parsed `single`-mode code object and matching future flags.
+/// Code compiled in another mode and shadowed callables keep their original operand.
+///
+/// # Safety
+/// The caller supplies a live context, native entry, and NUL-terminated expected source.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_single_operand(
+    ctx: *mut Context,
+    callable: Id,
+    text: Id,
+    entry: Code,
+    flags: u32,
+    expected: *const c_char,
+) -> Id {
+    // SAFETY: compiled callers supply an active context and static UTF-8 source.
+    let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec") {
+        return text;
+    }
+    if let Value::Code(code) = ctx.heap.get(text)
+        && let value::Body::ParsedSingle { constants, source } = &code.body
+        && code.definition.flags == flags
+        && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
+    {
+        let constants = *constants;
+        let Value::Code(code) = ctx.heap.get_mut(text) else {
+            unreachable!("validated code object")
+        };
+        code.body = value::Body::Native(entry, constants);
+    }
+    text
+}
+
 /// Link a fixed expression only when the evaluated callable is builtin `eval`
-/// and its actual string and inherited flags match the compiled alternative.
-/// This leaves a shadowed callable's original string argument untouched.
+/// and its actual string or parsed code source and flags match the compiled alternative.
+/// A shadowed callable receives its original argument unchanged.
 ///
 /// # Safety
 /// The caller supplies a live context, native entry, and NUL-terminated expected source.
@@ -1353,8 +1387,22 @@ pub(super) unsafe extern "C" fn imre_dyn_eval_operand(
 ) -> Id {
     // SAFETY: compiled callers supply an active context and static UTF-8 source.
     let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
-    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "eval")
-        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "eval") {
+        return text;
+    }
+    if let Value::Code(code) = ctx.heap.get(text)
+        && let value::Body::ParsedEval { constants, source } = &code.body
+        && code.definition.flags == flags
+        && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
+    {
+        let constants = *constants;
+        let Value::Code(code) = ctx.heap.get_mut(text) else {
+            unreachable!("validated code object")
+        };
+        code.body = value::Body::Native(entry, constants);
+        return text;
+    }
+    if !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
         || ctx.inherited_compile_flags() != flags
     {
         return text;

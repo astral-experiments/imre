@@ -565,7 +565,12 @@ pub(crate) fn exec_source_operand(call: &ast::ExprCall) -> Option<&ast::Expr> {
     let source = args.first()?;
     if !matches!(
         source,
-        ast::Expr::StringLiteral(_) | ast::Expr::Name(_) | ast::Expr::Subscript(_)
+        ast::Expr::StringLiteral(_)
+            | ast::Expr::Name(_)
+            | ast::Expr::Subscript(_)
+            | ast::Expr::Call(_)
+            | ast::Expr::BinOp(_)
+            | ast::Expr::FString(_)
     ) {
         return None;
     }

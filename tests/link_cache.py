@@ -104,6 +104,10 @@ def main():
         invoke(events=["hit"])
 
         # A user-supplied .o can change beneath an otherwise identical command line.
+        def executable_manifests():
+            return {path.name: path.read_bytes() for path in (root / "cache" / "v1").glob("*.json")}
+
+        before_custom = executable_manifests()
         external = root / "extra object.o"
         option = f"-Clink-arg={external}"
         for marker in ("first", "second"):
@@ -114,10 +118,12 @@ def main():
             )
             subprocess.run(["clang-18", "-x", "c", "-c", "-", "-o", external], input=program,
                            text=True, check=True)
-            invoke(option, events=["bypass"])
+            invoke(option, events=["relink"], objects="hit")
             assert subprocess.check_output([binary], text=True) == f"{marker}\n17\n"
-        invoke(events=["bypass"], IMRE_ENCODED_FLAGS=option)
+            assert executable_manifests() == before_custom
+        invoke(events=["relink"], objects="hit", IMRE_ENCODED_FLAGS=option)
         assert subprocess.check_output([binary], text=True) == "second\n17\n"
+        assert executable_manifests() == before_custom
         invoke(events=["hit"], mode="run")
 
         # Disabling trusted caching must not force all Python modules into one LLVM unit.
@@ -164,8 +170,9 @@ def main():
             invoke("--emit-llvm", root / "output.ll", mode="run", events=["bypass"], **without_clang)
             invoke("--target", f"{os.uname().machine}-linux-gnu", mode="run", events=["bypass"], **without_clang)
             override = invoke("-Clink-arg=--ld-path=/usr/bin/ld", "--verbose-link",
-                              mode="run", events=["bypass"], **without_clang)
+                              mode="run", events=["relink"], objects="hit", **without_clang)
             assert all(str(tools / "bin/ld.lld") not in line for line in override), override
+            assert any("--ld-path=/usr/bin/ld" in line for line in override), override
             explicit = invoke("--clang", "/usr/bin/clang-18", "--verbose-link", events=["bypass"])
             assert all(str(tools) not in line for line in explicit), explicit
             assert any("unit-0.o" in line and "unit-1.o" in line for line in explicit), explicit
