@@ -1,0 +1,2 @@
+10300 execve("/workspace/scratch/json-O3-saved.exe", ["/workspace/scratch/json-O3-saved"..., "test.test_json.test_decode.TestP"...], 0x7ffef1eba2c0 /* 79 vars */) = 0
+10300 +++ exited with 0 +++

@@ -1,0 +1,16 @@
+test_copy_file_empty (__main__.ZipToLocalPathCopyTest.test_copy_file_empty) ... ok
+test_copy_file_to_directory (__main__.ZipToLocalPathCopyTest.test_copy_file_to_directory) ... ok
+test_copy_file_to_existing_file (__main__.ZipToLocalPathCopyTest.test_copy_file_to_existing_file) ... ok
+test_copy_file_to_itself (__main__.ZipToLocalPathCopyTest.test_copy_file_to_itself) ... ok
+test_copy_into (__main__.ZipToLocalPathCopyTest.test_copy_into) ... ok
+test_copy_into_empty_name (__main__.ZipToLocalPathCopyTest.test_copy_into_empty_name) ... ok
+test_copy_dir (__main__.ZipToZipPathCopyTest.test_copy_dir) ... ok
+test_copy_dir_follow_symlinks_false (__main__.ZipToZipPathCopyTest.test_copy_dir_follow_symlinks_false) ... ok
+test_copy_dir_follow_symlinks_true (__main__.ZipToZipPathCopyTest.test_copy_dir_follow_symlinks_true) ... ok
+test_copy_dir_into_itself (__main__.ZipToZipPathCopyTest.test_copy_dir_into_itself) ... ok
+test_copy_dir_to_existing_directory (__main__.ZipToZipPathCopyTest.test_copy_dir_to_existing_directory) ... skipped 'needs local target'
+test_copy_dir_to_itself (__main__.ZipToZipPathCopyTest.test_copy_dir_to_itself) ... ok
+test_copy_file (__main__.ZipToZipPathCopyTest.test_copy_file) ... ok
+test_copy_file_empty (__main__.ZipToZipPathCopyTest.test_copy_file_empty) ... ok
+test_copy_file_to_directory (__main__.ZipToZipPathCopyTest.test_copy_file_to_directory) ... skipped 'needs local target'
+test_copy_file_to_existing_file (__main__.ZipToZipPathCopyTest.test_copy_file_to_existing_file) ... 

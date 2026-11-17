@@ -1,0 +1,1 @@
+/workspace/imre-pin/crates/imre-compiler/stdlib/runpy.py:88:10: Imre: this call may select builtins.exec without a linked body for its source. Define the handlers as Python functions and select one by name, or declare the finite modules with --include-module.

@@ -1,0 +1,42 @@
+test_repeat (test.test_itertools.LengthTransparency.test_repeat) ... ok
+test_repeat_with_negative_times (test.test_itertools.LengthTransparency.test_repeat_with_negative_times) ... ok
+test_issue30347_1 (test.test_itertools.RegressionTests.test_issue30347_1) ... ok
+test_issue30347_2 (test.test_itertools.RegressionTests.test_issue30347_2) ... ok
+test_sf_793826 (test.test_itertools.RegressionTests.test_sf_793826) ... ok
+test_sf_950057 (test.test_itertools.RegressionTests.test_sf_950057) ... ok
+test_combinations_sizeof (test.test_itertools.SizeofTest.test_combinations_sizeof) ... skipped 'implementation detail specific to cpython'
+test_combinations_with_replacement_sizeof (test.test_itertools.SizeofTest.test_combinations_with_replacement_sizeof) ... skipped 'implementation detail specific to cpython'
+test_permutations_sizeof (test.test_itertools.SizeofTest.test_permutations_sizeof) ... skipped 'implementation detail specific to cpython'
+test_product_sizeof (test.test_itertools.SizeofTest.test_product_sizeof) ... skipped 'implementation detail specific to cpython'
+test_keywords_in_subclass (test.test_itertools.SubclassWithKwargsTest.test_keywords_in_subclass) ... ok
+test_StopIteration (test.test_itertools.TestBasicOps.test_StopIteration) ... ok
+test_accumulate (test.test_itertools.TestBasicOps.test_accumulate) ... ok
+test_batched (test.test_itertools.TestBasicOps.test_batched) ... ok
+test_bug_7244 (test.test_itertools.TestBasicOps.test_bug_7244) ... ok
+test_chain (test.test_itertools.TestBasicOps.test_chain) ... ok
+test_chain_from_iterable (test.test_itertools.TestBasicOps.test_chain_from_iterable) ... ok
+test_combinations (test.test_itertools.TestBasicOps.test_combinations) ... ok
+test_combinations_result_gc (test.test_itertools.TestBasicOps.test_combinations_result_gc) ... skipped 'implementation detail specific to cpython'
+test_combinations_tuple_reuse (test.test_itertools.TestBasicOps.test_combinations_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+test_combinations_with_replacement (test.test_itertools.TestBasicOps.test_combinations_with_replacement) ... ok
+test_combinations_with_replacement_result_gc (test.test_itertools.TestBasicOps.test_combinations_with_replacement_result_gc) ... skipped 'implementation detail specific to cpython'
+test_combinations_with_replacement_tuple_reuse (test.test_itertools.TestBasicOps.test_combinations_with_replacement_tuple_reuse) ... skipped 'tuple reuse is specific to CPython'
+test_combinatorics (test.test_itertools.TestBasicOps.test_combinatorics) ... ok
+test_compress (test.test_itertools.TestBasicOps.test_compress) ... ok
+test_count (test.test_itertools.TestBasicOps.test_count) ... ok
+test_count_with_step (test.test_itertools.TestBasicOps.test_count_with_step) ... ok
+test_cycle (test.test_itertools.TestBasicOps.test_cycle) ... ok
+test_dropwhile (test.test_itertools.TestBasicOps.test_dropwhile) ... ok
+test_filter (test.test_itertools.TestBasicOps.test_filter) ... ok
+test_filterfalse (test.test_itertools.TestBasicOps.test_filterfalse) ... ok
+test_groupby (test.test_itertools.TestBasicOps.test_groupby) ... ok
+test_groupby_reentrant_eq_does_not_crash (test.test_itertools.TestBasicOps.test_groupby_reentrant_eq_does_not_crash) ... ok
+test_grouper_reentrant_eq_does_not_crash (test.test_itertools.TestBasicOps.test_grouper_reentrant_eq_does_not_crash) ... ok
+test_immutable_types (test.test_itertools.TestBasicOps.test_immutable_types) ... skipped 'implementation detail specific to cpython'
+test_islice (test.test_itertools.TestBasicOps.test_islice) ... ok
+test_map (test.test_itertools.TestBasicOps.test_map) ... ok
+test_pairwise (test.test_itertools.TestBasicOps.test_pairwise) ... ok
+test_pairwise_reenter (test.test_itertools.TestBasicOps.test_pairwise_reenter) ... ok
+test_pairwise_reenter2 (test.test_itertools.TestBasicOps.test_pairwise_reenter2) ... ok
+test_pairwise_result_gc (test.test_itertools.TestBasicOps.test_pairwise_result_gc) ... skipped 'implementation detail specific to cpython'
+test_permutations (test.test_itertools.TestBasicOps.test_permutations) ... 

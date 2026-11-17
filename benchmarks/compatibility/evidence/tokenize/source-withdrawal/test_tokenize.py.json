@@ -1,0 +1,56 @@
+{
+  "source": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_tokenize.py",
+  "source_sha256": "6af0b0fee4dce129c2702227cf25a02d4e147500f80835c86d143b2485ab4c44",
+  "withdrawn_to": "/workspace/scratch/withdrawn/test_tokenize.py",
+  "runs": {
+    "O0": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/tokenize/source-withdrawal/O0.execve",
+        "/workspace/scratch/tokenize-file-O0.exe",
+        "-v",
+        "CTokenizeTest.test_additive"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 0",
+        "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "source_absent_during_run": true,
+      "execve_count": 1,
+      "no_cpython_delegation": true
+    },
+    "O3": {
+      "argv": [
+        "strace",
+        "-f",
+        "-e",
+        "trace=execve",
+        "-o",
+        "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/tokenize/source-withdrawal/O3.execve",
+        "/workspace/scratch/tokenize-file-O3.exe",
+        "-v",
+        "CTokenizeTest.test_additive"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "IMREFLAGS": "--opt-level 3",
+        "IMRE_PYTHON": "/workspace/scratch/stdlib-sdk/imre"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "source_absent_during_run": true,
+      "execve_count": 1,
+      "no_cpython_delegation": true
+    }
+  },
+  "source_restored": true
+}

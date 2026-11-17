@@ -1,0 +1,30 @@
+{
+  "reason": "Both bounded individual attempts were stopped when the coordinator instructed no expansion of expensive retests. No individual result was emitted.",
+  "timeout_bound_seconds": 180,
+  "runs": {
+    "O0": {
+      "argv": [
+        "/workspace/scratch/tokenize-file-O0.exe",
+        "-v",
+        "TestRoundtrip.test_random_files"
+      ],
+      "exit_code": null,
+      "interrupted": true,
+      "reported_originals": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b5e2555dafb33547045a0e93035a34aa19b26231cbda23e990643d88f4db7a48"
+    },
+    "O3": {
+      "argv": [
+        "/workspace/scratch/tokenize-file-O3.exe",
+        "-v",
+        "TestRoundtrip.test_random_files"
+      ],
+      "exit_code": null,
+      "interrupted": true,
+      "reported_originals": 0,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b5e2555dafb33547045a0e93035a34aa19b26231cbda23e990643d88f4db7a48"
+    }
+  }
+}

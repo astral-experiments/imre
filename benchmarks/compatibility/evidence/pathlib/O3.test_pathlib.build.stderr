@@ -1,0 +1,636 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:206:29
+    |
+204 |         else:
+205 |             q = pathlib.PurePosixPath('a')
+206 |         self.assertNotEqual(p, q)
+    |                             ^ Expected `int`, found `PurePath`
+207 |
+208 |     def test_different_parsers_unordered(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:206:32
+    |
+204 |         else:
+205 |             q = pathlib.PurePosixPath('a')
+206 |         self.assertNotEqual(p, q)
+    |                                ^ Expected `int`, found `PureWindowsPath`
+207 |
+208 |     def test_different_parsers_unordered(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:371:29
+    |
+369 |         self.assertEqual(P('a/b'), P('a/b'))
+370 |         self.assertEqual(P('a/b'), P('a', 'b'))
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+    |                             ^^^^^^^^ Expected `int`, found `PurePath`
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:371:39
+    |
+369 |         self.assertEqual(P('a/b'), P('a/b'))
+370 |         self.assertEqual(P('a/b'), P('a', 'b'))
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+    |                                       ^^^^^^ Expected `int`, found `PurePath`
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:372:29
+    |
+370 |         self.assertEqual(P('a/b'), P('a', 'b'))
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+    |                             ^^^^^^^^ Expected `int`, found `PurePath`
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:372:39
+    |
+370 |         self.assertEqual(P('a/b'), P('a', 'b'))
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+    |                                       ^^^^^^^^^ Expected `int`, found `PurePath`
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:373:29
+    |
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+    |                             ^^^^^^^^ Expected `int`, found `PurePath`
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:373:39
+    |
+371 |         self.assertNotEqual(P('a/b'), P('a'))
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+    |                                       ^^^ Expected `int`, found `PurePath`
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:374:29
+    |
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+    |                             ^^^^^^^^^ Expected `int`, found `PurePath`
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:374:40
+    |
+372 |         self.assertNotEqual(P('a/b'), P('/a/b'))
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+    |                                        ^^^^^^ Expected `int`, found `PurePath`
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:375:29
+    |
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+    |                             ^^^ Expected `int`, found `PurePath`
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:375:34
+    |
+373 |         self.assertNotEqual(P('a/b'), P())
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+    |                                  ^^^^^^ Expected `int`, found `PurePath`
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:376:29
+    |
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+    |                             ^^^ Expected `int`, found `PurePath`
+377 |         self.assertNotEqual(P(), {})
+378 |         self.assertNotEqual(P(), int)
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:376:34
+    |
+374 |         self.assertNotEqual(P('/a/b'), P('/'))
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+    |                                  ^^ Expected `int`, found `Literal[""]`
+377 |         self.assertNotEqual(P(), {})
+378 |         self.assertNotEqual(P(), int)
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:377:29
+    |
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+    |                             ^^^ Expected `int`, found `PurePath`
+378 |         self.assertNotEqual(P(), int)
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:377:34
+    |
+375 |         self.assertNotEqual(P(), P('/'))
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+    |                                  ^^ Expected `int`, found `dict[Unknown, Unknown]`
+378 |         self.assertNotEqual(P(), int)
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:378:29
+    |
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+378 |         self.assertNotEqual(P(), int)
+    |                             ^^^ Expected `int`, found `PurePath`
+379 |
+380 |     def test_equivalences(self, equivalences=None):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:378:34
+    |
+376 |         self.assertNotEqual(P(), "")
+377 |         self.assertNotEqual(P(), {})
+378 |         self.assertNotEqual(P(), int)
+    |                                  ^^^ Expected `int`, found `<class 'int'>`
+379 |
+380 |     def test_equivalences(self, equivalences=None):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:660:29
+    |
+658 |     def test_eq_posix(self):
+659 |         P = self.cls
+660 |         self.assertNotEqual(P('a/b'), P('A/b'))
+    |                             ^^^^^^^^ Expected `int`, found `PurePath`
+661 |         self.assertEqual(P('/a'), P('///a'))
+662 |         self.assertNotEqual(P('/a'), P('//a'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:660:39
+    |
+658 |     def test_eq_posix(self):
+659 |         P = self.cls
+660 |         self.assertNotEqual(P('a/b'), P('A/b'))
+    |                                       ^^^^^^^^ Expected `int`, found `PurePath`
+661 |         self.assertEqual(P('/a'), P('///a'))
+662 |         self.assertNotEqual(P('/a'), P('//a'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:662:29
+    |
+660 |         self.assertNotEqual(P('a/b'), P('A/b'))
+661 |         self.assertEqual(P('/a'), P('///a'))
+662 |         self.assertNotEqual(P('/a'), P('//a'))
+    |                             ^^^^^^^ Expected `int`, found `PurePath`
+663 |
+664 |     @needs_posix
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:662:38
+    |
+660 |         self.assertNotEqual(P('a/b'), P('A/b'))
+661 |         self.assertEqual(P('/a'), P('///a'))
+662 |         self.assertNotEqual(P('/a'), P('//a'))
+    |                                      ^^^^^^^^ Expected `int`, found `PurePath`
+663 |
+664 |     @needs_posix
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:760:29
+    |
+758 |         self.assertEqual(P('c:a/b'), P('c:a/b'))
+759 |         self.assertEqual(P('c:a/b'), P('c:', 'a', 'b'))
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+    |                             ^^^^^^^^^^ Expected `int`, found `PurePath`
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:760:41
+    |
+758 |         self.assertEqual(P('c:a/b'), P('c:a/b'))
+759 |         self.assertEqual(P('c:a/b'), P('c:', 'a', 'b'))
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+    |                                         ^^^^^^^^^^ Expected `int`, found `PurePath`
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:761:29
+    |
+759 |         self.assertEqual(P('c:a/b'), P('c:', 'a', 'b'))
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+    |                             ^^^^^^^^^^ Expected `int`, found `PurePath`
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+763 |         # Case-insensitivity.
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:761:41
+    |
+759 |         self.assertEqual(P('c:a/b'), P('c:', 'a', 'b'))
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+    |                                         ^^^^^^^^^^^ Expected `int`, found `PurePath`
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+763 |         # Case-insensitivity.
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:762:29
+    |
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+    |                             ^^^^^^^^^ Expected `int`, found `PurePath`
+763 |         # Case-insensitivity.
+764 |         self.assertEqual(P('a/B'), P('A/b'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:762:40
+    |
+760 |         self.assertNotEqual(P('c:a/b'), P('d:a/b'))
+761 |         self.assertNotEqual(P('c:a/b'), P('c:/a/b'))
+762 |         self.assertNotEqual(P('/a/b'), P('c:/a/b'))
+    |                                        ^^^^^^^^^^^ Expected `int`, found `PurePath`
+763 |         # Case-insensitivity.
+764 |         self.assertEqual(P('a/B'), P('A/b'))
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[unknown-argument]: Argument `foo` does not match any known parameter of `PurePath.__init__`
+    --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_pathlib.py:2845:22
+     |
+2843 |     def test_passing_kwargs_errors(self):
+2844 |         with self.assertRaises(TypeError):
+2845 |             self.cls(foo="bar")
+     |                      ^^^^^^^^^
+2846 |
+2847 |     @needs_symlinks
+     |
+info: Method signature here
+   --> <imre stdlib>/pathlib/__init__.py:139:9
+    |
+137 |         return object.__new__(cls)
+138 |
+139 |     def __init__(self, *args):
+    |         ^^^^^^^^^^^^^^^^^^^^^
+140 |         paths = _string_args(args, _path_namespace)
+141 |         if paths is not None:
+    |
+
+

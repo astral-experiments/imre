@@ -1,0 +1,44 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+  --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_userstring.py:43:29
+   |
+41 |         with self.assertRaises(exc) as cm:
+42 |             getattr(obj, methodname)(*args)
+43 |         self.assertNotEqual(str(cm.exception), '')
+   |                             ^^^^^^^^^^^^^^^^^ Expected `int`, found `str`
+44 |         if expected_msg is not None:
+45 |             self.assertEqual(str(cm.exception), expected_msg)
+   |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+  --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_userstring.py:43:48
+   |
+41 |         with self.assertRaises(exc) as cm:
+42 |             getattr(obj, methodname)(*args)
+43 |         self.assertNotEqual(str(cm.exception), '')
+   |                                                ^^ Expected `int`, found `Literal[""]`
+44 |         if expected_msg is not None:
+45 |             self.assertEqual(str(cm.exception), expected_msg)
+   |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

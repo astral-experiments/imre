@@ -1,0 +1,24 @@
+{
+  "performed": false,
+  "provisional_pairs": 68,
+  "strict_verified_pairs": 0,
+  "images": {
+    "O0": {
+      "path": "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/textwrap/O0.exe",
+      "exists": false
+    },
+    "O3": {
+      "path": "/workspace/imre-stdlib-data/benchmarks/compatibility/evidence/textwrap/O3.exe",
+      "exists": false
+    }
+  },
+  "runner": "benchmarks/compatibility/replay_stdlib.py:111",
+  "reason": "The canonical runner explicitly unlinks each native image after its run; no saved textwrap image was found. No suite was rebuilt.",
+  "pending": [
+    "stage away original test_textwrap.py and matching bytecode",
+    "run the original O0/O3 images with child exec denied and traced",
+    "verify no libpython",
+    "restore source by hash",
+    "compare all 68 original outcomes to stock"
+  ]
+}

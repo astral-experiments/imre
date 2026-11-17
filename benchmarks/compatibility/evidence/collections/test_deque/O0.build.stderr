@@ -1,0 +1,44 @@
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_deque.py:682:29
+    |
+680 |         mut[0] = 11
+681 |         self.assertNotEqual(id(d), id(e))
+682 |         self.assertNotEqual(list(d), list(e))
+    |                             ^^^^^^^ Expected `int`, found `list[Unknown]`
+683 |
+684 |     def test_copy(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^       ---------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+
+error[invalid-argument-type]: Argument to bound method `TestCase.assertNotEqual` is incorrect
+   --> workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_deque.py:682:38
+    |
+680 |         mut[0] = 11
+681 |         self.assertNotEqual(id(d), id(e))
+682 |         self.assertNotEqual(list(d), list(e))
+    |                                      ^^^^^^^ Expected `int`, found `list[Unknown]`
+683 |
+684 |     def test_copy(self):
+    |
+info: Method defined here
+   --> <imre stdlib>/unittest/__init__.py:456:9
+    |
+454 |             self._failMembership(repr(member), repr(container), msg, expected)
+455 |
+456 |     def assertNotEqual(self, first: int, second: int, msg: str | None = None) -> None:
+    |         ^^^^^^^^^^^^^^                   ----------- Parameter declared here
+457 |         if first == second:
+458 |             raise self.failureException(self._formatMessage(msg, f"{first!r} == {second!r}"))
+    |
+
+

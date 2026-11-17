@@ -1,0 +1,2281 @@
+test_atexit_after_shutdown (test.test_threading.AtexitTests.test_atexit_after_shutdown) ... Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+FAIL
+test_atexit_called_once (test.test_threading.AtexitTests.test_atexit_called_once) ... FAIL
+test_atexit_output (test.test_threading.AtexitTests.test_atexit_output) ... FAIL
+test_abort (test.test_threading.BarrierTests.test_abort) ... ERROR
+test_abort_and_reset (test.test_threading.BarrierTests.test_abort_and_reset) ... ERROR
+test_action (test.test_threading.BarrierTests.test_action) ... ERROR
+test_barrier (test.test_threading.BarrierTests.test_barrier) ... ERROR
+test_barrier_10 (test.test_threading.BarrierTests.test_barrier_10) ... ERROR
+test_constructor (test.test_threading.BarrierTests.test_constructor) ... ok
+test_default_timeout (test.test_threading.BarrierTests.test_default_timeout) ... ERROR
+test_repr (test.test_threading.BarrierTests.test_repr) ... ERROR
+test_reset (test.test_threading.BarrierTests.test_reset) ... ERROR
+test_single_thread (test.test_threading.BarrierTests.test_single_thread) ... ok
+test_timeout (test.test_threading.BarrierTests.test_timeout) ... ERROR
+test_wait_return (test.test_threading.BarrierTests.test_wait_return) ... ERROR
+test_acquire (test.test_threading.BoundedSemaphoreTests.test_acquire) ... ok
+test_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.BoundedSemaphoreTests.test_acquire_destroy) ... ok
+test_acquire_timeout (test.test_threading.BoundedSemaphoreTests.test_acquire_timeout) ... ok
+test_constructor (test.test_threading.BoundedSemaphoreTests.test_constructor) ... ok
+test_default_value (test.test_threading.BoundedSemaphoreTests.test_default_value) ... ERROR
+test_multirelease (test.test_threading.BoundedSemaphoreTests.test_multirelease) ... ERROR
+test_release_unacquired (test.test_threading.BoundedSemaphoreTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.BoundedSemaphoreTests.test_repr) ... ok
+test_try_acquire (test.test_threading.BoundedSemaphoreTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_try_acquire_contended) ... ERROR
+test_with (test.test_threading.BoundedSemaphoreTests.test_with) ... ok
+test__is_owned (test.test_threading.CRLockTests.test__is_owned) ... ERROR
+test_acquire_contended (test.test_threading.CRLockTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.CRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (test.test_threading.CRLockTests.test_acquire_release) ... ok
+test_constructor (test.test_threading.CRLockTests.test_constructor) ... ok
+test_different_thread (test.test_threading.CRLockTests.test_different_thread) ... ERROR
+test_locked (test.test_threading.CRLockTests.test_locked) ... ok
+test_locked_repr (test.test_threading.CRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (test.test_threading.CRLockTests.test_locked_with_2threads) ... ERROR
+test_reacquire (test.test_threading.CRLockTests.test_reacquire) ... ok
+test_recursion_count (test.test_threading.CRLockTests.test_recursion_count) ... ERROR
+test_release_save_unacquired (test.test_threading.CRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (test.test_threading.CRLockTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.CRLockTests.test_repr) ... ok
+test_repr_count (test.test_threading.CRLockTests.test_repr_count) ... ERROR
+test_signature (test.test_threading.CRLockTests.test_signature) ... ok
+test_thread_leak (test.test_threading.CRLockTests.test_thread_leak) ... ERROR
+test_timeout (test.test_threading.CRLockTests.test_timeout) ... ERROR
+test_try_acquire (test.test_threading.CRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.CRLockTests.test_try_acquire_contended) ... ERROR
+test_weakref_deleted (test.test_threading.CRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (test.test_threading.CRLockTests.test_weakref_exists) ... ok
+test_with (test.test_threading.CRLockTests.test_with) ... ERROR
+test__is_owned (test.test_threading.ConditionAsRLockTests.test__is_owned) ... ERROR
+test_acquire_contended (test.test_threading.ConditionAsRLockTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.ConditionAsRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (test.test_threading.ConditionAsRLockTests.test_acquire_release) ... ok
+test_constructor (test.test_threading.ConditionAsRLockTests.test_constructor) ... ok
+test_different_thread (test.test_threading.ConditionAsRLockTests.test_different_thread) ... ERROR
+test_locked (test.test_threading.ConditionAsRLockTests.test_locked) ... ok
+test_locked_repr (test.test_threading.ConditionAsRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (test.test_threading.ConditionAsRLockTests.test_locked_with_2threads) ... ERROR
+test_reacquire (test.test_threading.ConditionAsRLockTests.test_reacquire) ... ok
+test_recursion_count (test.test_threading.ConditionAsRLockTests.test_recursion_count) ... skipped 'Condition does not expose _recursion_count()'
+test_release_save_unacquired (test.test_threading.ConditionAsRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (test.test_threading.ConditionAsRLockTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.ConditionAsRLockTests.test_repr) ... ok
+test_repr_count (test.test_threading.ConditionAsRLockTests.test_repr_count) ... ERROR
+test_thread_leak (test.test_threading.ConditionAsRLockTests.test_thread_leak) ... ERROR
+test_timeout (test.test_threading.ConditionAsRLockTests.test_timeout) ... ERROR
+test_try_acquire (test.test_threading.ConditionAsRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.ConditionAsRLockTests.test_try_acquire_contended) ... ERROR
+test_weakref_deleted (test.test_threading.ConditionAsRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (test.test_threading.ConditionAsRLockTests.test_weakref_exists) ... ok
+test_with (test.test_threading.ConditionAsRLockTests.test_with) ... ERROR
+test_acquire (test.test_threading.ConditionTests.test_acquire) ... ok
+test_notify (test.test_threading.ConditionTests.test_notify) ... ERROR
+test_timeout (test.test_threading.ConditionTests.test_timeout) ... ERROR
+test_unacquired_notify (test.test_threading.ConditionTests.test_unacquired_notify) ... ok
+test_unacquired_wait (test.test_threading.ConditionTests.test_unacquired_wait) ... ok
+test_waitfor (test.test_threading.ConditionTests.test_waitfor) ... ERROR
+test_waitfor_timeout (test.test_threading.ConditionTests.test_waitfor_timeout) ... ERROR
+test_at_fork_reinit (test.test_threading.EventTests.test_at_fork_reinit) ... ok
+test_is_set (test.test_threading.EventTests.test_is_set) ... ok
+test_notify (test.test_threading.EventTests.test_notify) ... ERROR
+test_repr (test.test_threading.EventTests.test_repr) ... ok
+test_set_and_clear (test.test_threading.EventTests.test_set_and_clear) ... ERROR
+test_timeout (test.test_threading.EventTests.test_timeout) ... ERROR
+test_custom_excepthook (test.test_threading.ExceptHookTests.test_custom_excepthook) ... ERROR
+test_custom_excepthook_fail (test.test_threading.ExceptHookTests.test_custom_excepthook_fail) ... ERROR
+test_excepthook (test.test_threading.ExceptHookTests.test_excepthook) ... ERROR
+test_excepthook_thread_None (test.test_threading.ExceptHookTests.test_excepthook_thread_None) ... skipped 'implementation detail specific to cpython'
+test_original_excepthook (test.test_threading.ExceptHookTests.test_original_excepthook) ... ERROR
+test_system_exit (test.test_threading.ExceptHookTests.test_system_exit) ... ERROR
+test_can_interrupt_tight_loops (test.test_threading.InterruptMainTests.test_can_interrupt_tight_loops) ... ERROR
+test_interrupt_main_invalid_signal (test.test_threading.InterruptMainTests.test_interrupt_main_invalid_signal) ... ok
+test_interrupt_main_mainthread (test.test_threading.InterruptMainTests.test_interrupt_main_mainthread) ... ok
+test_interrupt_main_noerror (test.test_threading.InterruptMainTests.test_interrupt_main_noerror) ... ok
+test_interrupt_main_subthread (test.test_threading.InterruptMainTests.test_interrupt_main_subthread) ... ERROR
+test_interrupt_main_with_signal_handler (test.test_threading.InterruptMainTests.test_interrupt_main_with_signal_handler) ... ok
+test_acquire_contended (test.test_threading.LockTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.LockTests.test_acquire_destroy) ... ok
+test_acquire_release (test.test_threading.LockTests.test_acquire_release) ... ok
+test_at_fork_reinit (test.test_threading.LockTests.test_at_fork_reinit) ... ok
+test_constructor (test.test_threading.LockTests.test_constructor) ... ok
+test_different_thread (test.test_threading.LockTests.test_different_thread) ... ERROR
+test_locked_repr (test.test_threading.LockTests.test_locked_repr) ... ok
+test_reacquire (test.test_threading.LockTests.test_reacquire) ... ERROR
+test_repr (test.test_threading.LockTests.test_repr) ... ok
+test_state_after_timeout (test.test_threading.LockTests.test_state_after_timeout) ... ok
+test_thread_leak (test.test_threading.LockTests.test_thread_leak) ... ERROR
+test_timeout (test.test_threading.LockTests.test_timeout) ... ERROR
+test_try_acquire (test.test_threading.LockTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.LockTests.test_try_acquire_contended) ... ERROR
+test_weakref_deleted (test.test_threading.LockTests.test_weakref_deleted) ... ok
+test_weakref_exists (test.test_threading.LockTests.test_weakref_exists) ... ok
+test_with (test.test_threading.LockTests.test_with) ... ERROR
+test__all__ (test.test_threading.MiscTestCase.test__all__) ... ok
+test_change_name (test.test_threading.MiscTestCase.test_change_name) ... skipped 'missing _thread.set_name'
+test_set_name (test.test_threading.MiscTestCase.test_set_name) ... skipped 'missing _thread.set_name'
+test__is_owned (test.test_threading.PyRLockTests.test__is_owned) ... ERROR
+test_acquire_contended (test.test_threading.PyRLockTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.PyRLockTests.test_acquire_destroy) ... ok
+test_acquire_release (test.test_threading.PyRLockTests.test_acquire_release) ... ok
+test_constructor (test.test_threading.PyRLockTests.test_constructor) ... ok
+test_different_thread (test.test_threading.PyRLockTests.test_different_thread) ... ERROR
+test_locked (test.test_threading.PyRLockTests.test_locked) ... ok
+test_locked_repr (test.test_threading.PyRLockTests.test_locked_repr) ... ok
+test_locked_with_2threads (test.test_threading.PyRLockTests.test_locked_with_2threads) ... ERROR
+test_reacquire (test.test_threading.PyRLockTests.test_reacquire) ... ok
+test_recursion_count (test.test_threading.PyRLockTests.test_recursion_count) ... ERROR
+test_release_save_unacquired (test.test_threading.PyRLockTests.test_release_save_unacquired) ... ok
+test_release_unacquired (test.test_threading.PyRLockTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.PyRLockTests.test_repr) ... ok
+test_repr_count (test.test_threading.PyRLockTests.test_repr_count) ... ERROR
+test_thread_leak (test.test_threading.PyRLockTests.test_thread_leak) ... ERROR
+test_timeout (test.test_threading.PyRLockTests.test_timeout) ... ERROR
+test_try_acquire (test.test_threading.PyRLockTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.PyRLockTests.test_try_acquire_contended) ... ERROR
+test_weakref_deleted (test.test_threading.PyRLockTests.test_weakref_deleted) ... ok
+test_weakref_exists (test.test_threading.PyRLockTests.test_weakref_exists) ... ok
+test_with (test.test_threading.PyRLockTests.test_with) ... ERROR
+test_acquire (test.test_threading.SemaphoreTests.test_acquire) ... ok
+test_acquire_contended (test.test_threading.SemaphoreTests.test_acquire_contended) ... ERROR
+test_acquire_destroy (test.test_threading.SemaphoreTests.test_acquire_destroy) ... ok
+test_acquire_timeout (test.test_threading.SemaphoreTests.test_acquire_timeout) ... ok
+test_constructor (test.test_threading.SemaphoreTests.test_constructor) ... ok
+test_default_value (test.test_threading.SemaphoreTests.test_default_value) ... ERROR
+test_multirelease (test.test_threading.SemaphoreTests.test_multirelease) ... ERROR
+test_release_unacquired (test.test_threading.SemaphoreTests.test_release_unacquired) ... ok
+test_repr (test.test_threading.SemaphoreTests.test_repr) ... ok
+test_try_acquire (test.test_threading.SemaphoreTests.test_try_acquire) ... ok
+test_try_acquire_contended (test.test_threading.SemaphoreTests.test_try_acquire_contended) ... ERROR
+test_with (test.test_threading.SemaphoreTests.test_with) ... ok
+test_daemon_threads_fatal_error (test.test_threading.SubinterpThreadingTests.test_daemon_threads_fatal_error) ... skipped 'implementation detail specific to cpython'
+test_daemon_threads_not_allowed (test.test_threading.SubinterpThreadingTests.test_daemon_threads_not_allowed) ... skipped 'implementation detail specific to cpython'
+test_threads_join (test.test_threading.SubinterpThreadingTests.test_threads_join) ... skipped 'requires _testcapi'
+test_threads_join_2 (test.test_threading.SubinterpThreadingTests.test_threads_join_2) ... skipped 'requires _testcapi'
+test_threads_join_with_no_main (test.test_threading.SubinterpThreadingTests.test_threads_join_with_no_main) ... skipped 'subinterpreters required'
+test_threads_not_allowed (test.test_threading.SubinterpThreadingTests.test_threads_not_allowed) ... skipped 'implementation detail specific to cpython'
+test_1_join_on_shutdown (test.test_threading.ThreadJoinOnShutdown.test_1_join_on_shutdown) ... FAIL
+test_2_join_in_forked_process (test.test_threading.ThreadJoinOnShutdown.test_2_join_in_forked_process) ... FAIL
+test_3_join_in_forked_from_thread (test.test_threading.ThreadJoinOnShutdown.test_3_join_in_forked_from_thread) ... FAIL
+test_4_daemon_threads (test.test_threading.ThreadJoinOnShutdown.test_4_daemon_threads) ... skipped 'not enough memory: 2.7G minimum needed'
+test_clear_threads_states_after_fork (test.test_threading.ThreadJoinOnShutdown.test_clear_threads_states_after_fork) ... ERROR
+test_reinit_tls_after_fork (test.test_threading.ThreadJoinOnShutdown.test_reinit_tls_after_fork) ... ERROR
+test_thread_from_thread (test.test_threading.ThreadJoinOnShutdown.test_thread_from_thread) ... FAIL
+test_BoundedSemaphore_limit (test.test_threading.ThreadTests.test_BoundedSemaphore_limit) ... ERROR
+test_PyThreadState_SetAsyncExc (test.test_threading.ThreadTests.test_PyThreadState_SetAsyncExc) ... skipped "No module named 'ctypes'"
+test_args_argument (test.test_threading.ThreadTests.test_args_argument) ... 
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdbb9>, args=[1]) ... ERROR
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdbb0>, args=(1,)) ... ERROR
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdba9>, args=['str']) ... ERROR
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdba1>, args=('str',)) ... ERROR
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdb9a>, args=([1],)) ... ERROR
+  test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdb93>, args=[(1,)]) ... ERROR
+test_boolean_target (test.test_threading.ThreadTests.test_boolean_target) ... ERROR
+test_daemon_param (test.test_threading.ThreadTests.test_daemon_param) ... ok
+test_dummy_thread_after_fork (test.test_threading.ThreadTests.test_dummy_thread_after_fork) ... FAIL
+test_enumerate_after_join (test.test_threading.ThreadTests.test_enumerate_after_join) ... ERROR
+test_finalization_shutdown (test.test_threading.ThreadTests.test_finalization_shutdown) ... FAIL
+test_finalize_daemon_thread_hang (test.test_threading.ThreadTests.test_finalize_daemon_thread_hang) ... skipped 'implementation detail specific to cpython'
+test_finalize_running_thread (test.test_threading.ThreadTests.test_finalize_running_thread) ... skipped "No module named 'ctypes'"
+test_finalize_with_trace (test.test_threading.ThreadTests.test_finalize_with_trace) ... FAIL
+test_foreign_thread (test.test_threading.ThreadTests.test_foreign_thread) ... ERROR
+test_frame_tstate_tracing (test.test_threading.ThreadTests.test_frame_tstate_tracing) ... skipped 'implementation detail specific to cpython'
+test_getprofile (test.test_threading.ThreadTests.test_getprofile) ... ERROR
+test_getprofile_all_threads (test.test_threading.ThreadTests.test_getprofile_all_threads) ... ERROR
+test_gettrace (test.test_threading.ThreadTests.test_gettrace) ... ERROR
+test_gettrace_all_threads (test.test_threading.ThreadTests.test_gettrace_all_threads) ... ERROR
+test_ident_of_no_threading_threads (test.test_threading.ThreadTests.test_ident_of_no_threading_threads) ... ERROR
+test_import_from_another_thread (test.test_threading.ThreadTests.test_import_from_another_thread) ... FAIL
+test_is_alive_after_fork (test.test_threading.ThreadTests.test_is_alive_after_fork) ... ERROR
+test_join_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_daemon_thread_in_finalization) ... 
+  test_join_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_daemon_thread_in_finalization) (timeout=None) ... FAIL
+  test_join_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_daemon_thread_in_finalization) (timeout=10) ... FAIL
+test_join_finished_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_finished_daemon_thread_in_finalization) ... FAIL
+test_join_from_multiple_threads (test.test_threading.ThreadTests.test_join_from_multiple_threads) ... skipped 'not enough memory: 1.4G minimum needed'
+test_join_nondaemon_on_shutdown (test.test_threading.ThreadTests.test_join_nondaemon_on_shutdown) ... FAIL
+test_join_with_timeout (test.test_threading.ThreadTests.test_join_with_timeout) ... ok
+test_lazy_import (test.test_threading.ThreadTests.test_lazy_import) ... skipped 'implementation detail specific to cpython'
+test_leak_without_join (test.test_threading.ThreadTests.test_leak_without_join) ... ok
+test_limbo_cleanup (test.test_threading.ThreadTests.test_limbo_cleanup) ... ERROR
+test_locals_at_exit (test.test_threading.ThreadTests.test_locals_at_exit) ... FAIL
+test_lock_no_args (test.test_threading.ThreadTests.test_lock_no_args) ... ok
+test_lock_no_subclass (test.test_threading.ThreadTests.test_lock_no_subclass) ... ok
+test_lock_or_none (test.test_threading.ThreadTests.test_lock_or_none) ... ok
+test_main_thread (test.test_threading.ThreadTests.test_main_thread) ... ERROR
+test_main_thread_after_fork (test.test_threading.ThreadTests.test_main_thread_after_fork) ... FAIL
+test_main_thread_after_fork_from_dummy_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_dummy_thread) ... FAIL
+test_main_thread_after_fork_from_foreign_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_foreign_thread) ... FAIL
+test_main_thread_after_fork_from_nonmain_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_nonmain_thread) ... FAIL
+test_main_thread_during_shutdown (test.test_threading.ThreadTests.test_main_thread_during_shutdown) ... FAIL
+test_name (test.test_threading.ThreadTests.test_name) ... skipped 'implementation detail specific to cpython'
+test_native_id_after_fork (test.test_threading.ThreadTests.test_native_id_after_fork) ... FAIL
+test_no_refcycle_through_target (test.test_threading.ThreadTests.test_no_refcycle_through_target) ... ERROR
+test_old_threading_api (test.test_threading.ThreadTests.test_old_threading_api) ... ok
+test_repr_daemon (test.test_threading.ThreadTests.test_repr_daemon) ... ok
+test_repr_stopped (test.test_threading.ThreadTests.test_repr_stopped) ... ok
+test_start_new_thread_at_finalization (test.test_threading.ThreadTests.test_start_new_thread_at_finalization) ... FAIL
+test_start_new_thread_failed (test.test_threading.ThreadTests.test_start_new_thread_failed) ... FAIL
+test_stop_the_world_during_finalization (test.test_threading.ThreadTests.test_stop_the_world_during_finalization) ... FAIL
+test_various_ops (test.test_threading.ThreadTests.test_various_ops) ... ERROR
+test_various_ops_large_stack (test.test_threading.ThreadTests.test_various_ops_large_stack) ... ERROR
+test_various_ops_small_stack (test.test_threading.ThreadTests.test_various_ops_small_stack) ... ERROR
+test_bare_raise_in_brand_new_thread (test.test_threading.ThreadingExceptionTests.test_bare_raise_in_brand_new_thread) ... ERROR
+test_daemonize_active_thread (test.test_threading.ThreadingExceptionTests.test_daemonize_active_thread) ... ok
+test_dummy_thread_on_interpreter_shutdown (test.test_threading.ThreadingExceptionTests.test_dummy_thread_on_interpreter_shutdown) ... FAIL
+test_joining_current_thread (test.test_threading.ThreadingExceptionTests.test_joining_current_thread) ... ok
+test_joining_inactive_thread (test.test_threading.ThreadingExceptionTests.test_joining_inactive_thread) ... ok
+test_multithread_modify_file_noerror (test.test_threading.ThreadingExceptionTests.test_multithread_modify_file_noerror) ... ERROR
+test_print_exception (test.test_threading.ThreadingExceptionTests.test_print_exception) ... FAIL
+test_print_exception_gh_102056 (test.test_threading.ThreadingExceptionTests.test_print_exception_gh_102056) ... ok
+test_print_exception_stderr_is_none_1 (test.test_threading.ThreadingExceptionTests.test_print_exception_stderr_is_none_1) ... FAIL
+test_print_exception_stderr_is_none_2 (test.test_threading.ThreadingExceptionTests.test_print_exception_stderr_is_none_2) ... FAIL
+test_recursion_limit (test.test_threading.ThreadingExceptionTests.test_recursion_limit) ... FAIL
+test_releasing_unacquired_lock (test.test_threading.ThreadingExceptionTests.test_releasing_unacquired_lock) ... ok
+test_start_thread_again (test.test_threading.ThreadingExceptionTests.test_start_thread_again) ... ok
+test_init_immutable_default_args (test.test_threading.TimerTests.test_init_immutable_default_args) ... ERROR
+
+======================================================================
+ERROR: test_abort (test.test_threading.BarrierTests.test_abort)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1130, in test_abort
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_abort_and_reset (test.test_threading.BarrierTests.test_abort_and_reset)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1195, in test_abort_and_reset
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_action (test.test_threading.BarrierTests.test_action)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1109, in test_action
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_barrier (test.test_threading.BarrierTests.test_barrier)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1077, in test_barrier
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_barrier_10 (test.test_threading.BarrierTests.test_barrier_10)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1083, in test_barrier_10
+    return self.test_barrier(10)
+           ~~~~~~~~~~~~~~~~~^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1077, in test_barrier
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_default_timeout (test.test_threading.BarrierTests.test_default_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1225, in test_default_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_repr (test.test_threading.BarrierTests.test_repr)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1243, in test_repr
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_reset (test.test_threading.BarrierTests.test_reset)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1160, in test_reset
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.BarrierTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1212, in test_timeout
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_wait_return (test.test_threading.BarrierTests.test_wait_return)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1094, in test_wait_return
+    self.run_threads(f)
+    ~~~~~~~~~~~~~~~~^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 1050, in run_threads
+    with Bunch(f, self.N):
+         ~~~~~^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 845, in test_acquire_contended
+    with Bunch(func, N):
+         ~~~~~^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_default_value (test.test_threading.BoundedSemaphoreTests.test_default_value)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 968, in test_default_value
+    with Bunch(f, 1) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_multirelease (test.test_threading.BoundedSemaphoreTests.test_multirelease)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 898, in test_multirelease
+    with Bunch(func, 10):
+         ~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.BoundedSemaphoreTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 940, in test_try_acquire_contended
+    with Bunch(f, 5):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test__is_owned (test.test_threading.CRLockTests.test__is_owned)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 475, in test__is_owned
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.CRLockTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 173, in test_acquire_contended
+    with Bunch(f, N) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_different_thread (test.test_threading.CRLockTests.test_different_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 459, in test_different_thread
+    with Bunch(f, 1, True) as bunch:
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_locked_with_2threads (test.test_threading.CRLockTests.test_locked_with_2threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 400, in test_locked_with_2threads
+    with Bunch(acquire, 1):
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_recursion_count (test.test_threading.CRLockTests.test_recursion_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 444, in test_recursion_count
+    start_new_thread(f, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_repr_count (test.test_threading.CRLockTests.test_repr_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 350, in test_repr_count
+    with Bunch(call_repr, 1):
+         ~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_thread_leak (test.test_threading.CRLockTests.test_thread_leak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 222, in test_thread_leak
+    with Bunch(f, 15):
+         ~~~~~^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.CRLockTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 247, in test_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.CRLockTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 160, in test_try_acquire_contended
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_with (test.test_threading.CRLockTests.test_with)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 199, in test_with
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test__is_owned (test.test_threading.ConditionAsRLockTests.test__is_owned)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 475, in test__is_owned
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.ConditionAsRLockTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 173, in test_acquire_contended
+    with Bunch(f, N) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_different_thread (test.test_threading.ConditionAsRLockTests.test_different_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 459, in test_different_thread
+    with Bunch(f, 1, True) as bunch:
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_locked_with_2threads (test.test_threading.ConditionAsRLockTests.test_locked_with_2threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 400, in test_locked_with_2threads
+    with Bunch(acquire, 1):
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_repr_count (test.test_threading.ConditionAsRLockTests.test_repr_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 350, in test_repr_count
+    with Bunch(call_repr, 1):
+         ~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_thread_leak (test.test_threading.ConditionAsRLockTests.test_thread_leak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 222, in test_thread_leak
+    with Bunch(f, 15):
+         ~~~~~^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.ConditionAsRLockTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 247, in test_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.ConditionAsRLockTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 160, in test_try_acquire_contended
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_with (test.test_threading.ConditionAsRLockTests.test_with)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 199, in test_with
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_notify (test.test_threading.ConditionTests.test_notify)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 728, in test_notify
+    self._check_notify(cond)
+    ~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 660, in _check_notify
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.ConditionTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 745, in test_timeout
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_waitfor (test.test_threading.ConditionTests.test_waitfor)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 767, in test_waitfor
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_waitfor_timeout (test.test_threading.ConditionTests.test_waitfor_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 787, in test_waitfor_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_notify (test.test_threading.EventTests.test_notify)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 523, in test_notify
+    self._check_notify(evt)
+    ~~~~~~~~~~~~~~~~~~^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 510, in _check_notify
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_set_and_clear (test.test_threading.EventTests.test_set_and_clear)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 569, in test_set_and_clear
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.EventTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 541, in test_timeout
+    with Bunch(f, N):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_custom_excepthook (test.test_threading.ExceptHookTests.test_custom_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2107, in test_custom_excepthook
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_custom_excepthook_fail (test.test_threading.ExceptHookTests.test_custom_excepthook_fail)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2132, in test_custom_excepthook_fail
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_excepthook (test.test_threading.ExceptHookTests.test_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/__init__.py", line 2966, in wrapper
+    return func(*args, **kwargs)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2053, in test_excepthook
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_original_excepthook (test.test_threading.ExceptHookTests.test_original_excepthook)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2150, in test_original_excepthook
+    default_output = run_thread()
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2143, in run_thread
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_system_exit (test.test_threading.ExceptHookTests.test_system_exit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2092, in test_system_exit
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_can_interrupt_tight_loops (test.test_threading.InterruptMainTests.test_can_interrupt_tight_loops)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/threading_helper.py", line 66, in decorator
+    return func(*args)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2441, in test_can_interrupt_tight_loops
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_interrupt_main_subthread (test.test_threading.InterruptMainTests.test_interrupt_main_subthread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2400, in test_interrupt_main_subthread
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.LockTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 173, in test_acquire_contended
+    with Bunch(f, N) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_different_thread (test.test_threading.LockTests.test_different_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 296, in test_different_thread
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_reacquire (test.test_threading.LockTests.test_reacquire)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 283, in test_reacquire
+    start_new_thread(f, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_thread_leak (test.test_threading.LockTests.test_thread_leak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 222, in test_thread_leak
+    with Bunch(f, 15):
+         ~~~~~^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.LockTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 247, in test_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.LockTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 160, in test_try_acquire_contended
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_with (test.test_threading.LockTests.test_with)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 199, in test_with
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test__is_owned (test.test_threading.PyRLockTests.test__is_owned)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 475, in test__is_owned
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.PyRLockTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 173, in test_acquire_contended
+    with Bunch(f, N) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_different_thread (test.test_threading.PyRLockTests.test_different_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 459, in test_different_thread
+    with Bunch(f, 1, True) as bunch:
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_locked_with_2threads (test.test_threading.PyRLockTests.test_locked_with_2threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 400, in test_locked_with_2threads
+    with Bunch(acquire, 1):
+         ~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_recursion_count (test.test_threading.PyRLockTests.test_recursion_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 444, in test_recursion_count
+    start_new_thread(f, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_repr_count (test.test_threading.PyRLockTests.test_repr_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 350, in test_repr_count
+    with Bunch(call_repr, 1):
+         ~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_thread_leak (test.test_threading.PyRLockTests.test_thread_leak)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 222, in test_thread_leak
+    with Bunch(f, 15):
+         ~~~~~^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_timeout (test.test_threading.PyRLockTests.test_timeout)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 247, in test_timeout
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.PyRLockTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 160, in test_try_acquire_contended
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_with (test.test_threading.PyRLockTests.test_with)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 199, in test_with
+    with Bunch(f, 1):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_acquire_contended (test.test_threading.SemaphoreTests.test_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 845, in test_acquire_contended
+    with Bunch(func, N):
+         ~~~~~^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_default_value (test.test_threading.SemaphoreTests.test_default_value)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 968, in test_default_value
+    with Bunch(f, 1) as bunch:
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_multirelease (test.test_threading.SemaphoreTests.test_multirelease)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 898, in test_multirelease
+    with Bunch(func, 10):
+         ~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_try_acquire_contended (test.test_threading.SemaphoreTests.test_try_acquire_contended)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 940, in test_try_acquire_contended
+    with Bunch(f, 5):
+         ~~~~~^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/lock_tests.py", line 65, in __enter__
+    start_new_thread(self.task, ())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_clear_threads_states_after_fork (test.test_threading.ThreadJoinOnShutdown.test_clear_threads_states_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1597, in test_clear_threads_states_after_fork
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_reinit_tls_after_fork (test.test_threading.ThreadJoinOnShutdown.test_reinit_tls_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1583, in test_reinit_tls_after_fork
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_BoundedSemaphore_limit (test.test_threading.ThreadTests.test_BoundedSemaphore_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 954, in test_BoundedSemaphore_limit
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdbb9>, args=[1])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdbb0>, args=(1,))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdba9>, args=['str'])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdba1>, args=('str',))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdb9a>, args=([1],))
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_args_argument (test.test_threading.ThreadTests.test_args_argument) (target=<function ThreadTests.test_args_argument.<locals>.<lambda> at 0xdb93>, args=[(1,)])
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 178, in test_args_argument
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_boolean_target (test.test_threading.ThreadTests.test_boolean_target)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1117, in test_boolean_target
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_enumerate_after_join (test.test_threading.ThreadTests.test_enumerate_after_join)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 520, in test_enumerate_after_join
+    old_interval = sys.getswitchinterval()
+AttributeError: module 'sys' has no attribute 'getswitchinterval'
+
+======================================================================
+ERROR: test_foreign_thread (test.test_threading.ThreadTests.test_foreign_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 301, in test_foreign_thread
+    tid = _thread.start_new_thread(f, (mutex,))
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_getprofile (test.test_threading.ThreadTests.test_getprofile)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1049, in test_getprofile
+    old_profile = threading.getprofile()
+AttributeError: module 'threading' has no attribute 'getprofile'
+
+======================================================================
+ERROR: test_getprofile_all_threads (test.test_threading.ThreadTests.test_getprofile_all_threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1058, in test_getprofile_all_threads
+    old_profile = threading.getprofile()
+AttributeError: module 'threading' has no attribute 'getprofile'
+
+======================================================================
+ERROR: test_gettrace (test.test_threading.ThreadTests.test_gettrace)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1010, in test_gettrace
+    old_trace = threading.gettrace()
+AttributeError: module 'threading' has no attribute 'gettrace'
+
+======================================================================
+ERROR: test_gettrace_all_threads (test.test_threading.ThreadTests.test_gettrace_all_threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1020, in test_gettrace_all_threads
+    old_trace = threading.gettrace()
+AttributeError: module 'threading' has no attribute 'gettrace'
+
+======================================================================
+ERROR: test_ident_of_no_threading_threads (test.test_threading.ThreadTests.test_ident_of_no_threading_threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 244, in test_ident_of_no_threading_threads
+    tid = _thread.start_new_thread(f, ())
+NotImplementedError: this thread callback requires the boxed Python heap
+
+======================================================================
+ERROR: test_is_alive_after_fork (test.test_threading.ThreadTests.test_is_alive_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 689, in test_is_alive_after_fork
+    old_interval = sys.getswitchinterval()
+AttributeError: module 'sys' has no attribute 'getswitchinterval'
+
+======================================================================
+ERROR: test_limbo_cleanup (test.test_threading.ThreadTests.test_limbo_cleanup)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 418, in test_limbo_cleanup
+    _start_joinable_thread = threading._start_joinable_thread
+AttributeError: module 'threading' has no attribute '_start_joinable_thread'
+
+======================================================================
+ERROR: test_main_thread (test.test_threading.ThreadTests.test_main_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 718, in test_main_thread
+    th.start()
+    ~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_no_refcycle_through_target (test.test_threading.ThreadTests.test_no_refcycle_through_target)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 592, in test_no_refcycle_through_target
+    cyclic_object = RunSelfFunction(should_raise=False)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 584, in __init__
+    self.thread.start()
+    ~~~~~~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_various_ops (test.test_threading.ThreadTests.test_various_ops)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 216, in test_various_ops
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_various_ops_large_stack (test.test_threading.ThreadTests.test_various_ops_large_stack)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 265, in test_various_ops_large_stack
+    threading.stack_size(0x100000)
+AttributeError: module 'threading' has no attribute 'stack_size'
+
+Stdout:
+with 1 MiB thread stack size...
+
+======================================================================
+ERROR: test_various_ops_small_stack (test.test_threading.ThreadTests.test_various_ops_small_stack)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 253, in test_various_ops_small_stack
+    threading.stack_size(262144)
+AttributeError: module 'threading' has no attribute 'stack_size'
+
+Stdout:
+with 256 KiB thread stack size...
+
+======================================================================
+ERROR: test_bare_raise_in_brand_new_thread (test.test_threading.ThreadingExceptionTests.test_bare_raise_in_brand_new_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1998, in test_bare_raise_in_brand_new_thread
+    thread.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+ERROR: test_multithread_modify_file_noerror (test.test_threading.ThreadingExceptionTests.test_multithread_modify_file_noerror)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2018, in test_multithread_modify_file_noerror
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: this thread target cannot run independently of the boxed Python heap
+
+======================================================================
+ERROR: test_init_immutable_default_args (test.test_threading.TimerTests.test_init_immutable_default_args)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2172, in test_init_immutable_default_args
+    timer1.start()
+    ~~~~~~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+======================================================================
+FAIL: test_atexit_after_shutdown (test.test_threading.AtexitTests.test_atexit_after_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2482, in test_atexit_after_shutdown
+    rc, out, err = assert_python_ok("-c", """if True:
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+        import threading
+        ^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        threading._register_atexit(run_last)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    """)
+    ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import threading\n\n            def func():\n                pass\n\n            def run_last():\n                threading._register_atexit(func)\n\n            threading._register_atexit(run_last)\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_atexit_called_once (test.test_threading.AtexitTests.test_atexit_called_once)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2465, in test_atexit_called_once
+    rc, out, err = assert_python_ok("-c", """if True:
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+        import threading
+        ^^^^^^^^^^^^^^^^
+    ...<7 lines>...
+        mock.assert_called_once()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    """)
+    ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import threading\n            from unittest.mock import Mock\n\n            mock = Mock()\n            threading._register_atexit(mock)\n            mock.assert_not_called()\n            # force early shutdown to ensure it was called once\n            threading._shutdown()\n            mock.assert_called_once()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_atexit_output (test.test_threading.AtexitTests.test_atexit_output)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2452, in test_atexit_output
+    rc, out, err = assert_python_ok("-c", """if True:
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+        import threading
+        ^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        threading._register_atexit(run_last)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    """)
+    ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "if True:\n            import threading\n\n            def run_last():\n                print('parrot')\n\n            threading._register_atexit(run_last)\n        "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_1_join_on_shutdown (test.test_threading.ThreadJoinOnShutdown.test_1_join_on_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1440, in test_1_join_on_shutdown
+    self._run_and_join(script)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1426, in _run_and_join
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "if 1:\n            import sys, os, time, threading\n\n            # a thread, which waits for the main program to terminate\n            def joiningfunc(mainthread):\n                mainthread.join()\n                print('end of thread')\n                # stdout is fully buffered because not a tty, we have to flush\n                # before exit.\n                sys.stdout.flush()\n        \nif 1:\n            import os\n            t = threading.Thread(target=joiningfunc,\n                                 args=(threading.current_thread(),))\n            t.start()\n            time.sleep(0.1)\n            print('end of main')\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_2_join_in_forked_process (test.test_threading.ThreadJoinOnShutdown.test_2_join_in_forked_process)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1460, in test_2_join_in_forked_process
+    self._run_and_join(script)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1426, in _run_and_join
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "if 1:\n            import sys, os, time, threading\n\n            # a thread, which waits for the main program to terminate\n            def joiningfunc(mainthread):\n                mainthread.join()\n                print('end of thread')\n                # stdout is fully buffered because not a tty, we have to flush\n                # before exit.\n                sys.stdout.flush()\n        \nif 1:\n            from test import support\n\n            childpid = os.fork()\n            if childpid != 0:\n                # parent process\n                support.wait_process(childpid, exitcode=0)\n                sys.exit(0)\n\n            # child process\n            t = threading.Thread(target=joiningfunc,\n                                 args=(threading.current_thread(),))\n            t.start()\n            print('end of main')\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_3_join_in_forked_from_thread (test.test_threading.ThreadJoinOnShutdown.test_3_join_in_forked_from_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1488, in test_3_join_in_forked_from_thread
+    self._run_and_join(script)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1426, in _run_and_join
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "if 1:\n            import sys, os, time, threading\n\n            # a thread, which waits for the main program to terminate\n            def joiningfunc(mainthread):\n                mainthread.join()\n                print('end of thread')\n                # stdout is fully buffered because not a tty, we have to flush\n                # before exit.\n                sys.stdout.flush()\n        \nif 1:\n            from test import support\n\n            main_thread = threading.current_thread()\n            def worker():\n                childpid = os.fork()\n                if childpid != 0:\n                    # parent process\n                    support.wait_process(childpid, exitcode=0)\n                    sys.exit(0)\n\n                # child process\n                t = threading.Thread(target=joiningfunc,\n                                     args=(main_thread,))\n                print('end of main')\n                t.start()\n                t.join() # Should not block: main_thread is already stopped\n\n            w = threading.Thread(target=worker)\n            w.start()\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_thread_from_thread (test.test_threading.ThreadJoinOnShutdown.test_thread_from_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1557, in test_thread_from_thread
+    rc, out, err = assert_python_ok('-c', script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import threading\n            import time\n\n            def thread2():\n                time.sleep(0.05)\n                print("OK")\n\n            def thread1():\n                time.sleep(0.05)\n                t2 = threading.Thread(target=thread2)\n                t2.start()\n\n            t = threading.Thread(target=thread1)\n            t.start()\n            # do not join() -- the interpreter waits for non-daemon threads to\n            # finish.\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_dummy_thread_after_fork (test.test_threading.ThreadTests.test_dummy_thread_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 681, in test_dummy_thread_after_fork
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import _thread, threading, os, time, warnings\n\n            def background_thread(evt):\n                # Creates and registers the _DummyThread instance\n                threading.current_thread()\n                evt.set()\n                time.sleep(10)\n\n            evt = threading.Event()\n            _thread.start_new_thread(background_thread, (evt,))\n            evt.wait()\n            assert threading.active_count() == 2, threading.active_count()\n            with warnings.catch_warnings(record=True) as ws:\n                warnings.filterwarnings(\n                        "always", category=DeprecationWarning)\n                if os.fork() == 0:\n                    assert threading.active_count() == 1, threading.active_count()\n                    os._exit(0)\n                else:\n                    assert ws[0].category == DeprecationWarning, ws[0]\n                    assert \'fork\' in str(ws[0].message), ws[0]\n                    os.wait()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_finalization_shutdown (test.test_threading.ThreadTests.test_finalization_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 917, in test_finalization_shutdown
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import os\n            import threading\n            import time\n            import random\n\n            def random_sleep():\n                seconds = random.random() * 0.010\n                time.sleep(seconds)\n\n            class Sleeper:\n                def __del__(self):\n                    random_sleep()\n\n            tls = threading.local()\n\n            def f():\n                # Sleep a bit so that the thread is still running when\n                # Py_Finalize() is called.\n                random_sleep()\n                tls.x = Sleeper()\n                random_sleep()\n\n            threading.Thread(target=f).start()\n            random_sleep()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_finalize_with_trace (test.test_threading.ThreadTests.test_finalize_with_trace)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 474, in test_finalize_with_trace
+    assert_python_ok("-c", """if 1:
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+        import sys, threading
+        ^^^^^^^^^^^^^^^^^^^^^
+    ...<17 lines>...
+        sys.settrace(func)
+        ^^^^^^^^^^^^^^^^^^
+        """)
+        ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "if 1:\n            import sys, threading\n\n            # A deadlock-killer, to prevent the\n            # testsuite to hang forever\n            def killer():\n                import os, time\n                time.sleep(2)\n                print('program blocked; aborting')\n                os._exit(2)\n            t = threading.Thread(target=killer)\n            t.daemon = True\n            t.start()\n\n            # This is the trace function\n            def func(frame, event, arg):\n                threading.current_thread()\n                return func\n\n            sys.settrace(func)\n            "]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_import_from_another_thread (test.test_threading.ThreadTests.test_import_from_another_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1158, in test_import_from_another_thread
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "\nimport _thread\nimport sys\n\nevent = _thread.allocate_lock()\nevent.acquire()\n\ndef import_threading():\n    import threading\n    event.release()\n\nif 'threading' in sys.modules:\n    raise Exception('threading is already imported')\n\n_thread.start_new_thread(import_threading, ())\n\n# wait until the threading module is imported\nevent.acquire()\nevent.release()\n\nif 'threading' not in sys.modules:\n    raise Exception('threading is not imported')\n\n# don't wait until the thread completes\n"]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_join_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_daemon_thread_in_finalization) (timeout=None)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1216, in test_join_daemon_thread_in_finalization
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "\nimport threading\n\n\ndef loop():\n    while True:\n        pass\n\n\nclass Cycle:\n    def __init__(self):\n        self.self_ref = self\n        self.thr = threading.Thread(\n            target=loop, daemon=True)\n        self.thr.start()\n\n    def __del__(self):\n        assert self.thr.is_alive()\n        try:\n            self.thr.join(timeout=None)\n        except PythonFinalizationError:\n            assert self.thr.is_alive()\n            print('got the correct exception!')\n\n# Cycle holds a reference to itself, which ensures it is\n# cleaned up during the GC that runs after daemon threads\n# have been forced to exit during finalization.\nCycle()\n"]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_join_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_daemon_thread_in_finalization) (timeout=10)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1216, in test_join_daemon_thread_in_finalization
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "\nimport threading\n\n\ndef loop():\n    while True:\n        pass\n\n\nclass Cycle:\n    def __init__(self):\n        self.self_ref = self\n        self.thr = threading.Thread(\n            target=loop, daemon=True)\n        self.thr.start()\n\n    def __del__(self):\n        assert self.thr.is_alive()\n        try:\n            self.thr.join(timeout=10)\n        except PythonFinalizationError:\n            assert self.thr.is_alive()\n            print('got the correct exception!')\n\n# Cycle holds a reference to itself, which ensures it is\n# cleaned up during the GC that runs after daemon threads\n# have been forced to exit during finalization.\nCycle()\n"]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_join_finished_daemon_thread_in_finalization (test.test_threading.ThreadTests.test_join_finished_daemon_thread_in_finalization)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1246, in test_join_finished_daemon_thread_in_finalization
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', "\nimport threading\ndone = threading.Event()\n\ndef set_event():\n    done.set()\n\nclass Cycle:\n    def __init__(self):\n        self.self_ref = self\n        self.thr = threading.Thread(target=set_event, daemon=True)\n        self.thr.start()\n        self.thr.join()\n\n    def __del__(self):\n        assert done.is_set()\n        assert not self.thr.is_alive()\n        self.thr.join()\n        assert not self.thr.is_alive()\n        print('all clear!')\n\nCycle()\n"]
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_join_nondaemon_on_shutdown (test.test_threading.ThreadTests.test_join_nondaemon_on_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 499, in test_join_nondaemon_on_shutdown
+    rc, out, err = assert_python_ok("-c", """if 1:
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+            import threading
+            ^^^^^^^^^^^^^^^^
+    ...<9 lines>...
+            raise SystemExit
+            ^^^^^^^^^^^^^^^^
+        """)
+        ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n                import threading\n                from time import sleep\n\n                def child():\n                    sleep(1)\n                    # As a non-daemon thread we SHOULD wake up and nothing\n                    # should be torn down yet\n                    print("Woke up, sleep function is:", sleep)\n\n                threading.Thread(target=child).start()\n                raise SystemExit\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_locals_at_exit (test.test_threading.ThreadTests.test_locals_at_exit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1088, in test_locals_at_exit
+    rc, out, err = assert_python_ok("-c", """if 1:
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+        import threading
+        ^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        atexit = Atexit()
+        ^^^^^^^^^^^^^^^^^
+    """)
+    ^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import threading\n\n            class Atexit:\n                def __del__(self):\n                    print("thread_dict.atexit = %r" % thread_dict.atexit)\n\n            thread_dict = threading.local()\n            thread_dict.atexit = "value"\n\n            atexit = Atexit()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork (test.test_threading.ThreadTests.test_main_thread_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 739, in test_main_thread_after_fork
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import os, threading\n            from test import support\n\n            ident = threading.get_ident()\n            pid = os.fork()\n            if pid == 0:\n                print("current ident", threading.get_ident() == ident)\n                main = threading.main_thread()\n                print("main", main.name)\n                print("main ident", main.ident == ident)\n                print("current is main", threading.current_thread() is main)\n            else:\n                support.wait_process(pid, exitcode=0)\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_dummy_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_dummy_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 854, in test_main_thread_after_fork_from_dummy_thread
+    self.test_main_thread_after_fork_from_foreign_thread(create_dummy=True)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 841, in test_main_thread_after_fork_from_foreign_thread
+    _, out, err = assert_python_ok("-W", "ignore::DeprecationWarning", "-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-W', 'ignore::DeprecationWarning', '-c', 'if 1:\n            import os, threading, sys, traceback, _thread\n            from test import support\n\n            def func(lock):\n                ident = threading.get_ident()\n                if True:\n                    # call current_thread() before fork to allocate DummyThread\n                    current = threading.current_thread()\n                    print("current", current.name, type(current).__name__)\n                print("ident in _active", ident in threading._active)\n                # flush before fork, so child won\'t flush it again\n                sys.stdout.flush()\n                pid = os.fork()\n                if pid == 0:\n                    print("current ident", threading.get_ident() == ident)\n                    main = threading.main_thread()\n                    print("main", main.name, type(main).__name__)\n                    print("main ident", main.ident == ident)\n                    print("current is main", threading.current_thread() is main)\n                    print("_dangling", [t.name for t in list(threading._dangling)])\n                    # stdout is fully buffered because not a tty,\n                    # we have to flush before exit.\n                    sys.stdout.flush()\n                    try:\n                        threading._shutdown()\n                        os._exit(0)\n                    except:\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                        os._exit(1)\n                else:\n                    try:\n                        support.wait_process(pid, exitcode=0)\n                    except Exception:\n                        # avoid \'could not acquire lock for\n                        # <_io.BufferedWriter name=\'<stderr>\'> at interpreter shutdown,\'\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                    finally:\n                        lock.release()\n\n            join_lock = _thread.allocate_lock()\n            join_lock.acquire()\n            th = _thread.start_new_thread(func, (join_lock,))\n            join_lock.acquire()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_foreign_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_foreign_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 841, in test_main_thread_after_fork_from_foreign_thread
+    _, out, err = assert_python_ok("-W", "ignore::DeprecationWarning", "-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-W', 'ignore::DeprecationWarning', '-c', 'if 1:\n            import os, threading, sys, traceback, _thread\n            from test import support\n\n            def func(lock):\n                ident = threading.get_ident()\n                if False:\n                    # call current_thread() before fork to allocate DummyThread\n                    current = threading.current_thread()\n                    print("current", current.name, type(current).__name__)\n                print("ident in _active", ident in threading._active)\n                # flush before fork, so child won\'t flush it again\n                sys.stdout.flush()\n                pid = os.fork()\n                if pid == 0:\n                    print("current ident", threading.get_ident() == ident)\n                    main = threading.main_thread()\n                    print("main", main.name, type(main).__name__)\n                    print("main ident", main.ident == ident)\n                    print("current is main", threading.current_thread() is main)\n                    print("_dangling", [t.name for t in list(threading._dangling)])\n                    # stdout is fully buffered because not a tty,\n                    # we have to flush before exit.\n                    sys.stdout.flush()\n                    try:\n                        threading._shutdown()\n                        os._exit(0)\n                    except:\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                        os._exit(1)\n                else:\n                    try:\n                        support.wait_process(pid, exitcode=0)\n                    except Exception:\n                        # avoid \'could not acquire lock for\n                        # <_io.BufferedWriter name=\'<stderr>\'> at interpreter shutdown,\'\n                        traceback.print_exc()\n                        sys.stderr.flush()\n                    finally:\n                        lock.release()\n\n            join_lock = _thread.allocate_lock()\n            join_lock.acquire()\n            th = _thread.start_new_thread(func, (join_lock,))\n            join_lock.acquire()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_main_thread_after_fork_from_nonmain_thread (test.test_threading.ThreadTests.test_main_thread_after_fork_from_nonmain_thread)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 779, in test_main_thread_after_fork_from_nonmain_thread
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import os, threading, sys, warnings\n            from test import support\n\n            def func():\n                ident = threading.get_ident()\n                with warnings.catch_warnings(record=True) as ws:\n                    warnings.filterwarnings(\n                            "always", category=DeprecationWarning)\n                    pid = os.fork()\n                    if pid == 0:\n                        print("current ident", threading.get_ident() == ident)\n                        main = threading.main_thread()\n                        print("main", main.name, type(main).__name__)\n                        print("main ident", main.ident == ident)\n                        print("current is main", threading.current_thread() is main)\n                        # stdout is fully buffered because not a tty,\n                        # we have to flush before exit.\n                        sys.stdout.flush()\n                    else:\n                        assert ws[0].category == DeprecationWarning, ws[0]\n                        assert \'fork\' in str(ws[0].message), ws[0]\n                        support.wait_process(pid, exitcode=0)\n\n            th = threading.Thread(target=func)\n            th.start()\n            th.join()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_main_thread_during_shutdown (test.test_threading.ThreadTests.test_main_thread_during_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 879, in test_main_thread_during_shutdown
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import gc, threading\n\n            main_thread = threading.current_thread()\n            assert main_thread is threading.main_thread()  # sanity check\n\n            class RefCycle:\n                def __init__(self):\n                    self.cycle = self\n\n                def __del__(self):\n                    print("GC:",\n                          threading.current_thread() is main_thread,\n                          threading.main_thread() is main_thread,\n                          threading.enumerate() == [main_thread])\n\n            RefCycle()\n            gc.collect()  # sanity check\n            x = RefCycle()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_native_id_after_fork (test.test_threading.ThreadTests.test_native_id_after_fork)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1377, in test_native_id_after_fork
+    rc, out, err = assert_python_ok('-c', script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import threading\n            import os\n            from test import support\n\n            parent_thread_native_id = threading.current_thread().native_id\n            print(parent_thread_native_id, flush=True)\n            assert parent_thread_native_id == threading.get_native_id()\n            childpid = os.fork()\n            if childpid == 0:\n                print(threading.current_thread().native_id, flush=True)\n                assert threading.current_thread().native_id == threading.get_native_id()\n            else:\n                try:\n                    assert parent_thread_native_id == threading.current_thread().native_id\n                    assert parent_thread_native_id == threading.get_native_id()\n                finally:\n                    support.wait_process(childpid, exitcode=0)\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_start_new_thread_at_finalization (test.test_threading.ThreadTests.test_start_new_thread_at_finalization)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1175, in test_start_new_thread_at_finalization
+    _, out, err = assert_python_ok("-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if 1:\n            import _thread\n\n            def f():\n                print("shouldn\'t be printed")\n\n            class AtFinalization:\n                def __del__(self):\n                    print("OK")\n                    _thread.start_new_thread(f, ())\n            at_finalization = AtFinalization()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_start_new_thread_failed (test.test_threading.ThreadTests.test_start_new_thread_failed)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1278, in test_start_new_thread_failed
+    _, out, err = assert_python_ok("-u", "-c", code)
+                  ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-u', '-c', 'if 1:\n            import resource\n            import _thread\n\n            def f():\n                print("shouldn\'t be printed")\n\n            limits = resource.getrlimit(resource.RLIMIT_NPROC)\n            [_, hard] = limits\n            resource.setrlimit(resource.RLIMIT_NPROC, (0, hard))\n\n            try:\n                handle = _thread.start_joinable_thread(f)\n            except RuntimeError:\n                print(\'ok\')\n            else:\n                print(\'!skip!\')\n                handle.join()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_stop_the_world_during_finalization (test.test_threading.ThreadTests.test_stop_the_world_during_finalization)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1406, in test_stop_the_world_during_finalization
+    rc, out, err = assert_python_ok('-c', script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import gc\n            import sys\n            import threading\n            NUM_THREADS = 5\n            b = threading.Barrier(NUM_THREADS + 1)\n            def run_in_bg():\n                b.wait()\n                while True:\n                    sys.setprofile(None)\n                    gc.collect()\n\n            for _ in range(NUM_THREADS):\n                t = threading.Thread(target=run_in_bg, daemon=True)\n                t.start()\n\n            b.wait()\n            print("Exiting...")\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_dummy_thread_on_interpreter_shutdown (test.test_threading.ThreadingExceptionTests.test_dummy_thread_on_interpreter_shutdown)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 2033, in test_dummy_thread_on_interpreter_shutdown
+    rc, out, err = assert_python_ok("-c", code)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n        import sys\n        import threading\n\n        threading.x = sys.modules[__name__]\n        x = threading._DummyThread()\n        ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_print_exception (test.test_threading.ThreadingExceptionTests.test_print_exception)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1891, in test_print_exception
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import threading\n            import time\n\n            running = False\n            def run():\n                global running\n                running = True\n                while running:\n                    time.sleep(0.01)\n                1/0\n            t = threading.Thread(target=run)\n            t.start()\n            while not running:\n                time.sleep(0.01)\n            running = False\n            t.join()\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_print_exception_stderr_is_none_1 (test.test_threading.ThreadingExceptionTests.test_print_exception_stderr_is_none_1)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1920, in test_print_exception_stderr_is_none_1
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import sys\n            import threading\n            import time\n\n            running = False\n            def run():\n                global running\n                running = True\n                while running:\n                    time.sleep(0.01)\n                1/0\n            t = threading.Thread(target=run)\n            t.start()\n            while not running:\n                time.sleep(0.01)\n            sys.stderr = None\n            running = False\n            t.join()\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_print_exception_stderr_is_none_2 (test.test_threading.ThreadingExceptionTests.test_print_exception_stderr_is_none_2)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1949, in test_print_exception_stderr_is_none_2
+    rc, out, err = assert_python_ok("-c", script)
+                   ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 182, in assert_python_ok
+    return _assert_python(True, *args, **env_vars)
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 167, in _assert_python
+    res.fail(cmd_line)
+    ~~~~~~~~^^^^^^^^^^
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support/script_helper.py", line 80, in fail
+    raise AssertionError(f"Process return code is {exitcode}\n"
+    ...<10 lines>...
+                         f"---")
+AssertionError: Process return code is 1
+command line: ['/workspace/imre/target/release/imre', '-X', 'faulthandler', '-c', 'if True:\n            import sys\n            import threading\n            import time\n\n            running = False\n            def run():\n                global running\n                running = True\n                while running:\n                    time.sleep(0.01)\n                1/0\n            sys.stderr = None\n            t = threading.Thread(target=run)\n            t.start()\n            while not running:\n                time.sleep(0.01)\n            running = False\n            t.join()\n            ']
+
+stdout:
+---
+
+---
+
+stderr:
+---
+Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+---
+
+======================================================================
+FAIL: test_recursion_limit (test.test_threading.ThreadingExceptionTests.test_recursion_limit)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1869, in test_recursion_limit
+    self.assertEqual(p.returncode, 0, "Unexpected error: " + stderr.decode())
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 1 != 0 : Unexpected error: Could not run clang-18 or clang: No such file or directory (os error 2). Install Clang 18 or pass --clang PATH.
+
+
+----------------------------------------------------------------------
+Ran 228 tests in 173.941s
+
+FAILED (failures=30, errors=95, skipped=18)

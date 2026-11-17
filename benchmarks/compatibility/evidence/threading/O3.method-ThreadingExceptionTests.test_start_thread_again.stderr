@@ -1,0 +1,5 @@
+test_start_thread_again (test.test_threading.ThreadingExceptionTests.test_start_thread_again) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.034s
+
+OK

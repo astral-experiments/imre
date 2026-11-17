@@ -1,0 +1,9 @@
+test_illegal_separators (test.test_json.test_separators.TestCSeparators.test_illegal_separators) ... ok
+test_separators (test.test_json.test_separators.TestCSeparators.test_separators) ... ok
+test_illegal_separators (test.test_json.test_separators.TestPySeparators.test_illegal_separators) ... ok
+test_separators (test.test_json.test_separators.TestPySeparators.test_separators) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 0.117s
+
+OK

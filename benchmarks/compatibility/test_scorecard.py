@@ -75,6 +75,12 @@ class ScorecardTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "paired does not match"): scorecard.validate_record(r, "script", {}, anchors)
             r["paired"] = False; scorecard.validate_record(r, "script", {}, anchors)
 
+    def test_failed_control_triple_is_observed_but_not_credited(self):
+        record = {"runs": {t: {"outcome": "pass"} for t in scorecard.TIERS}, "paired": False, "omission_reason": "imported bad-type control failed"}
+        row = {"originals": 2}
+        scorecard.summarize_family(row, [record])
+        self.assertEqual((row["receipts"], row["observed"], row["paired"], row["runs"]["stock"]["not_run"]), (1, 1, 0, 1))
+
     def test_pilot_and_unreplayed_denominators(self):
         fs, scripts = scorecard.summary()
         self.assertEqual((fs["errno"]["originals"], fs["errno"]["paired"], fs["errno"]["receipts"], fs["errno"]["cohort"]), (3, 3, 3, "supplemental"))
@@ -83,7 +89,7 @@ class ScorecardTests(unittest.TestCase):
         for view in ("readme", "stdlib"):
             rendered = scorecard.render(view)
             self.assertIn(f"Frozen 45-family cohort: **{sum(r['receipts'] for r in frozen):,} pinned receipts** of **16,225 raw upstream originals**", rendered)
-            self.assertIn("Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**", rendered)
+            self.assertIn("Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 observed intersections**, **3 verified credited pairs**", rendered)
         self.assertEqual((fs["argparse"]["originals"], fs["argparse"]["historical"]), (1893, 1887))
         readme_row = next(line for line in scorecard.render("readme").splitlines() if line.startswith("| `argparse`"))
         self.assertIn(readme_row, scorecard.render("stdlib").splitlines())

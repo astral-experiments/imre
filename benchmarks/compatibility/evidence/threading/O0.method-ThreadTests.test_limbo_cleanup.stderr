@@ -1,0 +1,13 @@
+test_limbo_cleanup (test.test_threading.ThreadTests.test_limbo_cleanup) ... ERROR
+======================================================================
+ERROR: test_limbo_cleanup (test.test_threading.ThreadTests.test_limbo_cleanup)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 418, in test_limbo_cleanup
+    _start_joinable_thread = threading._start_joinable_thread
+AttributeError: module 'threading' has no attribute '_start_joinable_thread'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.032s
+
+FAILED (errors=1)

@@ -1,0 +1,7 @@
+test__all__ (test.test_threading.MiscTestCase.test__all__) ... ok
+test_change_name (test.test_threading.MiscTestCase.test_change_name) ... skipped 'missing _thread.set_name'
+test_set_name (test.test_threading.MiscTestCase.test_set_name) ... skipped 'missing _thread.set_name'
+----------------------------------------------------------------------
+Ran 3 tests in 0.009s
+
+OK (skipped=2)

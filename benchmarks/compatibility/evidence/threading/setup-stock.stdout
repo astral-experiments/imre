@@ -1,0 +1,135 @@
+    started worker thread
+    trying nonsensical thread id
+    waiting for worker thread to get started
+    verifying worker hasn't exited
+    attempting to raise asynch exception in worker
+    waiting for worker to say it caught the exception
+    all OK -- joining worker
+task <thread 0> will run for 96.6 usec
+1 tasks are running
+task <thread 1> will run for 0.4 usec
+2 tasks are running
+task <thread 2> will run for 5.7 usec
+3 tasks are running
+task <thread 0> done
+<thread 0> is finished. 2 tasks are running
+task <thread 1> done
+<thread 1> is finished. 1 tasks are running
+task <thread 2> done
+<thread 2> is finished. 0 tasks are running
+task <thread 3> will run for 62.7 usec
+1 tasks are running
+task <thread 4> will run for 47.2 usec
+2 tasks are running
+task <thread 3> done
+<thread 3> is finished. 1 tasks are running
+task <thread 4> done
+<thread 4> is finished. 0 tasks are running
+task <thread 5> will run for 17.4 usec
+1 tasks are running
+task <thread 6> will run for 13.9 usec
+2 tasks are running
+task <thread 5> done
+<thread 5> is finished. 1 tasks are running
+task <thread 6> done
+<thread 6> is finished. 0 tasks are running
+task <thread 7> will run for 32.0 usec
+1 tasks are running
+task <thread 8> will run for 37.0 usec
+2 tasks are running
+task <thread 7> done
+<thread 7> is finished. 1 tasks are running
+task <thread 9> will run for 79.4 usec
+2 tasks are running
+waiting for all tasks to complete
+task <thread 9> done
+<thread 9> is finished. 1 tasks are running
+task <thread 8> done
+<thread 8> is finished. 0 tasks are running
+all tasks done
+with 1 MiB thread stack size...
+task <thread 0> will run for 8.1 usec
+1 tasks are running
+task <thread 1> will run for 87.8 usec
+2 tasks are running
+task <thread 2> will run for 40.3 usec
+3 tasks are running
+task <thread 0> done
+<thread 0> is finished. 2 tasks are running
+task <thread 1> done
+<thread 1> is finished. 1 tasks are running
+task <thread 2> done
+<thread 2> is finished. 0 tasks are running
+task <thread 3> will run for 69.3 usec
+1 tasks are running
+task <thread 3> done
+<thread 3> is finished. 0 tasks are running
+task <thread 4> will run for 66.0 usec
+1 tasks are running
+task <thread 4> done
+<thread 4> is finished. 0 tasks are running
+task <thread 5> will run for 88.3 usec
+1 tasks are running
+task <thread 5> done
+<thread 5> is finished. 0 tasks are running
+task <thread 6> will run for 76.8 usec
+1 tasks are running
+task <thread 6> done
+<thread 6> is finished. 0 tasks are running
+task <thread 7> will run for 96.0 usec
+1 tasks are running
+task <thread 8> will run for 19.4 usec
+2 tasks are running
+task <thread 9> will run for 75.0 usec
+3 tasks are running
+waiting for all tasks to complete
+task <thread 8> done
+<thread 8> is finished. 2 tasks are running
+task <thread 7> done
+<thread 7> is finished. 1 tasks are running
+task <thread 9> done
+<thread 9> is finished. 0 tasks are running
+all tasks done
+with 256 KiB thread stack size...
+task <thread 0> will run for 25.8 usec
+1 tasks are running
+task <thread 0> done
+<thread 0> is finished. 0 tasks are running
+task <thread 1> will run for 16.7 usec
+1 tasks are running
+task <thread 1> done
+<thread 1> is finished. 0 tasks are running
+task <thread 2> will run for 85.1 usec
+1 tasks are running
+task <thread 2> done
+<thread 2> is finished. 0 tasks are running
+task <thread 3> will run for 31.5 usec
+1 tasks are running
+task <thread 4> will run for 4.1 usec
+2 tasks are running
+task <thread 4> done
+<thread 4> is finished. 1 tasks are running
+task <thread 5> will run for 64.8 usec
+2 tasks are running
+task <thread 6> will run for 58.3 usec
+3 tasks are running
+task <thread 7> will run for 5.6 usec
+task <thread 8> will run for 54.8 usec
+task <thread 5> done
+<thread 5> is finished. 2 tasks are running
+task <thread 6> done
+<thread 6> is finished. 1 tasks are running
+2 tasks are running
+3 tasks are running
+task <thread 8> done
+<thread 8> is finished. 2 tasks are running
+task <thread 7> done
+<thread 7> is finished. 1 tasks are running
+task <thread 3> done
+<thread 3> is finished. 0 tasks are running
+task <thread 9> will run for 60.6 usec
+1 tasks are running
+waiting for all tasks to complete
+task <thread 9> done
+<thread 9> is finished. 0 tasks are running
+all tasks done

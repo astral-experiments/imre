@@ -1,0 +1,13 @@
+test_getprofile (test.test_threading.ThreadTests.test_getprofile) ... ERROR
+======================================================================
+ERROR: test_getprofile (test.test_threading.ThreadTests.test_getprofile)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 1049, in test_getprofile
+    old_profile = threading.getprofile()
+AttributeError: module 'threading' has no attribute 'getprofile'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.026s
+
+FAILED (errors=1)

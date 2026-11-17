@@ -1,0 +1,16 @@
+test_ascii_non_printable_decode (test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_decode) ... ok
+test_ascii_non_printable_encode (test.test_json.test_unicode.TestCUnicode.test_ascii_non_printable_encode) ... ok
+test_big_unicode_decode (test.test_json.test_unicode.TestCUnicode.test_big_unicode_decode) ... ok
+test_big_unicode_encode (test.test_json.test_unicode.TestCUnicode.test_big_unicode_encode) ... ok
+test_bytes_decode (test.test_json.test_unicode.TestCUnicode.test_bytes_decode) ... ok
+test_bytes_encode (test.test_json.test_unicode.TestCUnicode.test_bytes_encode) ... ok
+test_encoding3 (test.test_json.test_unicode.TestCUnicode.test_encoding3) ... ok
+test_encoding4 (test.test_json.test_unicode.TestCUnicode.test_encoding4) ... ok
+test_encoding5 (test.test_json.test_unicode.TestCUnicode.test_encoding5) ... ok
+test_encoding6 (test.test_json.test_unicode.TestCUnicode.test_encoding6) ... ok
+test_encoding7 (test.test_json.test_unicode.TestCUnicode.test_encoding7) ... ok
+test_escaped_decode (test.test_json.test_unicode.TestCUnicode.test_escaped_decode) ... ok
+test_object_pairs_hook_with_unicode (test.test_json.test_unicode.TestCUnicode.test_object_pairs_hook_with_unicode) ... ERROR
+test_single_surrogate_decode (test.test_json.test_unicode.TestCUnicode.test_single_surrogate_decode) ... ok
+test_single_surrogate_encode (test.test_json.test_unicode.TestCUnicode.test_single_surrogate_encode) ... ok
+test_unicode_decode (test.test_json.test_unicode.TestCUnicode.test_unicode_decode) ... 

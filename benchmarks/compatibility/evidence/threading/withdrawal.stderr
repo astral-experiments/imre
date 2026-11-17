@@ -1,0 +1,5 @@
+test_constructor (test.test_threading.BarrierTests.test_constructor) ... ok
+----------------------------------------------------------------------
+Ran 1 test in 0.007s
+
+OK

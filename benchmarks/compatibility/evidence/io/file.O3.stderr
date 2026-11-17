@@ -1,0 +1,41 @@
+testAttributes (test.test_file.CAutoFileTests.testAttributes) ... ok
+testErrors (test.test_file.CAutoFileTests.testErrors) ... ok
+testMethods (test.test_file.CAutoFileTests.testMethods) ... ok
+testReadWhenWriting (test.test_file.CAutoFileTests.testReadWhenWriting) ... ok
+testReadinto (test.test_file.CAutoFileTests.testReadinto) ... ok
+testReadinto_text (test.test_file.CAutoFileTests.testReadinto_text) ... ok
+testWeakRefs (test.test_file.CAutoFileTests.testWeakRefs) ... ok
+testWritelinesIntegers (test.test_file.CAutoFileTests.testWritelinesIntegers) ... ok
+testWritelinesIntegersUserList (test.test_file.CAutoFileTests.testWritelinesIntegersUserList) ... ok
+testWritelinesNonString (test.test_file.CAutoFileTests.testWritelinesNonString) ... ok
+testWritelinesUserList (test.test_file.CAutoFileTests.testWritelinesUserList) ... ok
+testBadModeArgument (test.test_file.COtherFileTests.testBadModeArgument) ... ok
+testDefaultBufferSize (test.test_file.COtherFileTests.testDefaultBufferSize) ... ok
+testIteration (test.test_file.COtherFileTests.testIteration) ... ok
+testModeStrings (test.test_file.COtherFileTests.testModeStrings) ... ok
+testSetBufferSize (test.test_file.COtherFileTests.testSetBufferSize) ... ok
+testStdin (test.test_file.COtherFileTests.testStdin) ... skipped 'stdin must be a TTY in this test'
+testTruncateOnWindows (test.test_file.COtherFileTests.testTruncateOnWindows) ... ok
+testAttributes (test.test_file.PyAutoFileTests.testAttributes) ... ok
+testErrors (test.test_file.PyAutoFileTests.testErrors) ... ok
+testMethods (test.test_file.PyAutoFileTests.testMethods) ... ok
+testReadWhenWriting (test.test_file.PyAutoFileTests.testReadWhenWriting) ... ok
+testReadinto (test.test_file.PyAutoFileTests.testReadinto) ... ok
+testReadinto_text (test.test_file.PyAutoFileTests.testReadinto_text) ... ok
+testWeakRefs (test.test_file.PyAutoFileTests.testWeakRefs) ... ok
+testWritelinesIntegers (test.test_file.PyAutoFileTests.testWritelinesIntegers) ... ok
+testWritelinesIntegersUserList (test.test_file.PyAutoFileTests.testWritelinesIntegersUserList) ... ok
+testWritelinesNonString (test.test_file.PyAutoFileTests.testWritelinesNonString) ... ok
+testWritelinesUserList (test.test_file.PyAutoFileTests.testWritelinesUserList) ... ok
+testBadModeArgument (test.test_file.PyOtherFileTests.testBadModeArgument) ... ok
+testDefaultBufferSize (test.test_file.PyOtherFileTests.testDefaultBufferSize) ... ok
+testIteration (test.test_file.PyOtherFileTests.testIteration) ... ok
+testModeStrings (test.test_file.PyOtherFileTests.testModeStrings) ... ok
+testSetBufferSize (test.test_file.PyOtherFileTests.testSetBufferSize) ... ok
+testStdin (test.test_file.PyOtherFileTests.testStdin) ... skipped 'stdin must be a TTY in this test'
+testTruncateOnWindows (test.test_file.PyOtherFileTests.testTruncateOnWindows) ... ok
+
+----------------------------------------------------------------------
+Ran 36 tests in 4.027s
+
+OK (skipped=2)

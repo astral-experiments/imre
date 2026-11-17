@@ -1,0 +1,16 @@
+test_various_ops_small_stack (test.test_threading.ThreadTests.test_various_ops_small_stack) ... ERROR
+======================================================================
+ERROR: test_various_ops_small_stack (test.test_threading.ThreadTests.test_various_ops_small_stack)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 253, in test_various_ops_small_stack
+    threading.stack_size(262144)
+AttributeError: module 'threading' has no attribute 'stack_size'
+
+Stdout:
+with 256 KiB thread stack size...
+
+----------------------------------------------------------------------
+Ran 1 test in 0.031s
+
+FAILED (errors=1)

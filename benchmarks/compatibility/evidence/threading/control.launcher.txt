@@ -1,0 +1,51 @@
+import threading_arch_control
+import unittest
+
+
+class ReceiptResult(unittest.TextTestResult):
+    def startTest(self, test):
+        self.receipt_status = "ok"
+        super().startTest(test)
+
+    def addError(self, test, err):
+        self.receipt_status = "ERROR"
+        super().addError(test, err)
+
+    def addFailure(self, test, err):
+        if self.receipt_status != "ERROR":
+            self.receipt_status = "FAIL"
+        super().addFailure(test, err)
+
+    def addSkip(self, test, reason):
+        if self.receipt_status == "ok":
+            self.receipt_status = "skipped " + repr(reason)
+        super().addSkip(test, reason)
+
+    def addExpectedFailure(self, test, err):
+        self.receipt_status = "expected failure"
+        super().addExpectedFailure(test, err)
+
+    def addUnexpectedSuccess(self, test):
+        self.receipt_status = "unexpected success"
+        super().addUnexpectedSuccess(test)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None:
+            if issubclass(err[0], test.failureException):
+                if self.receipt_status != "ERROR":
+                    self.receipt_status = "FAIL"
+            else:
+                self.receipt_status = "ERROR"
+        super().addSubTest(test, subtest, err)
+
+    def stopTest(self, test):
+        test_id = test.id()
+        name = test_id.rsplit(".", 1)[-1]
+        self.stream.writeln(name + " (" + test_id + ") ... " + self.receipt_status)
+        super().stopTest(test)
+
+
+if __name__ == "__main__":
+    unittest.main(module=None, testRunner=unittest.TextTestRunner(
+        verbosity=0, resultclass=ReceiptResult, buffer=True,
+    ))

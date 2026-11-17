@@ -1,0 +1,9 @@
+test_copy_file_to_existing_file (__main__.ZipToZipPathCopyTest.test_copy_file_to_existing_file) ... ok
+test_copy_file_to_itself (__main__.ZipToZipPathCopyTest.test_copy_file_to_itself) ... ok
+test_copy_into (__main__.ZipToZipPathCopyTest.test_copy_into) ... ok
+test_copy_into_empty_name (__main__.ZipToZipPathCopyTest.test_copy_into_empty_name) ... ok
+
+----------------------------------------------------------------------
+Ran 4 tests in 51.386s
+
+OK

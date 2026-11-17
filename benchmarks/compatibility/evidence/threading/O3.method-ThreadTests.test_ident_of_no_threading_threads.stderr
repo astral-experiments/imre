@@ -1,0 +1,13 @@
+test_ident_of_no_threading_threads (test.test_threading.ThreadTests.test_ident_of_no_threading_threads) ... ERROR
+======================================================================
+ERROR: test_ident_of_no_threading_threads (test.test_threading.ThreadTests.test_ident_of_no_threading_threads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 244, in test_ident_of_no_threading_threads
+    tid = _thread.start_new_thread(f, ())
+NotImplementedError: this thread callback requires the boxed Python heap
+
+----------------------------------------------------------------------
+Ran 1 test in 0.049s
+
+FAILED (errors=1)

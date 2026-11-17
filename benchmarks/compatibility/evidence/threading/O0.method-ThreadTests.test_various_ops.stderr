@@ -1,0 +1,17 @@
+test_various_ops (test.test_threading.ThreadTests.test_various_ops) ... ERROR
+======================================================================
+ERROR: test_various_ops (test.test_threading.ThreadTests.test_various_ops)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_threading.py", line 216, in test_various_ops
+    t.start()
+    ~~~~~~~^^
+  File "<imre stdlib>/threading.py", line 89, in start
+    _imre_thread.start(self, daemon, has_context)
+    ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+NotImplementedError: native workers require an ordinary Thread with the original run method
+
+----------------------------------------------------------------------
+Ran 1 test in 0.053s
+
+FAILED (errors=1)

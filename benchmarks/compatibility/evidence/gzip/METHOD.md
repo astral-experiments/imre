@@ -1,0 +1,7 @@
+The canonical FILE replay could not parse one stock verbose result because its method docstring splits the result over two lines (unittest reported 75, parser recognized 74). The direct entry uses the unchanged suite and a TextTestResult formatter that emits each actual test.id() on one line. Native class selectors put TestGzip and TestOpen before the costly TestCommandLine subprocess tests; all three original classes are selected. The initial O3 build timeout and retry are retained separately in run.json. Child Imre processes use the pinned CLI and toolchain on PATH; isolated children may select the SDK default optimization as described in SUITE_RUNNER.md.
+
+`run.json` records the pinned source/build hashes, exact commands, flags, environments, process results, and raw stream hashes. `receipt_runner.py` only changes unittest result descriptions and limits printed failure details; the original test files and complete fixtures are unchanged.
+
+The fresh O0 architecture control imported a separate first-party module containing `status: int = True` from the actual positive launcher, with the same finite suite declarations. It exited 0, produced an image, and emitted no expected int/got bool diagnostic. All prospective pairs from this launcher are unverified and have `omission_reason` set; observed native outcomes remain intact. See `architecture-control/run.json`.
+
+The positive artifacts had already been removed after their bounded runs, so source withdrawal would require another expensive build and was not attempted.

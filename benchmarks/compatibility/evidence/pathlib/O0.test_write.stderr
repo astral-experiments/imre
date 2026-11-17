@@ -1,0 +1,35 @@
+test_is_writable (__main__.LocalPathWriteTest.test_is_writable) ... ok
+test_mkdir (__main__.LocalPathWriteTest.test_mkdir) ... ok
+test_open_w (__main__.LocalPathWriteTest.test_open_w) ... ok
+test_open_w_encoding_warning (__main__.LocalPathWriteTest.test_open_w_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_wb (__main__.LocalPathWriteTest.test_open_wb) ... ok
+test_symlink_to (__main__.LocalPathWriteTest.test_symlink_to) ... ok
+test_write_bytes (__main__.LocalPathWriteTest.test_write_bytes) ... ok
+test_write_text (__main__.LocalPathWriteTest.test_write_text) ... ok
+test_write_text_encoding_warning (__main__.LocalPathWriteTest.test_write_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_write_text_with_newlines (__main__.LocalPathWriteTest.test_write_text_with_newlines) ... ok
+test_is_writable (__main__.PathWriteTest.test_is_writable) ... ok
+test_mkdir (__main__.PathWriteTest.test_mkdir) ... ok
+test_open_w (__main__.PathWriteTest.test_open_w) ... ok
+test_open_w_encoding_warning (__main__.PathWriteTest.test_open_w_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_wb (__main__.PathWriteTest.test_open_wb) ... ok
+test_symlink_to (__main__.PathWriteTest.test_symlink_to) ... ok
+test_write_bytes (__main__.PathWriteTest.test_write_bytes) ... ok
+test_write_text (__main__.PathWriteTest.test_write_text) ... ok
+test_write_text_encoding_warning (__main__.PathWriteTest.test_write_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_write_text_with_newlines (__main__.PathWriteTest.test_write_text_with_newlines) ... ok
+test_is_writable (__main__.ZipPathWriteTest.test_is_writable) ... ok
+test_mkdir (__main__.ZipPathWriteTest.test_mkdir) ... ok
+test_open_w (__main__.ZipPathWriteTest.test_open_w) ... ok
+test_open_w_encoding_warning (__main__.ZipPathWriteTest.test_open_w_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_wb (__main__.ZipPathWriteTest.test_open_wb) ... ok
+test_symlink_to (__main__.ZipPathWriteTest.test_symlink_to) ... ok
+test_write_bytes (__main__.ZipPathWriteTest.test_write_bytes) ... ok
+test_write_text (__main__.ZipPathWriteTest.test_write_text) ... ok
+test_write_text_encoding_warning (__main__.ZipPathWriteTest.test_write_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_write_text_with_newlines (__main__.ZipPathWriteTest.test_write_text_with_newlines) ... ok
+
+----------------------------------------------------------------------
+Ran 30 tests in 8.723s
+
+OK (skipped=6)

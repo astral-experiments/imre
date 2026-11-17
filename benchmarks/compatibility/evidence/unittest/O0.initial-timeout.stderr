@@ -1,0 +1,50 @@
+testAlmostEqual (test.test_unittest.test_assertions.TestLongMessage.testAlmostEqual) ... ok
+testAssertDictEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertDictEqual) ... ok
+testAssertFalse (test.test_unittest.test_assertions.TestLongMessage.testAssertFalse) ... ok
+testAssertGreater (test.test_unittest.test_assertions.TestLongMessage.testAssertGreater) ... ok
+testAssertGreaterEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertGreaterEqual) ... ok
+testAssertIn (test.test_unittest.test_assertions.TestLongMessage.testAssertIn) ... ok
+testAssertIs (test.test_unittest.test_assertions.TestLongMessage.testAssertIs) ... ok
+testAssertIsNone (test.test_unittest.test_assertions.TestLongMessage.testAssertIsNone) ... ok
+testAssertIsNot (test.test_unittest.test_assertions.TestLongMessage.testAssertIsNot) ... ok
+testAssertIsNotNone (test.test_unittest.test_assertions.TestLongMessage.testAssertIsNotNone) ... ok
+testAssertLess (test.test_unittest.test_assertions.TestLongMessage.testAssertLess) ... ok
+testAssertLessEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertLessEqual) ... ok
+testAssertMultiLineEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertMultiLineEqual) ... ok
+testAssertNotIn (test.test_unittest.test_assertions.TestLongMessage.testAssertNotIn) ... ok
+testAssertNotRegex (test.test_unittest.test_assertions.TestLongMessage.testAssertNotRegex) ... ok
+testAssertRaises (test.test_unittest.test_assertions.TestLongMessage.testAssertRaises) ... ok
+testAssertRaisesRegex (test.test_unittest.test_assertions.TestLongMessage.testAssertRaisesRegex) ... ok
+testAssertRegex (test.test_unittest.test_assertions.TestLongMessage.testAssertRegex) ... ok
+testAssertSequenceEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertSequenceEqual) ... ok
+testAssertSetEqual (test.test_unittest.test_assertions.TestLongMessage.testAssertSetEqual) ... ok
+testAssertTrue (test.test_unittest.test_assertions.TestLongMessage.testAssertTrue) ... ok
+testAssertWarns (test.test_unittest.test_assertions.TestLongMessage.testAssertWarns) ... ok
+testAssertWarnsRegex (test.test_unittest.test_assertions.TestLongMessage.testAssertWarnsRegex) ... ok
+testDefault (test.test_unittest.test_assertions.TestLongMessage.testDefault) ... ok
+testNotAlmostEqual (test.test_unittest.test_assertions.TestLongMessage.testNotAlmostEqual) ... ok
+testNotEqual (test.test_unittest.test_assertions.TestLongMessage.testNotEqual) ... ok
+test_assertNotWarns (test.test_unittest.test_assertions.TestLongMessage.test_assertNotWarns) ... ok
+test_baseAssertEqual (test.test_unittest.test_assertions.TestLongMessage.test_baseAssertEqual) ... ok
+test_formatMessage_unicode_error (test.test_unittest.test_assertions.TestLongMessage.test_formatMessage_unicode_error) ... ok
+test_formatMsg (test.test_unittest.test_assertions.TestLongMessage.test_formatMsg) ... ok
+testAssertNotRegex (test.test_unittest.test_assertions.Test_Assertions.testAssertNotRegex) ... ok
+test_AlmostEqual (test.test_unittest.test_assertions.Test_Assertions.test_AlmostEqual) ... ok
+test_AmostEqualWithDelta (test.test_unittest.test_assertions.Test_Assertions.test_AmostEqualWithDelta) ... ok
+test_assertRaises (test.test_unittest.test_assertions.Test_Assertions.test_assertRaises) ... ok
+test_assertRaises_frames_survival (test.test_unittest.test_assertions.Test_Assertions.test_assertRaises_frames_survival) ... ok
+test_base_exception_from_async_method (test.test_unittest.test_async_case.TestAsyncCase.test_base_exception_from_async_method) ... Executing <Task finished name='Task-3' coro=<IsolatedAsyncioTestCase.asyncTearDown() done, defined at <imre stdlib>/unittest/async_case.py:47> result=None created at <imre stdlib>/asyncio/runners.py:109> took 2.732 seconds
+Executing <Task finished name='Task-4' coro=<BaseEventLoop.shutdown_asyncgens() done, defined at <imre stdlib>/asyncio/base_events.py:570> result=None created at <imre stdlib>/asyncio/tasks.py:732> took 8.037 seconds
+Executing <Handle _run_until_complete_cb(<Task finishe.../tasks.py:732>) at <imre stdlib>/asyncio/base_events.py:181 created at <imre stdlib>/asyncio/futures.py:179> took 0.139 seconds
+Executing <Task finished name='Task-5' coro=<BaseEventLoop.shutdown_default_executor() done, defined at <imre stdlib>/asyncio/base_events.py:595> result=None created at <imre stdlib>/asyncio/tasks.py:732> took 7.099 seconds
+Executing <Handle _run_until_complete_cb(<Task finishe.../tasks.py:732>) at <imre stdlib>/asyncio/base_events.py:181 created at <imre stdlib>/asyncio/futures.py:179> took 0.161 seconds
+Executing <Task finished name='Task-6' coro=<IsolatedAsyncioTestCase.asyncSetUp() done, defined at <imre stdlib>/unittest/async_case.py:44> result=None created at <imre stdlib>/asyncio/runners.py:109> took 12.888 seconds
+Executing <Handle _run_until_complete_cb(<Task finishe...unners.py:109>) at <imre stdlib>/asyncio/base_events.py:181 created at <imre stdlib>/asyncio/futures.py:179> took 0.166 seconds
+Executing <Task finished name='Task-7' coro=<TestAsyncCase.test_base_exception_from_async_method.<locals>.Test.test_no_err() done, defined at /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_unittest/test_async_case.py:364> result=None created at <imre stdlib>/asyncio/runners.py:109> took 12.319 seconds
+Executing <Handle _run_until_complete_cb(<Task finishe...unners.py:109>) at <imre stdlib>/asyncio/base_events.py:181 created at <imre stdlib>/asyncio/futures.py:179> took 0.137 seconds
+Executing <Task finished name='Task-8' coro=<IsolatedAsyncioTestCase.asyncTearDown() done, defined at <imre stdlib>/unittest/async_case.py:47> result=None created at <imre stdlib>/asyncio/runners.py:109> took 10.755 seconds
+Executing <Task finished name='Task-9' coro=<BaseEventLoop.shutdown_asyncgens() done, defined at <imre stdlib>/asyncio/base_events.py:570> result=None created at <imre stdlib>/asyncio/tasks.py:732> took 2.332 seconds
+Executing <Task finished name='Task-10' coro=<BaseEventLoop.shutdown_default_executor() done, defined at <imre stdlib>/asyncio/base_events.py:595> result=None created at <imre stdlib>/asyncio/tasks.py:732> took 2.367 seconds
+Executing <Task finished name='Task-11' coro=<IsolatedAsyncioTestCase.asyncSetUp() done, defined at <imre stdlib>/unittest/async_case.py:44> result=None created at <imre stdlib>/asyncio/runners.py:109> took 2.290 seconds
+Executing <Task cancelled name='Task-12' coro=<TestAsyncCase.test_base_exception_from_async_method.<locals>.Test.test_cancel() done, defined at /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_unittest/test_async_case.py:367> created at <imre stdlib>/asyncio/runners.py:109> took 2.289 seconds
+Executing <Task finished name='Task-13' coro=<IsolatedAsyncioTestCase.asyncTearDown() done, defined at <imre stdlib>/unittest/async_case.py:47> result=None created at <imre stdlib>/asyncio/runners.py:109> took 2.336 seconds

@@ -1,0 +1,51 @@
+{
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/imre-tmp",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "timeout_seconds": 180,
+  "build": {
+    "argv": [
+      "/workspace/imre/target/release/imre",
+      "build",
+      "/workspace/imre-data/benchmarks/cpython_stdlib/full/csv/suite_loader.py",
+      "--module-root",
+      "/workspace/imre-data",
+      "--extension-path",
+      "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "--no-cache",
+      "--quiet",
+      "--opt-level",
+      "3",
+      "--runtime",
+      "/workspace/imre/target/release/libimre_runtime.a",
+      "--clang",
+      "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+      "-o",
+      "/workspace/scratch/replay/csv/O3.exe",
+      "--include-module",
+      "test.test_csv"
+    ],
+    "exit_code": -9,
+    "timed_out": true,
+    "seconds": 180.182,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "argv": [
+    "/workspace/scratch/replay/csv/O3.exe"
+  ],
+  "reason": "build timed out before test execution",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_bytes": 0,
+  "public_stderr": "exact",
+  "parsed_results": 0,
+  "reported_totals": [],
+  "result_raw_lines": []
+}
