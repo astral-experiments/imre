@@ -1,0 +1,248 @@
+IMRE_UNITTEST {"event": "collection", "count": 82}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_available"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blake2b"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blake2b_vectors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blake2s"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blake2s_vectors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_and_name"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_huge"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_uintmax"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_shake128_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_shake256_vector"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_128_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_256_0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature_errors"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_digest_length_overflow"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_disallow_instantiation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_extra_sha3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_get_builtin_constructor"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_get_fips_mode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_gil"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_hash_array"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_hexdigest"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_large_update"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_name_attribute"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_blake2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_sha3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_readonly_types"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_sha256_gil"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_threaded_hashing"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_unknown_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_false"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_true"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.KDFTests.test_file_digest"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.KDFTests.test_normalized_name"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.KDFTests.test_pbkdf2_hmac_c"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_hashlib.KDFTests.test_scrypt"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_available"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_available", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb", "outcome": "skip", "details": ["resource 'cpu' is not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blake2b"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blake2b", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blake2b_vectors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blake2b_vectors", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blake2s"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blake2s", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blake2s_vectors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blake2s_vectors", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_and_name"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_and_name", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_huge"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_huge", "outcome": "skip", "details": ["not enough memory: 4.0G minimum needed"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_uintmax"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_md5_uintmax", "outcome": "skip", "details": ["not enough memory: 4.0G minimum needed"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_shake128_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_shake128_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_shake256_vector"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_shake256_vector", "outcome": "skip", "details": ["Use of the 'urlfetch' resource not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_128_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_128_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_256_0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_case_shake_256_0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature_errors"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature_errors", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_digest_length_overflow"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_digest_length_overflow", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_disallow_instantiation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_disallow_instantiation", "outcome": "skip", "details": ["implementation detail specific to cpython"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_extra_sha3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_extra_sha3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_get_builtin_constructor"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_get_builtin_constructor", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_get_fips_mode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_get_fips_mode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_gil"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_gil", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_hash_array"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_hash_array", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_hexdigest"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_hexdigest", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_large_update"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_large_update", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_name_attribute"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_name_attribute", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_blake2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_blake2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_sha3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_sha3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_readonly_types"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_readonly_types", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_sha256_gil"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_sha256_gil", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb", "outcome": "skip", "details": ["resource 'cpu' is not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb", "outcome": "skip", "details": ["resource 'cpu' is not enabled"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_threaded_hashing"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_threaded_hashing", "outcome": "error", "details": ["this thread target cannot run independently of the boxed Python heap"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_unknown_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_unknown_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_false"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_false", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_true"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_true", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.KDFTests.test_file_digest"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.KDFTests.test_file_digest", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.KDFTests.test_normalized_name"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.KDFTests.test_normalized_name", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.KDFTests.test_pbkdf2_hmac_c"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.KDFTests.test_pbkdf2_hmac_c", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_hashlib.KDFTests.test_scrypt"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_hashlib.KDFTests.test_scrypt", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 82, "successful": false}

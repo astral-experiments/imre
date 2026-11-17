@@ -1,0 +1,1 @@
+/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/hashlib_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

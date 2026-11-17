@@ -1,0 +1,6 @@
+gcc -O2 /workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c -o /workspace/scratch/hashlib-strict/raw-control-probe
+gcc -O2 /workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c -o /workspace/scratch/hashlib-strict/raw-control-probe.verify
+04e95dc9924a9dc72f33e7762e5cbad60af1259a195d9c25364ca90766f6ada3  /workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c
+10cdd30ddd59ff46ea6f5c8c88bc21124fc7ceb3763daae50e883ca95f2530aa  /workspace/scratch/hashlib-strict/raw-control-probe
+10cdd30ddd59ff46ea6f5c8c88bc21124fc7ceb3763daae50e883ca95f2530aa  /workspace/scratch/hashlib-strict/raw-control-probe.verify
+cmp /workspace/scratch/hashlib-strict/raw-control-probe /workspace/scratch/hashlib-strict/raw-control-probe.verify

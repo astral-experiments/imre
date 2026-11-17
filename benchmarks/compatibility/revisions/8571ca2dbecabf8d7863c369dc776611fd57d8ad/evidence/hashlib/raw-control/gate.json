@@ -1,0 +1,71 @@
+{
+  "family": "hashlib",
+  "command": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/launcher.py",
+    "--module-root",
+    "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control",
+    "--extension-path",
+    "/workspace/scratch/hashlib-strict/fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--include-module",
+    "test.test_hashlib",
+    "-o",
+    "/workspace/scratch/hashlib-strict/gate.exe"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/hashlib-strict/fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+    "IMREFLAGS": "--opt-level 0",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+    "TMPDIR": "/workspace/scratch/hashlib-strict/tmp"
+  },
+  "launcher_sha256": "ffeb0ed57eb9cc0d8bdd6eaf81d98f36f3625e35e989fa9dee120076d5141c7b",
+  "first_party_module": "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/hashlib_poison.py",
+  "first_party_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "supervisor_exit": 0,
+  "image_exists": false,
+  "build": {
+    "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+    "tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+    "clean": true,
+    "cli_sha256": "36da70440000ded149af49b9a06d4b1c4ed5ff744be83163c31ce91927a9dbe7",
+    "runtime_sha256": "e37426811f79e2cf4049933786e546b80e55e4e1fe56a563a565effba9b68764",
+    "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target"
+    ],
+    "result": "    Finished `release` profile [optimized + debuginfo] target(s) in 3m 17s",
+    "source_depfiles": {
+      "compiler": {
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/compiler.d",
+        "sha256": "9f5916832d2ba1575f87507c323538d663c3189491fade4a0cb3ab881491a50f"
+      },
+      "runtime": {
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/runtime.d",
+        "sha256": "77074b28c115abea0f4098745f4763db08b19c394687e86eeb1ecca646ad42a0"
+      }
+    }
+  }
+}

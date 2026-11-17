@@ -1,0 +1,473 @@
+{
+  "schema": "imre.compatibility.raw-control.v1",
+  "family": "hashlib",
+  "cohorts": {
+    "finite-native": {
+      "kind": "finite",
+      "platform": {
+        "os": "linux",
+        "arch": "x86_64",
+        "release": "6.18.57"
+      },
+      "probe": "/workspace/scratch/hashlib-strict/raw-control-probe",
+      "artifacts": {
+        "run": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/run.json",
+        "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate.json",
+        "positive_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/launcher.py",
+        "negative_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate.launcher.py",
+        "poison": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/hashlib_poison.py",
+        "policy": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/hashlib_default_policy.py",
+        "stock_launcher": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock.launcher.py",
+        "stock_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock.source.py",
+        "stock_capture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock.capture.json",
+        "stock_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock.stdout",
+        "stock_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock.stderr",
+        "head": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/head.raw",
+        "clean": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/clean.raw",
+        "cargo": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/cargo.raw",
+        "identities": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/identity.raw",
+        "platform": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/platform.raw",
+        "stock_version": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/stock_version.raw",
+        "gate_files": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate-files.raw",
+        "positive_hash": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/positive.raw",
+        "restored": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/restored.raw",
+        "gate_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate.trace",
+        "gate_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate.stderr",
+        "gate_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/gate.stdout",
+        "probe_build": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/probe-build.raw",
+        "collector": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/collect.py",
+        "compiler_depfile": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/compiler.d",
+        "runtime_depfile": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/runtime.d",
+        "probe_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe.c",
+        "O0_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.stderr",
+        "O0_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.withdraw.stderr",
+        "O0_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.withdraw.stdout",
+        "O0_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.trace",
+        "O0_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.readelf.stdout",
+        "O0_build_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.build.stdout",
+        "O0_build_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.build.stderr",
+        "O0_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O0.stdout",
+        "O3_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.stderr",
+        "O3_withdraw_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.withdraw.stderr",
+        "O3_withdraw_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.withdraw.stdout",
+        "O3_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.trace",
+        "O3_readelf": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.readelf.stdout",
+        "O3_build_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.build.stdout",
+        "O3_build_stderr": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.build.stderr",
+        "O3_stdout": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/O3.stdout"
+      }
+    }
+  },
+  "originals": [
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_algorithms_available",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_algorithms_guaranteed",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blake2_update_over_4gb",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blake2b",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blake2b_vectors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blake2s",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blake2s_vectors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blocksize_and_name",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_blake2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_blocksize_name_sha3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2b_all_parameters",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_blake2s_all_parameters",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_md5_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_md5_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_md5_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_md5_huge",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_md5_uintmax",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha1_3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha224_3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha256_3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha384_3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_224_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_256_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_384_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha3_512_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_1",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_sha512_3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_shake128_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_shake256_vector",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_shake_128_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_case_shake_256_0",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_clinic_signature_errors",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_digest_length_overflow",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_disallow_instantiation",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_extra_sha3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_get_builtin_constructor",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_get_fips_mode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_gil",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_hash_array",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_hash_disallow_instantiation",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_hexdigest",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_large_update",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_name_attribute",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_new_upper_to_lower",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_no_unicode",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_blake2",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_no_unicode_sha3",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_readonly_types",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_sha256_gil",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_sha256_update_over_4gb",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_sha3_256_update_over_4gb",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_threaded_hashing",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_unknown_hash",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_false",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.HashLibTestCase.test_usedforsecurity_true",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.KDFTests.test_file_digest",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.KDFTests.test_normalized_name",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.KDFTests.test_pbkdf2_hmac_c",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    },
+    {
+      "id": "test.test_hashlib.KDFTests.test_scrypt",
+      "occurrence": 1,
+      "launcher_cohort": "finite-native"
+    }
+  ]
+}
