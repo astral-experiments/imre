@@ -89,6 +89,12 @@ fn receiver(ctx: &Context, scope: Id) -> Option<Id> {
 
 /// Skipping source statements must not skip a Python observer or change an allocation trace.
 fn unobserved_checkpoints(ctx: &Context) -> bool {
+    #[cfg(unix)]
+    if crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
+        || !unobserved_signal_handlers(ctx)
+    {
+        return false;
+    }
     if ctx.heap.allocation_traces.is_tracing()
         || ctx.heap.gc_callback(0).is_some()
         || ctx.heap.has_weak_values
@@ -115,6 +121,23 @@ fn unobserved_checkpoints(ctx: &Context) -> bool {
         super::io::text_descriptor_chain(&ctx.heap, stdin).unwrap_or([NONE; 3]);
     ctx.heap
         .finalizers_within(&[input, buffer, raw, stdout, stderr])
+}
+
+/// Source checkpoints can deliver a signal to a Python handler with the interrupted frame.
+#[cfg(unix)]
+fn unobserved_signal_handlers(ctx: &Context) -> bool {
+    let default = ctx.builtins.get("_signal.SIG_DFL").copied();
+    let ignore = ctx.builtins.get("_signal.SIG_IGN").copied();
+    let interrupt = ctx.builtins.get("_signal.default_int_handler").copied();
+    ctx.signal_handlers
+        .iter()
+        .enumerate()
+        .all(|(number, &handler)| {
+            handler == NONE
+                || Some(handler) == default
+                || Some(handler) == ignore
+                || (number == libc::SIGINT as usize && Some(handler) == interrupt)
+        })
 }
 
 fn canonical_builtins(ctx: &Context, root: Id, names: &[&str]) -> bool {
@@ -942,5 +965,27 @@ mod tests {
         let replacement = ctx.builtin("len");
         ctx.set_attr(class, "__new__", replacement).unwrap();
         assert_eq!(plain_match_constructor(&ctx, root), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn signal_handlers_that_can_inspect_the_interrupted_frame_require_source_checkpoints() {
+        let mut ctx: Context = ffi::new_context(
+            serde_json::json!({"paths": [], "python_version": "3.14"}),
+            ["imre"],
+        );
+        let default = ctx.signal_sentinel("_signal.SIG_DFL", libc::SIG_DFL);
+        let ignore = ctx.signal_sentinel("_signal.SIG_IGN", libc::SIG_IGN);
+        let interrupt = ctx.builtin("_signal.default_int_handler");
+        ctx.signal_handlers = vec![NONE; libc::SIGINT as usize + 3];
+        ctx.signal_handlers[1] = default;
+        ctx.signal_handlers[libc::SIGINT as usize] = interrupt;
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = ignore;
+        assert!(super::unobserved_signal_handlers(&ctx));
+
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = ctx.builtin("print");
+        assert!(!super::unobserved_signal_handlers(&ctx));
+        ctx.signal_handlers[libc::SIGINT as usize + 1] = interrupt;
+        assert!(!super::unobserved_signal_handlers(&ctx));
     }
 }
