@@ -1,7 +1,6 @@
 //! Runtime code metadata, compilation of source objects and Python namespace operations.
 
 mod annotations;
-mod comprehensions;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -74,93 +73,6 @@ enum EnclosingBinding {
     Local,
 }
 
-/// Suspension sites among the supported operands of one expression. The plan is discarded
-/// after collecting code metadata; untouched subtrees are visited in place.
-struct OperandPlan {
-    sites: smallvec::SmallVec<[ruff_text_size::TextSize; 1]>,
-}
-
-impl OperandPlan {
-    fn for_function(root: &ast::Expr, is_async: bool) -> Option<Self> {
-        if !is_async && !code_flags::yields_in_expression(root) {
-            return None;
-        }
-        let mut sites = smallvec::SmallVec::new();
-        let mut work = smallvec::SmallVec::<[&ast::Expr; 8]>::new();
-        work.push(root);
-        while let Some(expr) = work.pop() {
-            match expr {
-                ast::Expr::Await(a) if is_async => {
-                    sites.push(a.start());
-                    work.push(&a.value);
-                }
-                ast::Expr::Yield(y) => {
-                    sites.push(y.start());
-                    work.extend(y.value.as_deref());
-                }
-                ast::Expr::YieldFrom(y) => {
-                    sites.push(y.start());
-                    work.push(&y.value);
-                }
-                expr if let Some(comp) = Plan::from_expr(expr) => {
-                    if comp.suspends() {
-                        sites.push(expr.start());
-                    }
-                }
-                ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-                | ast::Expr::List(ast::ExprList { elts, .. })
-                    if !elts.iter().any(ast::Expr::is_starred_expr) =>
-                {
-                    work.extend(elts.iter());
-                }
-                ast::Expr::BinOp(b) => work.extend([&*b.left, &*b.right]),
-                ast::Expr::Compare(c) => work.extend(c.operands.iter()),
-                ast::Expr::BoolOp(b) => work.extend(b.values.iter()),
-                ast::Expr::UnaryOp(u) => work.push(&u.operand),
-                ast::Expr::Attribute(a) => work.push(&a.value),
-                ast::Expr::Subscript(s) => work.extend([&*s.value, &*s.slice]),
-                ast::Expr::Slice(s) => {
-                    work.extend(
-                        [s.lower.as_deref(), s.upper.as_deref(), s.step.as_deref()]
-                            .into_iter()
-                            .flatten(),
-                    );
-                }
-                ast::Expr::Named(n) => work.push(&n.value),
-                ast::Expr::Dict(d) => {
-                    for item in &d.items {
-                        work.extend(item.key.as_ref());
-                        work.push(&item.value);
-                    }
-                }
-                ast::Expr::Set(s) => {
-                    work.extend(s.elts.iter().map(|item| match item {
-                        ast::Expr::Starred(star) => star.value.as_ref(),
-                        item => item,
-                    }));
-                }
-                ast::Expr::If(b) => work.extend([&*b.body, &*b.test, &*b.orelse]),
-                ast::Expr::Call(c)
-                    if !c.arguments.args.iter().any(ast::Expr::is_starred_expr)
-                        && c.arguments.keywords.iter().all(|kw| kw.arg.is_some()) =>
-                {
-                    work.push(&c.func);
-                    work.extend(c.arguments.args.iter());
-                    work.extend(c.arguments.keywords.iter().map(|kw| &kw.value));
-                }
-                _ => {}
-            }
-        }
-        sites.sort_unstable();
-        (!sites.is_empty()).then_some(Self { sites })
-    }
-
-    fn suspends(&self, expr: &ast::Expr) -> bool {
-        let first = self.sites.partition_point(|&site| site < expr.start());
-        self.sites.get(first).is_some_and(|&site| site < expr.end())
-    }
-}
-
 /// Parsed items used to construct and validate code-object metadata.
 enum SourceItem {
     Discard(ast::Expr),
@@ -168,7 +80,6 @@ enum SourceItem {
     Annotations(Vec<(String, ast::Expr)>),
     Docstring(ast::StringLiteralValue),
     StringAnnotation(String, ast::Expr),
-    MakeGenerator(ast::Expr),
     Pattern(ast::Pattern, Box<[String]>),
     Name(ast::Identifier),
     Names(Vec<ast::name::Name>),
@@ -770,43 +681,7 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
         module: bool,
     ) -> Result<()> {
         use ast::visitor::Visitor;
-        let mut children = HashMap::new();
-        children
-            .try_reserve(functions.len())
-            .map_err(|_| crate::Error::allocation())?;
         for expr in functions {
-            let child = match expr {
-                ast::Expr::Lambda(lambda) => {
-                    if has_named_bindings {
-                        let mut named = NamedBindings::default();
-                        named.visit_expr(&lambda.body);
-                        named.declare(None)?;
-                    }
-                    if let Some(plan) = OperandPlan::for_function(&lambda.body, false) {
-                        let mut child = Program::new("<lambda>", has_named_bindings);
-                        child.record_operand(*lambda.body.clone(), &plan)?;
-                        Some(Box::new(child))
-                    } else {
-                        None
-                    }
-                }
-                ast::Expr::Generator(genexpr) => {
-                    let plan = Plan::generator(genexpr);
-                    if plan.body_suspends() {
-                        let mut child = Program::new("<genexpr>", has_named_bindings);
-                        child.is_async = true;
-                        child.lower_comprehension_body(&plan)?;
-                        Some(Box::new(child))
-                    } else {
-                        plan.try_target_names().map_err(invalid_target)?;
-                        None
-                    }
-                }
-                _ => unreachable!("anonymous function expression"),
-            };
-            children.insert(expr.range(), (expr, child));
-        }
-        for (expr, child) in children.into_values() {
             let mut directives = HashMap::new();
             if has_named_bindings && matches!(expr, ast::Expr::Generator(_)) {
                 let mut bindings = NamedBindings::default();
@@ -824,21 +699,25 @@ impl<'a, 'ctx> CompiledStrings<'a, 'ctx> {
                     directives.insert(name, (kind, TextRange::empty(offset)));
                 }
             }
-            let roots = if let Some(mut child) = child {
-                child.directives = directives;
-                child.prepare_strings(self.heap, self.shared, self.spellings)?
-            } else {
-                let mut strings =
-                    CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
-                match expr {
-                    ast::Expr::Lambda(lambda) => strings.visit_expr(&lambda.body),
-                    ast::Expr::Generator(generator) => {
-                        Plan::generator(generator).visit_body(|operand| strings.visit_expr(operand))
+            let mut strings =
+                CompiledStrings::new(self.heap, self.shared, self.spellings, &directives);
+            match expr {
+                ast::Expr::Lambda(lambda) => {
+                    if has_named_bindings {
+                        let mut named = NamedBindings::default();
+                        named.visit_expr(&lambda.body);
+                        named.declare(None)?;
                     }
-                    _ => unreachable!("anonymous function expression"),
+                    strings.visit_expr(&lambda.body);
                 }
-                strings.finish_scope(has_named_bindings, false)?
-            };
+                ast::Expr::Generator(generator) => {
+                    let plan = Plan::generator(generator);
+                    plan.try_target_names().map_err(invalid_target)?;
+                    plan.visit_body(|operand| strings.visit_expr(operand));
+                }
+                _ => unreachable!("anonymous function expression"),
+            }
+            let roots = strings.finish_scope(has_named_bindings, false)?;
             if roots != NONE {
                 self.keep(roots)?;
             }
@@ -1091,7 +970,6 @@ impl Program {
                 self.has_named_bindings,
             )?;
         }
-        let mut prepared_generators = Vec::new();
         let mut items = std::mem::take(&mut self.items);
         for op in &mut items {
             match op {
@@ -1109,9 +987,6 @@ impl Program {
                     for name in captures.iter() {
                         strings.heap.code_name(name);
                     }
-                }
-                SourceItem::MakeGenerator(expr) => {
-                    prepared_generators.push(&*expr);
                 }
                 SourceItem::Docstring(doc) => {
                     let text = imre_ast::strings::clean_doc(doc.to_str());
@@ -1172,10 +1047,7 @@ impl Program {
                 }
             }
         }
-        let mut functions = strings.scan()?;
-        functions.extend(prepared_generators);
-        strings.prepare_children(functions, self.has_named_bindings, self.name == "<module>")?;
-        Ok(strings.finish())
+        strings.finish_scope(self.has_named_bindings, self.name == "<module>")
     }
 
     fn declare(
@@ -1312,150 +1184,22 @@ impl Program {
         }
     }
 
-    fn lower_suspension(&mut self, expr: ast::Expr, function: bool) -> Result<Option<ast::Expr>> {
-        if !function {
-            if matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
-                self.invalid_transfer(expr.range(), "'yield' outside function")?;
-            }
-            return Ok(Some(expr));
-        }
-        if let Some(plan) = OperandPlan::for_function(&expr, self.is_async) {
-            self.lower_operand(expr, &plan)
-        } else {
-            Ok(Some(expr))
-        }
-    }
-
-    fn lower_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
-        stacker::maybe_grow(128 * 1024, 2 * 1024 * 1024, || {
-            self.emit_operand(expr, plan)
-        })
-    }
-
-    fn emit_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<Option<ast::Expr>> {
-        if !plan.suspends(&expr) {
-            return Ok(Some(expr));
-        }
-        if let ast::Expr::Generator(genexpr) = &expr {
-            if let Some(outer) =
-                self.lower_suspension(outer_clause(&genexpr.generators).iter.clone(), true)?
-            {
-                self.items.push(SourceItem::Discard(outer));
-            }
-            self.items.push(SourceItem::MakeGenerator(expr));
-            return Ok(None);
-        }
-        if let Some(comp) = Plan::from_expr(&expr) {
-            self.lower_eager_comprehension(&comp)?;
-            return Ok(None);
-        }
-        match expr {
-            ast::Expr::Yield(y) => {
-                if let Some(value) = y.value {
-                    self.record_operand(*value, plan)?;
-                }
-            }
-            ast::Expr::YieldFrom(y) => self.record_operand(*y.value, plan)?,
-            ast::Expr::Await(a) => self.record_operand(*a.value, plan)?,
-            ast::Expr::Call(call) => {
-                self.record_operand(*call.func, plan)?;
-                for arg in call.arguments.args {
-                    self.record_operand(arg, plan)?;
-                }
-                let mut keywords = Vec::new();
-                for kw in call.arguments.keywords {
-                    keywords.push(kw.arg.expect("fixed keyword").id);
-                    self.record_operand(kw.value, plan)?;
-                }
-                self.items.push(SourceItem::Names(keywords));
-            }
-            ast::Expr::Tuple(ast::ExprTuple { elts, .. })
-            | ast::Expr::List(ast::ExprList { elts, .. })
-            | ast::Expr::Set(ast::ExprSet { elts, .. }) => {
-                for item in elts {
-                    match item {
-                        ast::Expr::Starred(star) => self.record_operand(*star.value, plan)?,
-                        item => self.record_operand(item, plan)?,
-                    }
-                }
-            }
-            ast::Expr::Subscript(item) => {
-                self.record_operand(*item.value, plan)?;
-                self.record_operand(*item.slice, plan)?;
-            }
-            ast::Expr::Slice(slice) => {
-                for part in [slice.lower, slice.upper, slice.step].into_iter().flatten() {
-                    self.record_operand(*part, plan)?;
-                }
-            }
-            ast::Expr::Named(named) => {
-                let ast::Expr::Name(name) = *named.target else {
-                    return Err(unsupported("assignment expression target"));
-                };
-                self.record_operand(*named.value, plan)?;
-                self.items
-                    .push(SourceItem::Name(ast::Identifier::new(name.id, name.range)));
-            }
-            ast::Expr::Dict(dict) => {
-                for item in dict.items {
-                    if let Some(key) = item.key {
-                        self.record_operand(key, plan)?;
-                    }
-                    self.record_operand(item.value, plan)?;
-                }
-            }
-            ast::Expr::BinOp(b) => {
-                self.record_operand(*b.left, plan)?;
-                self.record_operand(*b.right, plan)?;
-            }
-            ast::Expr::Compare(c) => {
-                for expr in c.operands.into_vec() {
-                    self.record_operand(expr, plan)?;
-                }
-            }
-            ast::Expr::BoolOp(b) => {
-                for expr in b.values {
-                    self.record_operand(expr, plan)?;
-                }
-            }
-            ast::Expr::UnaryOp(u) => self.record_operand(*u.operand, plan)?,
-            ast::Expr::Attribute(a) => {
-                self.record_operand(*a.value, plan)?;
-                self.items.push(SourceItem::Name(a.attr));
-            }
-            ast::Expr::If(b) => {
-                for expr in [b.test, b.body, b.orelse] {
-                    self.record_operand(*expr, plan)?;
-                }
-            }
-            _ => unreachable!("operand with a supported suspension"),
-        }
-        Ok(None)
-    }
-
-    fn record_operand(&mut self, expr: ast::Expr, plan: &OperandPlan) -> Result<()> {
-        if let Some(expr) = self.lower_operand(expr, plan)? {
-            self.items.push(SourceItem::Discard(expr));
-        }
-        Ok(())
-    }
-
     fn assignment_operands(
         &mut self,
         targets: impl IntoIterator<Item = ast::Expr>,
         value: ast::Expr,
         function: bool,
     ) -> Result<()> {
-        let value = self.lower_suspension(value, function)?;
         self.items
-            .extend(targets.into_iter().chain(value).map(SourceItem::Discard));
-        Ok(())
+            .extend(targets.into_iter().map(SourceItem::Discard));
+        self.record_expression(value, function)
     }
 
     fn record_expression(&mut self, expr: ast::Expr, function: bool) -> Result<()> {
-        if let Some(expr) = self.lower_suspension(expr, function)? {
-            self.items.push(SourceItem::Discard(expr));
+        if !function && matches!(expr, ast::Expr::Yield(_) | ast::Expr::YieldFrom(_)) {
+            self.invalid_transfer(expr.range(), "'yield' outside function")?;
         }
+        self.items.push(SourceItem::Discard(expr));
         Ok(())
     }
 
