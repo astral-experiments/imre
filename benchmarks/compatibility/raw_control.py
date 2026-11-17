@@ -14,8 +14,8 @@ from pathlib import Path
 
 from collect_unittest_results import parse
 
-EXEC = re.compile(r'^(\d+) execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
-OPEN = re.compile(r'^\d+ (?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
+EXEC = re.compile(r'^(\d+)\s+execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
+OPEN = re.compile(r'^\d+\s+(?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
 SHA = re.compile(r'^([0-9a-f]{64})  (.+)$')
 
 
@@ -50,12 +50,12 @@ def find(lines, pattern, start=0):
 
 def stat(lines, pid, path, absent, start=0):
     tail = r'= -1 ENOENT\b' if absent else r'= 0$'
-    return find(lines, rf'^{pid} newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
+    return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
 
 
 def exits(lines, parent, child, code, start):
-    end = find(lines, rf'^{child} exit_group\({code}\)', start)
-    waited = find(lines, rf'^{parent} (?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
+    end = find(lines, rf'^{child}\s+exit_group\({code}\)', start)
+    waited = find(lines, rf'^{parent}\s+(?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
     return waited
 
 
@@ -72,49 +72,55 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
             m = OPEN.match(line)
             if m and line.startswith(target[1] + ' ') and json.loads(m[1]) == path and re.search(r'= [0-9]+$', line): found = True
         require(found, 'gate compiler did not open the actual launcher and imported poison')
-    m = re.search(rf'^{target[1]} exit_group\(([1-9][0-9]*)\)', text, re.M)
+    m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
     require(m is not None, 'gate compiler did not exit nonzero')
     waited = exits(lines, first[1], target[1], int(m[1]), target[0])
     after = stat(lines, first[1], out, True, waited + 1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', after + 1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
     require(poison_path in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic), 'missing imported int/bool diagnostic')
 
 
 def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
+    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
+    from posixpath import normpath
     lines = text.splitlines()
     first, target = execs(lines, require)
     require(first[2:] == (probe, [probe, 'withdraw', tree, stash, leaf, image])
         and target[2:] == (image, [image]), 'withdrawal did not run the saved image directly')
     pre = stat(lines, first[1], leaf, False, first[0]+1)
     missing_stash = stat(lines, first[1], stash, True, pre+1)
-    mv = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
+    mv = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
     a = stat(lines, first[1], tree, True, mv+1)
     b = stat(lines, first[1], leaf, True, a+1)
     require(b < target[0], 'test source tree was not absent before native exec')
     waited = exits(lines, first[1], target[1], 0, target[0])
     a = stat(lines, first[1], tree, True, waited+1)
     b = stat(lines, first[1], leaf, True, a+1)
-    restored = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
+    restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', exists+1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
+    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
     stem = Path(leaf).stem.lower()
     for line in lines[target[0]:waited+1]:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
-        m = OPEN.match(line)
+        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
         if m:
-            path = json.loads(m[1]).lower()
-            name = Path(path).name
-            forbidden = ('libpython' in path
-                or re.fullmatch(r'python(?:[0-9.]+)?', name)
-                or name == stem+'.py'
+            path = json.loads(m[1])
+            folded = path.lower()
+            name = Path(path).name.lower()
+            python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
+            require(not python_probe, 'native probed CPython or libpython')
+            resolved = Path(normpath(path if Path(path).is_absolute() else str(Path(cwd)/path)))
+            withdrawn = (name == stem+'.py'
                 or name in {stem+'.pyc', stem+'.pyo'}
-                or (name.startswith(stem+'.')
-                and name.endswith(('.pyc', '.pyo')))
-                or path == stash.lower()
-                or path.startswith(stash.lower()+'/'))
-            require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
-    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
+                or (name.startswith(stem+'.') and name.endswith(('.pyc', '.pyo')))
+                or resolved.is_relative_to(Path(tree))
+                or resolved.is_relative_to(Path(stash))
+                or Path(stash).name in Path(path).parts)
+            # Only an explicit ENOENT proves this withdrawn path was absent.
+            require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
+                    'native opened CPython, libpython, withdrawn source or matching bytecode')
     for path in api.successful_open_paths('\n'.join(lines[target[0]:waited+1]), cwd):
         name = path.name.lower()
         cached = path.parent.name == '__pycache__' and name.startswith(stem+'.') and path.suffix in {'.pyc','.pyo'}
