@@ -8,7 +8,7 @@ To add a decision, cite the assertion in the pinned CPython source, explain its 
 
 ### `argparse`
 
-These six tests launch programs distributed only as CPython bytecode. Imre compiles Python source. Accepting these programs would add a second input format tied to CPython’s bytecode version. Each original passed on stock and stopped in `py_compile` at native O0 and O3. The six source counterparts produced the expected help text in eight child invocations at each native level. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/99ce201f2646550e063f769419aef677c03d1c92) · [Source controls](https://github.com/astral-experiments/imre/commit/55bbb1472695639cff7bf85fab79ec8625c06e7f)
+These six tests create CPython bytecode with `py_compile`, remove the source, then use `script_helper.assert_python_ok` to execute a bytecode-only program. The [accepted per-original ledger](../benchmarks/cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) records their exact frozen IDs and source counterparts. Imre compiles Python source ahead of time to native code. Accepting these programs would add a second input format tied to CPython’s bytecode version. Each original passed on stock and stopped in `py_compile` at native O0 and O3. The six source counterparts produced the expected help text in eight child invocations at each native level. [Tested Imre revision](https://github.com/astral-experiments/imre/commit/99ce201f2646550e063f769419aef677c03d1c92) · [Source controls](https://github.com/astral-experiments/imre/commit/55bbb1472695639cff7bf85fab79ec8625c06e7f)
 
 | Original CPython test | Occurrence | Decision and reason | Related paired original |
 | --- | ---: | --- | --- |

@@ -70,6 +70,8 @@ Scripts: **84 of 84 original commands have receipts**, **1 verified paired passe
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](../benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](../benchmarks/compatibility/README.md).
 <!-- compatibility-scorecard:end -->
 
+The six accepted [argparse bytecode omissions](stdlib-omissions.md#argparse) remain in the 1,893-original denominator. Their revision-independent [policy ledger](../benchmarks/cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) does not alter the pinned receipts or earn passes.
+
 ## Historical API and ledger inventory
 
 The following import probes and native/host classifications are an archived ledger view from earlier revisions. They are not paired stock/O0/O3 results at the scorecard pin. In particular, the historical `argparse` zero is a different classification from the historical cumulative 1,887 credits; neither is a current result.

@@ -311,6 +311,8 @@ def replace_block(text, block):
 def main():
     p = argparse.ArgumentParser(description=__doc__); p.add_argument("--check", action="store_true"); p.add_argument("--validate", action="store_true"); args = p.parse_args()
     summary()
+    from check_omissions import validate as validate_omissions
+    validate_omissions()
     if args.validate: return
     for path, view in ((ROOT / "README.md", "readme"), (ROOT / "docs/stdlib.md", "stdlib")):
         old = path.read_text(); new = replace_block(old, render(view))

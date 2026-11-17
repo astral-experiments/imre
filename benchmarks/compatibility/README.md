@@ -9,6 +9,18 @@ python3 benchmarks/compatibility/scorecard.py
 python3 benchmarks/compatibility/scorecard.py --check
 ```
 
+## Accepted omission policy
+
+The [argparse accepted-omission ledger](../cpython_stdlib/full/argparse/accepted-omissions-linux.tsv) uses the existing [per-original omission review TSV schema](../cpython_stdlib/full/re/pending-omissions-linux.tsv): ordinal, full ID and occurrence, pinned source identity and lines, decision, requirement, AOT commitment, retained public behavior, and witness keys. Its six accepted decisions cover bytecode creation, source removal, and execution of CPython `.pyc` programs. They retain all **1,893** raw originals and earn **zero** passes or pairs. The ledger is policy, not an execution receipt, and has no Imre revision.
+
+`scorecard.py --check` and `--validate` check the policy against the pinned inventory, source, historical gap, and canonical receipts. It can also be checked alone:
+
+```sh
+python3 benchmarks/compatibility/check_omissions.py
+```
+
+For a future Imre revision, join policy to a canonical receipt by CPython source identity, full ID, and occurrence. Record the accepted reason in `omission_reason` and set `paired:false`. Preserve any actual observed outcome; use native `outcome:"omitted"` with a reason only when the run was deliberately omitted. Keep stock observations and the raw denominator. The pin49f receipts remain the observations made at that revision: stock passed these six, and native O0/O3 were `not_run` before collection. Do not relabel them retroactively.
+
 ## Cloud setup and stdlib replay
 
 Run Imre only in the configured Cloud environment. Fetch the public pin, create a `charlie/` worktree, and build compiler and runtime together from that revision. The cached release executable is not evidence for this pin.
