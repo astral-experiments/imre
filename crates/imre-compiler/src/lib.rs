@@ -2248,6 +2248,57 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn direct_set_insertions_select_a_layout_on_the_first_graph() {
+        use super::modules::LayoutHint;
+
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        for (tail, hint_applied, live_write) in [
+            ("    values.add(1)\n    return len(values)", false, true),
+            ("    values.add('z')\n    return len(values)", true, true),
+            (
+                "    else:\n        return len(values)\n    values.add(1)",
+                true,
+                false,
+            ),
+        ] {
+            let source = format!(
+                "def count(text):\n    values = set()\n    for char in text:\n        values.add(char)\n{tail}\nprint(count('a'))\n"
+            );
+            std::fs::write(&path, source).unwrap();
+            for disable_hint in [true, false] {
+                let mut passes = 0;
+                super::object_fallback(
+                    None,
+                    super::ProgramEntry::File(&path, None),
+                    &CompileOptions::default(),
+                    Default::default(),
+                    None,
+                    |graph, _, call_error| {
+                        passes += 1;
+                        graph.session.explicit_check = true;
+                        if disable_hint {
+                            graph.layout_hint.set(LayoutHint::Disabled);
+                        }
+                        let result = super::checked_lower_with(graph, None, call_error)?;
+                        if passes == 1 && !disable_hint {
+                            assert_eq!(graph.layout_hint.get() == LayoutHint::Applied, hint_applied);
+                            if hint_applied && live_write {
+                                assert!(matches!(result, super::CheckedProgram::Native(_)));
+                            }
+                        }
+                        Ok(result)
+                    },
+                )
+                .unwrap();
+                if disable_hint || live_write {
+                    assert_eq!(passes, 1, "{tail}, disable_hint={disable_hint}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn set_layout_retry_uses_the_resolved_source() {
         use super::modules::LayoutHint;
 
