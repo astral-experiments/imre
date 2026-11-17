@@ -1,0 +1,218 @@
+11720 execve("/workspace/scratch/argparse-8571-probe", ["/workspace/scratch/argparse-8571-probe", "withdraw", "/workspace/scratch/argparse-8571-fixtures/Lib/test", "/workspace/scratch/argparse-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", "/workspace/scratch/argparse-8571-O3.exe"], 0x7ffe317dcb38 /* 80 vars */) = 0
+11720 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+11720 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", {st_mode=S_IFREG|0600, st_size=266974, ...}, 0) = 0
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test.raw-control-stash", 0x7fffe1091df0, 0) = -1 ENOENT (No such file or directory)
+11720 rename("/workspace/scratch/argparse-8571-fixtures/Lib/test", "/workspace/scratch/argparse-8571-fixtures/Lib/test.raw-control-stash") = 0
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test", 0x7fffe1091df0, 0) = -1 ENOENT (No such file or directory)
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", 0x7fffe1091df0, 0) = -1 ENOENT (No such file or directory)
+11720 wait4(11721,  <unfinished ...>
+11721 execve("/workspace/scratch/argparse-8571-O3.exe", ["/workspace/scratch/argparse-8571-O3.exe"], 0x7fffe10920d0 /* 80 vars */) = 0
+11721 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 open("/workspace/scratch/argparse-8571-launch", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 open("/workspace/scratch/argparse-8571-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test", 0x7ffe3bd0c968, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7ffe3bd03c38, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7ffe3bd03c38, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support", 0x7ffe3bd06588, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support", 0x7ffe3bd02be8, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support", 0x7ffe3bd06588, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support", 0x7ffe3bd08f98, 0) = -1 ENOENT (No such file or directory)
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+11721 openat(AT_FDCWD, "@test_11721_tmp", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3
+11721 newfstatat(AT_FDCWD, "@test_11721_tmp", {st_mode=S_IFREG|0555, st_size=0, ...}, 0) = 0
+11721 newfstatat(AT_FDCWD, "@test_11721_tmp", {st_mode=S_IFREG|0777, st_size=0, ...}, 0) = 0
+11721 openat(AT_FDCWD, "@test_11721_tmp", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = 3
+11721 openat(AT_FDCWD, "@test_11721_tmp", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0666) = -1 EACCES (Permission denied)
+11721 exit_group(0)                     = ?
+11720 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 11721
+11720 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=11721, si_uid=1000, si_status=0, si_utime=214 /* 2.14 s */, si_stime=12 /* 0.12 s */} ---
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test", 0x7fffe1091df0, 0) = -1 ENOENT (No such file or directory)
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", 0x7fffe1091df0, 0) = -1 ENOENT (No such file or directory)
+11720 rename("/workspace/scratch/argparse-8571-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/argparse-8571-fixtures/Lib/test") = 0
+11720 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", {st_mode=S_IFREG|0600, st_size=266974, ...}, 0) = 0
+11720 exit_group(0)                     = ?

@@ -1,0 +1,122 @@
+{
+  "case": "uv-rich",
+  "evidence": {
+    "effects.normalized.json": {
+      "bytes": 115,
+      "path": "effects.normalized.json",
+      "sha256": "9e579b614f1081e65432e42f808720ab4881e23865d9d8efe8f963fbf6a93c58"
+    },
+    "raw/after.json": {
+      "bytes": 355,
+      "path": "raw/after.json",
+      "sha256": "f700d50e7fb0a35f8714ac3c95a18c48c59f417b59e39adc470cff27fce2a11f"
+    },
+    "raw/before.json": {
+      "bytes": 355,
+      "path": "raw/before.json",
+      "sha256": "f700d50e7fb0a35f8714ac3c95a18c48c59f417b59e39adc470cff27fce2a11f"
+    },
+    "raw/invocation.json": {
+      "bytes": 1163,
+      "path": "raw/invocation.json",
+      "sha256": "474b040b488c4038422c95c6b305026be761e0f561ce157bf60dc4de3089ee34"
+    },
+    "raw/processes.jsonl": {
+      "bytes": 0,
+      "path": "raw/processes.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/registry.jsonl": {
+      "bytes": 0,
+      "path": "raw/registry.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/stderr": {
+      "bytes": 0,
+      "path": "raw/stderr",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "raw/stdout": {
+      "bytes": 21,
+      "path": "raw/stdout",
+      "sha256": "62f2a29fb7c886579cd57d33e0a35e05ee7ed48d7c7ccbcdc6bda7da881da652"
+    },
+    "raw/wait.json": {
+      "bytes": 43,
+      "path": "raw/wait.json",
+      "sha256": "ac3e0602f1590968085f79df3e078d9f081c074cdbf1d48826ebaf2bf641419b"
+    }
+  },
+  "execution_controls": {
+    "umask": "0077"
+  },
+  "fixture": {
+    "before": "raw/before.json",
+    "external_inputs": [
+      {
+        "bytes": 32359056,
+        "path": "$PYTHON",
+        "sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304"
+      },
+      {
+        "bytes": 144132,
+        "path": "$CORPUS/fixtures/rich-imports.zip",
+        "sha256": "74efeda34e44bb6995d92a7c914014ed3f9a168797b491ecc2d6be6de3fab3fe"
+      }
+    ]
+  },
+  "invocation": {
+    "argv": [
+      "$PYTHON",
+      "-B",
+      "scripts/uv-run-remote-script-test.py",
+      "Ruff"
+    ],
+    "cwd": "$WORK",
+    "env": {
+      "COLUMNS": "80",
+      "HOME": "$WORK/home",
+      "LANG": "C.UTF-8",
+      "LC_ALL": "C.UTF-8",
+      "NO_COLOR": "1",
+      "PATH": "/usr/bin",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHASHSEED": "0",
+      "PYTHONNOUSERSITE": "1",
+      "PYTHONPATH": "$CORPUS/fixtures/rich-imports.zip",
+      "TERM": "dumb",
+      "TZ": "UTC"
+    }
+  },
+  "observation": {
+    "effects": "effects.normalized.json",
+    "exit_code": 0,
+    "stderr": "raw/stderr",
+    "stdout": "raw/stdout"
+  },
+  "schema": "prospective-stock-reference-v1",
+  "scope": "supplemental-stock-only",
+  "source": {
+    "bytes": 297,
+    "commit": "24688aaca1e7fd104437a0909d5db3afdc7dcdb0",
+    "git_blob": "e21e3413afc5fc41942e29ccf7f717af3614ac12",
+    "path": "scripts/uv-run-remote-script-test.py",
+    "repo": "https://github.com/astral-sh/uv",
+    "sha256": "a479935e4c75c1b31dcd4805b50464ffa8a37e7240acb7c6457a2e4033ae21b0",
+    "vendored": "sources/uv/scripts/uv-run-remote-script-test.py"
+  },
+  "tool": {
+    "executable_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+    "implementation": "CPython",
+    "kernel": "6.18.57",
+    "libc": [
+      "glibc",
+      "2.41"
+    ],
+    "machine": "x86_64",
+    "soabi": "cpython-314-x86_64-linux-gnu",
+    "system": "Linux",
+    "version": "3.14.5",
+    "version_verbose": "3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]"
+  }
+}

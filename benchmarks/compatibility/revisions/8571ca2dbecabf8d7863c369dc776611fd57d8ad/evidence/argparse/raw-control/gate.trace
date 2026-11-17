@@ -1,0 +1,35 @@
+10837 execve("/workspace/scratch/argparse-8571-probe", ["/workspace/scratch/argparse-8571-probe", "gate", "/workspace/scratch/argparse-8571-gate.exe", "/workspace/imre/target/release/imre", "build", "/workspace/scratch/argparse-8571-launch/launcher.py", "--module-root", "/workspace/scratch/argparse-8571-launch", "--extension-path", "/workspace/scratch/argparse-8571-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_argparse", "-o", "/workspace/scratch/argparse-8571-gate.exe"], 0x7ffcd5797998 /* 76 vars */) = 0
+10837 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10837 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10837 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-gate.exe", 0x7ffc31492730, 0) = -1 ENOENT (No such file or directory)
+10837 wait4(10838,  <unfinished ...>
+10838 execve("/workspace/imre/target/release/imre", ["/workspace/imre/target/release/imre", "build", "/workspace/scratch/argparse-8571-launch/launcher.py", "--module-root", "/workspace/scratch/argparse-8571-launch", "--extension-path", "/workspace/scratch/argparse-8571-fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/imre/target/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_argparse", "-o", "/workspace/scratch/argparse-8571-gate.exe"], 0x7ffc31492a90 /* 76 vars */) = 0
+10838 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-launch/launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10838 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-launch/gate_control_argparse.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_argparse.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support/import_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support/os_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support/script_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/support/i18n_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat2(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib/test/test_tools/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10838 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-launch", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10838 openat(AT_FDCWD, "/workspace/scratch/argparse-8571-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10838 exit_group(1)                     = ?
+10837 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 10838
+10837 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=10838, si_uid=1000, si_status=1, si_utime=22 /* 0.22 s */, si_stime=16 /* 0.16 s */} ---
+10837 newfstatat(AT_FDCWD, "/workspace/scratch/argparse-8571-gate.exe", 0x7ffc31492730, 0) = -1 ENOENT (No such file or directory)
+10837 exit_group(0)                     = ?

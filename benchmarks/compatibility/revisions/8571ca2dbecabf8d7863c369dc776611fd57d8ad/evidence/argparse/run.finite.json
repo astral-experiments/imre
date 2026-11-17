@@ -1,0 +1,243 @@
+{
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "family": "argparse",
+  "source": {
+    "repo": "https://github.com/python/cpython",
+    "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+    "path": "Lib/test/test_argparse.py",
+    "git_blob": "627e395c49b194f67566bbaa7bba9a567b71edd9",
+    "sha256": "bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499"
+  },
+  "platform": {
+    "os": "linux",
+    "arch": "x86_64",
+    "release": "6.18.57"
+  },
+  "gate": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/gate.json",
+  "launcher_sha256": "dad9a3ce6abfbce49c521073defbbf8c71a8619fde1587143b3e6ed124cb81ec",
+  "stock_version": "Python 3.14.5 (main, Jun  2 2026, 22:25:17) [Clang 22.1.3 ]",
+  "stock_python_sha256": "c27397da5541f67655be462e128ca3d3eb6e0a8eb0d39036896c9042529f4304",
+  "cpython_source_archive_sha256": "0d838be32b52da92a4293ecd99bc91f7be8b4acc573423665bd1a1428be46e47",
+  "frozen_originals": 1893,
+  "stock_inventory": 45,
+  "inventory_mismatch": false,
+  "native_selection": {
+    "selected_id_prefix": "test.test_argparse.TestAddArgumentMetavar.",
+    "selected_originals": 45,
+    "reason": "bounded early useful launcher cohort; other originals remain raw not_run, not speculative omissions",
+    "full_build_attempts": {
+      "O0": {
+        "exit_code": 143,
+        "reason": "terminated before execution to use a bounded window"
+      },
+      "O3": {
+        "exit_code": 143,
+        "reason": "terminated before execution to use a bounded window"
+      }
+    }
+  },
+  "runs": {
+    "stock": {
+      "argv": [
+        "/workspace/scratch/python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
+        "-B",
+        "/workspace/scratch/argparse-8571-launch/launcher.py"
+      ],
+      "cwd": "/workspace/scratch/argparse-8571-empty",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "TMPDIR": "/workspace/scratch/argparse-8571-empty",
+        "LC_ALL": "C",
+        "PYTHONUTF8": "0"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 90.0,
+      "collection": 45,
+      "inventory_complete": true,
+      "summary": {
+        "event": "summary",
+        "run": 45,
+        "successful": true
+      },
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
+      "fresh_stock_launcher_archive": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.finite.launcher.py",
+      "fresh_stock_launcher_sha256": "dad9a3ce6abfbce49c521073defbbf8c71a8619fde1587143b3e6ed124cb81ec",
+      "note": "fresh stock execution of the identical bounded positive launcher bytes and common runtime configuration"
+    },
+    "O0": {
+      "argv": [
+        "/workspace/scratch/argparse-8571-O0.exe"
+      ],
+      "cwd": "/workspace/scratch/argparse-8571-empty",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/argparse-8571-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 0",
+        "TMPDIR": "/workspace/scratch/argparse-8571-empty",
+        "LC_ALL": "C",
+        "PYTHONUTF8": "0"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 90,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
+      "collection": 45,
+      "inventory_complete": true,
+      "summary": {
+        "event": "summary",
+        "run": 45,
+        "successful": true
+      },
+      "image_sha256": "af0fa90673a0e21cf031516d88cc61fd243b39757494bf69d36379e35d4da33c",
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/argparse-8571-launch/launcher.py",
+          "--module-root",
+          "/workspace/scratch/argparse-8571-launch",
+          "--extension-path",
+          "/workspace/scratch/argparse-8571-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "0",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "--include-module",
+          "test.test_argparse",
+          "-o",
+          "/workspace/scratch/argparse-8571-O0.exe"
+        ],
+        "cwd": "/workspace/scratch/argparse-8571-empty",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/argparse-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 180,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "withdrawal": {
+        "supervisor_timeout_seconds": 120,
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/argparse-8571-O0.exe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "714f8c26fc3559613df17e1a0c925e94213b566f7c7a7a50c10c342f5a6efaa4"
+        }
+      }
+    },
+    "O3": {
+      "argv": [
+        "/workspace/scratch/argparse-8571-O3.exe"
+      ],
+      "cwd": "/workspace/scratch/argparse-8571-empty",
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/argparse-8571-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 3",
+        "TMPDIR": "/workspace/scratch/argparse-8571-empty",
+        "LC_ALL": "C",
+        "PYTHONUTF8": "0"
+      },
+      "exit_code": 0,
+      "timed_out": false,
+      "timeout_seconds": 90,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
+      "collection": 45,
+      "inventory_complete": true,
+      "summary": {
+        "event": "summary",
+        "run": 45,
+        "successful": true
+      },
+      "image_sha256": "1e1716175de06212b1375c5a8f5dc4cf7c45d555864efd81f54193eb4636da3e",
+      "build": {
+        "argv": [
+          "/workspace/imre/target/release/imre",
+          "build",
+          "/workspace/scratch/argparse-8571-launch/launcher.py",
+          "--module-root",
+          "/workspace/scratch/argparse-8571-launch",
+          "--extension-path",
+          "/workspace/scratch/argparse-8571-fixtures/Lib",
+          "--no-cache",
+          "--quiet",
+          "--opt-level",
+          "3",
+          "--runtime",
+          "/workspace/imre/target/release/libimre_runtime.a",
+          "--clang",
+          "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+          "--include-module",
+          "test.test_argparse",
+          "-o",
+          "/workspace/scratch/argparse-8571-O3.exe"
+        ],
+        "cwd": "/workspace/scratch/argparse-8571-empty",
+        "environment": {
+          "PYTHONPATH": "/workspace/scratch/argparse-8571-fixtures/Lib",
+          "PYTHONDONTWRITEBYTECODE": "1",
+          "PYTHON_COLORS": "0",
+          "NO_COLOR": "1"
+        },
+        "exit_code": 0,
+        "timed_out": false,
+        "timeout_seconds": 180,
+        "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "withdrawal": {
+        "supervisor_timeout_seconds": 120,
+        "readelf": {
+          "argv": [
+            "readelf",
+            "-d",
+            "/workspace/scratch/argparse-8571-O3.exe"
+          ],
+          "exit_code": 0,
+          "stdout_sha256": "ed7cd82fc9c6635cf067e706c22040deae0c0a8b79023e2eaab10583a1a9bad7"
+        }
+      }
+    }
+  },
+  "stock_ids_equal_canonical": true,
+  "counts": {
+    "stock": {
+      "pass": 45
+    },
+    "O0": {
+      "not_run": 1848,
+      "pass": 45
+    },
+    "O3": {
+      "not_run": 1848,
+      "pass": 45
+    }
+  },
+  "paired": 45,
+  "stock_scope": "finite 45-original matched-positive launcher"
+}

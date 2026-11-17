@@ -115,6 +115,13 @@ class RawControlTests(unittest.TestCase):
             self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
             with self.assertRaisesRegex(ValueError,'stock launcher bytes differ from native'):self.rows()
 
+    def test_rehashed_stock_capture_with_wrong_source_hash_is_rejected(self):
+        entry=self.entries['base64'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/base64/raw-control') as folder:
+            tmp=Path(folder);capture=json.loads((scorecard.ROOT/cohort['artifacts']['stock_capture']).read_text());capture['source_archive_sha256']='0'*64
+            self.artifact_temp(entry,cohort,'stock_capture',tmp/'capture.json',(json.dumps(capture)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'fresh stock capture metadata or raw stdout differs'):self.rows()
+
     def test_rehashed_stock_inventory_order_must_match_native(self):
         entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
         with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as folder:

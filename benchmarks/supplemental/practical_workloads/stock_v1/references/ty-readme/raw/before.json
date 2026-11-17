@@ -1,0 +1,33 @@
+[
+  {
+    "bytes": 5610,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "README.md",
+    "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08"
+  },
+  {
+    "bytes": 3747,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "dist-workspace.toml",
+    "sha256": "4365f9472da1296912e1e9794629da0dae15635ecf4c05fcf3d3d5b58fece0f5"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "home"
+  },
+  {
+    "kind": "directory",
+    "mode": "0o700",
+    "path": "scripts"
+  },
+  {
+    "bytes": 2641,
+    "kind": "file",
+    "mode": "0o644",
+    "path": "scripts/transform_readme.py",
+    "sha256": "d6a13d50218b55e3b73587974e8357b9bc68b7c364d8bb10d04708fec5e2d64f"
+  }
+]

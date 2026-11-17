@@ -186,6 +186,7 @@ Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **721 validated receipts*
 
 | Module | Raw originals | Verified pairs / status |
 | --- | ---: | --- |
+| `argparse` | 1,893 | pending (1,893 staged) |
 | `base64` | 41 | 35 verified |
 | `configparser` | 344 | 339 verified |
 | `csv` | 128 | 122 verified |
