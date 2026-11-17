@@ -672,6 +672,9 @@ jobs:
         run: |
           imre_target="$(rustc -vV | sed -n 's/^host: //p')"
           cargo build -p imre-runtime --features corosensei/sanitizer --release --locked --target "$imre_target" --target-dir target/asan
+      - &build-asan-providers
+        name: Build instrumented bundled standard library providers
+        run: python3 scripts/build-bundled-providers.py target/release/imre --clang /usr/bin/clang-18 --sanitize
       - &asan-smoke
         name: Check native ownership and wheels with AddressSanitizer
         run: |
@@ -714,6 +717,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y clang-18 lld-18
       - run: cargo build -p imre-compiler --release --locked --features imre-compiler/verify-ir
       - *build-asan
+      - *build-asan-providers
       - *asan-smoke
       - *asan-suites
       - *verify-stdlib-table

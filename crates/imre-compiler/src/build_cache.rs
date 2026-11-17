@@ -87,10 +87,14 @@ pub struct NativeToolchain {
 }
 
 /// The installed provider archive can also be linked by the native system toolchain.
-pub fn provider_archive(optimization: &OsStr) -> Option<PathBuf> {
-    let path = super::installation_file("imre-toolchain")
+pub fn provider_archive(optimization: &OsStr, sanitize: bool) -> Option<PathBuf> {
+    let mut root = super::installation_file("imre-toolchain")
         .ok()?
-        .join("lib/imre-stdlib")
+        .join("lib/imre-stdlib");
+    if sanitize {
+        root.push("asan");
+    }
+    let path = root
         .join(format!("O{}", optimization.to_str()?))
         .join("providers.a");
     path.is_file().then_some(path)

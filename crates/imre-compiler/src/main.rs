@@ -312,8 +312,9 @@ fn run() -> Result<ExitCode, String> {
             || std::env::var_os("PATH").is_some_and(|path| {
                 std::env::split_paths(&path).any(|dir| dir.join("clang-18").is_file())
             }));
-    if split && linux && !options.address_sanitizer {
-        options.bundled_provider_archive = build_cache::provider_archive(&optimization);
+    if split && linux {
+        options.bundled_provider_archive =
+            build_cache::provider_archive(&optimization, options.address_sanitizer);
     }
     let run_image = |directory, boxed_imports| {
         #[cfg(unix)]
