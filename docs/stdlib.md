@@ -9,7 +9,7 @@ Frozen 45-family cohort: **16,203 pinned receipts** of **16,225 raw upstream ori
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 observed intersections**, **3 verified credited pairs**.
 
-Scripts: **84 of 84 original commands have receipts**, **1 verified paired passes**; **0 not run**.
+Scripts: **84 of 84 original commands have receipts**, **3 verified paired passes**; **0 not run**.
 
 #### Frozen cohort
 

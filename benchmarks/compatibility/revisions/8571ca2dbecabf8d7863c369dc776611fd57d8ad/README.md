@@ -3,7 +3,7 @@
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **546 pinned receipts** of **16,225 raw upstream originals**, **537 observed stock/O0/O3 pass intersections**, **537 verified credited pairs**; **15,679 originals have no receipt**.
+Frozen 45-family cohort: **546 pinned receipts** of **16,225 raw upstream originals**, **537 observed stock/O0/O3 pass intersections**, **537 verified credited pairs**; **15,679 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 

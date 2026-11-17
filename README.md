@@ -116,7 +116,7 @@ Frozen 45-family cohort: **16,203 pinned receipts** of **16,225 raw upstream ori
 
 Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 observed intersections**, **3 verified credited pairs**.
 
-Scripts: **84 of 84 original commands have receipts**, **1 verified paired passes**; **0 not run**.
+Scripts: **84 of 84 original commands have receipts**, **3 verified paired passes**; **0 not run**.
 
 #### Frozen cohort
 
@@ -179,7 +179,26 @@ The [stdlib report](docs/stdlib.md) lists every frozen family, including those n
 An observed intersection means the same original passed stock, O0 and O3; frozen credited pairs also require the launcher to pass its imported bad-type control and any required source-withdrawal check. Script passes also require independently anchored frozen preimages and reference observations, plus exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never earn credited pairs. Historical credits come from the [frozen mixed-revision ledger](benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](benchmarks/compatibility/README.md).
 <!-- compatibility-scorecard:end -->
 
-[Compatibility snapshot at revision 8571ca2d](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/README.md)
+<!-- current-compatibility-snapshot:start -->
+### Current compatibility snapshot
+
+Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · **546 validated receipts**, **537 verified pairs**.
+
+| Module | Raw originals | Verified pairs / status |
+| --- | ---: | --- |
+| `base64` | 41 | pending (41 staged) |
+| `configparser` | 344 | 339 verified |
+| `csv` | 128 | pending (128 staged) |
+| `fnmatch` | 24 | 24 verified |
+| `glob` | 24 | pending (24 staged) |
+| `hashlib` | 82 | pending (82 staged) |
+| `json` | 216 | pending (216 staged) |
+| `logging` | 272 | pending (2 staged) |
+| `pathlib` | 1,369 | pending (6 staged) |
+| `urllib` | 178 | 174 verified |
+
+[Full revision table](benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/docs/stdlib.md)
+<!-- current-compatibility-snapshot:end -->
 
 ### Historical whole-suite runs (mixed revisions)
 
