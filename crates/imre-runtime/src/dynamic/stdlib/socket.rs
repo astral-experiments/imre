@@ -283,8 +283,8 @@ impl Connect {
                 query.finish(resolved, name)?
             }
         };
-        // SAFETY: resolution has returned and this execution owns the context again.
         super::audit::event(
+            // SAFETY: resolution has returned and this execution owns the context again.
             unsafe { &mut *context },
             "socket.connect",
             &[self.receiver, self.peer],
