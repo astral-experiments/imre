@@ -4626,7 +4626,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                             && diagnostic
                                 .primary_span()
                                 .and_then(|span| span.range())
-                                .and_then(|range| scalar_initializer(db, file, parsed, range))
+                                .and_then(|range| contract_initializer(db, file, parsed, range))
                                 .is_some()
                 })
                 && !diagnostic
@@ -4665,7 +4665,7 @@ fn file_errors<'db>(db: &'db dyn LiteralSourceDb, checked: CheckedFile<'db>) -> 
                 }
                 Some(sources) if diagnostic.id().is_lint_named("invalid-assignment") => {
                     let scalar =
-                        range.and_then(|range| scalar_initializer(db, file, &parse(), range));
+                        range.and_then(|range| contract_initializer(db, file, &parse(), range));
                     if scalar.is_none()
                         && !has_declared_nominal_target(
                             db,
@@ -4807,8 +4807,9 @@ fn signature_uses_guarded_import(
     })
 }
 
-/// Literal initializers of scalar names are independent of the operation that required boxing.
-fn scalar_initializer(
+/// Explicit scalar and list-comprehension initializers retain their annotated
+/// contracts when another operation requires Python object storage.
+fn contract_initializer(
     db: &dyn Db,
     file: File,
     parsed: &ParsedModuleRef,
@@ -4822,17 +4823,18 @@ fn scalar_initializer(
         AnyNodeRef::StmtAnnAssign(assignment) => Some(assignment),
         _ => None,
     })?;
+    let value = assignment.value.as_deref()?;
+    let comprehension = matches!(value, Expr::ListComp(_));
     if !assignment.target.is_name_expr()
-        || !assignment.value.as_deref().is_some_and(|value| {
-            value.range() == range
-                && matches!(
-                    value,
-                    Expr::NumberLiteral(_)
-                        | Expr::BooleanLiteral(_)
-                        | Expr::StringLiteral(_)
-                        | Expr::BytesLiteral(_)
-                )
-        })
+        || value.range() != range
+        || !(comprehension
+            || matches!(
+                value,
+                Expr::NumberLiteral(_)
+                    | Expr::BooleanLiteral(_)
+                    | Expr::StringLiteral(_)
+                    | Expr::BytesLiteral(_)
+            ))
     {
         return None;
     }
@@ -4850,7 +4852,7 @@ fn scalar_initializer(
     }
     let model = SemanticModel::new(db, db.program_file(file));
     let declared = annotation_type(db, &model, &assignment.annotation)?;
-    concrete_scalar(db, &model.program_environment(), declared)
+    (comprehension || concrete_scalar(db, &model.program_environment(), declared))
         .then(|| assignment.annotation.range())
 }
 

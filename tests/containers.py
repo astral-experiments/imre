@@ -23,6 +23,7 @@ class Item:
 # Projection-only tuple locals may be scalarized. These cases protect snapshot
 # ownership, evaluation order, control-flow rebinding, and boxed escape paths.
 ACCEPTED = {
+    "mixed_elements": 'values = ["text", 1]\nprint(values)\n',
     "deque_ordering": (
         "from collections import deque\n"
         "a, b = deque([2]), deque([2, 3])\n"
@@ -592,7 +593,7 @@ take({1})
                     required: int = value
                     index, (value, again) = (index, (None, True))
     """,
-    "mixed_elements": 'values = ["text", 1]\n',
+    "annotated_mixed_elements": 'values: list[str] = ["text", 1]\n',
     "concat_mixed_lists": 'values = [1] + ["text"]\n',
     "wrong_string_append": "values: list[str] = []\nvalues.append(1)\n",
     "wrong_string_replace": 'values: list[str] = ["x"]\nvalues[0] = False\n',
