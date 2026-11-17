@@ -1,0 +1,830 @@
+IMRE_UNITTEST {"event": "collection", "count": 276}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestAbstract.test_abc_implementation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestAbstract.test_maintain_abc"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_0_field_compare"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_1_field_compare"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_alternate_classmethod_constructor"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_marker"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_var"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_var_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_var_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_var_no_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_class_var_with_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_classvar_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_clean_traceback_from_fields_exception"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_compare_subclasses"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dataclass_params_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dataclass_params_signature"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dataclasses_pickleable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dataclasses_qualnames"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_default_factory_derived"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_default_factory_not_called_if_value_given"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_default_factory_with_no_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_deliberately_mutable_defaults"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_disallowed_mutable_defaults"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dont_include_other_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation_using_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_eq_order"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_default_default_factory_error"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_metadata_custom_mapping"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_metadata_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_metadata_mapping"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_BUILTINS_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_object"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_object_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_named_self"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_no_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_order"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_recursive_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_field_with_special_single_underscore_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_function_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_generic_dataclasses"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_generic_dynamic"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_generic_extending"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_hash_field_rules"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_containers"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_object_containers"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_copy_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_defaultdict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_derived"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_key"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_nested"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_asdict_raises_on_classes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_containers"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_object_containers"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_copy_values"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_defaultdict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_namedtuple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_nested"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_astuple_raises_on_classes"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_fields_exception"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_helper_fields_with_class_instance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_incomplete_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_false_no_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_in_order"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_inheritance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_name_shadowing"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_no_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_preserve_type"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_init_var_with_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_intermediate_non_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_is_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_is_dataclass_genericalias"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_is_dataclass_inheritance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_is_dataclass_when_getattr_always_returns"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_items_in_dicts"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_missing_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_missing_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_missing_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_named_init_params"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_no_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_no_fields_but_member_variable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_no_options"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_no_unhashable_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_not_in_compare"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_not_in_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_not_other_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_not_tuple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_one_field_no_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_overwrite_fields_in_derived_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_overwrite_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_post_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_post_init_classmethod"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_post_init_not_auto_added"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_post_init_staticmethod"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_post_init_super"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_recursive_annotation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_simple_compare"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestCase.test_two_fields_one_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_default_value"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_getting_field_calls_get"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_init_calls_set"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_instance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_no_default_value"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_non_descriptor"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_set_name"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_setting_field_calls_set"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDescriptors.test_setting_uninitialized_descriptor_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field_with_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field_with_default_factory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_no_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default_none"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_three_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_two_fields"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_undefined_name"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_with_no_signature"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestDocString.test_existing_docstring_not_overridden"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestEq.test_no_eq"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestEq.test_overwriting_eq"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestEq.test_recursive_eq"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base_not_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_with_slots"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_without_slots"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_frozen_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_frozen_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_from_normal_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_from_nonfrozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance_regular_mixins"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_multiple_frozen_dataclasses_inheritance"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived_from_empty_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestFrozen.test_overwriting_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_0_field_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_1_field_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_eq_only"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_hash_no_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_hash_rules"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestHash.test_unsafe_hash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInit.test_base_has_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInit.test_inherit_from_protocol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInit.test_no_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInit.test_overwriting_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_contains_forwardref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_forwardref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_init_false"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_not_replaced"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_init_false_forwardref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestInitAnnotate.test_slots_true_init_false"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_as_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_twice"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_defaults"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_deferred_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_field_marked_as_kwonly"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_make_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_match_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_no_classvar_kwarg"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestKeywordArgs.test_post_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_base"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_base_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_cannot_be_pickled"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_class_var"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_custom_decorator"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_decorator_default"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_duplicate_field_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_funny_class_names_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_init_var"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_invalid_type_specification"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_keyword_field_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_module_attr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_no_mutate_namespace"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_get_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_no_typing_import"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_non_identifier_field_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_other_params"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_pickle_support"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_simple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMakeDataclass.test_underscore_field_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMatchArgs.test_bpo_43764"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMatchArgs.test_explicit_match_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMatchArgs.test_make_dataclasses"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMatchArgs.test_match_args"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestMatchArgs.test_match_args_argument"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestOrdering.test_functools_total_ordering"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestOrdering.test_no_order"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestOrdering.test_overwriting_order"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_classvar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_frozen"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_initvar_is_specified"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_initvar_with_default_value"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_invalid_field_name"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_invalid_object"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_no_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_recursive_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection_two"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_misc_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_two_attrs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestRepr.test_no_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestRepr.test_overwriting_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestRepr.test_repr"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_add_slots_when_slots_exists"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_cant_inherit_from_iterator_slots"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_base"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base_with_weakref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_weakref_slot"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_derived_added_field"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_frozen_pickle"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_frozen_slots_pickle_custom_state"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_generated_slots"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_generated_slots_value"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_original_class_is_gced"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_returns_new_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_simple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_no_weakref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_weakref"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_str"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_tuple"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_factory_no_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_no_init"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_with_docs"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_make_dataclass"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_normal_base_weakref_slot"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_no_weakref_slot"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_weakref_slot"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_without_slot"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar_module_level_import"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_initvar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_classvar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_initvar"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestStringAnnotations.test_text_annotations"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_class_cell_from_other_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_new_property"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_old_property"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_empty_class_cell"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_remembered_class"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_deleter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_getter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_setter"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_wrapped"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_zero_argument_super"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestAbstract.test_abc_implementation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestAbstract.test_abc_implementation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestAbstract.test_maintain_abc"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestAbstract.test_maintain_abc", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_0_field_compare"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_0_field_compare", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_1_field_compare"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_1_field_compare", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_alternate_classmethod_constructor"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_alternate_classmethod_constructor", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_marker"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_marker", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_var"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_var", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_var_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_var_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_var_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_var_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_var_no_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_var_no_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_class_var_with_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_class_var_with_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_classvar_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_classvar_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_clean_traceback_from_fields_exception"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_clean_traceback_from_fields_exception", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_compare_subclasses"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_compare_subclasses", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dataclass_params_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dataclass_params_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dataclass_params_signature"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dataclass_params_signature", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dataclasses_pickleable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dataclasses_pickleable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dataclasses_qualnames"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dataclasses_qualnames", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_default_factory_derived"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_default_factory_derived", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_default_factory_not_called_if_value_given"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_default_factory_not_called_if_value_given", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_default_factory_with_no_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_default_factory_with_no_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_deliberately_mutable_defaults"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_deliberately_mutable_defaults", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_disallowed_mutable_defaults"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_disallowed_mutable_defaults", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dont_include_other_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dont_include_other_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation_using_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_dynamic_class_creation_using_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_eq_order"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_eq_order", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_default_default_factory_error"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_default_default_factory_error", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_metadata_custom_mapping"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_metadata_custom_mapping", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_metadata_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_metadata_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_metadata_mapping"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_metadata_mapping", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_BUILTINS_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_BUILTINS_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_like_builtin_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_object"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_object", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_object_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_object_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_named_self"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_named_self", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_no_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_no_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_order"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_order", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_recursive_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_recursive_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_field_with_special_single_underscore_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_field_with_special_single_underscore_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_function_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_function_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_generic_dataclasses"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_generic_dataclasses", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_generic_dynamic"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_generic_dynamic", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_generic_extending"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_generic_extending", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_hash_field_rules"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_hash_field_rules", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_containers"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_containers", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_object_containers"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_builtin_object_containers", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_copy_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_copy_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_defaultdict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_defaultdict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_derived"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_derived", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_key"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_namedtuple_key", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_nested"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_nested", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_asdict_raises_on_classes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_asdict_raises_on_classes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_containers"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_containers", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_object_containers"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_builtin_object_containers", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_copy_values"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_copy_values", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_defaultdict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_defaultdict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_namedtuple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_namedtuple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_nested"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_nested", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_astuple_raises_on_classes"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_astuple_raises_on_classes", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_fields_exception"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_fields_exception", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_helper_fields_with_class_instance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_helper_fields_with_class_instance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_incomplete_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_incomplete_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_false_no_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_false_no_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_in_order"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_in_order", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_inheritance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_inheritance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_name_shadowing"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_name_shadowing", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_no_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_no_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_preserve_type"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_preserve_type", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_init_var_with_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_init_var_with_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_intermediate_non_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_intermediate_non_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_is_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_is_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_is_dataclass_genericalias"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_is_dataclass_genericalias", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_is_dataclass_inheritance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_is_dataclass_inheritance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_is_dataclass_when_getattr_always_returns"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_is_dataclass_when_getattr_always_returns", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_items_in_dicts"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_items_in_dicts", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_missing_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_missing_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_missing_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_missing_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_missing_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_missing_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_named_init_params"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_named_init_params", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_no_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_no_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_no_fields_but_member_variable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_no_fields_but_member_variable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_no_options"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_no_options", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_no_unhashable_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_no_unhashable_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_not_in_compare"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_not_in_compare", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_not_in_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_not_in_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_not_other_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_not_other_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_not_tuple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_not_tuple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_one_field_no_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_one_field_no_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_overwrite_fields_in_derived_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_overwrite_fields_in_derived_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_overwrite_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_overwrite_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_post_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_post_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_post_init_classmethod"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_post_init_classmethod", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_post_init_not_auto_added"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_post_init_not_auto_added", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_post_init_staticmethod"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_post_init_staticmethod", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_post_init_super"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_post_init_super", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_recursive_annotation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_recursive_annotation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_simple_compare"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_simple_compare", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestCase.test_two_fields_one_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestCase.test_two_fields_one_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_default_value"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_default_value", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_getting_field_calls_get"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_getting_field_calls_get", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_init_calls_set"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_init_calls_set", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_instance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_lookup_on_instance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_no_default_value"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_no_default_value", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_non_descriptor"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_non_descriptor", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_set_name"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_set_name", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_setting_field_calls_set"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_setting_field_calls_set", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDescriptors.test_setting_uninitialized_descriptor_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDescriptors.test_setting_uninitialized_descriptor_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field_with_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_deque_field_with_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field_with_default_factory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_list_field_with_default_factory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_no_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_no_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default_none"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_one_field_with_default_none", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_three_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_three_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_two_fields"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_two_fields", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_undefined_name"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_undefined_name", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_with_no_signature"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_with_no_signature", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_docstring_with_unsolvable_forward_ref_in_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestDocString.test_existing_docstring_not_overridden"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestDocString.test_existing_docstring_not_overridden", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestEq.test_no_eq"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestEq.test_no_eq", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestEq.test_overwriting_eq"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestEq.test_overwriting_eq", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestEq.test_recursive_eq"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestEq.test_recursive_eq", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base_not_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFieldNoAnnotation.test_field_without_annotation_but_annotation_in_base_not_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_with_slots"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_with_slots", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_without_slots"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_frozen_deepcopy_without_slots", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_frozen_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_frozen_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_frozen_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_frozen_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_from_normal_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_from_normal_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_from_nonfrozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_from_nonfrozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance_regular_mixins"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_frozen_mutliple_inheritance_regular_mixins", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_empty_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_inherit_nonfrozen_from_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_multiple_frozen_dataclasses_inheritance"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_multiple_frozen_dataclasses_inheritance", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived_from_empty_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_non_frozen_normal_derived_from_empty_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestFrozen.test_overwriting_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestFrozen.test_overwriting_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_0_field_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_0_field_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_1_field_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_1_field_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_eq_only"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_eq_only", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_hash_no_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_hash_no_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_hash_rules"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_hash_rules", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestHash.test_unsafe_hash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestHash.test_unsafe_hash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInit.test_base_has_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInit.test_base_has_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInit.test_inherit_from_protocol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInit.test_inherit_from_protocol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInit.test_no_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInit.test_no_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInit.test_overwriting_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInit.test_overwriting_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_contains_forwardref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_contains_forwardref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_forwardref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_forwardref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_init_false"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_init_false", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_not_replaced"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_annotate_function_not_replaced", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_init_false_forwardref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_init_false_forwardref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestInitAnnotate.test_slots_true_init_false"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestInitAnnotate.test_slots_true_init_false", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_as_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_as_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_twice"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_KW_ONLY_twice", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_defaults"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_defaults", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_deferred_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_deferred_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_field_marked_as_kwonly"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_field_marked_as_kwonly", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_make_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_make_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_match_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_match_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_no_classvar_kwarg"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_no_classvar_kwarg", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestKeywordArgs.test_post_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestKeywordArgs.test_post_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_base"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_base", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_base_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_base_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_cannot_be_pickled"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_cannot_be_pickled", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_class_var"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_class_var", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_custom_decorator"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_custom_decorator", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_decorator_default"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_dataclass_decorator_default", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_duplicate_field_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_duplicate_field_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_funny_class_names_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_funny_class_names_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_init_var"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_init_var", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_invalid_type_specification"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_invalid_type_specification", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_keyword_field_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_keyword_field_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_module_attr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_module_attr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_no_mutate_namespace"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_no_mutate_namespace", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_get_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_get_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_no_typing_import"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_no_types_no_typing_import", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_non_identifier_field_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_non_identifier_field_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_other_params"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_other_params", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_pickle_support"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_pickle_support", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_simple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_simple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMakeDataclass.test_underscore_field_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMakeDataclass.test_underscore_field_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMatchArgs.test_bpo_43764"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMatchArgs.test_bpo_43764", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMatchArgs.test_explicit_match_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMatchArgs.test_explicit_match_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMatchArgs.test_make_dataclasses"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMatchArgs.test_make_dataclasses", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMatchArgs.test_match_args"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMatchArgs.test_match_args", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestMatchArgs.test_match_args_argument"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestMatchArgs.test_match_args_argument", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestOrdering.test_functools_total_ordering"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestOrdering.test_functools_total_ordering", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestOrdering.test_no_order"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestOrdering.test_no_order", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestOrdering.test_overwriting_order"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestOrdering.test_overwriting_order", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_classvar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_classvar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_frozen"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_frozen", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_initvar_is_specified"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_initvar_is_specified", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_initvar_with_default_value"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_initvar_with_default_value", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_invalid_field_name"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_invalid_field_name", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_invalid_object"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_invalid_object", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_no_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_no_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_recursive_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_recursive_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection_two"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_indirection_two", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_misc_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_misc_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_two_attrs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestReplace.test_recursive_repr_two_attrs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestRepr.test_no_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestRepr.test_no_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestRepr.test_overwriting_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestRepr.test_overwriting_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestRepr.test_repr"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestRepr.test_repr", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_add_slots_when_slots_exists"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_add_slots_when_slots_exists", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_cant_inherit_from_iterator_slots"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_cant_inherit_from_iterator_slots", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_base"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_base", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base_with_weakref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_generic_from_slotted_base_with_weakref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_weakref_slot"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_derived_weakref_slot", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_dataclass_slot_dict_ctype", "outcome": "skip", "details": ["No module named '_testcapi'"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_derived_added_field"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_derived_added_field", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_frozen_pickle"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_frozen_pickle", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_frozen_slots_pickle_custom_state"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_frozen_slots_pickle_custom_state", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_generated_slots"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_generated_slots", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_generated_slots_value"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_generated_slots_value", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_original_class_is_gced"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_original_class_is_gced", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_returns_new_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_returns_new_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_simple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_simple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_no_weakref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_no_weakref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_weakref"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_weakref", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_str"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_str", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_tuple"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_weakref_base_tuple", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_factory_no_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_factory_no_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_no_init"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_with_default_no_init", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_with_docs"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_with_docs", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_slots_with_wrong_init_subclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_make_dataclass"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_make_dataclass", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_normal_base_weakref_slot"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_normal_base_weakref_slot", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_no_weakref_slot"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_no_weakref_slot", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_weakref_slot"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_subclass_weakref_slot", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_without_slot"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestSlots.test_weakref_slot_without_slot", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar_module_level_import"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_classvar_module_level_import", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_initvar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_initvar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_classvar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_classvar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_initvar"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_isnt_initvar", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestStringAnnotations.test_text_annotations"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestStringAnnotations.test_text_annotations", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_class_cell_from_other_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_class_cell_from_other_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_new_property"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_new_property", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_old_property"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_dunder_class_with_old_property", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_empty_class_cell"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_empty_class_cell", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_remembered_class"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_remembered_class", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_deleter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_deleter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_getter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_getter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_setter"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_slots_dunder_class_property_setter", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_wrapped"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_wrapped", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_zero_argument_super"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_dataclasses.TestZeroArgumentSuperWithSlots.test_zero_argument_super", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 276, "successful": true}

@@ -1,0 +1,8 @@
+canonical schema and exact frozen ID/occurrence/source inventory: 276/276
+stock {'pass': 275, 'skip': 1}
+O0 {'pass': 273, 'error': 1, 'skip': 2}
+O3 {'pass': 273, 'error': 1, 'skip': 2}
+normalized snapshot validator: PASS; staged pairs 273
+O0 execs 2; source open probes 2 ENOENT; source metadata probes 13 ENOENT; outcome stream unchanged
+O3 execs 2; source open probes 2 ENOENT; source metadata probes 13 ENOENT; outcome stream unchanged
+root table regeneration pending; staged flags are not a strict published score

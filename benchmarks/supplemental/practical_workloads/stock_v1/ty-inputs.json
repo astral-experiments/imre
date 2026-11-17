@@ -1,0 +1,20 @@
+[
+  {
+    "repo": "https://github.com/astral-sh/ty",
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "path": "README.md",
+    "git_blob": "ac9a0b09776b84e515a40e91fab9fc69edf6afca",
+    "sha256": "8da93511cec1298648c345618960559c7dec67504b9132c1b9aee9a841e9fe08",
+    "bytes": 5610,
+    "vendored": "fixtures/ty/README.md"
+  },
+  {
+    "repo": "https://github.com/astral-sh/ty",
+    "commit": "d4e4bf90906c7677049bc3a29d1735de7d22052d",
+    "path": "dist-workspace.toml",
+    "git_blob": "6837294b6c81d781a9d818eab03a78c8a51b6430",
+    "sha256": "4365f9472da1296912e1e9794629da0dae15635ecf4c05fcf3d3d5b58fece0f5",
+    "bytes": 3747,
+    "vendored": "fixtures/ty/dist-workspace.toml"
+  }
+]

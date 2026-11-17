@@ -1,0 +1,85 @@
+{
+  "family": "dataclasses",
+  "build": {
+    "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+    "tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+    "clean": true,
+    "cli_sha256": "83f8e7ae5502473743fc3e0ab040f8853e6589d6b7d6468e4f2bf15c73516fa5",
+    "runtime_sha256": "306b337aacb8a73fcbf67858ac66e17a96073f8c9e5270c4cc1eafaf5a88c766",
+    "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target"
+    ],
+    "environment": {
+      "CARGO_HOME": "/workspace/.toolchains/cargo",
+      "RUSTUP_HOME": "/workspace/.toolchains/rustup",
+      "PATH_prefix": "/workspace/.toolchains/cargo/bin"
+    },
+    "result": "    Finished `release` profile [optimized + debuginfo] target(s) in 7m 08s",
+    "source_depfiles": {
+      "compiler": {
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/raw-control/compiler.d",
+        "sha256": "bf35073c57c0a8fe3e64239fe4b9582a527809369decaf053bcb9cdb14f002e4"
+      },
+      "runtime": {
+        "path": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/raw-control/runtime.d",
+        "sha256": "925659f486dc80ae3f6ea6665c78640cf88f51515685fdc1af84559cdb61ee66"
+      }
+    }
+  },
+  "command": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/launcher.py",
+    "--module-root",
+    "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses",
+    "--extension-path",
+    "/workspace/scratch/dataclasses-857-fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--include-module",
+    "test.test_dataclasses",
+    "--include-module",
+    "test.test_dataclasses.dataclass_module_1",
+    "--include-module",
+    "test.test_dataclasses.dataclass_module_1_str",
+    "--include-module",
+    "test.test_dataclasses.dataclass_module_2",
+    "--include-module",
+    "test.test_dataclasses.dataclass_module_2_str",
+    "--include-module",
+    "test.test_dataclasses.dataclass_textanno",
+    "-o",
+    "/workspace/scratch/dataclasses-857-images/gate.exe"
+  ],
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/dataclasses-857-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+    "IMREFLAGS": "--opt-level 0",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback"
+  },
+  "launcher_sha256": "2c930838892e1e96e956a79f6284272b6a8a8bf8661e6c64064fd3295a076677",
+  "first_party_module": "/workspace/imre-dataclasses-data/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/dataclasses/gate_control_dataclasses.py",
+  "first_party_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "supervisor_exit": 0,
+  "image_exists": false
+}

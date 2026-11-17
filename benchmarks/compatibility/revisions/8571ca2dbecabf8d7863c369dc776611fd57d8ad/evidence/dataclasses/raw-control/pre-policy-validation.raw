@@ -1,0 +1,7 @@
+stock {'pass': 275, 'skip': 1}
+O0 {'pass': 273, 'error': 1, 'skip': 2}
+O3 {'pass': 273, 'error': 1, 'skip': 2}
+strict adapter gate rejection: raw exec attempt failed, was truncated, or used execveat
+O0 execs 2 withdrawn original open attempts at lines 162,165 all ENOENT; result stream identical
+O3 execs 2 withdrawn original open attempts at lines 162,165 all ENOENT; result stream identical
+rows 276; observed pass intersections 273; credited pairs 0; no omissions; candidate digest binding valid

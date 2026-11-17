@@ -1,0 +1,13 @@
+{
+  "launcher_sha256": "7ab1bc2219ad6e62ef5daedda3eca9f80b662d9abc58ea46d669389c88e746d8",
+  "image_sha256": "5b82cc558e7d506e2e037fdaa865f1b61d7612da519bef7936f254b08d88648e",
+  "exit_code": 1,
+  "collection": 276,
+  "outcomes": {
+    "pass": 273,
+    "error": 1,
+    "skip": 2
+  },
+  "raw_stderr_sha256": "00cfd96ef0f42dee4a8be25d281693e9f91967d6d974617f417edc512912c564",
+  "reason_for_final_launcher_exit_convention": "Preserve all original events and unsuccessful summary while returning zero for the common supervisor."
+}

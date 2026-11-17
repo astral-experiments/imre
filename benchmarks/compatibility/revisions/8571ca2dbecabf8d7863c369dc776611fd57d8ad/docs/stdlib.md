@@ -3,7 +3,7 @@
 
 Revision `8571ca2dbecabf8d7863c369dc776611fd57d8ad` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Frozen 45-family cohort: **721 pinned receipts** of **16,225 raw upstream originals**, **700 observed stock/O0/O3 pass intersections**, **700 verified credited pairs**; **15,504 originals have no validated receipt**.
+Frozen 45-family cohort: **2,890 pinned receipts** of **16,225 raw upstream originals**, **1,018 observed stock/O0/O3 pass intersections**, **1,018 verified credited pairs**; **13,335 originals have no validated receipt**.
 
 Supplemental pilots, outside the frozen cohort: **0 receipts** of **3 originals**, **0 observed intersections**, **0 verified credited pairs**.
 
@@ -13,14 +13,14 @@ Scripts: **0 of 84 original commands have receipts**, **0 observed intersections
 
 | Family | Raw originals | Stock | O0 | O3 | Observed stock/O0/O3 passes | Verified credited pairs | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | ---: | --- | ---: |
-| `argparse` | 1,893 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,887 |
+| `argparse` | 1,893 | 1,893 pass | 45 pass, 1,848 not run | 45 pass, 1,848 not run | 45 | 45 verified | 1,887 |
 | `base64` | 41 | 41 pass | 35 pass, 1 skip, 5 not run | 35 pass, 1 skip, 5 not run | 35 | 35 verified | 40 |
 | `collections` | 659 | not run | not run | not run | unknown (not run) | unknown (not run) | 639 |
 | `configparser` | 344 | 339 pass, 5 skip | 339 pass, 5 skip | 339 pass, 5 skip | 339 | 339 verified | 339 |
 | `contextlib` | 149 | not run | not run | not run | unknown (not run) | unknown (not run) | 149 |
 | `copy` | 81 | not run | not run | not run | unknown (not run) | unknown (not run) | 81 |
 | `csv` | 128 | 124 pass, 4 skip | 122 pass, 6 skip | 122 pass, 6 skip | 122 | 122 verified | 122 |
-| `dataclasses` | 276 | not run | not run | not run | unknown (not run) | unknown (not run) | 273 |
+| `dataclasses` | 276 | 275 pass, 1 skip | 273 pass, 1 error, 2 skip | 273 pass, 1 error, 2 skip | 273 | 273 verified | 273 |
 | `datetime` | 1,098 | not run | not run | not run | unknown (not run) | unknown (not run) | 1,029 |
 | `fnmatch` | 24 | 24 pass | 24 pass | 24 pass | 24 | 24 verified | 24 |
 | `fractions` | 50 | not run | not run | not run | unknown (not run) | unknown (not run) | 50 |

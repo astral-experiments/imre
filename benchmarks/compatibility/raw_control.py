@@ -7,14 +7,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import posixpath
 import re
 from functools import lru_cache
 from pathlib import Path
 
 from collect_unittest_results import parse
 
-EXEC = re.compile(r'^(\d+) execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
-OPEN = re.compile(r'^\d+ (?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
+EXEC = re.compile(r'^(\d+)\s+execve\(("(?:[^"\\]|\\.)*"), (\[.*\]), .*\) = 0$')
+OPEN = re.compile(r'^\d+\s+(?:open|openat|openat2|creat)\(.*?("(?:[^"\\]|\\.)*")')
 SHA = re.compile(r'^([0-9a-f]{64})  (.+)$')
 
 
@@ -49,12 +50,12 @@ def find(lines, pattern, start=0):
 
 def stat(lines, pid, path, absent, start=0):
     tail = r'= -1 ENOENT\b' if absent else r'= 0$'
-    return find(lines, rf'^{pid} newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
+    return find(lines, rf'^{pid}\s+newfstatat\(AT_FDCWD, {re.escape(json.dumps(path))}, .*{tail}', start)
 
 
 def exits(lines, parent, child, code, start):
-    end = find(lines, rf'^{child} exit_group\({code}\)', start)
-    waited = find(lines, rf'^{parent} (?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
+    end = find(lines, rf'^{child}\s+exit_group\({code}\)', start)
+    waited = find(lines, rf'^{parent}\s+(?:<\.\.\. wait4 resumed>|wait4\({child},).*WEXITSTATUS\(s\) == {code}.*= {child}$', end + 1)
     return waited
 
 
@@ -71,49 +72,55 @@ def trace_gate(text, command, probe, poison_path, diagnostic, require):
             m = OPEN.match(line)
             if m and line.startswith(target[1] + ' ') and json.loads(m[1]) == path and re.search(r'= [0-9]+$', line): found = True
         require(found, 'gate compiler did not open the actual launcher and imported poison')
-    m = re.search(rf'^{target[1]} exit_group\(([1-9][0-9]*)\)', text, re.M)
+    m = re.search(rf'^{target[1]}\s+exit_group\(([1-9][0-9]*)\)', text, re.M)
     require(m is not None, 'gate compiler did not exit nonzero')
     waited = exits(lines, first[1], target[1], int(m[1]), target[0])
     after = stat(lines, first[1], out, True, waited + 1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', after + 1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', after + 1)
     require(poison_path in diagnostic and re.search(r'expected\s+int,\s*got\s+bool', diagnostic), 'missing imported int/bool diagnostic')
 
 
 def trace_withdraw(api, text, image, probe, tree, stash, leaf, cwd, require):
+    """Allow only ENOENT withdrawn-path probes; never allow Python probes or child execs."""
+    from posixpath import normpath
     lines = text.splitlines()
     first, target = execs(lines, require)
     require(first[2:] == (probe, [probe, 'withdraw', tree, stash, leaf, image])
         and target[2:] == (image, [image]), 'withdrawal did not run the saved image directly')
     pre = stat(lines, first[1], leaf, False, first[0]+1)
     missing_stash = stat(lines, first[1], stash, True, pre+1)
-    mv = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
+    mv = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(tree))}, {re.escape(json.dumps(stash))}\) = 0$', missing_stash+1)
     a = stat(lines, first[1], tree, True, mv+1)
     b = stat(lines, first[1], leaf, True, a+1)
     require(b < target[0], 'test source tree was not absent before native exec')
     waited = exits(lines, first[1], target[1], 0, target[0])
     a = stat(lines, first[1], tree, True, waited+1)
     b = stat(lines, first[1], leaf, True, a+1)
-    restored = find(lines, rf'^{first[1]} rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
+    restored = find(lines, rf'^{first[1]}\s+rename\({re.escape(json.dumps(stash))}, {re.escape(json.dumps(tree))}\) = 0$', b+1)
     exists = stat(lines, first[1], leaf, False, restored+1)
-    find(lines, rf'^{first[1]} exit_group\(0\)', exists+1)
+    find(lines, rf'^{first[1]}\s+exit_group\(0\)', exists+1)
+    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
     stem = Path(leaf).stem.lower()
     for line in lines[target[0]:waited+1]:
         # A successful io_uring setup would permit unobserved asynchronous opens.
         require(not re.search(r'\bio_uring_setup\(.*= [0-9]+$', line), 'native io_uring may hide file access')
-        m = OPEN.match(line)
+        m = OPEN.match(line) or re.match(r'^\d+\s+newfstatat\(.*?("(?:[^"\\]|\\.)*")', line)
         if m:
-            path = json.loads(m[1]).lower()
-            name = Path(path).name
-            forbidden = ('libpython' in path
-                or re.fullmatch(r'python(?:[0-9.]+)?', name)
-                or name == stem+'.py'
+            path = json.loads(m[1])
+            folded = path.lower()
+            name = Path(path).name.lower()
+            python_probe = 'libpython' in folded or any(part.startswith('python') for part in Path(folded).parts)
+            require(not python_probe, 'native probed CPython or libpython')
+            resolved = Path(normpath(path if Path(path).is_absolute() else str(Path(cwd)/path)))
+            withdrawn = (name == stem+'.py'
                 or name in {stem+'.pyc', stem+'.pyo'}
-                or (name.startswith(stem+'.')
-                and name.endswith(('.pyc', '.pyo')))
-                or path == stash.lower()
-                or path.startswith(stash.lower()+'/'))
-            require(not forbidden, 'native opened CPython, libpython, withdrawn source or matching bytecode')
-    require(isinstance(cwd, str) and Path(cwd).is_absolute(), 'native cwd missing')
+                or (name.startswith(stem+'.') and name.endswith(('.pyc', '.pyo')))
+                or resolved.is_relative_to(Path(tree))
+                or resolved.is_relative_to(Path(stash))
+                or Path(stash).name in Path(path).parts)
+            # Only an explicit ENOENT proves this withdrawn path was absent.
+            require(not withdrawn or re.search(r'\) = -1 ENOENT(?: \([^)]*\))?$', line),
+                    'native opened CPython, libpython, withdrawn source or matching bytecode')
     for path in api.successful_open_paths('\n'.join(lines[target[0]:waited+1]), cwd):
         name = path.name.lower()
         cached = path.parent.name == '__pycache__' and name.startswith(stem+'.') and path.suffix in {'.pyc','.pyo'}
@@ -132,6 +139,25 @@ def event_index(path, require):
         require(key not in index and row['outcome'] in {'pass','fail','error','skip'}, 'raw unittest original missing a completed outcome')
         index[key] = row
     return index
+
+
+def comparable_run(run, extension, compiler, require):
+    """Compare the finite test configuration while allowing tier launch mechanics."""
+    metas = run['runs']
+    def cwd(meta):
+        value = meta.get('cwd')
+        require(isinstance(value, str) and value.startswith('/'), 'finite cohort cwd missing')
+        return posixpath.normpath(value)
+    def common(meta):
+        env = meta.get('environment')
+        require(isinstance(env, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in env.items()), 'finite cohort environment missing')
+        return {k:v for k,v in env.items() if k not in {'PYTHONPATH','IMRE_PYTHON','IMREFLAGS'}}
+    stock = metas['stock']; settings = common(stock)
+    require('IMRE_PYTHON' not in stock['environment'] and 'IMREFLAGS' not in stock['environment'] and settings.get('PYTHONDONTWRITEBYTECODE') == '1', 'stock finite configuration contains native flags or permits bytecode')
+    for tier, opt in (('O0','0'),('O3','3')):
+        meta = metas[tier]; env = meta.get('environment', {})
+        require(cwd(meta) == cwd(stock) and common(meta) == settings and meta.get('timeout_seconds') == stock.get('timeout_seconds') and isinstance(meta.get('timeout_seconds'), (int,float)) and meta['timeout_seconds'] > 0, tier+' finite cohort common configuration differs from stock')
+        require(posixpath.normpath(env.get('PYTHONPATH','')) == posixpath.normpath(extension) and env.get('IMRE_PYTHON') == compiler and env.get('IMREFLAGS') == '--opt-level '+opt, tier+' finite cohort tier configuration differs')
 
 
 @lru_cache(maxsize=None)
@@ -153,6 +179,9 @@ def load_binding(api, family, locator, digest, activation_digest):
     rows = [json.loads(line) for line in receipt.read_text().splitlines()]
     keys = [(row['id'], row['occurrence']) for row in rows]
     require(len(keys) == len(set(keys)) and set(keys) == set(mapping) and set(mapping.values()) == set(cohorts), 'launcher cohort mapping must cover every receipt original exactly once')
+    for row in rows:
+        kind = cohorts[mapping[(row['id'], row['occurrence'])]].get('kind', 'finite')
+        require(kind in {'finite','stock-only'} and (kind != 'stock-only' or row.get('paired') is False), 'credited original cannot use a stock-only cohort')
     return binding, mapping
 
 
@@ -162,6 +191,7 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
     entry = api.activation_entry(family)
     manifest, mapping = load_binding(api, family, locator, digest, activation_digest)
     binding = manifest['cohorts'][cohort]
+    kind = binding.get('kind', 'finite')
     artifacts = binding.get('artifacts')
     require(isinstance(artifacts, dict), 'missing raw-control artifacts')
     def file(role):
@@ -219,7 +249,14 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
     stock_launcher = data('stock_launcher')
     expected_stock_sha = stock_meta.get('fresh_stock_launcher_sha256',run['launcher_sha256'])
     require(sha(stock_launcher)==expected_stock_sha and f'import {module} as ' in stock_launcher.decode(), 'stock launcher archive differs')
+    if kind == 'finite':
+        require(stock_launcher == positive and expected_stock_sha == run['launcher_sha256'], 'credited finite cohort stock launcher bytes differ from native')
+    if 'stock_capture' in artifacts:
+        capture = obj('stock_capture')
+        require(all(capture.get(k) == stock_meta.get(k) for k in ('argv','cwd','environment','timeout_seconds','exit_code','timed_out','stderr_sha256','stdout_sha256','collection','inventory_complete','summary')) and capture.get('launcher_sha256') == sha(stock_launcher) and capture.get('python_sha256') == run.get('stock_python_sha256') and capture.get('version') == run.get('stock_version') and capture.get('source_commit') == source['commit'] and capture.get('source_archive_sha256') == source['sha256'] and sha(data('stock_stdout')) == stock_meta.get('stdout_sha256'), 'fresh stock capture metadata or raw stdout differs')
     opt = api.option(command,'--extension-path')
+    if kind == 'finite':
+        comparable_run(run, opt, compiler, require)
     tree = str(Path(opt)/'test')
     leaf = str(Path(opt)/source['path'].removeprefix('Lib/'))
     stash = tree+'.raw-control-stash'
@@ -228,10 +265,11 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
     stock_leaf = str(Path(stock_lib)/source['path'].removeprefix('Lib/'))
     require(source['commit'] in stock_lib, 'stock source invocation is not pinned to the immutable commit')
     sums = sha_lines(text('identities'))
+    stock_sums = sha_lines(text('stock_identity')) if 'stock_identity' in artifacts else sums
     require(isinstance(probe,str)
         and sums.get(compiler)==build.get('cli_sha256')
         and sums.get(runtime)==build.get('runtime_sha256')
-        and sums.get(stock_cmd[0])==run.get('stock_python_sha256')
+        and stock_sums.get(stock_cmd[0])==run.get('stock_python_sha256')
         and sums.get(leaf)==sums.get(stock_leaf)==source['sha256']
         and bool(api.HEX64.fullmatch(sums.get(probe,'')))
         and sha_lines(text('restored'))=={leaf:source['sha256']}, 'raw compiler/runtime, CPython, source, probe or restoration identity missing')
@@ -282,8 +320,13 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
             and b'Dynamic section' in elfraw
             and b'libpython' not in elfraw.lower(), tier+' raw ELF links libpython or is missing')
     assigned = {key for key, name in mapping.items() if name == cohort}
-    require(assigned <= set(inventories['stock']) <= set(mapping), 'launcher cohort stock inventory does not cover its assigned originals')
-    require(all(set(inventories[t]) <= set(inventories['stock']) for t in ('O0','O3')), 'native inventory contains non-stock originals')
+    stock_keys = list(inventories['stock']); native_keys = list(inventories['O0'])
+    require(assigned and assigned <= set(stock_keys) <= set(mapping), 'launcher cohort stock inventory does not cover its assigned originals')
+    require(native_keys == list(inventories['O3']), 'native cohort inventories differ in ID, occurrence or order')
+    if kind == 'finite':
+        require(stock_keys == native_keys and assigned == set(native_keys), 'finite cohort assigned and ordered stock/native inventories differ')
+    else:
+        require(assigned.isdisjoint(native_keys) and set(native_keys) <= set(stock_keys), 'stock-only cohort contains a native original')
     return run, inventories, paths
 
 

@@ -27,6 +27,14 @@ fn site_path_files(directory: &Path) -> impl Iterator<Item = PathBuf> {
         .map(|entry| entry.path())
 }
 
+fn declarative_site_path(line: &str) -> Option<&str> {
+    if line.starts_with('#') || line.starts_with("import ") || line.starts_with("import\t") {
+        return None;
+    }
+    let path = line.trim_end_matches(imre_ast::strings::python_whitespace);
+    (!path.is_empty()).then_some(path)
+}
+
 /// Collect possible compiler inputs. Only site.addpackage knows which lines will run.
 fn venv_path_inputs(directory: PathBuf) -> Option<(PathBuf, Vec<PathBuf>)> {
     let mut files: Vec<_> = site_path_files(&directory).collect();
@@ -41,14 +49,9 @@ fn venv_path_inputs(directory: PathBuf) -> Option<(PathBuf, Vec<PathBuf>)> {
         };
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
         for line in text.split(|c: char| imre_ast::strings::is_line_boundary(u32::from(c))) {
-            if line.starts_with('#') || line.starts_with("import ") || line.starts_with("import\t")
-            {
+            let Some(path) = declarative_site_path(line) else {
                 continue;
-            }
-            let path = line.trim_end_matches(imre_ast::strings::python_whitespace);
-            if path.is_empty() {
-                continue;
-            }
+            };
             let root = ruff_db::system::SystemPath::absolute(path, directory.to_str()?)
                 .as_std_path()
                 .to_owned();
@@ -58,6 +61,71 @@ fn venv_path_inputs(directory: PathBuf) -> Option<(PathBuf, Vec<PathBuf>)> {
         }
     }
     Some((directory, roots))
+}
+
+/// Resolve declarative site paths without running Python startup code.
+fn static_site_paths(directory: &Path) -> Result<Vec<PathBuf>, String> {
+    let directory = std::path::absolute(directory).map_err(|e| e.to_string())?;
+    let entries = std::fs::read_dir(&directory).map_err(|e| {
+        format!(
+            "cannot read site-packages directory {}: {e}",
+            directory.display()
+        )
+    })?;
+    let mut files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| !name.starts_with('.') && name.ends_with(".pth"))
+        {
+            files.push(entry.path());
+        }
+    }
+    files.sort_unstable();
+    let mut paths = vec![directory.clone()];
+    for file in files {
+        let text = std::fs::read_to_string(&file)
+            .map_err(|e| format!("cannot read site path file {}: {e}", file.display()))?;
+        let text = text
+            .strip_prefix('\u{feff}')
+            .unwrap_or(&text)
+            .replace("\r\n", "\n");
+        for (index, line) in text
+            .split(|c: char| imre_ast::strings::is_line_boundary(u32::from(c)))
+            .enumerate()
+        {
+            if line.starts_with("import ") || line.starts_with("import\t") {
+                return Err(format!(
+                    "{}:{}: executable .pth code is outside the finite AOT import graph\n  help: replace the startup hook with declarative path entries, or pass each package root with --extension-path DIRECTORY",
+                    file.display(),
+                    index + 1
+                ));
+            }
+            let Some(line) = declarative_site_path(line) else {
+                continue;
+            };
+            let directory_text = directory
+                .to_str()
+                .ok_or("site-packages paths must be valid UTF-8")?;
+            let path = ruff_db::system::SystemPath::absolute(line, directory_text)
+                .as_std_path()
+                .to_owned();
+            if path.exists() && !paths.contains(&path) {
+                if !path.is_dir() {
+                    return Err(format!(
+                        "{}:{}: declarative AOT site path is not a directory: {}\n  help: pass an archive separately with --extension-path PATH",
+                        file.display(),
+                        index + 1,
+                        path.display()
+                    ));
+                }
+                paths.push(path);
+            }
+        }
+    }
+    Ok(paths)
 }
 
 #[derive(Default)]
@@ -286,6 +354,7 @@ impl BuildOptions {
             if command == "check"
                 && flag != "--module-root"
                 && flag != "--extension-path"
+                && flag != "--site-packages"
                 && flag != "--include-module"
                 && flag != "--reachable-only"
                 && flag != "--entry-profile"
@@ -310,12 +379,14 @@ impl BuildOptions {
                 Some("--module-root") => self.module_root = Some(value()?.into()),
                 Some("--extension-path") => {
                     let path: PathBuf = value()?.into();
-                    if imre_compiler::is_zip_path(&path) {
-                        self.compile
-                            .python_archive_indices
-                            .push(self.compile.extension_paths.len());
+                    self.add_extension_path(path);
+                }
+                Some("--site-packages") => {
+                    let directory: PathBuf = value()?.into();
+                    for path in static_site_paths(&directory)? {
+                        self.compile.application_roots.push(path.clone());
+                        self.add_extension_path(path);
                     }
-                    self.compile.extension_paths.push(path);
                 }
                 Some("--include-module") => {
                     let name = value()?
@@ -363,6 +434,15 @@ impl BuildOptions {
             }
         }
         Ok(())
+    }
+
+    fn add_extension_path(&mut self, path: PathBuf) {
+        if imre_compiler::is_zip_path(&path) {
+            self.compile
+                .python_archive_indices
+                .push(self.compile.extension_paths.len());
+        }
+        self.compile.extension_paths.push(path);
     }
 }
 
@@ -430,5 +510,146 @@ mod tests {
         options.read(command, &mut args(), true).unwrap();
         assert_eq!(options.source_path, Some(PathBuf::from("main.py")));
         assert!(options.verbosity == Verbosity::Verbose);
+    }
+
+    #[test]
+    fn site_packages_resolves_sorted_declarative_paths_and_rejects_code() {
+        let temp = tempfile::tempdir().unwrap();
+        let site = temp.path().join("site");
+        let first = temp.path().join("first");
+        let second = temp.path().join("second");
+        for dir in [&site, &first, &second] {
+            std::fs::create_dir(dir).unwrap();
+        }
+        std::fs::write(site.join("b.pth"), "../second\n../first\nmissing\n").unwrap();
+        std::fs::write(site.join("a.pth"), "\u{feff}# comment\r\n../first\r\n").unwrap();
+        assert_eq!(
+            static_site_paths(&site).unwrap(),
+            vec![site.clone(), first, second]
+        );
+        let marker = temp.path().join("executed");
+        std::fs::write(
+            site.join("a.pth"),
+            format!(
+                "# comment\r\nimport pathlib; pathlib.Path({:?}).touch()\r\n",
+                marker
+            ),
+        )
+        .unwrap();
+        let error = static_site_paths(&site).unwrap_err();
+        assert!(error.contains("a.pth:2: executable .pth code"));
+        assert!(error.contains("--extension-path DIRECTORY"));
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn extensionless_console_script_checks_imported_contracts() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        let site = root.path().join("site");
+        let packages = root.path().join("packages");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::create_dir(&site).unwrap();
+        std::fs::create_dir(&packages).unwrap();
+        std::fs::write(site.join("editable.pth"), "../packages\n").unwrap();
+        let entry = bin.join("greeting");
+        let dependency = packages.join("greeting.py");
+        std::fs::write(
+            &entry,
+            "#!/usr/bin/env python3\nimport sys\nfrom greeting import main\nif __name__ == '__main__':\n    sys.exit(main())\n",
+        )
+        .unwrap();
+        std::fs::write(&dependency, "def main():\n    print('hello')\n").unwrap();
+        let mut options = BuildOptions::default();
+        let mut args = [
+            entry.as_os_str().to_owned(),
+            "--site-packages".into(),
+            site.into_os_string(),
+        ]
+        .into_iter();
+        options.read(OsStr::new("check"), &mut args, true).unwrap();
+        imre_compiler::check_file_with_options(&entry, None, &options.compile).unwrap();
+        std::fs::write(
+            &dependency,
+            "status: int = True\ndef main():\n    print('hello')\n",
+        )
+        .unwrap();
+        let error =
+            imre_compiler::check_file_with_options(&entry, None, &options.compile).unwrap_err();
+        assert!(error.contains("greeting.py:1:15"), "{error}");
+        assert!(error.contains("expected int, got bool"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_site_source_ownership_survives_alias_ordering() {
+        use std::os::unix::fs::symlink;
+        let temp = tempfile::tempdir_in(".").unwrap();
+        let site = temp.path().join("site");
+        let alias = temp.path().join("alias");
+        let third = temp.path().join("third");
+        for root in [&site, &third] {
+            std::fs::create_dir_all(root.join("sample")).unwrap();
+        }
+        symlink("site", &alias).unwrap();
+        let poison = "status: int = True\ndef main():\n    print(status)\n";
+        for root in [&site, &third] {
+            std::fs::write(root.join("sample/__init__.py"), poison).unwrap();
+        }
+        let entry = temp.path().join("launch");
+        std::fs::write(&entry, "#!/usr/bin/env python3\nimport sys\nfrom sample import main\nif __name__ == '__main__':\n    sys.exit(main())\n").unwrap();
+        let physical = site.canonicalize().unwrap();
+        let absolute_alias = std::path::absolute(&alias).unwrap();
+        let check = |flags: Vec<OsString>| {
+            let mut options = BuildOptions::default();
+            let mut args = std::iter::once(entry.as_os_str().to_owned()).chain(flags);
+            options.read(OsStr::new("check"), &mut args, true).unwrap();
+            imre_compiler::check_file_with_options(&entry, None, &options.compile)
+        };
+        for flags in [
+            vec![
+                "--extension-path".into(),
+                absolute_alias.clone().into_os_string(),
+                "--site-packages".into(),
+                physical.clone().into_os_string(),
+            ],
+            vec![
+                "--site-packages".into(),
+                physical.clone().into_os_string(),
+                "--extension-path".into(),
+                absolute_alias.into_os_string(),
+            ],
+            vec![
+                "--extension-path".into(),
+                physical.clone().into_os_string(),
+                "--site-packages".into(),
+                alias.as_os_str().to_owned(),
+            ],
+            vec![
+                "--extension-path".into(),
+                alias.as_os_str().to_owned(),
+                "--site-packages".into(),
+                site.as_os_str().to_owned(),
+            ],
+        ] {
+            let error = check(flags).unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "{}:1:15",
+                    physical.join("sample/__init__.py").display()
+                )),
+                "{error}"
+            );
+            assert!(error.contains("expected int, got bool"), "{error}");
+        }
+        // An earlier, physically different third-party provider is not promoted merely
+        // because a later marked site happens to contain a module with the same name.
+        check(vec![
+            "--extension-path".into(),
+            third.into_os_string(),
+            "--site-packages".into(),
+            physical.into_os_string(),
+        ])
+        .unwrap();
     }
 }
