@@ -1,0 +1,2 @@
+ Compiling /workspace/imre/benchmarks/compatibility/evidence/literal-runner-main/literal_poison.py (-O0)
+/workspace/imre/benchmarks/compatibility/evidence/literal-runner-main/literal_poison.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

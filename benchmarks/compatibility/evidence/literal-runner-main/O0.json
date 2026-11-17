@@ -1,0 +1,301 @@
+{
+  "collection": 41,
+  "inventory_complete": true,
+  "originals": [
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_case",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 44
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_filterfalse",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 46
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_mix_bytes_str",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 48
+    },
+    {
+      "id": "test.test_fnmatch.FilterFalseTestCase.test_sep",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 50
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_case",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 52
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_filter",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 54
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_mix_bytes_str",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 56
+    },
+    {
+      "id": "test.test_fnmatch.FilterTestCase.test_sep",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 58
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_bytes",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 60
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_case",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 62
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_char_set",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 64
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_fnmatch",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 66
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_fnmatchcase",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 68
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_mix_bytes_str",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 70
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_range",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 72
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 74
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep_in_char_set",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 76
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_sep_in_range",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 78
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_slow_fnmatch",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 80
+    },
+    {
+      "id": "test.test_fnmatch.FnmatchTestCase.test_warnings",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 82
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_star_indices_locations",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 84
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 86
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate_expressions",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 88
+    },
+    {
+      "id": "test.test_fnmatch.TranslateTestCase.test_translate_wildcards",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 90
+    },
+    {
+      "id": "test.test_tomllib.test_data.TestData.test_invalid",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 92
+    },
+    {
+      "id": "test.test_tomllib.test_data.TestData.test_valid",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 94
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_deprecated_tomldecodeerror",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 96
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_invalid_char_quotes",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 98
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_invalid_parse_float",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 100
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_line_and_col",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 102
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_missing_value",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 104
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_module_name",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 106
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_tomldecodeerror",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 108
+    },
+    {
+      "id": "test.test_tomllib.test_error.TestError.test_type_error",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 110
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_deepcopy",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 112
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_incorrect_load",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 114
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_inline_array_recursion_limit",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 116
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_inline_table_recursion_limit",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 118
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_load",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 120
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_parse_float",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 122
+    },
+    {
+      "id": "test.test_tomllib.test_misc.TestMiscellaneous.test_types_import",
+      "occurrence": 1,
+      "outcome": "pass",
+      "details": [],
+      "line": 124
+    }
+  ],
+  "fixtures": [],
+  "subtest_skips": [],
+  "summary": {
+    "event": "summary",
+    "run": 41,
+    "successful": true
+  },
+  "timed_out": false
+}

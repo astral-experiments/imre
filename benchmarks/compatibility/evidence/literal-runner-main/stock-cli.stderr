@@ -1,0 +1,47 @@
+test_case (test.test_fnmatch.FilterFalseTestCase.test_case) ... ok
+test_filterfalse (test.test_fnmatch.FilterFalseTestCase.test_filterfalse) ... ok
+test_mix_bytes_str (test.test_fnmatch.FilterFalseTestCase.test_mix_bytes_str) ... ok
+test_sep (test.test_fnmatch.FilterFalseTestCase.test_sep) ... ok
+test_case (test.test_fnmatch.FilterTestCase.test_case) ... ok
+test_filter (test.test_fnmatch.FilterTestCase.test_filter) ... ok
+test_mix_bytes_str (test.test_fnmatch.FilterTestCase.test_mix_bytes_str) ... ok
+test_sep (test.test_fnmatch.FilterTestCase.test_sep) ... ok
+test_bytes (test.test_fnmatch.FnmatchTestCase.test_bytes) ... ok
+test_case (test.test_fnmatch.FnmatchTestCase.test_case) ... ok
+test_char_set (test.test_fnmatch.FnmatchTestCase.test_char_set) ... ok
+test_fnmatch (test.test_fnmatch.FnmatchTestCase.test_fnmatch) ... ok
+test_fnmatchcase (test.test_fnmatch.FnmatchTestCase.test_fnmatchcase) ... ok
+test_mix_bytes_str (test.test_fnmatch.FnmatchTestCase.test_mix_bytes_str) ... ok
+test_range (test.test_fnmatch.FnmatchTestCase.test_range) ... ok
+test_sep (test.test_fnmatch.FnmatchTestCase.test_sep) ... ok
+test_sep_in_char_set (test.test_fnmatch.FnmatchTestCase.test_sep_in_char_set) ... ok
+test_sep_in_range (test.test_fnmatch.FnmatchTestCase.test_sep_in_range) ... ok
+test_slow_fnmatch (test.test_fnmatch.FnmatchTestCase.test_slow_fnmatch) ... ok
+test_warnings (test.test_fnmatch.FnmatchTestCase.test_warnings) ... ok
+test_star_indices_locations (test.test_fnmatch.TranslateTestCase.test_star_indices_locations) ... ok
+test_translate (test.test_fnmatch.TranslateTestCase.test_translate) ... ok
+test_translate_expressions (test.test_fnmatch.TranslateTestCase.test_translate_expressions) ... ok
+test_translate_wildcards (test.test_fnmatch.TranslateTestCase.test_translate_wildcards) ... ok
+test_invalid (test.test_tomllib.test_data.TestData.test_invalid) ... ok
+test_valid (test.test_tomllib.test_data.TestData.test_valid) ... ok
+test_deprecated_tomldecodeerror (test.test_tomllib.test_error.TestError.test_deprecated_tomldecodeerror) ... ok
+test_invalid_char_quotes (test.test_tomllib.test_error.TestError.test_invalid_char_quotes) ... ok
+test_invalid_parse_float (test.test_tomllib.test_error.TestError.test_invalid_parse_float) ... ok
+test_line_and_col (test.test_tomllib.test_error.TestError.test_line_and_col) ... ok
+test_missing_value (test.test_tomllib.test_error.TestError.test_missing_value) ... ok
+test_module_name (test.test_tomllib.test_error.TestError.test_module_name) ... ok
+test_tomldecodeerror (test.test_tomllib.test_error.TestError.test_tomldecodeerror) ... ok
+test_type_error (test.test_tomllib.test_error.TestError.test_type_error) ... ok
+test_deepcopy (test.test_tomllib.test_misc.TestMiscellaneous.test_deepcopy) ... ok
+test_incorrect_load (test.test_tomllib.test_misc.TestMiscellaneous.test_incorrect_load) ... ok
+test_inline_array_recursion_limit (test.test_tomllib.test_misc.TestMiscellaneous.test_inline_array_recursion_limit) ... ok
+test_inline_table_recursion_limit (test.test_tomllib.test_misc.TestMiscellaneous.test_inline_table_recursion_limit) ... ok
+test_load (test.test_tomllib.test_misc.TestMiscellaneous.test_load) ... ok
+test_parse_float (test.test_tomllib.test_misc.TestMiscellaneous.test_parse_float) ... ok
+test_types_import (test.test_tomllib.test_misc.TestMiscellaneous.test_types_import)
+Test that `_types` module runs. ... ok
+
+----------------------------------------------------------------------
+Ran 41 tests in 0.012s
+
+OK
