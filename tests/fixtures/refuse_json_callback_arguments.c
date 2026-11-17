@@ -8,8 +8,6 @@ static unsigned armed, active, refused, seen;
 extern void *__real_malloc(size_t);
 extern void *__real_calloc(size_t, size_t);
 extern void *__real_realloc(void *, size_t);
-extern uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
-extern uint64_t __real_imre_dyn_scoped_call_at(void *, uint64_t, uint64_t, uint64_t, size_t, const uint32_t (*)[4], uint64_t);
 
 static int reject(size_t size) {
     if (!active || refused || size != 8) return 0;
@@ -29,18 +27,8 @@ void *__wrap_calloc(size_t count, size_t size) {
     size_t total = size && count > SIZE_MAX / size ? SIZE_MAX : count * size;
     return reject(total) ? NULL : __real_calloc(count, size);
 }
-uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t length) {
-    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, length);
-    static const char marker[] = "arm JSON default argument refusal";
-    if (kind == 1 && length == sizeof(marker) - 1 && !memcmp(data, marker, length)) armed = 1;
-    return result;
-}
-uint64_t __wrap_imre_dyn_scoped_call_at(void *ctx, uint64_t callable, uint64_t args,
-                               uint64_t kwargs, size_t mark, const uint32_t (*span)[4], uint64_t scope) {
-    if (!armed) return __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
-    armed = 0;
+static void begin_probe(void) {
     active = 1;
-    uint64_t result = __real_imre_dyn_scoped_call_at(ctx, callable, args, kwargs, mark, span, scope);
-    active = 0;
-    return result;
 }
+#define REFUSAL_MARKER "arm JSON default argument refusal"
+#include "refuse_marked_scope.h"
