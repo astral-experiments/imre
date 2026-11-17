@@ -352,6 +352,10 @@ pub(crate) fn resume_dispatch() {
 pub(crate) fn take(number: i32) -> bool {
     PENDING[number as usize].swap(false, Ordering::AcqRel)
 }
+/// Read the pending interrupt without consuming it before entering its logical Python frame.
+pub(crate) fn interrupt_pending() -> bool {
+    PENDING[libc::SIGINT as usize].load(Ordering::Acquire)
+}
 pub(crate) fn take_interrupt() -> bool {
     if !begin_dispatch() {
         return false;

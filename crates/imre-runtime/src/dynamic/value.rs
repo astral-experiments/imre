@@ -122,10 +122,10 @@ mod permanent {
     include!("../../native/boxed-handles.rs");
 }
 pub(super) use permanent::{
-    COLLECTIONS_NAMEDTUPLE_MAKE_BODY, DIFFLIB_CHAIN_B_BODY, DIFFLIB_FIND_BODY,
-    DIFFLIB_GET_BLOCKS_BODY, DIFFLIB_INIT_BODY, DIFFLIB_SET_SEQ1_BODY, DIFFLIB_SET_SEQ2_BODY,
-    DIFFLIB_SET_SEQS_BODY, ELLIPSIS, EMPTY_TUPLE, FALSE, NATIVE_SUSPENDED_BODY, NONE,
-    NOT_IMPLEMENTED, TRUE,
+    COLLECTIONS_NAMEDTUPLE_MAKE_BODY, DIFFLIB_CALCULATE_RATIO_BODY, DIFFLIB_CHAIN_B_BODY,
+    DIFFLIB_FIND_BODY, DIFFLIB_GET_BLOCKS_BODY, DIFFLIB_INIT_BODY, DIFFLIB_RATIO_BODY,
+    DIFFLIB_SET_SEQ1_BODY, DIFFLIB_SET_SEQ2_BODY, DIFFLIB_SET_SEQS_BODY, ELLIPSIS, EMPTY_TUPLE,
+    FALSE, NATIVE_SUSPENDED_BODY, NONE, NOT_IMPLEMENTED, TRUE,
 };
 use permanent::{FIRST_SMALL_INT, SMALL_INT_MAX, SMALL_INT_MIN};
 const FIRST_DYNAMIC_SLOT: usize =
@@ -6529,11 +6529,13 @@ impl Heap {
     }
 
     /// Resolve ordered ownership on the way to the next ordinary destructor.
+    /// Set `retired` when an unowned frame operand was released during this invocation.
     pub(super) fn next_acyclic_finalizer(
         &mut self,
         globals: [Id; 2],
         roots: impl Iterator<Item = Id>,
         streams: Option<&crate::dynamic::stdlib::io::StandardStreamRoots>,
+        retired: &mut bool,
     ) -> Result<Option<Id>> {
         // These owners are reachable through the current standard stream bindings even in a mixed set.
         let mut remaining = self.ordinary_finalizers.len();
@@ -6644,7 +6646,7 @@ impl Heap {
         let next = if remaining == 0 {
             Ok(None)
         } else {
-            self.release_unreachable_owners(&mut visited, remaining)
+            self.release_unreachable_owners(&mut visited, remaining, retired)
         };
         while visited != END {
             visited = self.traces[visited].replace(UNMARKED);
@@ -6659,12 +6661,31 @@ impl Heap {
         &mut self,
         visited: &mut usize,
         remaining: usize,
+        retired: &mut bool,
     ) -> Result<Option<Id>> {
+        fn no_pending_signal() -> bool {
+            #[cfg(unix)]
+            {
+                !crate::signals::TRIPPED.load(std::sync::atomic::Ordering::Acquire)
+            }
+            #[cfg(not(unix))]
+            {
+                true
+            }
+        }
         let isolated = remaining == 1 && !self.has_weak_values;
+        let retire_frames = isolated
+            && self.descriptor_owners.is_empty()
+            && !self.full_collection_active()
+            && !self.has_unstarted_coroutines()
+            && self.gc_callback(0).is_none()
+            && !self.allocation_traces.is_tracing()
+            && no_pending_signal();
         let candidates = self
             .unreachable_slots(&[], usize::MAX)
             .ok_or_else(|| Error::new("MemoryError", ""))?;
         let mut cycles = std::mem::take(&mut self.prompt_cycles);
+        let mut frame_budget = 64;
         let next = cycles.prepare(self.slots.len()).and_then(|()| {
             loop {
                 let (owner, cyclic) = self.identify_indexed_cycles(
@@ -6694,9 +6715,27 @@ impl Heap {
                 }
                 let Some(owner) = owner else { return Ok(None) };
                 let mark = self.temporary_mark();
+                let frame_back = if retire_frames && frame_budget != 0 {
+                    match self.get(owner) {
+                        Value::PythonFrame {
+                            scope,
+                            back: Some(back),
+                            ..
+                        } if *scope != NONE
+                            && self.traces[*back as usize].get() == UNMARKED
+                            && matches!(self.get(*back), Value::PythonFrame { .. }) =>
+                        {
+                            Some(*back)
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
                 if !self.release_owner_edge(owner)? {
                     return Ok(Some(owner));
                 }
+                let before = *visited;
                 let mut pending = MarkQueue {
                     slots: &self.slots,
                     traces: &self.traces,
@@ -6716,6 +6755,23 @@ impl Heap {
                     .iter()
                     .all(|&id| self.traces[id as usize].get() != UNMARKED)
                 {
+                    if no_pending_signal()
+                        && frame_back.is_some_and(|back| {
+                            self.execution.current().live.get(mark..) == Some(&[back])
+                        })
+                    {
+                        // This frame was unreachable before its parent published f_back.
+                        // Retire that sole temporary in source order, discard only marks
+                        // introduced by it, and resolve the modified candidate graph again.
+                        self.release_temporaries_since(mark);
+                        while *visited != before {
+                            let index = *visited;
+                            *visited = self.traces[index].replace(UNMARKED);
+                        }
+                        *retired = true;
+                        frame_budget -= 1;
+                        continue;
+                    }
                     return Ok(None);
                 }
             }
@@ -9166,7 +9222,7 @@ mod tests {
             heap.release_temporaries_since(0);
 
             let check = |heap: &mut Heap| {
-                heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+                heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut false)
                     .unwrap()
             };
             assert_eq!(check(&mut heap), None);
@@ -9185,6 +9241,184 @@ mod tests {
         }
     }
 
+    fn release_frame(heap: &mut Heap, owner: Id, back: Option<Id>) -> Id {
+        let mut scope = Scope::new("release-test".into(), None);
+        if owner != NONE {
+            scope.names.insert("owner".into(), owner);
+        }
+        let scope = heap.alloc(Value::Scope(allocator_api2::boxed::Box::new(scope)));
+        heap.alloc(Value::PythonFrame {
+            unoptimized_locals: None,
+            class_proxy_scope: None,
+            overwritten_fast_locals: Vec::new(),
+            scope,
+            code: NONE,
+            globals: NONE,
+            builtins: NONE,
+            back,
+            lineno: 1,
+            span: None,
+        })
+    }
+
+    #[test]
+    fn acyclic_frame_back_chain_releases_one_finalizer_without_losing_aliases() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let base = release_frame(&mut heap, NONE, None);
+        let retained = release_frame(&mut heap, owner, Some(base));
+        let outer = release_frame(&mut heap, NONE, Some(retained));
+        heap.release_temporaries_since(0);
+
+        let mut retired = false;
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [retained].into_iter(), None, &mut retired)
+                .unwrap(),
+            None
+        );
+        assert!(!retired);
+        assert!(matches!(
+            heap.get(outer),
+            Value::PythonFrame { back: Some(_), .. }
+        ));
+
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut retired)
+                .unwrap(),
+            Some(owner)
+        );
+        assert!(retired);
+        assert_eq!(heap.temporary_mark(), 1);
+        assert_eq!(*heap.temporary_root(0), base);
+        let dirty: Vec<_> = heap
+            .traces
+            .iter()
+            .enumerate()
+            .skip(FIRST_DYNAMIC_SLOT)
+            .filter_map(|(id, mark)| (mark.get() != UNMARKED).then_some((id, mark.get())))
+            .collect();
+        assert!(dirty.is_empty(), "scratch marks remain: {dirty:?}");
+    }
+
+    #[test]
+    fn weak_observers_keep_frame_release_on_the_existing_ordered_path() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let base = release_frame(&mut heap, NONE, None);
+        let middle = release_frame(&mut heap, owner, Some(base));
+        release_frame(&mut heap, NONE, Some(middle));
+        heap.release_temporaries_since(0);
+        heap.has_weak_values = true;
+
+        let mut retired = false;
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut retired)
+                .unwrap(),
+            None
+        );
+        assert!(!retired);
+        assert!(heap.temporary_mark() > 0);
+    }
+
+    #[test]
+    fn frame_back_rollback_preserves_old_marks_shared_by_the_new_trace() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        let shared = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        heap.register_finalizer(shared);
+        let base = release_frame(&mut heap, NONE, None);
+        let middle = release_frame(&mut heap, owner, Some(base));
+        let Value::PythonFrame { scope, .. } = *heap.get(middle) else {
+            unreachable!()
+        };
+        let Value::Scope(scope) = heap.get_mut(scope) else {
+            unreachable!()
+        };
+        scope.names.insert("shared".into(), shared);
+        release_frame(&mut heap, NONE, Some(middle));
+        heap.release_temporaries_since(0);
+
+        let mut retired = false;
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [shared].into_iter(), None, &mut retired)
+                .unwrap(),
+            Some(owner)
+        );
+        assert!(retired);
+        assert!(heap.is_pending_finalizer(shared));
+        assert!(
+            heap.traces[FIRST_DYNAMIC_SLOT..]
+                .iter()
+                .all(|mark| mark.get() == UNMARKED)
+        );
+    }
+
+    #[test]
+    fn two_unreachable_frames_sharing_a_back_edge_do_not_finalize_it_early() {
+        let mut heap = Heap::new();
+        let owner = heap.alloc(Value::List(Vec::new()));
+        heap.register_finalizer(owner);
+        let base = release_frame(&mut heap, NONE, None);
+        let middle = release_frame(&mut heap, owner, Some(base));
+        let first = release_frame(&mut heap, NONE, Some(middle));
+        let second = release_frame(&mut heap, NONE, Some(middle));
+        heap.release_temporaries_since(0);
+
+        let mut retired = false;
+        assert_eq!(
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut retired)
+                .unwrap(),
+            Some(owner)
+        );
+        for frame in [first, second] {
+            assert!(matches!(
+                heap.get(frame),
+                Value::PythonFrame { back: None, .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn callback_and_allocation_trace_observers_keep_frame_release_on_the_existing_path() {
+        for trace in [false, true] {
+            let mut heap = Heap::new();
+            let owner = heap.alloc(Value::List(Vec::new()));
+            heap.register_finalizer(owner);
+            let base = release_frame(&mut heap, NONE, None);
+            let middle = release_frame(&mut heap, owner, Some(base));
+            release_frame(&mut heap, NONE, Some(middle));
+            heap.release_temporaries_since(0);
+            if trace {
+                heap.allocation_traces.start(1);
+            } else {
+                let Value::List(callbacks) = heap.get_mut(heap.gc_callbacks) else {
+                    unreachable!()
+                };
+                callbacks.push(NONE);
+            }
+            let mut retired = false;
+            assert_eq!(
+                heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut retired)
+                    .unwrap(),
+                None
+            );
+            assert!(!retired);
+        }
+    }
+
+    #[test]
+    fn finalizer_cycle_scratch_capacity_failure_is_catchable_and_reusable() {
+        let mut scratch = CycleSet::default();
+        assert_eq!(scratch.prepare(usize::MAX).unwrap_err().kind, "MemoryError");
+        assert!(scratch.incoming.is_empty());
+        assert!(scratch.work.is_empty());
+        scratch.prepare(4).unwrap();
+        assert_eq!(scratch.incoming, [0; 4]);
+    }
+
     #[test]
     fn prompt_finalizers_recheck_a_cycle_and_its_path_to_the_owner() {
         let mut heap = Heap::new();
@@ -9198,7 +9432,7 @@ mod tests {
         items.push(ring);
         heap.release_temporaries_since(0);
         let check = |heap: &mut Heap| {
-            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut false)
                 .unwrap()
         };
         assert_eq!(check(&mut heap), None);
@@ -9242,7 +9476,7 @@ mod tests {
         edges.push(retained);
         heap.release_temporaries_since(0);
         assert_eq!(
-            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut false)
                 .unwrap(),
             None
         );
@@ -9252,7 +9486,7 @@ mod tests {
         heap.register_finalizer(dying);
         heap.release_temporaries_since(0);
         assert_eq!(
-            heap.next_acyclic_finalizer([NONE; 2], [retained].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [retained].into_iter(), None, &mut false)
                 .unwrap(),
             Some(dying)
         );
@@ -9274,7 +9508,7 @@ mod tests {
         *heap.get_mut(ring) = Value::List(items);
         heap.release_temporaries_since(0);
         let check = |heap: &mut Heap| {
-            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None)
+            heap.next_acyclic_finalizer([NONE; 2], [].into_iter(), None, &mut false)
                 .unwrap()
         };
         assert_eq!(check(&mut heap), None);
@@ -9333,7 +9567,7 @@ mod tests {
         // Only one distinct pending owner is proven by this chain.
         let chain = [input, buffer, input, NONE, input];
         let mut check = |roots| {
-            heap.next_acyclic_finalizer([NONE; 2], roots, Some(&chain))
+            heap.next_acyclic_finalizer([NONE; 2], roots, Some(&chain), &mut false)
                 .unwrap()
         };
         assert_eq!(check(vec![input].into_iter()), Some(dead));

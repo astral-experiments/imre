@@ -4602,9 +4602,14 @@ print(globals()["label"](2.0, True))
                 guarded = run(imre, "run", failed_shutdown, "--quiet", "--", certdata, timeout=600)
                 assert guarded.returncode == 0, guarded.stderr
                 object_io = fixtures / "ssl_object_io.py"
+                # Client authentication needs two more pinned CPython test certificates.
+                object_certdata = root / "ssl_object_certdata"
+                shutil.copytree(certdata, object_certdata)
+                for name in ("keycert4.pem", "pycacert.pem"):
+                    shutil.copy2(fixtures / "ssl_certdata" / name, object_certdata / name)
                 compare(
-                    "-IB", object_io, certdata,
-                    native_args=("run", object_io, "--quiet", "--", certdata), native_timeout=600,
+                    "-IB", object_io, object_certdata,
+                    native_args=("run", object_io, "--quiet", "--", object_certdata), native_timeout=600,
                 )
                 cert_chain = fixtures / "ssl_cert_chain.py"
                 compare(
@@ -4721,7 +4726,7 @@ print(globals()["label"](2.0, True))
             "boxed_thread_dangling.py", "boxed_threading_rlock.py", "boxed_indirect_threading_rlock.py",
             "boxed_threading_condition_event.py", "boxed_threading_timer.py",
             "boxed_thread_captured_lock.py",
-            "boxed_thread_bound_lock.py", "boxed_thread_argument_lifetime.py",
+            "boxed_thread_bound_lock.py", "boxed_thread_subclass_run.py", "boxed_thread_argument_lifetime.py",
             "boxed_thread_captured_acquire.py", "boxed_thread_method_closure.py",
             "boxed_thread_finalization.py",
             "boxed_thread_hash_update.py",

@@ -6199,6 +6199,19 @@ impl Context {
                 if let Some((owner, signature)) = stdlib::operator::callable_type(class) =>
             {
                 match name {
+                    "__dict__" => {
+                        let storage = match owner {
+                            "operator.attrgetter" => "<operator.attrgetter namespace>",
+                            "operator.itemgetter" => "<operator.itemgetter namespace>",
+                            "operator.methodcaller" => "<operator.methodcaller namespace>",
+                            _ => unreachable!("operator callable type"),
+                        };
+                        return self.native_class_dictionary(
+                            obj,
+                            storage,
+                            ["__call__", "__reduce__", "__module__"].into_iter(),
+                        );
+                    }
                     "__text_signature__" => return Ok(self.text(signature)),
                     "__name__" | "__qualname__" => {
                         return Ok(self.text(owner.trim_start_matches("operator.")));
