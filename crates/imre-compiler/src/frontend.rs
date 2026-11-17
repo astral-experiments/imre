@@ -4218,6 +4218,7 @@ struct Checker<'a> {
     globals: &'a ModuleValues,
     inference: Option<&'a inference::Inference>,
     inferred_returns: Option<Vec<Type>>,
+    inferred_return_context: Option<Type>,
     return_declaration: Option<phase::TypeDeclaration>,
     /// An explicit return can still escape the enclosing cleanup.
     explicit_return: bool,
@@ -4370,6 +4371,7 @@ impl<'a> Checker<'a> {
             globals,
             inference: None,
             inferred_returns: None,
+            inferred_return_context: None,
             return_declaration: None,
             explicit_return: false,
             discover_document_return: None,
@@ -4525,6 +4527,20 @@ impl<'a> Checker<'a> {
             };
             if layout.kind == ParameterKind::Variadic && parameter.annotation().is_some() {
                 self.positional_pack = Some((parameter.name().to_string(), slot));
+            }
+            if self.types.element(layout.ty).is_some()
+                && parameter.annotation().is_none()
+                && self
+                    .inference
+                    .is_none_or(|inference| inference.inferred_parameter(signature.id, index))
+            {
+                self.assigned.set_value_source(
+                    slot,
+                    Some(ValueSource::InferredListParameter {
+                        function: signature.id,
+                        index,
+                    }),
+                );
             }
             bound(slot);
         }
@@ -6244,6 +6260,7 @@ impl<'a> Checker<'a> {
             | ValueSource::PythonCall
             | ValueSource::LiteralStrings(_)
             | ValueSource::InferredList(_)
+            | ValueSource::InferredListParameter { .. }
             | ValueSource::Function(_)
             | ValueSource::ReboundMethod => None,
         }
@@ -15800,6 +15817,22 @@ impl<'a> Checker<'a> {
                             },
                             declaration,
                         )?
+                    } else if let Some(ValueSource::InferredListParameter { function, index }) =
+                        self.value_source(&receiver)
+                        && let Some(inference) = self.inference
+                        && element != Type::ObjectValue
+                        && self.graph.session.unreachable_range(self.module, call.range())
+                            != Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional)
+                    {
+                        let value = self.expr_expected_if(arg, element, |checker, actual| {
+                            actual != element
+                                && checker.object_value_supported(element)
+                                && checker.object_value_supported(actual)
+                        })?;
+                        if value.ty != element {
+                            inference.demand_list_write(function, index, receiver.ty, self.types);
+                        }
+                        coerce_item(self, value, element, arg)?
                     } else if let ExprKind::Local(slot) = receiver.kind
                         && let Some(&site) = self.document_list_sites.get(&slot)
                         && let Some(inference) = self.inference
@@ -15818,12 +15851,16 @@ impl<'a> Checker<'a> {
                     } else {
                         match self.expr_in_context(arg, element, |_, _| false, coerce_item, declaration) {
                             Err(Failure::Diagnostic(report))
-                                if let Some(owner) = declaration
-                                    && owner.module == self.module
-                                    && report.operand_declaration() == Some(owner)
-                                    && report.exact_operand() == Some(arg.range())
+                                if report.exact_operand() == Some(arg.range())
                                     && self.graph.session.unreachable_range(self.module, call.range()) == Some(ty_python_semantic::types::ide_support::UnreachableKind::Unconditional) =>
                             {
+                                let declared_here = declaration.is_some_and(|owner| {
+                                    owner.module == self.module && report.operand_declaration() == Some(owner)
+                                });
+                                let inferred_parameter = matches!(self.value_source(&receiver), Some(ValueSource::InferredListParameter { .. }));
+                                if !declared_here && !inferred_parameter {
+                                    return Err(Failure::Diagnostic(report));
+                                }
                                 // No fixed store can run. The caller still checks its remaining
                                 // operands with append's ordinary None result.
                                 return Ok(Expr::none());
