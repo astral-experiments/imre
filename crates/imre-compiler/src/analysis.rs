@@ -3674,10 +3674,9 @@ impl Session {
             roots.clone(),
             skipped,
             overloads,
-            checks,
+            (checks, true),
             checked_modules,
             native,
-            true,
         )?;
 
         let entry = match calls {
@@ -4291,10 +4290,9 @@ impl Session {
             roots,
             skipped,
             overloads,
-            checks,
+            (checks, false),
             checked_modules,
             native,
-            false,
         )
     }
 
@@ -4303,10 +4301,9 @@ impl Session {
         roots: impl Iterator<Item = usize>,
         skipped: Option<&[Vec<TextRange>]>,
         overloads: &[Vec<CheckedDiagnostic>],
-        checks: FileChecks,
+        (checks, record_fallback): (FileChecks, bool),
         checked_modules: Option<&[crate::modules::SourceModule]>,
         native: Option<&crate::frontend::phase::Diagnostic>,
-        record_fallback: bool,
     ) -> Result<(), String> {
         let errors: Vec<_> = roots
             .flat_map(|index| {
