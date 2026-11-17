@@ -1,0 +1,1 @@
+/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_shutil.py:24:1: Imre: standard-library imports and shadowing are unsupported: "tarfile"
