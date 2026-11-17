@@ -115,10 +115,13 @@ impl NamedFunction<'_> {
             }
             None => {}
         }
-        if let Some((field, selector)) =
+        if let Some((field, selector, argument)) =
             bound_candidate.and_then(|frame| thread_projected_call(def, frame))
         {
-            signature["thread_projected_call"] = json!([field, selector]);
+            signature["thread_projected_call"] = match argument {
+                Some(argument) => json!([field, selector, argument]),
+                None => json!([field, selector]),
+            };
         }
         let Some(annotations) = self
             .annotations
@@ -166,8 +169,8 @@ impl NamedFunction<'_> {
 fn thread_projected_call<'a>(
     def: &ast::StmtFunctionDef,
     frame: &'a crate::frontend::RegisteredFunction,
-) -> Option<(&'a str, &'a str)> {
-    use crate::ir::{self, Builtin, Expr, ExprKind, Statement};
+) -> Option<(&'a str, &'a str, Option<&'a str>)> {
+    use crate::ir::{self, Expr, ExprKind, Statement};
     if def.is_async
         || def.returns.is_some()
         || def.parameters.vararg.is_some()
@@ -195,9 +198,14 @@ fn thread_projected_call<'a>(
     else {
         return None;
     };
-    if !args.values.is_empty() || !args.order.is_empty() || args.exhaustive_enum_match {
+    if !args.order.is_empty() || args.exhaustive_enum_match {
         return None;
     }
+    let argument = match args.values.as_slice() {
+        [] => None,
+        [argument] => Some(thread_projected_field(argument, frame, formal.as_str())?),
+        _ => return None,
+    };
     let site = args.site.python()?;
     if site.scope.is_some() || !matches!(site.call.arguments, ir::RegisteredArguments::Positional) {
         return None;
@@ -205,6 +213,17 @@ fn thread_projected_call<'a>(
     let ir::RegisteredCallTarget::Method { name: selector, .. } = &site.call.target else {
         return None;
     };
+    let field = thread_projected_field(callable, frame, formal.as_str())?;
+    Some((field, selector.as_str(), argument))
+}
+
+/// Borrow a callback-free field projection of the original checked receiver formal.
+fn thread_projected_field<'a>(
+    expr: &'a crate::ir::Expr,
+    frame: &crate::frontend::RegisteredFunction,
+    formal: &str,
+) -> Option<&'a str> {
+    use crate::ir::{self, Builtin, ExprKind};
     let ExprKind::Builtin(
         Builtin::RegisteredAttribute {
             action: ir::AttributeAction::Load,
@@ -212,7 +231,7 @@ fn thread_projected_call<'a>(
             ..
         },
         operands,
-    ) = &callable.without_location().kind
+    ) = &expr.without_location().kind
     else {
         return None;
     };
@@ -222,11 +241,11 @@ fn thread_projected_call<'a>(
     let original = match &owner.without_location().kind {
         ExprKind::Local(slot) => frame.function.params.as_slice() == [*slot],
         ExprKind::Builtin(Builtin::RegisteredName(name), operands) => {
-            operands.is_empty() && name.as_str() == formal.as_str()
+            operands.is_empty() && name.as_str() == formal
         }
         _ => false,
     };
-    (original && !field.id.starts_with("__")).then_some((field.id.as_str(), selector.as_str()))
+    (original && !field.id.starts_with("__")).then_some(field.id.as_str())
 }
 
 /// Serializes a placed callable without copying its lexical scope or parameter names.

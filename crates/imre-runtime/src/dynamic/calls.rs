@@ -287,6 +287,7 @@ pub(super) enum RegisteredCall {
     Observe(Arc<thread_worker::Handle>, thread_worker::Status),
     ShutdownWorkers,
     Acquire(thread_lock::Acquire),
+    UpdateHash(stdlib::hashlib::UpdateHash),
     /// Condition.notify has already selected the waiter's bound release method.
     Release(Arc<crate::objects::locks::PrimitiveLock>),
     Restore(thread_rlock::Restore),
@@ -347,6 +348,8 @@ impl RegisteredCall {
             Self::StartDetached(start) => unsafe { start.run(context) },
             // SAFETY: the caller owns the context and its interrupted frame on this thread.
             Self::Acquire(wait) => unsafe { wait.run_registered(context) },
+            // SAFETY: the registered caller roots both owner-local operands until return.
+            Self::UpdateHash(update) => update.run(unsafe { &mut *context }),
             Self::Release(lock) => {
                 lock.release()?;
                 Ok(NONE)
@@ -8763,7 +8766,25 @@ impl Context {
                 {
                     return stdlib::socket::prepare_descriptor(self, owner, name, &args, &kwargs);
                 }
+                Value::HeapTypeMethod {
+                    owner,
+                    name: "update",
+                    ..
+                } if self.heap.get(owner).heap_type() == Some(stdlib::hashlib::md5::CLASS) => {
+                    if let Some(update) =
+                        stdlib::hashlib::UpdateHash::prepare(self, callable, &args, &kwargs)
+                    {
+                        return Ok(RegisteredCall::UpdateHash(update));
+                    }
+                    break;
+                }
                 Value::Native(ref name) => {
+                    if stdlib::hashlib::UpdateHash::native_class(name).is_some()
+                        && let Some(update) =
+                            stdlib::hashlib::UpdateHash::prepare(self, callable, &args, &kwargs)
+                    {
+                        return Ok(RegisteredCall::UpdateHash(update));
+                    }
                     if let Some(method) = name.strip_prefix("_imre_pyexpat.")
                         && let Some(call) = stdlib::pyexpat::Call::prepare(method, &args, &kwargs)
                     {
