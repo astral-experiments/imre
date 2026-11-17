@@ -18,12 +18,16 @@ def evidence(family):
     return directory, binding, run
 
 
+def selected_trace(directory, tier):
+    return SNAPSHOT / 'evidence/run-only' / directory.parent.name / tier / 'trace.raw'
+
+
 def withdrawal(directory, binding, run, tier, trace=None):
     meta = run["runs"][tier]
     tree = str(Path(run["runs"][tier]["environment"]["PYTHONPATH"]) / "test")
     leaf = str(Path(tree) / Path(run["source"]["path"]).name)
     raw_control.trace_withdraw(
-        scorecard, trace or (directory / f"{tier}.trace").read_text(), meta["argv"][0],
+        scorecard, trace or selected_trace(directory, tier).read_text(), meta["argv"][0],
         binding["probe"], tree, tree + ".raw-control-stash", leaf, meta["cwd"],
         scorecard.require, binding["withdraw_sources"], strict_payloads=True,
     )
@@ -55,7 +59,7 @@ class StagedSourceControls(unittest.TestCase):
 
     def test_native_open_of_hidden_launcher_stash_rejects_credit(self):
         directory, binding, run = evidence("glob")
-        lines = (directory / "O0.trace").read_text().splitlines()
+        lines = selected_trace(directory, "O0").read_text().splitlines()
         target = raw_control.execs(lines, scorecard.require)[1]
         index = next(i for i in range(target[0] + 1, len(lines))
                      if lines[i].startswith(target[1] + " ") and raw_control.OPEN.match(lines[i])

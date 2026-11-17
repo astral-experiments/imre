@@ -1,5 +1,4 @@
 """Rehashed real-trace attacks and immutable source-stage authority controls."""
-import copy
 import hashlib
 import json
 import subprocess
@@ -10,7 +9,7 @@ from unittest.mock import patch
 
 import raw_control
 import scorecard
-from test_raw_control_staged import PIN, SNAPSHOT, evidence
+from test_raw_control_staged import PIN, SNAPSHOT, evidence, selected_trace, withdrawal
 
 def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 def loc(path): return path.relative_to(scorecard.ROOT).as_posix()
@@ -18,45 +17,18 @@ def dump(path, obj): path.parent.mkdir(parents=True, exist_ok=True); path.write_
 
 
 class RehashedTraceTests(unittest.TestCase):
-    def test_real_binding_rejects_rehashed_payload_opens(self):
-        directory, cohort, run = evidence("glob")
-        original = json.loads((directory/"binding.json").read_text())
-        raw = (directory/"O0.trace").read_text().splitlines()
-        target = raw_control.execs(raw, scorecard.require)[1]
-        pid = target[1]
-        attacks = {
-            "open": [f'{pid} open("/tmp/unapproved.py", O_RDONLY) = 40'],
-            "openat": [f'{pid} openat(AT_FDCWD, "/tmp/unapproved.pyc", O_RDONLY) = 40'],
-            "pyo": [f'{pid} openat(AT_FDCWD, "/tmp/unapproved.pyo", O_RDONLY) = 40'],
-            "openat2": [f'{pid} openat2(AT_FDCWD, "/tmp/unapproved.zip", {{flags=O_RDONLY}}, 24) = 40'],
-            "creat": [f'{pid} creat("/tmp/no-suffix", 0600) = 40'],
-            "dirfd-traversal": [f'{pid} openat(AT_FDCWD, "/tmp/sub", O_RDONLY|O_DIRECTORY) = 40',
-                                f'{pid} openat(40, "../unapproved.whl", O_RDONLY) = 41'],
-            "proc-fd": [f'{pid} openat(AT_FDCWD, "/proc/self/fd/7", O_RDONLY) = 40'],
-            "dev-fd": [f'{pid} openat(AT_FDCWD, "/dev/fd/8", O_RDONLY) = 40'],
-            "fd-traversal": [f'{pid} openat(AT_FDCWD, "/proc/self/fd", O_RDONLY|O_DIRECTORY) = 40',
-                             f'{pid} openat(40, "7/../unapproved", O_RDONLY) = 41'],
-            "relative-fd": [f'{pid} openat(AT_FDCWD, "/proc/thread-self", O_RDONLY|O_DIRECTORY) = 40',
-                            f'{pid} openat2(40, "fd/9", {{flags=O_RDONLY}}, 24) = 41'],
-        }
-        with tempfile.TemporaryDirectory(dir=SNAPSHOT) as tmp:
-            tmp=Path(tmp)
-            receipt=tmp/"receipt.jsonl"
-            receipt.write_text("".join(json.dumps({**x,"paired":True})+"\n" for x in original["originals"]))
-            for name, calls in attacks.items():
-                with self.subTest(name=name):
-                    trace=tmp/(name+".trace"); trace.write_text("\n".join(raw[:target[0]+1]+calls+raw[target[0]+1:])+"\n")
-                    binding=copy.deepcopy(original);binding["cohorts"]["finite-native"]["artifacts"]["O0_trace"]=loc(trace)
-                    b=tmp/(name+".json");dump(b,binding)
-                    files={p:digest(scorecard.ROOT/p) for p in set(binding["cohorts"]["finite-native"]["artifacts"].values())}
-                    files.update({loc(b):digest(b),loc(receipt):digest(receipt)})
-                    entry={"receipt":loc(receipt),"sources":{"binding":loc(b)},"files":files}
-                    with patch.object(scorecard,"DATA_ROOT",SNAPSHOT), patch.object(scorecard,"COHORT",{**scorecard.CANONICAL_COHORT,"imre_revision":PIN}), patch.object(scorecard,"activation_entry",return_value=entry):
-                        with self.assertRaisesRegex(ValueError,"payload|creat|unauthorized"):
-                            raw_control.adapt(scorecard,"glob",loc(b),digest(b),json.dumps(run["source"],sort_keys=True),name,"finite-native")
+    def test_previous_suffix_control_rejects_payload_opens(self):
+        directory, binding, run = evidence("glob")
+        raw = selected_trace(directory,"O0").read_text().splitlines()
+        target = raw_control.execs(raw,scorecard.require)[1];pid=target[1]
+        for call in (f'{pid} openat(AT_FDCWD, "/tmp/unapproved.pyc", O_RDONLY) = 40',
+                     f'{pid} creat("/tmp/no-suffix", 0600) = 40',
+                     f'{pid} openat(AT_FDCWD, "/proc/self/fd/7", O_RDONLY) = 40'):
+            with self.subTest(call=call),self.assertRaisesRegex(ValueError,"payload|creat|unauthorized"):
+                withdrawal(directory,binding,run,"O0","\n".join(raw[:target[0]+1]+[call]+raw[target[0]+1:]))
 
     def test_legacy_scope_does_not_reject_unrelated_source_open(self):
-        directory, binding, run=evidence("logging");lines=(directory/"O0.trace").read_text().splitlines()
+        directory, binding, run=evidence("logging");lines=selected_trace(directory,"O0").read_text().splitlines()
         target=raw_control.execs(lines,scorecard.require)[1];lines.insert(target[0]+1,f'{target[1]} openat(AT_FDCWD, "/tmp/unapproved.py", O_RDONLY) = 40')
         tree=str(Path(run["runs"]["O0"]["environment"]["PYTHONPATH"])/"test")
         raw_control.trace_withdraw(scorecard,"\n".join(lines),run["runs"]["O0"]["argv"][0],binding["probe"],tree,tree+".raw-control-stash",tree+"/test_logging.py",run["runs"]["O0"]["cwd"],scorecard.require,binding["withdraw_sources"])

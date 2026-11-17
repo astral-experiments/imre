@@ -21,7 +21,7 @@ def dump(path, obj): path.write_text(json.dumps(obj, indent=2)+"\n")
 class NativeContentStageTests(unittest.TestCase):
     def validate(self, family, binding_path, receipt, nonce):
         binding=json.loads(binding_path.read_text()); cohort=binding["cohorts"]["finite-native"]; archive=json.loads((RUN_ONLY/"archive.json").read_text())
-        paths=set(cohort["artifacts"].values()) | set(archive["families"][family]) | {loc(binding_path),loc(receipt)}
+        paths=set(cohort["artifacts"].values()) | (set(archive["families"][family])-raw_control.superseded_trace_refs(family)) | {loc(binding_path),loc(receipt)}
         entry={"receipt":loc(receipt),"sources":{"binding":loc(binding_path)},"files":{p:digest(scorecard.ROOT/p) for p in paths}}
         run=json.loads((scorecard.ROOT/cohort["artifacts"]["run"]).read_text())
         with patch.object(scorecard,"DATA_ROOT",SNAPSHOT),patch.object(scorecard,"COHORT",{**scorecard.CANONICAL_COHORT,"imre_revision":PIN}),patch.object(scorecard,"activation_entry",return_value=entry):
@@ -69,6 +69,26 @@ class NativeContentStageTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,"unauthorized|unknown kernel dirfd"):
                         self.validate("glob",bp,receipt,name)
 
+    def test_only_exact_old_trace_locators_can_be_digest_only(self):
+        archive=json.loads((RUN_ONLY/"archive.json").read_text());family="glob"
+        archived=archive["families"][family];exempt=raw_control.superseded_trace_refs(family)
+        entry={"files":{p:d for p,d in archived.items() if p not in exempt}}
+        with patch.object(scorecard,"DATA_ROOT",SNAPSHOT):
+            raw_control.validate_capture_archive(scorecard,archive,family,entry)
+            prefix=next(iter(exempt)).rsplit("/",1)[0]
+            for missing in (prefix+"/O7.trace",next(iter(raw_control.superseded_trace_refs("logging")))):
+                changed=copy.deepcopy(archive);changed["families"][family][missing]="a"*64
+                bound={"files":{**entry["files"],missing:"a"*64}}
+                with self.subTest(missing=missing),self.assertRaisesRegex(ValueError,"missing"):
+                    raw_control.validate_capture_archive(scorecard,changed,family,bound)
+            changed=copy.deepcopy(archive);changed["families"][family][next(iter(exempt))]="not-a-sha"
+            with self.assertRaisesRegex(ValueError,"invalid archived SHA"):
+                raw_control.validate_capture_archive(scorecard,changed,family,entry)
+            required=next(p for p in archived if p.endswith("/gate.trace"))
+            del entry["files"][required]
+            with self.assertRaisesRegex(ValueError,"not digest-bound"):
+                raw_control.validate_capture_archive(scorecard,archive,family,entry)
+
     def test_uncredited_manifest_matches_selected_bytes(self):
         manifest=json.loads((scorecard.ROOT/raw_control.SOURCE_MANIFEST).read_text())
         for path,value in manifest["sources"].items():
@@ -80,6 +100,7 @@ class NativeContentStageTests(unittest.TestCase):
             self.assertEqual(frozen["staged_receipt"]["sha256"],digest(scorecard.ROOT/frozen["staged_receipt"]["path"]))
             artifacts={v for c in binding["cohorts"].values() for v in c["artifacts"].values()}
             self.assertEqual(set(frozen["artifact_files"]),artifacts)
+            self.assertTrue(raw_control.superseded_trace_refs(family).isdisjoint(artifacts | set(frozen["evidence_files"])))
             fixed={**manifest["sources"],**frozen["evidence_files"]}
             self.assertTrue(artifacts <= set(fixed))
             for path,value in frozen["evidence_files"].items():

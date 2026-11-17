@@ -333,6 +333,26 @@ SOURCE_MANIFEST = f'benchmarks/compatibility/revisions/{SOURCE_PIN}/controls/glo
 SOURCE_FAMILIES = frozenset({'glob', 'logging'})
 
 
+def superseded_trace_refs(family):
+    """Only the two canonical pre-recapture tier traces for this family."""
+    if family not in SOURCE_FAMILIES: return frozenset()
+    prefix = f'benchmarks/compatibility/revisions/{SOURCE_PIN}/evidence/{family}/strict'
+    return frozenset(f'{prefix}/{tier}.trace' for tier in ('O0','O3'))
+
+
+def validate_capture_archive(api, archive, family, entry):
+    archived = archive.get('families',{}).get(family)
+    superseded = superseded_trace_refs(family)
+    api.require(isinstance(archived,dict) and superseded and superseded <= archived.keys(),
+                'missing canonical superseded trace references')
+    for loc,digest in archived.items():
+        api.require(isinstance(digest,str) and api.HEX64.fullmatch(digest), 'invalid archived SHA-256')
+        if loc in superseded: continue  # Historical digest only; never a selected artifact.
+        api.require(api.binding_digest(entry,loc) == digest
+                    and sha(api.repository_file(loc,api.DATA_ROOT).read_bytes()) == digest,
+                    'original capture archive digest differs')
+
+
 def git(root, *args):
     try:
         return subprocess.check_output(['git','--no-replace-objects',*args], cwd=root, stderr=subprocess.DEVNULL)
@@ -532,9 +552,7 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
                 and archive['families'][family].get(artifacts['original_binding']) == sha(data('original_binding'))
                 and archive['families'][family].get(artifacts['original_collector']) == sha(data('original_collector')),
                 'original capture archive or as-used controller differs')
-        for loc,digest in archive['families'][family].items():
-            require(api.binding_digest(entry,loc) == digest and sha(api.repository_file(loc,api.DATA_ROOT).read_bytes()) == digest,
-                    'original capture archive digest differs')
+        validate_capture_archive(api,archive,family,entry)
         require(set(policy.get('sources',{})) == {'glob','os_helper'}
                 and policy['sources']['glob']['archive'] == artifacts.get('policy_glob_source')
                 and policy['sources']['os_helper']['archive'] == artifacts.get('policy_helper_source'),

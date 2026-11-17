@@ -76,9 +76,7 @@
         "original_binding": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/binding.json",
         "O0_recapture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O0/run.json",
         "O3_recapture": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/run.json",
-        "policy_glob_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py",
-        "O0_original_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O0.trace",
-        "O3_original_trace": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/O3.trace"
+        "policy_glob_source": "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/stock.source.py"
       },
       "stock_source_member": "cpython-5607950ef232dad16d75c0cf53101d9649d89115/Lib/test/test_logging.py"
     }
