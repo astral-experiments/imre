@@ -16761,6 +16761,12 @@ impl<'a> Checker<'a> {
                             )
                             || self.types.payload(arg.ty) == Some(Type::Exception)
                             || (args.len() > 1 && self.types.element(arg.ty).is_some_and(scalar))
+                            || (args.len() > 1
+                                && self.types.is_plain_tuple(arg.ty)
+                                && self
+                                    .types
+                                    .fields(arg.ty)
+                                    .is_some_and(|fields| fields.into_iter().all(scalar)))
                             || self
                                 .types
                                 .members(arg.ty)
