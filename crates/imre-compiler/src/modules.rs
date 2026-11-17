@@ -664,6 +664,7 @@ pub(crate) enum IntrinsicModule {
     Functools,
     FunctoolsNative,
     Calendar,
+    Bisect,
     Fractions,
     Fnmatch,
     Glob,
@@ -1263,6 +1264,7 @@ impl IntrinsicModule {
             "functools" => Some(Self::Functools),
             "_functools" => Some(Self::FunctoolsNative),
             "calendar" => Some(Self::Calendar),
+            "bisect" => Some(Self::Bisect),
             "fractions" => Some(Self::Fractions),
             "fnmatch" => Some(Self::Fnmatch),
             "glob" => Some(Self::Glob),
@@ -1384,6 +1386,17 @@ impl IntrinsicModule {
     pub(crate) fn symbol(self, name: &str) -> Option<Binding> {
         if self == Self::Fractions {
             return (name != "Fraction").then_some(Binding::ConditionalValue);
+        }
+        if self == Self::Bisect {
+            return Some(match name {
+                "bisect_left" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("bisect.bisect_left"))
+                }
+                "bisect_right" | "bisect" => {
+                    Binding::Intrinsic(Intrinsic::ScopedObjectExport("bisect.bisect_right"))
+                }
+                _ => Binding::ConditionalValue,
+            });
         }
         if self == Self::Calendar {
             return Some(match name {
@@ -6424,6 +6437,7 @@ impl<'a> Loader<'a> {
             self.needs_object_imports |= matches!(
                 module,
                 IntrinsicModule::Calendar
+                    | IntrinsicModule::Bisect
                     | IntrinsicModule::Fractions
                     | IntrinsicModule::Ast
                     | IntrinsicModule::NtPath

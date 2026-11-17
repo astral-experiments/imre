@@ -2139,6 +2139,9 @@ pub(crate) enum Builtin {
     ExceptionSubclass(u32, u32),
     LiteralStringView,
     IntListContains,
+    BisectIntList {
+        left: bool,
+    },
     StringListContains,
     StringTupleContains,
     StructListContains,

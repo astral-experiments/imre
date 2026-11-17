@@ -2576,6 +2576,38 @@ pub unsafe extern "C" fn imre_list_len(list: *const List) -> usize {
     (length << 1) | 1
 }
 
+/// Find the insertion point in an exact integer list without invoking user code.
+///
+/// # Safety
+/// The caller roots the list and the borrowed integer for this nonreentrant read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_bisect_left(list: *const List, needle: usize) -> usize {
+    // SAFETY: the caller roots both inputs, and integer comparison cannot mutate this list.
+    let needle = unsafe { Int::borrow(needle) };
+    let index = unsafe {
+        (&*list)
+            .0
+            .with(|values| values.partition_point(|value| value.cmp(&needle).is_lt()))
+    };
+    (index << 1) | 1
+}
+
+/// Find the insertion point after equal values in an exact integer list.
+///
+/// # Safety
+/// The caller roots the list and the borrowed integer for this nonreentrant read.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn imre_list_bisect_right(list: *const List, needle: usize) -> usize {
+    // SAFETY: the caller roots both inputs, and integer comparison cannot mutate this list.
+    let needle = unsafe { Int::borrow(needle) };
+    let index = unsafe {
+        (&*list)
+            .0
+            .with(|values| values.partition_point(|value| !value.cmp(&needle).is_gt()))
+    };
+    (index << 1) | 1
+}
+
 /// Sums an exact integer list and an already-evaluated starting value.
 ///
 /// An i32 reduction avoids per-element integer owners and arithmetic calls.

@@ -684,6 +684,7 @@ impl Builtin {
             | Self::StrEnumValue
             | Self::EnumString
             | Self::IntListContains
+            | Self::BisectIntList { .. }
             | Self::StructListContains
             | Self::DequeContains
             | Self::StringContains

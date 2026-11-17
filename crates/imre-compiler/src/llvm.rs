@@ -4804,6 +4804,15 @@ impl Emitter<'_, '_> {
                     small_integer: false,
                 }
             }
+            Builtin::BisectIntList { left } => self.call(
+                if *left {
+                    "imre_list_bisect_left"
+                } else {
+                    "imre_list_bisect_right"
+                },
+                Type::Int,
+                &[&args[0].value, &args[1].value],
+            ),
             Builtin::IntListContains
             | Builtin::StringListContains
             | Builtin::StructListContains => {
@@ -11452,6 +11461,8 @@ declare i64 @imre_list_view_index(i64, i64) nounwind
     .unwrap();
     output.push_str(
         r#"declare i64 @imre_list_len(ptr)
+declare i64 @imre_list_bisect_left(ptr, i64)
+declare i64 @imre_list_bisect_right(ptr, i64)
 declare ptr @imre_list_repeat(ptr, i64)
 declare ptr @imre_list_slice(ptr, i64, i64, i64)
 declare ptr @imre_seq_slice(ptr, i64, i64, i64)
