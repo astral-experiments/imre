@@ -18,6 +18,7 @@ TIERS = ("stock", "O0", "O3")
 DIMENSIONS = ("exit_code", "stdout", "stderr", "effects")
 HEX40 = re.compile(r"[0-9a-f]{40}\Z")
 HEX64 = re.compile(r"[0-9a-f]{64}\Z")
+RESULT = re.compile(r"^([^\s]+) \(([^)]+)\) \.\.\. (ok|FAIL|ERROR|skipped .+|expected failure|unexpected success)$")
 START = "<!-- compatibility-scorecard:start -->"
 END = "<!-- compatibility-scorecard:end -->"
 
@@ -30,11 +31,11 @@ def require(condition, message):
 def families():
     with (ROOT / COHORT["historical_families"]).open(newline="") as f:
         rows = list(csv.DictReader(f, delimiter="\t"))
-    result = {r["family"]: {"originals": int(r["originals"]), "historical": int(r["paired"])} for r in rows}
+    result = {r["family"]: {"originals": int(r["originals"]), "historical": int(r["paired"]), "cohort": "frozen"} for r in rows}
     require(len(result) == len(rows), "duplicate historical family")
     for r in COHORT["supplemental_families"]:
         require(r["family"] not in result, "duplicate supplemental family")
-        result[r["family"]] = {"originals": r["originals"], "historical": None}
+        result[r["family"]] = {"originals": r["originals"], "historical": None, "cohort": "supplemental"}
     return result
 
 
@@ -90,23 +91,42 @@ def validate_record(r, kind, family_names):
     return r
 
 
+def parse_result(line, module):
+    match = RESULT.fullmatch(line)
+    if not match: return None
+    test_id, status = match.group(2), match.group(3)
+    if test_id.startswith("__main__."):
+        test_id = module + test_id[len("__main__"):]
+    outcome = "pass" if status == "ok" else "skip" if status.startswith("skipped ") else "fail" if status in {"FAIL", "unexpected success", "expected failure"} else "error"
+    return test_id, outcome
+
+
+def source_module(source_path):
+    path = Path(source_path)
+    require(path.parts[:1] == ("Lib",) and path.suffix == ".py", f"invalid CPython test source path: {source_path}")
+    parts = list(path.with_suffix("").parts[1:])
+    if parts[-1] == "__init__": parts.pop()
+    return ".".join(parts)
+
+
 def verify_stdlib_evidence(r):
     source = r["source"]
     vendored = ROOT / "benchmarks/cpython_stdlib/full" / r["family"] / "upstream" / source["path"]
     if vendored.is_file():
         data = vendored.read_bytes()
         require(hashlib.sha256(data).hexdigest() == source["sha256"] and hashlib.sha1(f"blob {len(data)}\0".encode() + data).hexdigest() == source["git_blob"], f"{r['id']}: source hash differs from vendored upstream")
-    suffix = ".".join(r["id"].split(".")[-2:])
-    statuses = {"pass": ("ok",), "fail": ("FAIL", "expected failure", "unexpected success"), "error": ("ERROR",), "skip": ("skipped ",)}
+    module = source_module(source["path"])
     for tier, run in r["runs"].items():
-        if run["outcome"] not in statuses: continue
+        if run["outcome"] not in {"pass", "fail", "error", "skip"}: continue
         evidence = run["evidence"]
         match = re.fullmatch(r"(.+)#L([1-9][0-9]*)", evidence)
         require(bool(match), f"{r['id']}: {tier} needs a raw evidence line")
         path = (ROOT / match.group(1)).resolve()
         require(path.is_relative_to(ROOT.resolve()) and path.is_file(), f"{r['id']}: missing evidence {evidence}")
         lines = path.read_text().splitlines(); line = int(match.group(2))
-        require(line <= len(lines) and suffix in lines[line-1] and any(f" ... {status}" in lines[line-1] for status in statuses[run["outcome"]]), f"{r['id']}: {tier} evidence does not establish outcome")
+        result = parse_result(lines[line-1], module) if line <= len(lines) else None
+        occurrence = sum(parsed is not None and parsed[0] == r["id"] for parsed in (parse_result(text, module) for text in lines[:line]))
+        require(result == (r["id"], run["outcome"]) and occurrence == r["occurrence"], f"{r['id']}: {tier} evidence does not establish exact ID, occurrence and outcome")
 
 
 def load_records(kind, names):
@@ -154,19 +174,24 @@ def outcome_text(counts, n):
 
 def render(view):
     fs, scripts = summary()
-    total = sum(r["originals"] for r in fs.values())
-    receipts = sum(r["receipts"] for r in fs.values())
-    paired = sum(r["paired"] for r in fs.values())
-    script_paired = sum(r["paired"] for r in scripts)
+    frozen = {n: r for n, r in fs.items() if r["cohort"] == "frozen"}
+    supplemental = {n: r for n, r in fs.items() if r["cohort"] == "supplemental"}
+    def totals(rows):
+        return tuple(sum(r[k] for r in rows.values()) for k in ("originals", "receipts", "paired"))
+    raw, received, paired = totals(frozen)
+    sup_raw, sup_received, sup_paired = totals(supplemental)
     expected = COHORT["scripts"]["expected_commands"]
-    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Stdlib: **{paired:,} verified paired passes**, **{receipts:,} original-test receipts** of **{total:,} raw upstream originals**; **{total-receipts:,} originals have no receipt**. Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{script_paired} verified paired passes**; **{expected-len(scripts)} not run**.", "", "| Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | --- | ---: |"]
-    selected = sorted(fs) if view == "stdlib" else sorted(n for n,r in fs.items() if r["receipts"] or n == "argparse")
-    for name in selected:
-        r = fs[name]; n = r["originals"]
-        pair = "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
-        hist = "—" if r["historical"] is None else f"{r['historical']:,}"
-        lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {pair} | {hist} |")
-    if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every family, including those not run."]
+    lines = [START, "### Pinned compatibility scorecard", "", f"Revision `{COHORT['imre_revision']}` · CPython **{COHORT['cpython_version']}** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.", "", f"Frozen {len(frozen)}-family cohort: **{received:,} pinned receipts** of **{raw:,} raw upstream originals**, **{paired:,} verified paired passes**; **{raw-received:,} originals have no receipt**.", "", f"Supplemental pilots, outside the frozen cohort: **{sup_received:,} receipts** of **{sup_raw:,} originals**, **{sup_paired:,} verified paired passes**.", "", f"Scripts: **{len(scripts)} of {expected} original commands have receipts**, **{sum(r['paired'] for r in scripts)} verified paired passes**; **{expected-len(scripts)} not run**."]
+    def table(title, rows):
+        lines.extend(["", f"#### {title}", "", "| Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |", "| --- | ---: | --- | --- | --- | --- | ---: |"])
+        for name, r in sorted(rows.items()):
+            n = r["originals"]
+            pair = "unknown (not run)" if not r["receipts"] else f"{r['paired']:,} verified" + (f"; {n-r['receipts']:,} unknown" if r["receipts"] < n else "")
+            hist = "—" if r["historical"] is None else f"{r['historical']:,}"
+            lines.append(f"| `{name}` | {n:,} | " + " | ".join(outcome_text(r["runs"][t], n) for t in TIERS) + f" | {pair} | {hist} |")
+    table("Frozen cohort", frozen if view == "stdlib" else {n: r for n, r in frozen.items() if r["receipts"] or n == "argparse"})
+    if supplemental: table("Supplemental pilots", supplemental)
+    if view == "readme": lines += ["", "The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run."]
     prefix = "../" if view == "stdlib" else ""
     lines += ["", f"A paired pass requires the same original to pass stock, O0 and O3; script passes also require exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger]({prefix}{COHORT['historical_families']}) and are separate from the pinned result. [Receipts and replay instructions]({prefix}benchmarks/compatibility/README.md).", END]
     return "\n".join(lines)

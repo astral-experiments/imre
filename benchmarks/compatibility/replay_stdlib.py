@@ -11,9 +11,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from scorecard import COHORT, HERE, ROOT, SCHEMA, require
+from scorecard import COHORT, HERE, ROOT, SCHEMA, parse_result, require
 
-RESULT = re.compile(r"^([^\s]+) \(([^)]+)\) \.\.\. (ok|FAIL|ERROR|skipped .+|expected failure|unexpected success)$")
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.M)
 
 
@@ -31,12 +30,9 @@ def write_log(path, data): path.write_bytes(data)
 def parse(stderr, module, complete=True):
     text = stderr.decode("utf-8", errors="replace"); results = []; occurrences = {}
     for line_num, line in enumerate(text.splitlines(), 1):
-        m = RESULT.match(line)
-        if not m: continue
-        test_id = m.group(2)
-        if test_id.startswith("__main__."): test_id = module + test_id[len("__main__"):]
-        status = m.group(3)
-        outcome = "pass" if status == "ok" else "skip" if status.startswith("skipped ") else "fail" if status in {"FAIL", "unexpected success", "expected failure"} else "error"
+        result = parse_result(line, module)
+        if not result: continue
+        test_id, outcome = result
         occurrences[test_id] = occurrences.get(test_id, 0) + 1
         results.append((test_id, occurrences[test_id], outcome, line_num))
     if complete:

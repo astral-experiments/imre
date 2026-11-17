@@ -30,7 +30,13 @@ class ScorecardTests(unittest.TestCase):
 
     def test_pilot_and_unreplayed_denominators(self):
         fs, scripts = scorecard.summary()
-        self.assertEqual((fs["errno"]["originals"], fs["errno"]["paired"], fs["errno"]["receipts"]), (3, 3, 3))
+        self.assertEqual((fs["errno"]["originals"], fs["errno"]["paired"], fs["errno"]["receipts"], fs["errno"]["cohort"]), (3, 3, 3, "supplemental"))
+        frozen = [r for r in fs.values() if r["cohort"] == "frozen"]
+        self.assertEqual((len(frozen), sum(r["originals"] for r in frozen)), (45, 16225))
+        for view in ("readme", "stdlib"):
+            rendered = scorecard.render(view)
+            self.assertIn(f"Frozen 45-family cohort: **{sum(r['receipts'] for r in frozen):,} pinned receipts** of **16,225 raw upstream originals**", rendered)
+            self.assertIn("Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**", rendered)
         self.assertEqual((fs["argparse"]["originals"], fs["argparse"]["historical"]), (1893, 1887))
         readme_row = next(line for line in scorecard.render("readme").splitlines() if line.startswith("| `argparse`"))
         self.assertIn(readme_row, scorecard.render("stdlib").splitlines())
@@ -44,7 +50,19 @@ class ScorecardTests(unittest.TestCase):
 
     def test_pilot_evidence_is_verified(self):
         r = json.loads((scorecard.HERE / "stdlib/errno.jsonl").read_text().splitlines()[0]); r["runs"]["O0"]["evidence"] = r["runs"]["O0"]["evidence"].replace("#L1", "#L3")
-        with self.assertRaisesRegex(ValueError, "does not establish outcome"): scorecard.verify_stdlib_evidence(r)
+        with self.assertRaisesRegex(ValueError, "does not establish exact ID, occurrence and outcome"): scorecard.verify_stdlib_evidence(r)
+
+    def test_colliding_class_method_suffix_is_not_the_original_id(self):
+        r = json.loads((scorecard.HERE / "stdlib/errno.jsonl").read_text().splitlines()[0])
+        r["id"] = r["id"].replace("test.test_errno.", "test.test_other.")
+        with self.assertRaisesRegex(ValueError, "does not establish exact ID"):
+            scorecard.verify_stdlib_evidence(r)
+
+    def test_occurrence_must_match_the_raw_line(self):
+        r = json.loads((scorecard.HERE / "stdlib/errno.jsonl").read_text().splitlines()[0])
+        r["occurrence"] = 2
+        with self.assertRaisesRegex(ValueError, "does not establish exact ID, occurrence"):
+            scorecard.verify_stdlib_evidence(r)
 
 
 if __name__ == "__main__": unittest.main()

@@ -112,14 +112,25 @@ with Rust-competitive performance.
 
 Revision `49f0dc2ef78b82692e333252faf71b4fc7730949` · CPython **3.14.5** · Linux x86-64. These are original-test receipts at this revision, not cumulative credits.
 
-Stdlib: **3 verified paired passes**, **3 original-test receipts** of **16,228 raw upstream originals**; **16,225 originals have no receipt**. Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes**; **84 not run**.
+Frozen 45-family cohort: **0 pinned receipts** of **16,225 raw upstream originals**, **0 verified paired passes**; **16,225 originals have no receipt**.
+
+Supplemental pilots, outside the frozen cohort: **3 receipts** of **3 originals**, **3 verified paired passes**.
+
+Scripts: **0 of 84 original commands have receipts**, **0 verified paired passes**; **84 not run**.
+
+#### Frozen cohort
 
 | Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |
 | --- | ---: | --- | --- | --- | --- | ---: |
 | `argparse` | 1,893 | not run | not run | not run | unknown (not run) | 1,887 |
+
+#### Supplemental pilots
+
+| Family | Raw originals | Stock | O0 | O3 | Paired at pin | Historical mixed-revision credits |
+| --- | ---: | --- | --- | --- | --- | ---: |
 | `errno` | 3 | 3 pass | 3 pass | 3 pass | 3 verified | — |
 
-The [stdlib report](docs/stdlib.md) lists every family, including those not run.
+The [stdlib report](docs/stdlib.md) lists every frozen family, including those not run.
 
 A paired pass requires the same original to pass stock, O0 and O3; script passes also require exact exit, stdout, stderr and effect comparisons. Skips, omissions, unsupported diagnostics, exclusions, timeouts and non-stock successes never count. Historical credits come from the [frozen mixed-revision ledger](benchmarks/cpython_stdlib/full/frozen-stock-intersection-8818.tsv) and are separate from the pinned result. [Receipts and replay instructions](benchmarks/compatibility/README.md).
 <!-- compatibility-scorecard:end -->
