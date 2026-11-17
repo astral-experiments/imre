@@ -1,0 +1,69 @@
+{
+  "command": [
+    "/workspace/scratch/imre-target-8571/release/imre",
+    "build",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py",
+    "--module-root",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict",
+    "--extension-path",
+    "/workspace/scratch/glob-logging-8571/fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/scratch/imre-target-8571/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "--include-module",
+    "test.test_glob",
+    "-o",
+    "/workspace/scratch/glob-strict-8571/gate.exe"
+  ],
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/override:/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/node/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin:/opt/codex/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/agent/.local/bin:/opt/codex/runtimes/codex-primary-runtime/dependencies/bin/fallback",
+    "TMPDIR": "/workspace/scratch/glob-strict-8571/tmp",
+    "PYTHONPATH": "/workspace/scratch/glob-logging-8571/fixtures/Lib",
+    "IMRE_PYTHON": "/workspace/scratch/imre-target-8571/release/imre",
+    "IMREFLAGS": "--opt-level 0"
+  },
+  "supervisor_exit": 0,
+  "image_exists": false,
+  "family": "glob",
+  "launcher_sha256": "1386083c383eccf300e03f349d97d06770500ee64821bb33bcec4b64fa1a293e",
+  "first_party_module": "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/glob_poison.py",
+  "first_party_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "build": {
+    "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+    "tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+    "clean": true,
+    "cli_sha256": "97cbb30865ac752ddfa4e0430a4126e47ebb3efba894842c41a93fe60d641483",
+    "runtime_sha256": "bf866ff965e659f21123e264fb1c898f1428e322d1f9dbcb62b937fd99c33e9f",
+    "clang_sha256": "8ef402d453d1ba4902e4ee0f0f847f6cfa01400c95aa43c24e97818b9c0e3f45",
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/scratch/imre-target-8571"
+    ],
+    "result": "    Finished `release` profile [optimized + debuginfo] target(s) in 6m 20s",
+    "source_checkout": "/workspace/scratch/imre-source-8571",
+    "target_seed": "/workspace/imre/target",
+    "packages_cleaned": [
+      "imre-compiler",
+      "imre-runtime"
+    ],
+    "compiler_depfile_sha256": "451090b41047a768d2e9757719ac0e8fc3eccb5a80bfc0663b2cb059bf4e3140",
+    "runtime_depfile_sha256": "44474cc88f1087e0352af49a774762ccaaf4cf571ae62322d7ebdcd7ad55f891"
+  }
+}

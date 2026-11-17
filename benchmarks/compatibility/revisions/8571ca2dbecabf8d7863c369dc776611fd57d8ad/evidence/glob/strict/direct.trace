@@ -1,0 +1,32 @@
+10042 execve("/workspace/scratch/glob-strict-8571/raw-control-probe", ["/workspace/scratch/glob-strict-8571/raw-control-probe", "gate", "/workspace/scratch/glob-strict-8571/direct.exe", "/workspace/scratch/imre-target-8571/release/imre", "build", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py", "--module-root", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict", "--extension-path", "/workspace/scratch/glob-logging-8571/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/scratch/imre-target-8571/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_glob", "-o", "/workspace/scratch/glob-strict-8571/direct.exe"], 0x7fffab838438 /* 79 vars */) = 0
+10042 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10042 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10042 newfstatat(AT_FDCWD, "/workspace/scratch/glob-strict-8571/direct.exe", 0x7ffe2c69a820, 0) = -1 ENOENT (No such file or directory)
+10042 wait4(10043,  <unfinished ...>
+10043 execve("/workspace/scratch/imre-target-8571/release/imre", ["/workspace/scratch/imre-target-8571/release/imre", "build", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py", "--module-root", "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict", "--extension-path", "/workspace/scratch/glob-logging-8571/fixtures/Lib", "--no-cache", "--quiet", "--opt-level", "0", "--runtime", "/workspace/scratch/imre-target-8571/release/libimre_runtime.a", "--clang", "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang", "--include-module", "test.test_glob", "-o", "/workspace/scratch/glob-strict-8571/direct.exe"], 0x7ffe2c69cba0 /* 79 vars */) = 0
+10043 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict/launcher.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+10043 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_glob.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support/__init__.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support/os_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support/import_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat2(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/support/script_helper.py", {flags=O_RDONLY|O_LARGEFILE|O_CLOEXEC, resolve=RESOLVE_NO_SYMLINKS}, 24) = 3
+10043 openat(AT_FDCWD, "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/glob/strict", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10043 openat(AT_FDCWD, "/workspace/scratch/glob-logging-8571/fixtures/Lib", O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY) = 3
+10043 exit_group(1)                     = ?
+10042 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 1}], 0, NULL) = 10043
+10042 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=10043, si_uid=1000, si_status=1, si_utime=29 /* 0.29 s */, si_stime=14 /* 0.14 s */} ---
+10042 newfstatat(AT_FDCWD, "/workspace/scratch/glob-strict-8571/direct.exe", 0x7ffe2c69a820, 0) = -1 ENOENT (No such file or directory)
+10042 exit_group(0)                     = ?

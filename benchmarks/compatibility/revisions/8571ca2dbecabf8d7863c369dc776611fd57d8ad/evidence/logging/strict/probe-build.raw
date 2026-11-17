@@ -1,0 +1,7 @@
++ gcc -O2 /workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c -o /workspace/scratch/logging-strict-8571/raw-control-probe
++ gcc -O2 /workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c -o /workspace/scratch/logging-strict-8571/raw-control-probe.verify
++ sha256sum /workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c /workspace/scratch/logging-strict-8571/raw-control-probe /workspace/scratch/logging-strict-8571/raw-control-probe.verify
+fa57a3d90c735b76210df621af5e32619afb282729922246da93c836d9437cd2  /workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/controls/raw_control_probe_sources.c
+1294e97884c87cd49368a05ebbcd89962081b52663a2e9d955f8bd5ecded2a36  /workspace/scratch/logging-strict-8571/raw-control-probe
+1294e97884c87cd49368a05ebbcd89962081b52663a2e9d955f8bd5ecded2a36  /workspace/scratch/logging-strict-8571/raw-control-probe.verify
++ cmp /workspace/scratch/logging-strict-8571/raw-control-probe /workspace/scratch/logging-strict-8571/raw-control-probe.verify

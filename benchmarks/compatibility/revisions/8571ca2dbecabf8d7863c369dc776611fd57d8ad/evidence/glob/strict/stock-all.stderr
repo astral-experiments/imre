@@ -1,0 +1,74 @@
+IMRE_UNITTEST {"event": "collection", "count": 24}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_escape"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_escape_windows"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_broken_symlinks"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_directory_names"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_empty_pattern"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_literal"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_magic_in_drive"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_many_open_files"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_named_pipe"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_nested_directory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_non_directory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_one_directory"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_glob_symlinks"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_hidden_glob"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_recursive_glob"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_translate"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_translate_include_hidden"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_translate_matching"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_translate_recursive"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_glob.GlobTests.test_translate_seps"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_escape"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_escape", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_escape_windows"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_escape_windows", "outcome": "skip", "details": ["Win32 specific test"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_broken_symlinks"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_broken_symlinks", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_directory_names"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_directory_names", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_empty_pattern"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_empty_pattern", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_literal"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_literal", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_magic_in_drive"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_magic_in_drive", "outcome": "skip", "details": ["Win32 specific test"]}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_many_open_files"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_many_open_files", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_named_pipe"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_named_pipe", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_nested_directory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_nested_directory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_non_directory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_non_directory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_one_directory"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_one_directory", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_glob_symlinks"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_glob_symlinks", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_hidden_glob"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_hidden_glob", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_recursive_glob"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_recursive_glob", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_translate"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_translate", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_translate_include_hidden"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_translate_include_hidden", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_translate_matching"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_translate_matching", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_translate_recursive"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_translate_recursive", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_glob.GlobTests.test_translate_seps"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_glob.GlobTests.test_translate_seps", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 24, "successful": true}

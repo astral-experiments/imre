@@ -1,0 +1,52 @@
+{
+  "schema": "imre.compatibility.run-only.v1",
+  "family": "logging",
+  "tier": "O3",
+  "controller_sha256": "6fb3743249fd5ca463e2ffecaed557b7b1674734b734ff6b7a5629cd7f7e57c6",
+  "archive_sha256": "9914eb9b31dc81bae36e6617a1dded5a47dbcdbb24451d76fdecc958294a9484",
+  "argv": [
+    "/usr/bin/strace",
+    "-f",
+    "-y",
+    "-qq",
+    "-s",
+    "512",
+    "-e",
+    "trace=execve,execveat,open,openat,openat2,creat,io_uring_setup,newfstatat,rename,wait4,waitid,exit,exit_group,chdir,fchdir,close,close_range,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork",
+    "-o",
+    "/workspace/scratch/imre-8571-evidence-stage/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/run-only/logging/O3/trace.raw",
+    "/workspace/scratch/logging-strict-8571/raw-control-probe",
+    "withdraw",
+    "/workspace/scratch/glob-logging-8571/fixtures/Lib/test",
+    "/workspace/scratch/glob-logging-8571/fixtures/Lib/test.raw-control-stash",
+    "/workspace/scratch/glob-logging-8571/fixtures/Lib/test/test_logging.py",
+    "/workspace/scratch/logging-strict-8571/O3.exe"
+  ],
+  "cwd": "/workspace/scratch/logging-strict-8571/empty",
+  "environment": {
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "PATH": "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin",
+    "TMPDIR": "/workspace/scratch/logging-strict-8571/tmp",
+    "PYTHONPATH": "/workspace/scratch/glob-logging-8571/fixtures/Lib",
+    "IMRE_PYTHON": "/workspace/scratch/imre-target-8571/release/imre",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_WITHDRAW_LAUNCHER": "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py",
+    "IMRE_WITHDRAW_ARCHIVE": "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip"
+  },
+  "timeout_seconds": 30,
+  "seconds": 2.386,
+  "exit_code": 0,
+  "image_sha256_before": "043156ee53427b262b0b914d7a9980860fa675631ff73ccc2b7e757193938ab6",
+  "image_sha256_after": "043156ee53427b262b0b914d7a9980860fa675631ff73ccc2b7e757193938ab6",
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "a71155c90219b6bbfbb7fabad6c8fa99cf9e14d8f21132637aa7a8fc9e9bce88",
+  "trace_sha256": "c9f629dfb084aa1e15ed3191ae5c56688fb78f80ecee6cd1555c299bfe86b563",
+  "original_output_equal": true,
+  "restored_source_sha256": "529fb98e8a0890d562d8d8903c09700635ad8f67cef4bad6f749f89d3442a563",
+  "restored_extra_sha256": {
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/launcher.py": "d3a8f0ea4b89cf97b496da290321c63120818ae5f85ccebdccdb7b16f9b8f5ec",
+    "/workspace/scratch/imre-8571-glob-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/logging/strict/stock.source.zip": "4c20c1b660201205d308f1eded635a194336f619ea07232b14407f191f07029e"
+  }
+}
