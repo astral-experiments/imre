@@ -1,3 +1,8 @@
+# Keep runtime Python signatures unannotated while checked callers use source contracts.
+_safe_repr.__annotations__ = {}
+TestCase._formatMessage.__annotations__ = {}
+TestCase.fail.__annotations__ = {}
+TestCase.assertNotEqual.__annotations__ = {}
 _baseAssertEqual.__annotations__ = {}
 assertMultiLineEqual = TestCase.assertMultiLineEqual
 # Keep the public Python signature while fixed callers use the class declaration.
@@ -82,12 +87,6 @@ def assertSetEqual(self, set1, set2, msg=None):
 
     standardMsg = '\n'.join(lines)
     self.fail(self._formatMessage(msg, standardMsg))
-
-
-def assertNotEqual(self, first, second, msg=None):
-    if not first != second:
-        msg = self._formatMessage(msg, f"{_safe_repr(first)!s} == {_safe_repr(second)!s}")
-        raise self.failureException(msg)
 
 
 def assertLess(self, a, b, msg=None):
@@ -214,7 +213,6 @@ assertDictEqual.__qualname__ = "TestCase.assertDictEqual"
 TestCase.assertDictEqual = assertDictEqual
 assertSetEqual.__qualname__ = "TestCase.assertSetEqual"
 TestCase.assertSetEqual = assertSetEqual
-TestCase.assertNotEqual = assertNotEqual
 TestCase.assertLess = assertLess
 TestCase.assertLessEqual = assertLessEqual
 TestCase.assertGreater = assertGreater
