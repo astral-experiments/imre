@@ -1,0 +1,137 @@
+IMRE_UNITTEST {"event": "collection", "count": 45}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_string"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length0"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length1"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length2"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length3"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_string"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_1_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_2_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_3_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_None_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_oneormore_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_optional_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_parser_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_remainder_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length0"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length0", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length1"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length1", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length2"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length2", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length3"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_length3", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_string"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_argparse.TestAddArgumentMetavar.test_nargs_zeroormore_metavar_string", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 45, "successful": true}
