@@ -62,11 +62,12 @@ class SnapshotTests(unittest.TestCase):
     def test_successful_open_paths_distinguishes_fd_returns_and_resolves_dirfds(self):
         trace = "\n".join((
             '10 open("/etc/ld.so.cache", O_RDONLY) = 3',
+            '10 creat("created.py", 0666) = 6',
             '10 openat(AT_FDCWD, "/Lib/test", O_RDONLY|O_DIRECTORY) = 4',
             '10 openat2(4, "__pycache__/test_leaf.pyc", {flags=O_RDONLY}, 24) = 5',
             '10 openat(AT_FDCWD, "/Lib/test/missing.py", O_RDONLY) = -1 ENOENT (No such file or directory)',
         ))
-        self.assertEqual(list(scorecard.successful_open_paths(trace, "/work")), [Path("/etc/ld.so.cache"), Path("/Lib/test"), Path("/Lib/test/__pycache__/test_leaf.pyc")])
+        self.assertEqual(list(scorecard.successful_open_paths(trace, "/work")), [Path("/etc/ld.so.cache"), Path("/work/created.py"), Path("/Lib/test"), Path("/Lib/test/__pycache__/test_leaf.pyc")])
 
     def test_selector_pins_cohort_and_keeps_repository_root(self):
         canonical_root = scorecard.ROOT

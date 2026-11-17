@@ -449,12 +449,12 @@ def successful_open_paths(text, cwd):
     """Decode successful strace open calls, resolving relative dirfd paths."""
     descriptors = {}; quoted = r'"(?:\\.|[^"\\])*"'
     for line in text.splitlines():
-        call = re.search(r"\b(open|openat|openat2)\((.*)\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s|$)", line)
+        call = re.search(r"\b(open|openat|openat2|creat)\((.*)\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s|$)", line)
         if not call or int(call.group(3)) < 0: continue
         operation, args, fd = call.group(1), call.group(2), int(call.group(3))
         pid = re.match(r"\s*(?:\[pid\s+(\d+)\]|(\d+))\s+", line)
         pid = (pid.group(1) or pid.group(2)) if pid else "main"
-        if operation == "open":
+        if operation in {"open", "creat"}:
             match = re.match(rf"({quoted})(?:,|$)", args); base = cwd
         else:
             match = re.match(rf"([^,]+),\s*({quoted})(?:,|$)", args)
@@ -463,7 +463,7 @@ def successful_open_paths(text, cwd):
             if base is None and "<" in dirfd and dirfd.endswith(">"):
                 base = dirfd.split("<", 1)[1][:-1]
         require(match is not None, "cannot decode successful open in saved-image trace")
-        try: name = ast.literal_eval(match.group(1 if operation == "open" else 2))
+        try: name = ast.literal_eval(match.group(1 if operation in {"open", "creat"} else 2))
         except (ValueError, SyntaxError): require(False, "invalid open path in saved-image trace")
         require(isinstance(name, str) and (name.startswith("/") or isinstance(base, str) and base.startswith("/")), "unresolved successful relative open in saved-image trace")
         path = posixpath.normpath(name if name.startswith("/") else posixpath.join(base, name))

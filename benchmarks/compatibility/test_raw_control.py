@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import re
 import tempfile
 import unittest
 from collections import Counter
@@ -39,6 +40,73 @@ class RawControlTests(unittest.TestCase):
         child=[r for r in rows if r['family']=='base64' and '.TestMain.' in r['id']]
         self.assertEqual(len(child),5)
         self.assertTrue(all(r['runs']['stock']['outcome']=='pass' and all(r['runs'][t]['outcome']=='not_run' for t in ('O0','O3')) and r['omission_reason'] is None and not r['paired'] for r in child))
+
+    def rehashed_csv_trace(self, tmp, call, padded=False):
+        entry = self.entries['csv']
+        binding = json.loads((scorecard.ROOT / entry['sources']['binding']).read_text())
+        artifacts = binding['cohorts']['finite-native']['artifacts']
+        lines = (scorecard.ROOT / artifacts['O0_trace']).read_text().splitlines()
+        child = next(line.split()[0] for line in lines if 'execve(' in line and 'csv-O0.exe", [' in line and 'withdraw' not in line)
+        ix = next(i for i, line in enumerate(lines) if line.startswith(child + ' exit_group('))
+        calls = call if isinstance(call, list) else [call]
+        lines[ix:ix] = [f'{child} {item}' for item in calls]
+        trace = '\n'.join(lines) + '\n'
+        if padded:
+            trace = re.sub(r'^(\d+) ', r'\1  ', trace, flags=re.M)
+        witness = tmp / 'witness.trace'; witness.write_text(trace)
+        artifacts['O0_trace'] = locator(witness); entry['files'][locator(witness)] = digest(witness)
+        bound = tmp / 'binding.json'; bound.write_text(json.dumps(binding) + '\n')
+        entry['sources']['binding'] = locator(bound); entry['files'][locator(bound)] = digest(bound)
+
+    def test_rehashed_enoent_probe_is_allowed_with_padded_pid(self):
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+            self.rehashed_csv_trace(Path(tmp), 'openat(AT_FDCWD, "test_csv.py", O_RDONLY) = -1 ENOENT (No such file or directory)', padded=True)
+            self.assertEqual(sum(r['paired'] for r in self.rows() if r['family']=='csv'), 122)
+
+    def test_rehashed_successful_source_read_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+            self.rehashed_csv_trace(Path(tmp), 'openat(AT_FDCWD, "test_csv.py", O_RDONLY) = 3')
+            with self.assertRaisesRegex(ValueError, 'native opened CPython, libpython, withdrawn source or matching bytecode'):
+                self.rows()
+
+    def test_rehashed_other_source_errors_are_rejected(self):
+        original = copy.deepcopy(self.entries['csv'])
+        for errno in ('EACCES', 'EINTR'):
+            with self.subTest(errno=errno), tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+                self.entries['csv'] = copy.deepcopy(original)
+                self.rehashed_csv_trace(Path(tmp), f'openat(AT_FDCWD, "test_csv.py", O_RDONLY) = -1 {errno} (error)')
+                with self.assertRaisesRegex(ValueError, 'native opened CPython, libpython, withdrawn source or matching bytecode'):
+                    self.rows()
+
+    def test_rehashed_python_and_libpython_probes_reject_even_enoent(self):
+        original = copy.deepcopy(self.entries['csv'])
+        for call in ('openat(AT_FDCWD, "/usr/bin/python3", O_RDONLY) = -1 ENOENT (missing)',
+                     'newfstatat(AT_FDCWD, "/usr/lib/libpython3.14.so", 0x0, 0) = -1 ENOENT (missing)'):
+            with self.subTest(call=call), tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+                self.entries['csv'] = copy.deepcopy(original)
+                self.rehashed_csv_trace(Path(tmp), call)
+                with self.assertRaisesRegex(ValueError, 'native probed CPython or libpython'):
+                    self.rows()
+
+    def test_rehashed_successful_creat_and_relative_dirfd_read_reject(self):
+        original = copy.deepcopy(self.entries['csv'])
+        binding = json.loads((scorecard.ROOT / original['sources']['binding']).read_text())
+        gate = json.loads((scorecard.ROOT / binding['cohorts']['finite-native']['artifacts']['gate']).read_text())
+        lib = scorecard.option(gate['command'], '--extension-path')
+        witnesses = ['creat("test_csv.py", 0666) = 3',
+                     [f'open("{lib}", O_RDONLY|O_DIRECTORY) = 88', 'openat(88, "test/support/__init__.py", O_RDONLY) = 89']]
+        for call in witnesses:
+            with self.subTest(call=call), tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+                self.entries['csv'] = copy.deepcopy(original)
+                self.rehashed_csv_trace(Path(tmp), call)
+                with self.assertRaisesRegex(ValueError, 'native opened CPython, libpython, withdrawn source or matching bytecode'):
+                    self.rows()
+
+    def test_rehashed_failed_child_exec_attempt_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as tmp:
+            self.rehashed_csv_trace(Path(tmp), 'execve("/usr/bin/python3", ["/usr/bin/python3"], 0x0) = -1 ENOENT (No such file or directory)')
+            with self.assertRaisesRegex(ValueError, 'native child exec is unverified'):
+                self.rows()
 
     def test_rehashed_raw_openat2_witness_is_rejected(self):
         entry=self.entries['csv']; binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text())
