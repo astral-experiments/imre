@@ -1,0 +1,602 @@
+[
+  {
+    "id": "test.test_glob.GlobTests.test_escape",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_escape"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.35,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "23ef280807badca29ad255f636c9dadc4df402502a90927379f97b76edc80e5e",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_escape_windows",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_escape_windows"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.426,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "c67234b9df4885fefd23ce0017c718cdac989913cd69f1de69f7ea4ee9e74eec",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob0",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob0"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.36,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "a2308d577a2445354af1255c2067255c594f769b3512cea03def55598d44cbe5",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob1",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob1"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.34,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "f8516e09cc3aafe43b8572582802d76d24c5920c663e844de7331c97ea50dbcc",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_broken_symlinks"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.353,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "ff6a674e6d410f2715b8b5fc1a63eaa0f5128f111506f815093e1534fb53da2b",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.333,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e36fafa4b76b18377d2b6d824decb2154189e3181a9b9eb0cc098ad4c1da1f78",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_directory_names",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_directory_names"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.42,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e20c681c8f259dd6e337b45fb676488e2b3afe47f0cdd52d7175fd423df1b6ca",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_directory_with_trailing_slash"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.406,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e418bc7bf7747ada16cf33f558a6e060def5b219602c711dcccafc818a582028",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_empty_pattern"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.333,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "428aa27dcee2e7235a7d6e0bf340d5074e0888d3276651f83f93491d8e8b7b17",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_literal",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_literal"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.364,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "58ffc701eea17aaa137f76022d83bf0969fd60680c414da2668685f1e23522f9",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_magic_in_drive",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_magic_in_drive"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.32,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "57daa3336d7b0379158764302857dfd8a52356ef02a3a4b19d1b3c0e4c2071a9",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_many_open_files",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_many_open_files"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": -9,
+    "timed_out": true,
+    "elapsed_seconds": 8.006,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "31a4e77633e9de0c66696ba77473fad0cedd559c2b2eced48628f0ab7102027a",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_named_pipe"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.388,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "89fd25adfc654042e91eba8a457f54e1013d30847c0dd5664b887a7f3ac234a0",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_nested_directory"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.353,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e00cbada2e6e605afc5eb6decba7e5161ba59f2cd024a229cc4384c02dc06369",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_non_directory",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_non_directory"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.388,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "bab368a26234b4b8ec5ce2f678d4a0824c21f56c55fb2199ff61aa6ea3f473f4",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_one_directory",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_one_directory"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.48,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "45e905bff35a68a123ee5f1492be6f7012914bfb9dce23c2a1e3e50678be2026",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_glob_symlinks",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_glob_symlinks"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.378,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "591118c2a14d5adec18dcd1d481baa0b3d77dc29460c37813866126ccd5346f3",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_hidden_glob",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_hidden_glob"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.379,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "e1c21dae927e5ae216ccd4bf2dc23f177390834e68cd4ad9428a8e11f24d89e2",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_recursive_glob",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_recursive_glob"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 1.537,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "d051f43e5b12209d2bbceaf1c102033f3f80fbd6ead78f09408b24930f83172f",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_translate",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_translate"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.343,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "d89c78b8949cdc9814e1435e257d8a8eeff1fca63917bc1ed9888f1c35046147",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_translate_include_hidden"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.34,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "60efed44ccf39ad255ba93ed634acdd5d1b304d9719de06fbcefe3ea203bcb3d",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_translate_matching",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_translate_matching"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.336,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "8c17b2036b1172ff10650ee3d24d73d30bfcbef7ad025099ec8f957367f38955",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_translate_recursive",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_translate_recursive"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.337,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "2d9bf15fec23e29419fe1a4cad177c4eb7f9e994a187c9cf8c3a505e83cf14ec",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  },
+  {
+    "id": "test.test_glob.GlobTests.test_translate_seps",
+    "occurrence": 1,
+    "argv": [
+      "/workspace/scratch/8571-refresh/glob/O0.exe",
+      "-v",
+      "GlobTests.test_translate_seps"
+    ],
+    "cwd": "/workspace/scratch/8571-refresh/glob",
+    "timeout_seconds": 8,
+    "exit_code": 0,
+    "timed_out": false,
+    "elapsed_seconds": 0.406,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "5570c5dfb3dc228f87c5ac17de5951390acc6737fa89ab66ad3a4cddb346a51e",
+    "environment": {
+      "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHON_COLORS": "0",
+      "NO_COLOR": "1",
+      "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+      "IMREFLAGS": "--opt-level 0",
+      "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+    }
+  }
+]

@@ -1,0 +1,34 @@
+{
+  "guard_source_sha256": "8c9a25f9b597347dd228a9b29339cfb79cda67d9da64884afd84608f1779339d",
+  "guard_so_sha256": "32376a734ccdf81d73c0c50e9981dd392c92a5b1adb6fd0f46719b3fd90c8dc1",
+  "guard_build_argv": [
+    "/usr/bin/cc",
+    "-shared",
+    "-fPIC",
+    "-O2",
+    "/workspace/scratch/stdlib-architecture/guard/exec_guard.c",
+    "-ldl",
+    "-o",
+    "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+  ],
+  "probe_source_sha256": "07139395f058bb446a1537dc3b1ebef0bf261da0ca6f1ae40c165e9c44858c1c",
+  "probe_build_argv": [
+    "/usr/bin/cc",
+    "/workspace/scratch/stdlib-architecture/guard/dlopen_probe.c",
+    "-ldl",
+    "-o",
+    "/workspace/scratch/stdlib-architecture/guard/dlopen_probe"
+  ],
+  "dlopen_probe": {
+    "argv": [
+      "/workspace/scratch/stdlib-architecture/guard/dlopen_probe"
+    ],
+    "environment": {
+      "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+    },
+    "exit_code": 0,
+    "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderr_sha256": "91cc552971ba1ed7c9c04c007b2130636749aec358b0d681eacec9a4c8f54897"
+  },
+  "restriction": "LD_PRELOAD constructor checks no libpython maps, installs an inherited seccomp filter denying execve/execveat and x32, and rejects dlopen names containing libpython."
+}

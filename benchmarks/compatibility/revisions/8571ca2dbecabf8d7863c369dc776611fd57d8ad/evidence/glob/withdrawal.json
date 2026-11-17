@@ -1,0 +1,1267 @@
+{
+  "candidate_originals": 21,
+  "runs": {
+    "O0": {
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "no_libpython_dependency": true,
+      "commands": [
+        {
+          "id": "test.test_glob.GlobTests.test_escape",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_escape"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.372,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "491bc480a0e0db57aa7cde93c12cc1411a9b48eb6213055889f721f018139018",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob0",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob0"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.364,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1bac5033a6ee2adfe3e51443f24f3ff0baafd09e6102e85c1e80f126557569e8",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob1",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob1"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.452,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "f6e32754c4de2b2e1e7171598627eef2e935ef46c788aed0060718062a477fcd",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_broken_symlinks"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.403,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c23febaef4933a42c4d802e2ddb1e1668f1c23fd62c5135c2a7d8028e5b14a03",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.343,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7a777c23c2747afdad8887e8b18f78d23396cf134634e50a66f1d8a5a2336c20",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_names",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_directory_names"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.415,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "e7af57e8fd4f051f3e4bfd4aa386f88452cb5fa676ff581e1cdb17dc0163c5c9",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_directory_with_trailing_slash"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.343,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7fb3bddb67c156a6809f83bbf414da988606d68ea68d7ab6ea9007ef22ee13b9",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_empty_pattern"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.441,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "024ff13c31f567e6301cc854e2c734f11d48b477db67aa74364a69ebe2167768",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_literal",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_literal"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.367,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "81480fc6253ed5c88e45762b0b1b3a88174dbfa23aecf3001cbcc8220656016b",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_named_pipe"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.39,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "54ded59939a6753039b5de443ce3df1df6a3bc9b1a7d65079fce897715460ca3",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_nested_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.384,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c8987685db668df96eda6271d3c34f37eba1082104a4b771f3bcd4082c7d19ca",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_non_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_non_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.404,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "6dcee61201044e4beb777b2311c0553473044f3751618812f4bd534fdc1395c6",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_one_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_one_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.517,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "b6aae859846afe3aecb1a6471e4f97d23bd33bdc42fc4bc2fe9f8d0eb53f0f48",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_symlinks",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_glob_symlinks"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.403,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "dbd936a54240837ca62a9906d34d4196cd1a2f224a55fe7ea7e95d4d73c9ade6",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_hidden_glob",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_hidden_glob"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.385,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "842833b3feb99d5461e7e3a89324bd4173f3bc20d26c08a43395328a4a756d09",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_recursive_glob",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_recursive_glob"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 1.547,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "67948f1fe464e4f770af5b7bf89cb0a2b8551c358401c34d6effbf3837f5b2a4",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_translate"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.403,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "da300a708f881f818bab09b12b4787e4b972c6dd00b5d0de5c98632ad29780c6",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_translate_include_hidden"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.421,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "198f68e6aff4ac7f45f49963d0f83a7e4ba9d94f52c1a4950b3534d21dcda0fa",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_matching",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_translate_matching"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.376,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "d696f07f74d5e1f38c7f981193fe7a06350989baeddd5f6ad7426208358365ca",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_recursive",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_translate_recursive"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.338,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1caf5195d6681a79389507047ac573fbe551783484c5691f0925d842d0a317a2",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_seps",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O0.exe",
+            "-v",
+            "GlobTests.test_translate_seps"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.396,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "cc259f1a958b87e88449503de28d2c1864fdf3d02b8d73bc2ebb451b24d1e4d7",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 0",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        }
+      ]
+    },
+    "O3": {
+      "dynamic_needed": [
+        "0x0000000000000001 (NEEDED)             Shared library: [libm.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libgcc_s.so.1]",
+        "0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]",
+        "0x0000000000000001 (NEEDED)             Shared library: [ld-linux-x86-64.so.2]"
+      ],
+      "no_libpython_dependency": true,
+      "commands": [
+        {
+          "id": "test.test_glob.GlobTests.test_escape",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_escape"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.383,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "6cf2d8eee13087e3b345e960574ab3c60c997e84ad6c10eb5df24fabcab70aff",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob0",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob0"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.364,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "1bac5033a6ee2adfe3e51443f24f3ff0baafd09e6102e85c1e80f126557569e8",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob1",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob1"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.343,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ebbdb9e5447ee28267346a2d30728736ae61a7383e17305837597d5cf5317d5f",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_broken_symlinks",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_broken_symlinks"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.36,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c23febaef4933a42c4d802e2ddb1e1668f1c23fd62c5135c2a7d8028e5b14a03",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_bytes_directory_with_trailing_slash",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_bytes_directory_with_trailing_slash"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.341,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7a777c23c2747afdad8887e8b18f78d23396cf134634e50a66f1d8a5a2336c20",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_names",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_directory_names"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.484,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "4747eacadb69644d6e448b06dbf667ed654af1135f9fa9dc9764664d988178eb",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_directory_with_trailing_slash",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_directory_with_trailing_slash"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.344,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "7fb3bddb67c156a6809f83bbf414da988606d68ea68d7ab6ea9007ef22ee13b9",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_empty_pattern",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_empty_pattern"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.34,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "00a9572b071f188fa4ec3dc9ee2518a1245720bedc733866c18bcb7f7870d60b",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_literal",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_literal"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.367,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "8bc5748be0ebe2d5f647f118fb9113845f88a60fd8c40ef90b53d41f68d48cb6",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_named_pipe",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_named_pipe"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.369,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "761d9654adbcf48eee15cf270ce49414d333bd8aa7ef8b09cc405e83aad32e1c",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_nested_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_nested_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.491,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "62fbaae8be742fc601a6098bcd8cf346afe1a30b6720b74c244f8cf65beebef7",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_non_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_non_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.4,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "fa7b5c72536635c5c65ee096dff6fb293e5e08ca6f72f48669d7ce115f604993",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_one_directory",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_one_directory"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.41,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "c948174d1c4bb8b50d10361a047fc5fb9bc0901ec6dd4f4ae6d795731be0f52a",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_glob_symlinks",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_glob_symlinks"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.38,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "dbd936a54240837ca62a9906d34d4196cd1a2f224a55fe7ea7e95d4d73c9ade6",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_hidden_glob",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_hidden_glob"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.382,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "0fa41f9e4a2e7574667a8bd5f7148071f6719e7372c8809b31c9c84971f7f6fa",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_recursive_glob",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_recursive_glob"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 1.559,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "91564a76c93f9187ab1ee2273db0360d96fb88e2b2d85ccbc0131d1fe66646bd",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_translate"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.339,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "19307208a80fdf34c1651e4cbbe77fd144332e046049d6074b73db0c0dffea62",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_include_hidden",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_translate_include_hidden"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.344,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "9f1f2b3e140554d486e0701fb31d171b6237ec62f6785b75b9fa217984223f77",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_matching",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_translate_matching"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.384,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "a4681a2aa2b19b8df747a38dbe90c9fb86abb864a7cdcda38ce268ebb55bdc52",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_recursive",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_translate_recursive"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.334,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "ffd94ea7b28ced19f69951ac44b7abccd77ffc02bfb87cf098777b75523edc4f",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        },
+        {
+          "id": "test.test_glob.GlobTests.test_translate_seps",
+          "occurrence": 1,
+          "argv": [
+            "/workspace/scratch/8571-refresh/glob/O3.exe",
+            "-v",
+            "GlobTests.test_translate_seps"
+          ],
+          "cwd": "/workspace/scratch/8571-refresh/glob",
+          "timeout_seconds": 30,
+          "exit_code": 0,
+          "timed_out": false,
+          "elapsed_seconds": 0.358,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "stderr_sha256": "cc259f1a958b87e88449503de28d2c1864fdf3d02b8d73bc2ebb451b24d1e4d7",
+          "environment": {
+            "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHON_COLORS": "0",
+            "NO_COLOR": "1",
+            "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+            "IMREFLAGS": "--opt-level 3",
+            "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+            "LD_PRELOAD": "/workspace/scratch/stdlib-architecture/guard/exec_guard.so"
+          },
+          "guard_installed": true,
+          "libpython_dlopen_attempt": false,
+          "exact_pass": true
+        }
+      ]
+    }
+  },
+  "source_path": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py",
+  "source_restored_sha256": "b4adbfa93158f2949957bc6b9c7f16aca58e3fa9b35c863a6caf36f4114a279a",
+  "exec_guard": {
+    "source_sha256": "8c9a25f9b597347dd228a9b29339cfb79cda67d9da64884afd84608f1779339d",
+    "so_sha256": "32376a734ccdf81d73c0c50e9981dd392c92a5b1adb6fd0f46719b3fd90c8dc1",
+    "probe": {
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "exec /bin/true"
+      ],
+      "cwd": "/workspace/scratch/8571-refresh/glob",
+      "timeout_seconds": 10,
+      "exit_code": 126,
+      "timed_out": false,
+      "elapsed_seconds": 0.002,
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "aec3b48f921d3a10c6114c4fe33e5eb51ba22919da5b7db75933c91c57569b21"
+    }
+  },
+  "source_absent": true,
+  "matching_pyc_absent": true
+}

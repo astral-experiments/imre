@@ -1,0 +1,2 @@
+[guard: execve/execveat denied; no libpython mapped]
+/bin/sh: 1: exec: /bin/true: Operation not permitted

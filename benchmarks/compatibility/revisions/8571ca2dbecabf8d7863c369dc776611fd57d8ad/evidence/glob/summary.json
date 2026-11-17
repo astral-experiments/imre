@@ -1,0 +1,31 @@
+{
+  "family": "glob",
+  "revision": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+  "gate_passed": true,
+  "status": "replayed",
+  "receipts": 24,
+  "frozen_family_denominator": 24,
+  "missing_family_originals": 0,
+  "tiers": {
+    "stock": {
+      "pass": 22,
+      "skip": 2
+    },
+    "O0": {
+      "pass": 21,
+      "skip": 2,
+      "timeout": 1
+    },
+    "O3": {
+      "pass": 21,
+      "skip": 2,
+      "timeout": 1
+    }
+  },
+  "paired": 21,
+  "historical_stock_reused": false,
+  "saved_images": {
+    "O0": "/workspace/scratch/8571-refresh/glob/O0.exe",
+    "O3": "/workspace/scratch/8571-refresh/glob/O3.exe"
+  }
+}

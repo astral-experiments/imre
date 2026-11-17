@@ -1,0 +1,36 @@
+{
+  "argv": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_glob.py",
+    "--module-root",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--opt-level",
+    "3",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/8571-refresh/glob/O3.exe"
+  ],
+  "cwd": "/workspace/scratch/8571-refresh/glob",
+  "timeout_seconds": 240,
+  "exit_code": 0,
+  "timed_out": false,
+  "elapsed_seconds": 62.278,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stderr_sha256": "bb0f1dbf407c42879c729cc6443695f8d0cb8346bbc188cdc2aed2aecaeff07a",
+  "environment": {
+    "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHON_COLORS": "0",
+    "NO_COLOR": "1",
+    "TMPDIR": "/workspace/scratch/stdlib-work/tmp",
+    "IMREFLAGS": "--opt-level 3",
+    "IMRE_PYTHON": "/workspace/imre/target/release/imre"
+  },
+  "executable_exists": true,
+  "executable_sha256": "0b6bcea9a8caae3d4fd3bb56798ed5e6369dba62f4213d26fb246809fde172f5"
+}
