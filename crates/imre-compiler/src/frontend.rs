@@ -12430,6 +12430,20 @@ impl<'a> Checker<'a> {
                         }]),
                     });
                 }
+                if attribute.attr.as_str() == "__traceback__"
+                    && matches!(
+                        receiver.ty,
+                        Type::Exception
+                            | Type::ImportException
+                            | Type::TimeoutExpired
+                            | Type::NamedException(_)
+                    )
+                {
+                    return Err(self.object_builtin_error_with_checked_calls(
+                        "exception.__traceback__",
+                        attribute,
+                    ));
+                }
                 let receiver = if matches!(
                     attribute.attr.as_str(),
                     "__cause__" | "__suppress_context__"
