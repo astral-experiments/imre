@@ -2531,7 +2531,7 @@ def main():
         launched = run(imre, "-B", "-m", entry.stem)
         assert (launched.returncode, launched.stdout) == (0, reference.stdout), launched.stderr
         ordinary = run(imre, "run", entry, "--quiet")
-        assert ordinary.returncode != 0 and b"local functions require" in ordinary.stderr, ordinary.stderr
+        assert (ordinary.returncode, ordinary.stdout, ordinary.stderr) == (0, reference.stdout, b""), ordinary
 
         spec_entry = root / "runtime_spec.py"
         spec_entry.write_text(
