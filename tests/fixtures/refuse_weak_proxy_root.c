@@ -9,10 +9,13 @@ void *__real_malloc(size_t);
 void *__real_realloc(void *, size_t);
 void *__real_calloc(size_t, size_t);
 uint64_t __real_imre_dyn_lit(void *, int, const unsigned char *, size_t);
+uint64_t __real_imre_dyn_linked_string(void *, const void *, int, const unsigned char *, size_t);
 uint64_t __real_imre_dyn_op_at(void *, const char *, uint64_t, uint64_t, uint64_t, const uint32_t (*)[4]);
+uint64_t __real_imre_dyn_get_int_item(void *, uint64_t, int64_t, uint64_t, const uint32_t (*)[4]);
 static _Thread_local unsigned armed, active, calls, allocations, nth;
 static int deny(size_t size) {
-    if (!active || size < 256) return 0;
+    /* The four-read case grows the temporary-root vector to eight handles. */
+    if (!active || size != 8 * sizeof(uint64_t)) return 0;
     unsigned decision = ++allocations == nth;
     active = 0;
     dprintf(2, "weak_proxy_root_allocation %u %u %zu %u\n", calls, allocations, size, decision);
@@ -26,14 +29,22 @@ static int deny(size_t size) {
 void *__wrap_malloc(size_t size) { return deny(size) ? NULL : __real_malloc(size); }
 void *__wrap_realloc(void *ptr, size_t size) { return deny(size) ? NULL : __real_realloc(ptr, size); }
 void *__wrap_calloc(size_t count, size_t size) { if (count && size > SIZE_MAX / count) return __real_calloc(count, size); return deny(count * size) ? NULL : __real_calloc(count, size); }
-uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
+static void arm(int kind, const unsigned char *data, size_t len) {
     static const char marker[] = "arm weak proxy root refusal";
-    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
     if (kind == 1 && len == sizeof(marker) - 1 && !memcmp(data, marker, len)) {
         armed = 1;
         const char *value = getenv("PROXY_ROOT_REFUSE_NTH");
         nth = value ? (unsigned)strtoul(value, NULL, 10) : 0;
     }
+}
+uint64_t __wrap_imre_dyn_lit(void *ctx, int kind, const unsigned char *data, size_t len) {
+    uint64_t result = __real_imre_dyn_lit(ctx, kind, data, len);
+    arm(kind, data, len);
+    return result;
+}
+uint64_t __wrap_imre_dyn_linked_string(void *ctx, const void *slot, int kind, const unsigned char *data, size_t len) {
+    uint64_t result = __real_imre_dyn_linked_string(ctx, slot, kind, data, len);
+    arm(kind, data, len);
     return result;
 }
 static int enter(const char *op) {
@@ -43,6 +54,12 @@ static int enter(const char *op) {
 uint64_t __wrap_imre_dyn_op_at(void *ctx, const char *op, uint64_t a, uint64_t b, uint64_t c, const uint32_t (*span)[4]) {
     int probe = enter(op);
     uint64_t result = __real_imre_dyn_op_at(ctx, op, a, b, c, span);
+    if (probe) active = 0;
+    return result;
+}
+uint64_t __wrap_imre_dyn_get_int_item(void *ctx, uint64_t receiver, int64_t index, uint64_t fallback, const uint32_t (*span)[4]) {
+    int probe = enter("get");
+    uint64_t result = __real_imre_dyn_get_int_item(ctx, receiver, index, fallback, span);
     if (probe) active = 0;
     return result;
 }
