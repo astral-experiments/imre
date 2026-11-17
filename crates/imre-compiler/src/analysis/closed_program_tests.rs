@@ -52,6 +52,36 @@ fn object_fallback_checks_first_party_scalar_stores() {
 }
 
 #[test]
+fn object_fallback_checks_unique_parameter_reassignments() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let dynamic = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n";
+    fs::write(
+        &main,
+        format!("{dynamic}def change(status: int) -> None:\n    status = True\nchange(1)\n"),
+    )
+    .unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(error.contains("expected int, got bool"), "{error}");
+
+    for body in [
+        "status = 2",
+        "if False:\n        status = True",
+        "return\n    status = True",
+        "if TYPE_CHECKING:\n        status = True",
+    ] {
+        fs::write(&main, format!("from typing import TYPE_CHECKING\n{dynamic}def change(status: int) -> None:\n    {body}\nchange(1)\n")).unwrap();
+        crate::check_file(&main, None).unwrap_or_else(|e| panic!("{body}: {e}"));
+    }
+    fs::write(&main, format!("{dynamic}first: int = 'first'\ndef change(flag: bool) -> None:\n    if flag:\n        status: int\n    else:\n        status: str\n    status = True\nlast: int = 'last'\nchange(True)\n")).unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(!error.contains("Imre: expected int, got bool"), "{error}");
+    let first = error.find("Literal[\"first\"]").unwrap();
+    let last = error.find("Literal[\"last\"]").unwrap();
+    assert!(first < last, "{error}");
+}
+
+#[test]
 fn heterogeneous_unannotated_lists_use_object_storage_without_erasing_contracts() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
