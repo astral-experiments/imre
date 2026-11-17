@@ -400,7 +400,7 @@ impl Error {
     }
 
     /// Acquire the cold metadata while an error is already propagating.
-    fn try_tracing(&mut self) -> Option<&mut Trace> {
+    pub(super) fn try_tracing(&mut self) -> Option<&mut Trace> {
         if self.trace.is_none() {
             self.trace = Some(allocator_api2::boxed::Box::try_new(Trace::default()).ok()?);
         }
@@ -697,6 +697,9 @@ impl Context {
     }
 
     pub(super) fn record_exception_frame(&mut self, error: &mut Error, span: Option<&[u32; 4]>) {
+        if error.kind == "MemoryError" && error.try_tracing().is_none() {
+            return;
+        }
         let position = error.trace.as_mut().and_then(|t| t.source_position.take());
         if let Some((line, _)) = position {
             self.heap.set_statement_line(line);

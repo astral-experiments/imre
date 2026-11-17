@@ -2876,15 +2876,19 @@ fn finish_operand_position<T>(
         } else {
             return;
         };
-        error.tracing().source_position = Some((
-            line,
-            value::TracebackSpan {
-                end_line,
-                start,
-                end,
-                anchor,
-            },
-        ));
+        if let Some(trace) = error.try_tracing() {
+            trace.source_position = Some((
+                line,
+                value::TracebackSpan {
+                    end_line,
+                    start,
+                    end,
+                    anchor,
+                },
+            ));
+        } else if error.kind != "MemoryError" {
+            *error = Error::new("MemoryError", "");
+        }
     }
 }
 
