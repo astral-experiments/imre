@@ -118,7 +118,8 @@ fn match_components(
     sep: char,
 ) -> bool {
     if pattern.contains('[') && pattern.split(sep).any(|part| {
-        matches!(Pattern::component(part), Pattern::Wildcard(tokens) if tokens.iter().any(|token| {
+        let Some(first) = part.find('[') else { return false };
+        matches!(Pattern::component(&part[first..]), Pattern::Wildcard(tokens) if tokens.iter().any(|token| {
             matches!(token, Token::Class { .. }) && token.matches(sep)
         }))
     }) {
@@ -201,6 +202,7 @@ fn match_component(path: &str, pattern: &str, sensitive: bool) -> bool {
 
 fn folded(actual: char, expected: char) -> bool {
     actual == expected
+        || (actual.is_ascii() && expected.is_ascii() && actual.eq_ignore_ascii_case(&expected))
         || super::super::warnings::literal_fold(actual)
             == super::super::warnings::literal_fold(expected)
 }
@@ -299,7 +301,7 @@ enum GlobToken {
     RecursiveTail,
 }
 
-fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
+fn append_component(tokens: &mut Vec<GlobToken>, part: &str, whole_component: bool) {
     match Pattern::component(part) {
         Pattern::Literal(text) => {
             tokens.extend(text.chars().map(|c| GlobToken::Shell(Token::Literal(c))))
@@ -310,7 +312,7 @@ fn append_component(tokens: &mut Vec<GlobToken>, part: &str) {
                     .chars()
                     .map(|c| GlobToken::Shell(Token::Literal(c))),
             );
-            if part == "*" {
+            if part == "*" && whole_component {
                 tokens.push(GlobToken::Shell(Token::Any));
             }
             tokens.push(GlobToken::Shell(Token::Star));
@@ -349,21 +351,36 @@ fn activate_state(
 /// Store active token positions in flat arrays. Generation marks suppress duplicate
 /// states without clearing a pattern-sized array for every input character.
 fn match_crossing(path: &str, pattern: &str, sensitive: bool, recursive: bool, sep: char) -> bool {
+    let first = pattern.find(['*', '?', '[']).unwrap_or(pattern.len());
+    let (prefix, pattern) = pattern.split_at(first);
+    let path = if sensitive {
+        path.strip_prefix(prefix)
+    } else {
+        let mut actual = path.chars();
+        prefix
+            .chars()
+            .all(|expected| actual.next().is_some_and(|c| folded(c, expected)))
+            .then(|| actual.as_str())
+    };
+    let Some(path) = path else { return false };
+    let mut first_component = true;
     let mut tokens = Vec::new();
     let mut parts = pattern.split(sep).peekable();
     while let Some(part) = parts.next() {
-        if recursive && part == "**" {
+        let whole = !first_component || prefix.is_empty() || prefix.ends_with(sep);
+        if recursive && part == "**" && whole {
             if parts.peek().is_some() {
                 tokens.extend([GlobToken::RecursiveStart, GlobToken::RecursiveBody]);
             } else {
                 tokens.push(GlobToken::RecursiveTail);
             }
         } else {
-            append_component(&mut tokens, part);
+            append_component(&mut tokens, part, whole);
             if parts.peek().is_some() {
                 tokens.push(GlobToken::Shell(Token::Literal(sep)));
             }
         }
+        first_component = false;
     }
     let mut marks = vec![0; tokens.len() + 1];
     let mut current = Vec::new();
@@ -730,10 +747,22 @@ mod tests {
 
     #[test]
     fn crossing_patterns_have_no_token_limit() {
-        let prefix = "a".repeat(128);
-        let path = format!("{prefix}/b");
-        for pattern in [format!("{prefix}[!x]b"), format!("{prefix}*[!x]*b")] {
-            assert!(glob_matches(&path, &pattern, true, true, '/').ok().unwrap());
+        for width in [128, 256, 512] {
+            let prefix = "a".repeat(width);
+            let path = format!("{prefix}/b");
+            for pattern in [format!("{prefix}[!x]b"), format!("{prefix}*[!x]*b")] {
+                assert!(glob_matches(&path, &pattern, true, true, '/').ok().unwrap());
+            }
         }
+        assert!(
+            glob_matches("foo/x", "foo*/[!a]", true, true, '/')
+                .ok()
+                .unwrap()
+        );
+        assert!(
+            !glob_matches("foo/bar/x", "foo**/[!a]", true, true, '/')
+                .ok()
+                .unwrap()
+        );
     }
 }
