@@ -660,7 +660,9 @@ fn object_fallback(
     let graph = checked_graph
         .as_ref()
         .filter(|graph| !graph.has_checked_only_import);
-    if options.entry_profile.is_some()
+    if (options.entry_profile.is_some()
+        && !(kind == LoweringKind::ScopedObject
+            && graph.is_some_and(|g| g.entry_profile.has_exclusions())))
         || (checked_file
             && graph.as_ref().is_some_and(|g| {
                 matches!(

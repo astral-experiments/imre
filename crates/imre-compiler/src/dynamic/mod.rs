@@ -3086,9 +3086,39 @@ pub(crate) fn compile(
         .map(|graph| graph.take_registered_functions())
         .unwrap_or_default();
     registrations.functions = functions;
+    if let Some(graph) = project.as_ref() {
+        for id in 0..graph.modules.len() {
+            if graph.entry_profile.ranges(id).next().is_some()
+                && !registrations
+                    .checked_units
+                    .values()
+                    .any(|unit| unit.module == Some(id) && unit.source.is_some())
+            {
+                return Err(format!(
+                    "entry profile: no checked registration for {}",
+                    graph.modules[id].name
+                ));
+            }
+        }
+    }
     let modules = project
         .take()
         .map(|graph| {
+            for id in 0..graph.modules.len() {
+                let exclusions: HashMap<_, _> = graph
+                    .entry_profile
+                    .ranges(id)
+                    .filter_map(|range| {
+                        graph
+                            .entry_profile
+                            .excluded(id, range.start())
+                            .map(|reason| (range.start(), reason.to_owned()))
+                    })
+                    .collect();
+                if !exclusions.is_empty() {
+                    registrations.profile_exclusions.insert(id, exclusions);
+                }
+            }
             registrations.call_operands = graph.registered_call_operands.into_inner();
             registrations.bundled_doctest_prompts = graph.bundled_doctest_prompts;
             graph.modules

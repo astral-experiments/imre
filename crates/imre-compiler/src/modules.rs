@@ -5301,6 +5301,10 @@ impl<'a> Loader<'a> {
             initialization: self.initialization,
             errno_names: self.errno_names,
         };
+        let exclusions = (0..graph.modules.len())
+            .map(|module| (module, graph.entry_profile.ranges(module).collect()))
+            .collect::<Vec<_>>();
+        graph.session.set_profile_exclusions(exclusions);
         if reachable_only {
             graph.reachable = Some(Arc::new(reachability::Reachable::collect(&graph, false)));
         } else if let Some(library) = graph

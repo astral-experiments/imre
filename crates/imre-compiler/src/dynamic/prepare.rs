@@ -237,6 +237,7 @@ pub(super) fn units<'a>(
                         checked_source,
                         initializer,
                         module_id.and_then(|id| registrations.call_operands.get(&id)),
+                        module_id.and_then(|id| registrations.profile_exclusions.get(&id)),
                     ),
                 )?;
                 body.prompts = bundled_prompts
