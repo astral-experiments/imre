@@ -13897,6 +13897,30 @@ impl<'a> Checker<'a> {
                 return Err(self.object_runtime_export("functools.cached_property", call));
             }
             Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
+                name @ ("bisect.bisect_left" | "bisect.bisect_right"),
+            ))) => {
+                let params = [
+                    parameter("a", Type::ListInt, None),
+                    parameter("x", Type::Int, None),
+                ];
+                let args = self
+                    .arguments_with(call, &params, None, |checker, index, source| {
+                        let value = checker.expr(source)?;
+                        if value.ty != params[index].ty {
+                            return Err(checker.object_runtime_export(name, source));
+                        }
+                        Ok(value)
+                    })
+                    .map_err(|_| self.object_runtime_export(name, call))?;
+                return Ok(self.ordered_builtin(
+                    Builtin::BisectIntList {
+                        left: name.ends_with("_left"),
+                    },
+                    Type::Int,
+                    args,
+                ));
+            }
+            Some(Binding::Intrinsic(Intrinsic::ScopedObjectExport(
                 name @ ("imre._calendar.month_grid"
                 | "calendar.monthcalendar"
                 | "calendar.firstweekday"

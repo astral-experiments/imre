@@ -1706,6 +1706,18 @@ print("result", call(b=2, a=1))
     }
 
     #[test]
+    fn exact_integer_bisect_uses_checked_list_search() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.py");
+        std::fs::write(&path, "from bisect import bisect_left, bisect_right\ndef search(a: list[int], x: int) -> int:\n    return bisect_left(a, x) + bisect_right(a, x)\nprint(search([1, 2, 2], 2))\n").unwrap();
+        let ir = super::compile_file(&path, None, &CompileOptions::default())
+            .unwrap()
+            .llvm_ir;
+        assert!(ir.contains("call i64 @imre_list_bisect_left("));
+        assert!(ir.contains("call i64 @imre_list_bisect_right("));
+    }
+
+    #[test]
     fn registered_reduction_specializes_multiply_in_its_python_frame() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("paired.py");
