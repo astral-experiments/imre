@@ -1994,10 +1994,6 @@ impl RegisteredSuite {
         bind_operand(&mut self.operands, value, ty)
     }
 
-    fn refused_operand(&mut self, (range, reason): OperandRefusal) -> Statement {
-        Self::bind_refusal(&mut self.operands, (range, reason))
-    }
-
     fn bind_refusal(
         operands: &mut Vec<PhysicalOperand>,
         (range, reason): OperandRefusal,
@@ -2087,10 +2083,282 @@ pub(super) fn cursor_input(
     pipelines::Prepared::pull_cursor(cursor, Type::PythonObject, kind, hidden)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 enum SuiteSelection {
+    #[default]
     All,
     Physical,
+}
+
+/// Compounds lower in their source scope. A physical child owns the operands and
+/// slots that could not be kept in the enclosing function.
+#[derive(Default)]
+struct CompoundSuites<'p, 'a> {
+    physical: Option<&'p mut SuitePreparation<'a>>,
+    selection: SuiteSelection,
+    suspended: bool,
+    operands: Vec<PhysicalOperand>,
+    suites: Vec<RegisteredSuite>,
+}
+
+impl CompoundSuites<'_, '_> {
+    fn block(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        stmts: &[ast::Stmt],
+        reachable: bool,
+    ) -> StdResult<statements::Block, ()> {
+        let Some(prepare) = self.physical.as_deref_mut() else {
+            return scope.block(stmts);
+        };
+        if stmts.is_empty() {
+            return Ok((Vec::new(), true));
+        }
+        let child = prepare.selected_suite(
+            stmts,
+            scope.kind,
+            self.selection,
+            self.selection,
+            self.suspended,
+            None,
+        );
+        if reachable {
+            prepare.refusal = prepare.refusal.or(child.refusal);
+        }
+        let falls = child.falls_through;
+        Ok((child.into_child(&mut self.suites), falls))
+    }
+
+    fn value(&mut self, scope: &mut SourceScope<'_>, expr: &ast::Expr) -> StdResult<Expr, ()> {
+        let Some(prepare) = self.physical.as_deref_mut() else {
+            return scope.frame_value(expr).ok_or(());
+        };
+        let value = scope.try_operand(|scope| scope.selected_operand(expr, self.selection));
+        Ok(prepare.region_operand(expr, scope.kind, &mut self.operands, value, self.suspended))
+    }
+
+    fn condition(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        expr: &ast::Expr,
+        branch: bool,
+    ) -> StdResult<Expr, ()> {
+        let Some(prepare) = self.physical.as_deref_mut() else {
+            return scope.condition_operand(expr).ok_or(());
+        };
+        if !branch && let ast::Expr::BooleanLiteral(value) = expr {
+            return Ok(Expr::boolean(value.value));
+        }
+        let input = if branch && !self.suspended {
+            prepare.physical_operand(expr, scope.kind, self.selection, false)
+        } else {
+            prepare.owned_operand(expr, scope.kind, self.suspended, |owner| {
+                owner.condition_operand(expr)
+            })
+        };
+        Ok(bind_operand(&mut self.operands, input, Type::Bool))
+    }
+
+    fn branch(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        branch: &ast::StmtIf,
+        mut out: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let mut falls = false;
+        for (test, suite) in statements::if_clauses(branch) {
+            // A dead arm in a suspended frame has no resume entry.
+            let test = match test {
+                Some(ast::Expr::BooleanLiteral(value)) if self.suspended => {
+                    if !value.value {
+                        continue;
+                    }
+                    None
+                }
+                test => test,
+            };
+            let condition = test
+                .map(|test| self.condition(scope, test, true))
+                .transpose()?;
+            let (child, continues) = self.block(scope, suite, true)?;
+            falls |= continues;
+            if let Some(condition) = condition {
+                let (yes, otherwise) = statements::push_if(out, condition);
+                *yes = child;
+                out = otherwise;
+            } else {
+                statements::append_block(out, child);
+                return Ok(falls);
+            }
+        }
+        Ok(true)
+    }
+
+    fn while_loop(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        loop_: &ast::StmtWhile,
+        out: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let condition = self.condition(scope, &loop_.test, false)?;
+        let disabled =
+            self.physical.is_none() && ir::control::boolean_literal(&condition) == Some(false);
+        let body = if disabled {
+            Vec::new()
+        } else {
+            scope
+                .in_loop(LoopScope::While, |scope| {
+                    self.block(scope, &loop_.body, true)
+                })?
+                .0
+        };
+        let (otherwise, falls) = self.block(scope, &loop_.orelse, true)?;
+        out.push(Statement::While(condition, body, otherwise));
+        Ok(!disabled || falls)
+    }
+
+    fn for_loop(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        loop_: &ast::StmtFor,
+        out: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let pull = for_pull(loop_);
+        let mut input = if self.physical.is_some() {
+            let iter = self.value(scope, &loop_.iter)?;
+            cursor_input(iter, Some(loop_.iter.range()), pull, |ty, cursor| {
+                scope.reserve_cursor_slot(ty, cursor)
+            })
+        } else {
+            scope
+                .creating_iterable(|scope| scope.iteration_input(&loop_.iter, pull))
+                .ok_or(())?
+        };
+        let binding = input
+            .bind_loop_target(scope, &loop_.target)
+            .inspect_err(|_| {
+                scope.refusal.get_or_insert((
+                    loop_.target.range(),
+                    "cannot compile this assignment target ahead of time",
+                ));
+            })?;
+        if let Some(prepare) = self.physical.as_deref_mut() {
+            prepare.refusal = prepare
+                .refusal
+                .or_else(|| prepare.literal_refusal(RegionRoot::Suite(binding)));
+        }
+        let (body, _) = scope.in_loop(LoopScope::WithCursor, |scope| {
+            self.block(scope, &loop_.body, true)
+        })?;
+        let (otherwise, _) = self.block(scope, &loop_.orelse, true)?;
+        statements::append_block(out, input.for_suite(body, otherwise, Vec::new()));
+        Ok(true)
+    }
+
+    fn try_statement(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        region: &ast::StmtTry,
+        out: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let (body, body_falls) = self.block(scope, &region.body, true)?;
+        // Physical children retain their first reachable refusal in execution order.
+        let early_else = self
+            .physical
+            .is_some()
+            .then(|| self.block(scope, &region.orelse, body_falls))
+            .transpose()?;
+        let mut handlers = Vec::with_capacity(region.handlers.len());
+        let mut handler_falls = false;
+        for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
+            let matcher = exception_matcher(handler, region.is_star, |class, site| {
+                let value = self.value(scope, class)?;
+                Ok::<_, ()>(if self.physical.is_some() {
+                    values::located(site, class.start(), value)
+                } else {
+                    value
+                })
+            })?;
+            let name = handler.name.as_ref().map(|name| scope.slot(name.as_str()));
+            let (body, falls) = self.block(scope, &handler.body, true)?;
+            handler_falls |= falls;
+            handlers.push(ir::ExceptHandler {
+                matcher,
+                name,
+                body,
+            });
+        }
+        let (orelse, else_falls) = match early_else {
+            Some(block) => block,
+            None => self.block(scope, &region.orelse, body_falls)?,
+        };
+        let finalbody = self.block(scope, &region.finalbody, true)?;
+        Ok(statements::finish_try(
+            Some(out),
+            body,
+            handlers,
+            orelse,
+            body_falls && else_falls || handler_falls,
+            finalbody,
+        ))
+    }
+
+    fn with_statement(
+        &mut self,
+        scope: &mut SourceScope<'_>,
+        stmt: &ast::StmtWith,
+        out: &mut Vec<Statement>,
+    ) -> StdResult<bool, ()> {
+        let mut protected = out;
+        for item in &stmt.items {
+            let manager = self.value(scope, &item.context_expr)?;
+            let site = context_site(scope.source.text, &item.context_expr, stmt.is_async);
+            let manager = if self.physical.is_some() {
+                values::located(site.range, site.anchor, manager)
+            } else {
+                manager
+            };
+            let mut fault = None;
+            let binding = if let Some(target) = item.optional_vars.as_deref() {
+                let report = scope.report_child_refusals;
+                scope.report_child_refusals |= self.physical.is_some();
+                let binding = contexts::python_binding(scope, target);
+                scope.report_child_refusals = report;
+                match (binding, self.physical.as_deref_mut()) {
+                    (Ok(binding), prepare) => {
+                        if let Some(prepare) = prepare {
+                            prepare.refusal = prepare.refusal.or_else(|| {
+                                prepare.literal_refusal(RegionRoot::Suite(&binding.body))
+                            });
+                        }
+                        Some(binding)
+                    }
+                    (Err(()), Some(prepare)) => {
+                        let reason = scope.refusal.unwrap_or((
+                            target.range(),
+                            "cannot compile this assignment target ahead of time",
+                        ));
+                        prepare
+                            .refusal
+                            .get_or_insert(PreparedRefusal::Operand(reason));
+                        fault = Some(reason);
+                        None
+                    }
+                    (Err(()), None) => return Err(()),
+                }
+            } else {
+                None
+            };
+            protected = contexts::enter_python(protected, site, manager, binding);
+            if let Some(fault) = fault {
+                protected.push(RegisteredSuite::bind_refusal(&mut self.operands, fault));
+                return Ok(true);
+            }
+        }
+        statements::append_block(protected, self.block(scope, &stmt.body, true)?.0);
+        // A manager can suppress an exception from its protected suite.
+        Ok(true)
+    }
 }
 
 /// Prepare ordered suites while the source tree and its namespace operands are available.
@@ -2377,27 +2645,47 @@ impl<'a> SuitePreparation<'a> {
         child_selection: SuiteSelection,
         suspended: bool,
     ) -> StdResult<RegisteredSuite, OperandRefusal> {
-        match stmt {
-            ast::Stmt::If(branch) => Ok(self.prepare_if(branch, kind, child_selection, suspended)),
-            ast::Stmt::While(loop_) => {
-                Ok(self.prepare_while(loop_, kind, child_selection, suspended))
-            }
-            ast::Stmt::For(loop_) => {
-                self.prepare_for(loop_, checkpoint(stmt), kind, child_selection, suspended)
-            }
-            ast::Stmt::Try(protected) => Ok(self.prepare_try(
-                protected,
-                checkpoint(stmt),
-                kind,
-                child_selection,
-                suspended,
-            )),
-            ast::Stmt::With(with) => {
-                Ok(self.prepare_context(with, kind, child_selection, suspended))
-            }
-            ast::Stmt::Match(branch) => self.prepare_match(branch, kind, suspended),
-            _ => Err((stmt.range(), "cannot compile this statement ahead of time")),
+        if let ast::Stmt::Match(branch) = stmt {
+            return self.prepare_match(branch, kind, suspended);
         }
+        // The parent owns the loop checkpoint. A disabled loop has only its else frame.
+        if let ast::Stmt::While(loop_) = stmt
+            && disabled_while(loop_)
+        {
+            return Ok(self.physical_suite(&loop_.orelse, kind, child_selection, suspended));
+        }
+        let mut scope = self.source_scope(kind);
+        let mut children = CompoundSuites {
+            physical: Some(self),
+            selection: child_selection,
+            suspended,
+            ..CompoundSuites::default()
+        };
+        let mut body = match stmt {
+            ast::Stmt::While(_) => Vec::new(),
+            ast::Stmt::If(_) | ast::Stmt::With(_) => vec![Statement::Position(stmt.range(), None)],
+            _ => vec![checkpoint(stmt)],
+        };
+        let falls = match stmt {
+            ast::Stmt::If(branch) => children.branch(&mut scope, branch, &mut body),
+            ast::Stmt::While(loop_) => children.while_loop(&mut scope, loop_, &mut body),
+            ast::Stmt::For(loop_) => children.for_loop(&mut scope, loop_, &mut body),
+            ast::Stmt::Try(region) => children.try_statement(&mut scope, region, &mut body),
+            ast::Stmt::With(stmt) => children.with_statement(&mut scope, stmt, &mut body),
+            _ => return Err((stmt.range(), "cannot compile this statement ahead of time")),
+        }
+        .map_err(|()| {
+            scope
+                .refusal
+                .unwrap_or((stmt.range(), "cannot compile this statement ahead of time"))
+        })?;
+        Ok(RegisteredSuite {
+            checked: scope.finish(body),
+            suites: children.suites,
+            operands: children.operands,
+            falls_through: falls,
+            refusal: None,
+        })
     }
 
     pub(crate) fn checked_declaration_refusal(
@@ -2558,254 +2846,6 @@ impl<'a> SuitePreparation<'a> {
     fn region(&self, kind: RegisteredScope) -> RegisteredSuite {
         let scope = self.source_scope(kind);
         RegisteredSuite::new(scope.finish(Vec::new()), Vec::new())
-    }
-
-    fn prepare_if(
-        &mut self,
-        branch: &ast::StmtIf,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> RegisteredSuite {
-        let mut region = self.region(kind);
-        let mut tail = &mut region.checked.function.body;
-        let mut arm_continues = false;
-        for (test, suite) in statements::if_clauses(branch) {
-            // A dead literal arm in a suspended frame has no resume entry.
-            let test = match test {
-                Some(ast::Expr::BooleanLiteral(literal)) if suspended => {
-                    if !literal.value {
-                        continue;
-                    }
-                    None
-                }
-                Some(expr) if suspended => {
-                    Some(self.owned_operand(expr, kind, suspended, |scope| {
-                        scope.condition_operand(expr)
-                    }))
-                }
-                test => test.map(|expr| self.physical_operand(expr, kind, selection, suspended)),
-            };
-            let child = self.physical_suite(suite, kind, selection, suspended);
-            arm_continues |= child.falls_through;
-            let child = child.into_child(&mut region.suites);
-            if let Some(test) = test {
-                let condition = bind_operand(&mut region.operands, test, Type::Bool);
-                let (yes, no) = statements::push_if(tail, condition);
-                *yes = child;
-                tail = no;
-            } else {
-                *tail = child;
-                region.falls_through = arm_continues;
-                break;
-            }
-        }
-        region
-            .checked
-            .function
-            .body
-            .insert(0, Statement::Position(branch.range(), None));
-        region
-    }
-
-    fn prepare_try(
-        &mut self,
-        stmt: &ast::StmtTry,
-        checkpoint: Statement,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> RegisteredSuite {
-        let mut scope = self.source_scope(kind);
-        let mut operands = Vec::new();
-        let mut suites = Vec::new();
-
-        // Preserve the first refusal from the body, entered else, handlers and finally.
-        let body = self.physical_suite(&stmt.body, kind, selection, suspended);
-        let mut normal_exit = body.falls_through;
-        let body = body.into_child(&mut suites);
-        let orelse = if stmt.orelse.is_empty() {
-            Vec::new()
-        } else {
-            let otherwise =
-                self.selected_suite(&stmt.orelse, kind, selection, selection, suspended, None);
-            if normal_exit {
-                self.refusal = self.refusal.or(otherwise.refusal);
-            }
-            normal_exit &= otherwise.falls_through;
-            otherwise.into_child(&mut suites)
-        };
-        let mut handlers = Vec::with_capacity(stmt.handlers.len());
-        for ast::ExceptHandler::ExceptHandler(handler) in &stmt.handlers {
-            let matcher = exception_matcher(handler, stmt.is_star, |class, site| {
-                let checked = scope.try_operand(|scope| scope.selected_operand(class, selection));
-                let operand = self.region_operand(class, kind, &mut operands, checked, suspended);
-                Ok::<_, std::convert::Infallible>(values::located(site, class.start(), operand))
-            })
-            .expect("prepared exception matcher");
-            let name = handler.name.as_ref().map(|name| scope.slot(name.as_str()));
-            let handler = self.physical_suite(&handler.body, kind, selection, suspended);
-            normal_exit |= handler.falls_through;
-            handlers.push(ir::ExceptHandler {
-                matcher,
-                name,
-                body: handler.into_child(&mut suites),
-            });
-        }
-        let finalbody = if stmt.finalbody.is_empty() {
-            (Vec::new(), true)
-        } else {
-            let suite = self.physical_suite(&stmt.finalbody, kind, selection, suspended);
-            let continues = suite.falls_through;
-            (suite.into_child(&mut suites), continues)
-        };
-        let mut statements = Vec::with_capacity(2);
-        statements.push(checkpoint);
-        let falls_through = statements::finish_try(
-            Some(&mut statements),
-            body,
-            handlers,
-            orelse,
-            normal_exit,
-            finalbody,
-        );
-        RegisteredSuite {
-            checked: scope.finish(statements),
-            operands,
-            suites,
-            falls_through,
-            refusal: None,
-        }
-    }
-
-    fn prepare_context(
-        &mut self,
-        stmt: &ast::StmtWith,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> RegisteredSuite {
-        let mut scope = self.source_scope(kind);
-        let mut operands = Vec::new();
-        let mut statements = vec![Statement::Position(stmt.range(), None)];
-        let mut protected = &mut statements;
-        let mut refused_binding = None;
-        for item in &stmt.items {
-            let checked =
-                scope.try_operand(|scope| scope.selected_operand(&item.context_expr, selection));
-            let manager =
-                self.region_operand(&item.context_expr, kind, &mut operands, checked, suspended);
-            let site = context_site(self.source.text, &item.context_expr, stmt.is_async);
-            let manager = values::located(site.range, site.anchor, manager);
-            scope.report_child_refusals = true;
-            let binding = item.optional_vars.as_deref().and_then(|target| {
-                match contexts::python_binding(&mut scope, target) {
-                    Ok(binding) => {
-                        self.refusal = self
-                            .refusal
-                            .or_else(|| self.literal_refusal(RegionRoot::Suite(&binding.body)));
-                        Some(binding)
-                    }
-                    Err(()) => {
-                        refused_binding = Some(scope.refusal.unwrap_or((
-                            target.range(),
-                            "cannot compile this assignment target ahead of time",
-                        )));
-                        None
-                    }
-                }
-            });
-            scope.report_child_refusals = false;
-            protected = contexts::enter_python(protected, site, manager, binding);
-            if refused_binding.is_some() {
-                break;
-            }
-        }
-        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
-        *protected = if let Some(fault) = refused_binding {
-            self.refusal.get_or_insert(PreparedRefusal::Operand(fault));
-            vec![region.refused_operand(fault)]
-        } else {
-            region.child(self.physical_suite(&stmt.body, kind, selection, suspended))
-        };
-        region.checked.function.body = statements;
-        region
-    }
-
-    fn prepare_while(
-        &mut self,
-        loop_: &ast::StmtWhile,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> RegisteredSuite {
-        // A disabled body has no entry or declarations. The parent already owns the
-        // loop checkpoint, and the else suite supplies its own fallthrough.
-        if disabled_while(loop_) {
-            return self.physical_suite(&loop_.orelse, kind, selection, suspended);
-        }
-        let mut region = self.region(kind);
-        let test = match loop_.test.as_ref() {
-            ast::Expr::BooleanLiteral(literal) => Expr::boolean(literal.value),
-            expr => region.operand(
-                self.owned_operand(expr, kind, suspended, |scope| scope.condition_operand(expr)),
-                Type::Bool,
-            ),
-        };
-        let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
-        let otherwise = if loop_.orelse.is_empty() {
-            Vec::new()
-        } else {
-            region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
-        };
-        region
-            .checked
-            .function
-            .body
-            .push(Statement::While(test, body, otherwise));
-        region
-    }
-
-    fn prepare_for(
-        &mut self,
-        loop_: &ast::StmtFor,
-        checkpoint: Statement,
-        kind: RegisteredScope,
-        selection: SuiteSelection,
-        suspended: bool,
-    ) -> StdResult<RegisteredSuite, OperandRefusal> {
-        let mut operands = Vec::new();
-        let mut scope = self.source_scope(kind);
-        let checked = scope.try_operand(|scope| scope.selected_operand(&loop_.iter, selection));
-        let iterable = self.region_operand(&loop_.iter, kind, &mut operands, checked, suspended);
-        let mut input = cursor_input(
-            iterable,
-            Some(loop_.iter.range()),
-            for_pull(loop_),
-            |ty, cursor| scope.reserve_cursor_slot(ty, cursor),
-        );
-        let binding = input
-            .bind_loop_target(&mut scope, &loop_.target)
-            .map_err(|()| {
-                scope.refusal.unwrap_or((
-                    loop_.target.range(),
-                    "cannot compile this assignment target ahead of time",
-                ))
-            })?;
-        self.refusal = self
-            .refusal
-            .or_else(|| self.literal_refusal(RegionRoot::Suite(binding)));
-        let mut region = RegisteredSuite::new(scope.finish(Vec::new()), operands);
-        let body = region.child(self.physical_suite(&loop_.body, kind, selection, suspended));
-        let otherwise = if loop_.orelse.is_empty() {
-            Vec::new()
-        } else {
-            region.child(self.physical_suite(&loop_.orelse, kind, selection, suspended))
-        };
-        let mut statements = vec![checkpoint];
-        statements.extend(input.for_suite(body, otherwise, Vec::new()));
-        region.checked.function.body = statements;
-        Ok(region)
     }
 
     fn selected_suite(
@@ -3336,24 +3376,8 @@ where
         Ok(true)
     }
 
-    fn branch(
-        &mut self,
-        branch: &ast::StmtIf,
-        mut output: &mut Vec<Statement>,
-    ) -> StdResult<bool, ()> {
-        let scope = &mut *self.0;
-        let mut falls = false;
-        for (test, suite) in statements::if_clauses(branch) {
-            let Some(test) = test else {
-                let continues = scope.block_into(suite, output)?;
-                return Ok(falls || continues);
-            };
-            let condition = scope.condition_operand(test).ok_or(())?;
-            let (body, otherwise) = statements::push_if(output, condition);
-            falls |= scope.block_into(suite, body)?;
-            output = otherwise;
-        }
-        Ok(true)
+    fn branch(&mut self, branch: &ast::StmtIf, output: &mut Vec<Statement>) -> StdResult<bool, ()> {
+        CompoundSuites::default().branch(self.0, branch, output)
     }
 
     fn definition(&mut self, def: &ast::StmtFunctionDef) -> StdResult<Option<Statement>, ()> {
@@ -3395,16 +3419,9 @@ where
     }
 
     fn for_loop(&mut self, loop_: &ast::StmtFor) -> StdResult<statements::Block, ()> {
-        let scope = &mut *self.0;
-        let mut input = scope
-            .creating_iterable(|scope| scope.iteration_input(&loop_.iter, for_pull(loop_)))
-            .ok_or(())?;
-        input.bind_loop_target(scope, &loop_.target)?;
-        scope.in_loop(LoopScope::WithCursor, |scope| {
-            scope.block_into(&loop_.body, &mut input.next)
-        })?;
-        let otherwise = scope.suite(&loop_.orelse)?;
-        Ok((input.loop_suite(otherwise, Vec::new()), true))
+        let mut body = Vec::new();
+        let falls = CompoundSuites::default().for_loop(self.0, loop_, &mut body)?;
+        Ok((body, falls))
     }
 
     fn raised_value(
@@ -3476,56 +3493,13 @@ impl SourceScope<'_> {
                 Ok((vec![binding], true))
             }
             ast::Stmt::Try(region) => {
-                let (body, body_falls) = self.block(&region.body)?;
-                let mut handlers = Vec::with_capacity(region.handlers.len());
-                let mut handler_falls = false;
-                for ast::ExceptHandler::ExceptHandler(handler) in &region.handlers {
-                    let matcher = exception_matcher(handler, region.is_star, |class, _| {
-                        self.frame_value(class).ok_or(())
-                    })?;
-                    let name = handler.name.as_ref().map(|name| self.slot(name.as_str()));
-                    let (body, falls) = self.block(&handler.body)?;
-                    handler_falls |= falls;
-                    handlers.push(ir::ExceptHandler {
-                        matcher,
-                        name,
-                        body,
-                    });
-                }
-                let (orelse, else_falls) = self.block(&region.orelse)?;
-                let finalbody = self.block(&region.finalbody)?;
-                let normal_exit = body_falls && else_falls || handler_falls;
-                return Ok(statements::finish_try(
-                    Some(output),
-                    body,
-                    handlers,
-                    orelse,
-                    normal_exit,
-                    finalbody,
-                ));
+                return CompoundSuites::default().try_statement(self, region, output);
             }
             ast::Stmt::With(stmt) if !stmt.is_async || self.is_async_function() => {
-                contexts::python_with(
-                    self,
-                    self.source.text,
-                    stmt,
-                    |scope, expr| scope.frame_value(expr).ok_or(()),
-                    Self::block_into,
-                )
+                return CompoundSuites::default().with_statement(self, stmt, output);
             }
             ast::Stmt::While(loop_) => {
-                let condition = self.condition_operand(&loop_.test).ok_or(())?;
-                let disabled = ir::control::boolean_literal(&condition) == Some(false);
-                let body = if disabled {
-                    Vec::new()
-                } else {
-                    self.in_loop(LoopScope::While, |scope| scope.suite(&loop_.body))?
-                };
-                let (otherwise, falls_through) = self.block(&loop_.orelse)?;
-                Ok((
-                    vec![Statement::While(condition, body, otherwise)],
-                    !disabled || falls_through,
-                ))
+                return CompoundSuites::default().while_loop(self, loop_, output);
             }
             ast::Stmt::Global(_) | ast::Stmt::Nonlocal(_) => Ok((Vec::new(), true)),
             ast::Stmt::AnnAssign(ann) => {
