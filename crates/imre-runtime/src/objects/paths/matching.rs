@@ -94,7 +94,54 @@ fn glob_matches(
     if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
         return Ok(matched);
     }
+    if pattern.contains('[')
+        && !pattern.contains(sep)
+        && !path.contains(sep)
+        && let Some(matched) = match_simple_ranges(path, pattern, sensitive)
+    {
+        return Ok(matched);
+    }
     complex_glob_matches(path, pattern, sensitive, recursive, sep)
+}
+
+/// Scan fixed-width range classes directly without allocating shell tokens or classes.
+fn match_simple_ranges(path: &str, pattern: &str, sensitive: bool) -> Option<bool> {
+    let mut pattern = pattern.chars().peekable();
+    let mut path = path.chars();
+    let mut matched = true;
+    while let Some(token) = pattern.next() {
+        let accepts = match token {
+            '*' => return None,
+            '[' => {
+                let negated = pattern.next_if_eq(&'!').is_some();
+                let start = pattern.next()?;
+                if matches!(start, '[' | ']' | '-' | '!') || pattern.next()? != '-' {
+                    return None;
+                }
+                let end = pattern.next()?;
+                if matches!(end, '[' | ']' | '-') || start > end || pattern.next()? != ']' {
+                    return None;
+                }
+                path.next().is_some_and(|actual| {
+                    if sensitive {
+                        (start <= actual && actual <= end) != negated
+                    } else {
+                        folded_class(actual, negated, &[(start, end)])
+                    }
+                })
+            }
+            '?' => path.next().is_some(),
+            expected => path.next().is_some_and(|actual| {
+                if sensitive {
+                    actual == expected
+                } else {
+                    folded(actual, expected)
+                }
+            }),
+        };
+        matched &= accepts;
+    }
+    Some(matched && path.next().is_none())
 }
 
 // Keep token compilation out of the literal-component loop.
@@ -231,6 +278,12 @@ fn folded_class(character: char, negated: bool, ranges: &[(char, char)]) -> bool
         let folding = super::super::warnings::literal_fold(character);
         char::from_u32(folding)
             .is_some_and(|c| c.is_ascii() && (contains(c) || contains(c.to_ascii_uppercase())))
+    } else if char::from_u32(super::super::warnings::literal_fold(character)).is_some_and(contains)
+        || matches!(unicode_case_mapping::to_uppercase(character), [upper, 0, 0] if char::from_u32(upper).is_some_and(|upper| {
+            contains(upper) && super::super::warnings::literal_fold(character) == super::super::warnings::literal_fold(upper)
+        }))
+    {
+        true
     } else {
         let mut equivalents = ClassUnicode::new([ClassUnicodeRange::new(character, character)]);
         if matches!(character, 'i' | 'I' | 'İ' | 'ı') {
@@ -682,6 +735,8 @@ mod tests {
             "docs/RÉSUMÉ_2026.TXT",
             "src/Kelvin.txt",
             "src/İstanbul.txt",
+            "éé",
+            "ÉÉ",
         ];
         let patterns = [
             "**",
@@ -706,6 +761,8 @@ mod tests {
             "src/[İ]*.TXT",
             "a[.-0]b",
             "*[!x]*b",
+            "[À-Ö][À-Ö]",
+            "[!À-Ö][À-Ö]",
         ];
         for path in paths {
             for pattern in patterns {
