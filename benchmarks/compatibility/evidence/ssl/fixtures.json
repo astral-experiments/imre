@@ -1,0 +1,13 @@
+{
+  "actual_files": 1639,
+  "cpython_commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+  "expected_files": 1639,
+  "extra_files": [],
+  "manifest": "benchmarks/cpython_stdlib/full/unittest/cpython-test-tree.json",
+  "manifest_sha256": "cc39fac6d87ce7272117d16cfc08a436d0fcb812ed3a971f39a237c5c3ef1d85",
+  "method": "Compared every staged file or symlink Git blob against the pinned recursive CPython test tree manifest.",
+  "mismatched_blobs": [],
+  "missing_files": [],
+  "staged_tree": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test",
+  "test_tree_git_sha": "b4324777842d3e16d2f95dc24789b2a80486541a"
+}

@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/imre-cpython-test-fixtures/Lib/ssl_suite_runner.py (-O3)
+/workspace/scratch/imre-cpython-test-fixtures/Lib/ssl_suite_runner.py:3:1: Imre: /workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_ssl.py:43:1: Imre: imports must precede executable module statements
