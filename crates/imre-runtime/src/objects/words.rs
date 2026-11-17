@@ -22,6 +22,9 @@ type RowOwner = allocator_api2::boxed::Box<super::structs::Rows>;
 pub(super) struct WordKind(u16);
 
 impl WordKind {
+    pub(super) const STR: Self = Self(3);
+    pub(super) const OBJECT: Self = Self(5);
+
     // Private to Words. A deferred list stores a plan instead of element words.
     const DEFERRED: Self = Self(u16::MAX);
     const STRUCT_ROWS: Self = Self(u16::MAX - 1);

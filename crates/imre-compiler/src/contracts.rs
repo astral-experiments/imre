@@ -700,7 +700,7 @@ impl Builtin {
             | Self::GetInAppendWindow(..)
             | Self::GetBoundedInAppendWindow { .. }
             | Self::JoinBufferAppend
-            | Self::SortByKeys => Contract::new(true, PreservesOwners),
+            | Self::SortByKeys(_) => Contract::new(true, PreservesOwners),
             Self::ObjectCall(..)
             | Self::RegisteredImport(_)
             | Self::RegisteredSuspend(..)
@@ -931,7 +931,7 @@ impl Builtin {
         result: Type,
         module: &crate::ir::Module,
     ) -> Result<(), &'static str> {
-        use crate::ir::ExprKind;
+        use crate::ir::{ExprKind, SortKeys};
 
         let types = &module.types;
         let signature = |params: &[Type], returns| {
@@ -944,6 +944,19 @@ impl Builtin {
             _ => false,
         };
         let valid = match self {
+            Self::SortByKeys(SortKeys::ObjectText) => {
+                result == Type::None
+                    && matches!(args, [values, reverse]
+                        if types.element(values.ty) == Some(Type::ObjectValue)
+                            && reverse.ty == Type::Bool)
+            }
+            Self::SortByKeys(SortKeys::Stored) => {
+                result == Type::None
+                    && matches!(args, [values, keys, reverse]
+                        if types.element(values.ty).is_some()
+                            && types.element(keys.ty).is_some_and(|ty| types.ordered_key(ty))
+                            && reverse.ty == Type::Bool)
+            }
             Self::RecordCopy => matches!(result, Type::Class(_)) && signature(&[result], result),
             Self::WeakProxyTarget => {
                 matches!(result, Type::Class(class) if signature(&[Type::WeakProxy(class)], result))

@@ -180,6 +180,12 @@ pub unsafe extern "C" fn imre_object_is_exact_tuple(value: *const Object) -> boo
     }
 }
 
+/// Borrow the exact string word while its projected owner remains rooted.
+pub(super) fn exact_text_word(storage: &Storage) -> Option<usize> {
+    let (kind, word) = super::exceptions::projected_word(storage)?;
+    (kind == WordKind::STR && word != 0).then_some(word)
+}
+
 /// Acquire the original exact string from an erased object, SystemExit code, or module member.
 ///
 /// # Safety
@@ -187,10 +193,8 @@ pub unsafe extern "C" fn imre_object_is_exact_tuple(value: *const Object) -> boo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn imre_object_exact_text(value: *const Object) -> *const Str {
     // SAFETY: the caller roots both the view and its projected word.
-    if let Some((kind, word)) = unsafe { object(value).0.with(super::exceptions::projected_word) }
-        && kind.raw() == 3
-    {
-        // SAFETY: kind 3 identifies a rooted exact string.
+    if let Some(word) = unsafe { object(value).0.with(exact_text_word) } {
+        // SAFETY: the boxed owner keeps the exact string alive during acquisition.
         return StrOwner::into_raw(unsafe { StrOwner::acquire_word(word) });
     }
     Error::return_static_message(

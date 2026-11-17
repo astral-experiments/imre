@@ -2033,6 +2033,15 @@ impl Constant {
     }
 }
 
+/// Where a stable sort reads each comparison key.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SortKeys {
+    /// A key list, which may be the result itself for directly ordered elements.
+    Stored,
+    /// Each object in the fresh result owns the exact string to compare.
+    ObjectText,
+}
+
 #[derive(Clone)]
 pub(crate) enum Builtin {
     /// An indeterminate operand during source checking. Its containing body retains
@@ -2325,8 +2334,7 @@ pub(crate) enum Builtin {
     LengthResult(Box<FixedOrigin>),
     Abs,
     FloatCopySign,
-    /// Stable permutation of a fully typed list by precomputed scalar keys.
-    SortByKeys,
+    SortByKeys(SortKeys),
     SortByComparator,
     ListExtendBuffer,
     ListExtendSnapshot,

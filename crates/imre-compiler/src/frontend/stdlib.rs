@@ -1,6 +1,7 @@
 //! Eager typed library operations reuse the existing iterator and callback IR.
 
 use super::*;
+use crate::ir::SortKeys;
 
 /// These calls bind the original string method and its operands in the Python frame.
 pub(super) fn registered_string_method(call: &ast::ExprCall) -> Option<&ast::ExprAttribute> {
@@ -295,8 +296,17 @@ impl Checker<'_> {
         }
         let mut body = Vec::new();
         let mut clear = Vec::new();
-        let input = self.expansion_input(&call.arguments.args[0], element)?;
+        let key = Self::sort_key(call);
+        // Without a key, infer the sortable element independently of the
+        // storage requested for the newly allocated result. Real keys retain
+        // the destination context used to check their parameter.
+        let input_hint = match (element, key) {
+            (Some(Type::ObjectValue), Ok(None | Some(ast::Expr::NoneLiteral(_)))) => None,
+            _ => element,
+        };
+        let input = self.expansion_input(&call.arguments.args[0], input_hint)?;
         if call.arguments.keywords.is_empty()
+            && element.is_none_or(|ty| ty == Type::Str)
             && let Iteration::Container {
                 iterable,
                 items: false,
@@ -313,20 +323,43 @@ impl Checker<'_> {
         }
         let input = self.capture_consumer_input(input, &mut body, &mut clear);
         let input = self.prepare_iteration(input, call, false)?;
-        self.hint_empty_iteration(&input, Some(element.unwrap_or(Type::Int)));
-        let element = self.locals[input.value];
+        self.hint_empty_iteration(&input, Some(input_hint.unwrap_or(Type::Int)));
+        let pulled = self.locals[input.value];
 
-        let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
+        let (callback, reverse) = self.sort_options(call, key, pulled, &mut body, &mut clear)?;
         if callback.is_none() {
             // The surrounding check can continue after a refused sort.
-            self.sortable_key(element, call)
+            self.sortable_key(pulled, call)
                 .inspect_err(|_| self.forget_pull_writes(&input))?;
         }
+        let object_key = callback.is_some_and(|slot| {
+            self.types
+                .signature(self.locals[slot])
+                .is_some_and(|(parameters, _)| parameters.as_slice() == [Type::ObjectValue])
+        });
+        let (storage, keys) = if element == Some(Type::ObjectValue)
+            && pulled == Type::Str
+            && (callback.is_none() || object_key)
+        {
+            let keys = if callback.is_none() {
+                SortKeys::ObjectText
+            } else {
+                SortKeys::Stored
+            };
+            (Type::ObjectValue, keys)
+        } else {
+            (pulled, SortKeys::Stored)
+        };
         let (collection, result) = self.collect_list_body(
             Iteration::Prepared(input),
-            element,
+            storage,
             call,
             |checker, result, value| {
+                let value = if storage != pulled {
+                    checker.coerce(value, storage, call)?
+                } else {
+                    value
+                };
                 Ok(vec![Statement::Expr(Expr {
                     ty: Type::None,
                     kind: ExprKind::Builtin(Builtin::Append, vec![checker.local(result), value]),
@@ -335,7 +368,14 @@ impl Checker<'_> {
         )?;
         body.extend(collection);
         clear.push(result);
-        self.sort_values(call, result, callback, reverse, &mut body, &mut clear)?;
+        self.sort_values(
+            call,
+            result,
+            (callback, keys),
+            reverse,
+            &mut body,
+            &mut clear,
+        )?;
         Ok(Expr::scope(body, self.local(result), clear))
     }
 
@@ -462,7 +502,8 @@ impl Checker<'_> {
         let target = self.hidden(ty);
         let mut body = vec![Statement::Assign(target, receiver)];
         let mut clear = vec![target];
-        let (callback, reverse) = self.sort_options(call, element, &mut body, &mut clear)?;
+        let (callback, reverse) =
+            self.sort_options(call, Self::sort_key(call), element, &mut body, &mut clear)?;
         if callback.is_some() {
             let original = self.hidden(ty);
             let completed = self.hidden(Type::Bool);
@@ -476,7 +517,14 @@ impl Checker<'_> {
             ));
             body.push(Statement::Assign(completed, Expr::boolean(false)));
             let mut sorting = Vec::new();
-            self.sort_values(call, original, callback, reverse, &mut sorting, &mut clear)?;
+            self.sort_values(
+                call,
+                original,
+                (callback, SortKeys::Stored),
+                reverse,
+                &mut sorting,
+                &mut clear,
+            )?;
             sorting.push(Statement::Assign(completed, Expr::boolean(true)));
             body.push(Statement::Try {
                 body: sorting,
@@ -496,7 +544,14 @@ impl Checker<'_> {
             });
         } else {
             self.sortable_key(element, call)?;
-            self.sort_values(call, target, callback, reverse, &mut body, &mut clear)?;
+            self.sort_values(
+                call,
+                target,
+                (callback, SortKeys::Stored),
+                reverse,
+                &mut body,
+                &mut clear,
+            )?;
         }
         Ok(Expr {
             ty: Type::None,
@@ -508,23 +563,36 @@ impl Checker<'_> {
         })
     }
 
+    /// Find the key without evaluating any keyword or changing diagnostics.
+    fn sort_key(call: &ast::ExprCall) -> std::result::Result<Option<&ast::Expr>, &ast::Keyword> {
+        let mut names = HashSet::new();
+        let mut key = None;
+        for keyword in &call.arguments.keywords {
+            let name = keyword.arg.as_ref().map(|name| name.as_str());
+            if !matches!(name, Some("key" | "reverse")) || !names.insert(name) {
+                return Err(keyword);
+            }
+            if name == Some("key") {
+                key = Some(&keyword.value);
+            }
+        }
+        Ok(key)
+    }
+
     fn sort_options(
         &mut self,
         call: &ast::ExprCall,
+        key: std::result::Result<Option<&ast::Expr>, &ast::Keyword>,
         element: Type,
         body: &mut Vec<Statement>,
         clear: &mut Vec<usize>,
     ) -> Result<(Option<usize>, Expr), String> {
-        let mut keywords = HashSet::new();
-        for keyword in &call.arguments.keywords {
-            let name = keyword.arg.as_ref().map(|name| name.as_str());
-            if !matches!(name, Some("key" | "reverse")) || !keywords.insert(name) {
-                return Err(error(
-                    self.source,
-                    keyword,
-                    "sort accepts key and reverse once each",
-                ));
-            }
+        if let Err(keyword) = key {
+            return Err(error(
+                self.source,
+                keyword,
+                "sort accepts key and reverse once each",
+            ));
         }
         let mut callback = None;
         let mut reverse = Expr::boolean(false);
@@ -551,7 +619,7 @@ impl Checker<'_> {
         &mut self,
         call: &ast::ExprCall,
         result: usize,
-        callback: Option<usize>,
+        (callback, source): (Option<usize>, SortKeys),
         reverse: Expr,
         body: &mut Vec<Statement>,
         clear: &mut Vec<usize>,
@@ -570,7 +638,7 @@ impl Checker<'_> {
             )?));
             return Ok(());
         }
-        let keys = if let Some(callback) = callback {
+        let (source, operands) = if let Some(callback) = callback {
             let (parameters, key) = self.types.signature(self.locals[callback]).unwrap();
             let [parameter] = parameters.as_slice() else {
                 return Err(error(
@@ -612,16 +680,20 @@ impl Checker<'_> {
                     })])
                 },
             )?);
-            keys
+            (
+                SortKeys::Stored,
+                vec![self.local(result), self.local(keys), reverse],
+            )
         } else {
-            result
+            let operands = match source {
+                SortKeys::Stored => vec![self.local(result), self.local(result), reverse],
+                SortKeys::ObjectText => vec![self.local(result), reverse],
+            };
+            (source, operands)
         };
         body.push(Statement::Expr(Expr {
             ty: Type::None,
-            kind: ExprKind::Builtin(
-                Builtin::SortByKeys,
-                vec![self.local(result), self.local(keys), reverse],
-            ),
+            kind: ExprKind::Builtin(Builtin::SortByKeys(source), operands),
         }));
         Ok(())
     }
