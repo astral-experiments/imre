@@ -1,7 +1,9 @@
 use super::{CycleSet, END, FindReferences, Heap, Id, MarkMode, Scope, UNMARKED, Value};
 use crate::dynamic::stdlib::{BinaryFile, io::MemoryStream};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, map::Entry};
 use std::collections::{HashSet, VecDeque};
+
+type IdSet = HashSet<Id, hashbrown::DefaultHashBuilder>;
 
 mod retained;
 pub(super) use retained::RetainedPaths;
@@ -367,7 +369,7 @@ impl RootPaths {
     ) -> Option<Self> {
         let mut edges_left = MAX_EDGES;
         let mut nodes_left = heap.slots.len().min(MAX_NODES);
-        let mut wanted = HashSet::new();
+        let mut wanted = IdSet::with_hasher(hashbrown::DefaultHashBuilder::default());
         for id in endpoints {
             edges_left = edges_left.checked_sub(1)?;
             wanted.try_reserve(1).ok()?;
@@ -436,12 +438,17 @@ impl RootPaths {
         &mut self,
         heap: &Heap,
         roots: impl Iterator<Item = (Id, Root)>,
-        wanted: &mut HashSet<Id>,
+        wanted: &mut IdSet,
         nodes_left: &mut usize,
         edges_left: &mut usize,
         search: Search,
     ) -> Option<()> {
-        let mut tree = IndexMap::<Id, (Origin, bool)>::new();
+        if search == Search::Strong {
+            return self.search_strong(heap, roots, wanted, nodes_left, edges_left);
+        }
+        let mut tree = IndexMap::<Id, (Origin, bool), hashbrown::DefaultHashBuilder>::with_hasher(
+            hashbrown::DefaultHashBuilder::default(),
+        );
         for (root, origin) in roots {
             if *edges_left == 0 || *nodes_left == 0 {
                 break;
@@ -473,39 +480,6 @@ impl RootPaths {
             if search == Search::SkipModules && matches!(value, Value::Module { .. }) {
                 continue;
             }
-            if search == Search::Strong {
-                let mut allocated = true;
-                // A missed edge only reduces coverage. Each retained edge is rechecked below.
-                let _ = value.try_children(&mut |child: Id| {
-                    if !allocated || *edges_left == 0 || *nodes_left == 0 {
-                        return;
-                    }
-                    *edges_left -= 1;
-                    if !heap.slot_shapes[child as usize].is_scalar_leaf()
-                        && !tree.contains_key(&child)
-                    {
-                        if tree.try_reserve(1).is_err() {
-                            allocated = false;
-                            return;
-                        }
-                        *nodes_left -= 1;
-                        tree.insert(
-                            child,
-                            (
-                                Origin::Edge {
-                                    parent: index,
-                                    slot: None,
-                                },
-                                wanted.remove(&child),
-                            ),
-                        );
-                    }
-                });
-                if !allocated {
-                    return None;
-                }
-                continue;
-            }
             let links = Links::from(value, self.dict_keys);
             let end = links.len().min(start.saturating_add(CHILDREN_PER_VISIT));
             if end < links.len() {
@@ -517,32 +491,48 @@ impl RootPaths {
                 let Some(child) = links.get(slot) else {
                     continue;
                 };
-                if tree.contains_key(&child) {
-                    continue;
-                }
-                if *nodes_left == 0 {
-                    break 'search;
-                }
-                let found = wanted.remove(&child);
                 // A registry key can prove an endpoint without traversing unrelated keys.
-                if !found
-                    && (heap.slot_shapes[child as usize].is_scalar_leaf()
-                        || links.is_dict_key(slot))
-                {
-                    continue;
-                }
-                *nodes_left -= 1;
-                tree.try_reserve(1).ok()?;
-                tree.insert(
-                    child,
-                    (
+                if heap.slot_shapes[child as usize].is_scalar_leaf() || links.is_dict_key(slot) {
+                    if *nodes_left == 0 {
+                        break 'search;
+                    }
+                    if !wanted.remove(&child) {
+                        continue;
+                    }
+                    if tree.len() == tree.capacity() {
+                        tree.try_reserve(1).ok()?;
+                    }
+                    *nodes_left -= 1;
+                    tree.insert(
+                        child,
+                        (
+                            Origin::Edge {
+                                parent: index,
+                                slot: Some(slot),
+                            },
+                            true,
+                        ),
+                    );
+                } else {
+                    // Reserve before borrowing the vacant entry so insertion remains fallible.
+                    if tree.len() == tree.capacity() {
+                        tree.try_reserve(1).ok()?;
+                    }
+                    let Entry::Vacant(entry) = tree.entry(child) else {
+                        continue;
+                    };
+                    if *nodes_left == 0 {
+                        break 'search;
+                    }
+                    *nodes_left -= 1;
+                    entry.insert((
                         Origin::Edge {
                             parent: index,
                             slot: Some(slot),
                         },
-                        found,
-                    ),
-                );
+                        wanted.remove(&child),
+                    ));
+                }
                 if wanted.is_empty() {
                     break;
                 }
@@ -576,6 +566,115 @@ impl RootPaths {
                 Origin::Root(root) => {
                     self.anchors.try_reserve(1).ok()?;
                     self.anchors.push((root, id));
+                }
+            }
+        }
+        self.nodes.sort_unstable();
+        Some(())
+    }
+
+    /// Heap IDs are compact slot indices. A dense index avoids hashing every edge
+    /// in the unbounded strong search while keeping the BFS and proof order intact.
+    fn search_strong(
+        &mut self,
+        heap: &Heap,
+        roots: impl Iterator<Item = (Id, Root)>,
+        wanted: &mut IdSet,
+        nodes_left: &mut usize,
+        edges_left: &mut usize,
+    ) -> Option<()> {
+        if heap.slots.len() >= u32::MAX as usize {
+            return None;
+        }
+        let mut positions = Vec::new();
+        positions.try_reserve_exact(heap.slots.len()).ok()?;
+        positions.resize(heap.slots.len(), 0u32);
+        for &id in wanted.iter() {
+            *positions.get_mut(id as usize)? = u32::MAX;
+        }
+        let mut tree: Vec<(Id, Origin, bool)> = Vec::new();
+        tree.try_reserve((*nodes_left).min(4096)).ok()?;
+        for (id, origin) in roots {
+            if *edges_left == 0 || *nodes_left == 0 {
+                break;
+            }
+            *edges_left -= 1;
+            let position = positions.get_mut(id as usize)?;
+            if *position == 0 || *position == u32::MAX {
+                let found = *position == u32::MAX;
+                tree.try_reserve(1).ok()?;
+                *position = (tree.len() + 1) as u32;
+                *nodes_left -= 1;
+                if found {
+                    wanted.remove(&id);
+                }
+                tree.push((id, Origin::Root(origin), found));
+            }
+        }
+        let mut front = 0;
+        while !wanted.is_empty() && *edges_left != 0 && *nodes_left != 0 && front < tree.len() {
+            let index = front;
+            front += 1;
+            let parent = tree[index].0;
+            let mut allocated = true;
+            // A missed edge only reduces coverage; retained edges are validated again.
+            let _ = heap.get(parent).try_children(&mut |child: Id| {
+                if !allocated || *edges_left == 0 || *nodes_left == 0 {
+                    return;
+                }
+                *edges_left -= 1;
+                if heap.slot_shapes[child as usize].is_scalar_leaf() {
+                    return;
+                }
+                let position = &mut positions[child as usize];
+                if *position == 0 || *position == u32::MAX {
+                    let found = *position == u32::MAX;
+                    if tree.try_reserve(1).is_err() {
+                        allocated = false;
+                        return;
+                    }
+                    *position = (tree.len() + 1) as u32;
+                    *nodes_left -= 1;
+                    if found {
+                        wanted.remove(&child);
+                    }
+                    tree.push((
+                        child,
+                        Origin::Edge {
+                            parent: index,
+                            slot: None,
+                        },
+                        found,
+                    ));
+                }
+            });
+            if !allocated {
+                return None;
+            }
+        }
+        for index in (0..tree.len()).rev() {
+            if let (_, Origin::Edge { parent, .. }, true) = tree[index] {
+                tree[parent].2 = true;
+            }
+        }
+        let known = self.nodes.len();
+        for &(id, origin, keep) in &tree {
+            if !keep || self.nodes[..known].binary_search(&id).is_ok() {
+                continue;
+            }
+            self.nodes.try_reserve(1).ok()?;
+            self.nodes.push(id);
+            match origin {
+                Origin::Root(root) => {
+                    self.anchors.try_reserve(1).ok()?;
+                    self.anchors.push((root, id));
+                }
+                Origin::Edge { parent, .. } => {
+                    let parent = tree[parent].0;
+                    let links = Links::from(heap.get(parent), self.dict_keys);
+                    let slot = (0..links.len().min(MAX_EDGES)).find(|&i| links.get(i) == Some(id));
+                    self.edges.try_reserve(1).ok()?;
+                    self.edges.push((parent, slot, id));
                 }
             }
         }
