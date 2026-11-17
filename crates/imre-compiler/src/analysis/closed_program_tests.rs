@@ -26,6 +26,15 @@ fn object_fallback_checks_first_party_scalar_stores() {
         fs::write(&main, format!("{dynamic}{store}")).unwrap();
         reject();
     }
+    for store in ["status: int = str(1)\n", "status: int = 1\nstatus = 'x'\n"] {
+        fs::write(&main, format!("{dynamic}{store}")).unwrap();
+        let error = crate::check_file(&main, None).unwrap_err();
+        assert!(error.contains("expected int, got str"), "{error}");
+    }
+    fs::write(&main, format!("{dynamic}status: int = 'x'\n")).unwrap();
+    let error = crate::check_file(&main, None).unwrap_err();
+    assert!(error.contains("invalid-assignment"), "{error}");
+    assert!(!error.contains("Imre: expected int, got str"), "{error}");
     fs::write(project.path().join("dynamic.py"), dynamic).unwrap();
     fs::write(project.path().join("bad.py"), "status: int = True\n").unwrap();
     fs::write(&main, "import dynamic\nimport bad\n").unwrap();

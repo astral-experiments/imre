@@ -3930,8 +3930,10 @@ impl Session {
                 }
                 if let Some(expected) = annotation_type(db, &model, annotation)
                     && let Some(actual) = value.inferred_type(&model)
-                    // Non-assignable stores already have ty diagnostics.
-                    && actual.is_assignable_to(db, &env, expected)
+                    // Keep ty's diagnostic where the declared-initializer check covers it;
+                    // other scalar stores still need an independent contract diagnostic.
+                    && (actual.is_assignable_to(db, &env, expected)
+                        || contract_initializer(db, file, &parsed, value.range()).is_none())
                     && !Self::written_scalar_union_accepts(&model, annotation, actual)
                     && let Some(error) = Self::scalar_contract_error(&model, expected, value, actual, || true)
                     && !unreachable.iter().any(|r| r.range.contains_range(value.range()))
