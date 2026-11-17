@@ -94,7 +94,8 @@ fn glob_matches(
     if let Some(matched) = match_literal_components(path, pattern, sensitive, recursive, sep) {
         return Ok(matched);
     }
-    if pattern.contains('[')
+    if !pattern.contains('*')
+        && pattern.contains('[')
         && !pattern.contains(sep)
         && !path.contains(sep)
         && let Some(matched) = match_simple_ranges(path, pattern, sensitive)
