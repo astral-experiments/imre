@@ -25,6 +25,7 @@ def current():
     check_unicode_index_order_and_popularity()
     check_matching_blocks_dispatch()
     check_ratio_dispatch()
+    check_position_integer_identity()
 
 
 def check_live_matcher_state():
@@ -215,3 +216,18 @@ def check_ratio_dispatch():
         assert matcher.ratio() == (1, 4)
     finally:
         difflib._calculate_ratio = original
+
+
+def check_position_integer_identity():
+    import gc
+
+    ascii_matcher = SequenceMatcher(None, "", "x" * 300, False)
+    unicode_matcher = SequenceMatcher(None, "", "雪" * 300, False)
+    ascii_positions = ascii_matcher.b2j["x"]
+    unicode_positions = unicode_matcher.b2j["雪"]
+    assert ascii_positions[0] is unicode_positions[0]
+    assert ascii_positions[256] is unicode_positions[256]
+    assert ascii_positions[257] is not unicode_positions[257]
+    del ascii_matcher, unicode_matcher
+    gc.collect()
+    assert ascii_positions == unicode_positions == list(range(300))

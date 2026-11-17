@@ -307,13 +307,12 @@ fn build_chain_ascii(ctx: &mut Context, receiver: Id, b: Id, autojunk: bool) -> 
             .map_err(|_| crate::Error::memory_error())?;
         let list = ctx.alloc(Value::List(values));
         ctx.set_dictionary_key(b2j, key, list, None, false)?;
-        for &position in &positions[offsets[byte as usize]..offsets[byte as usize + 1]] {
-            let index = ctx.int(position as i64);
-            let Value::List(values) = ctx.heap.get_mut(list) else {
-                unreachable!()
-            };
-            values.push(index);
-        }
+        ctx.heap.try_extend_position_list(
+            list,
+            positions[offsets[byte as usize]..offsets[byte as usize + 1]]
+                .iter()
+                .copied(),
+        )?;
     }
     let bjunk = ctx.alloc(Value::Set {
         entries: Default::default(),

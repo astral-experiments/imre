@@ -4668,6 +4668,88 @@ impl Heap {
             .unwrap_or_else(|| self.alloc_slot(Value::Int(integer)))
     }
 
+    /// Extend a rooted exact list with nonnegative position integers from one reserved slot batch.
+    /// Every nonpermanent integer becomes owned by the list before another heap allocation.
+    pub(super) fn try_extend_position_list<I>(&mut self, list: Id, positions: I) -> Result<()>
+    where
+        I: Clone + ExactSizeIterator<Item = usize>,
+    {
+        let count = positions.len();
+        let mut fresh = 0usize;
+        let mut inline = true;
+        for position in positions.clone() {
+            if position > SMALL_INT_MAX as usize {
+                fresh += 1;
+                inline &= position as u64 <= crate::MAX_SMALL as u64;
+            }
+        }
+        let Value::List(values) = self.get_mut(list) else {
+            unreachable!("position owner is an exact rooted list")
+        };
+        values
+            .try_reserve(count)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+
+        if !inline || self.allocation_traces.is_tracing() || self.full_collection_active() {
+            self.reserve_temporaries(fresh)?;
+            for position in positions {
+                let value = self.owned_integer(crate::Int::from_usize(position));
+                let Value::List(values) = self.get_mut(list) else {
+                    unreachable!()
+                };
+                values.push(value);
+            }
+            return Ok(());
+        }
+
+        let appended = fresh.saturating_sub(self.free_count);
+        self.slot_shapes
+            .try_reserve(appended)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.traces
+            .try_reserve(appended)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+        self.slots
+            .try_reserve(appended)
+            .map_err(|_| Error::new("MemoryError", ""))?;
+
+        for position in positions {
+            let value = if position <= SMALL_INT_MAX as usize {
+                Self::cached_integer(position as i64).expect("permanent position integer")
+            } else {
+                let integer = Value::Int(crate::Int::from_usize(position));
+                let index = if self.free_head != END {
+                    let index = self.free_head;
+                    let slot = &mut self.slots[index];
+                    self.free_head = slot.gc_next.replace(UNMARKED);
+                    self.free_count -= 1;
+                    debug_assert_eq!(self.traces[index].get(), UNMARKED);
+                    debug_assert_eq!(slot.gc_prev.get(), UNMARKED);
+                    self.slot_shapes[index] = SlotShape::ScalarLeaf;
+                    slot.value = Some(integer);
+                    slot.may_have_buffer_views = false;
+                    slot.generation = 0;
+                    slot.untracked_tuple.set(false);
+                    slot.has_gc_header = false;
+                    slot.finalization = Finalization::None;
+                    index
+                } else {
+                    let index = self.slots.len();
+                    self.slot_shapes.push(SlotShape::ScalarLeaf);
+                    self.traces.push(Cell::new(UNMARKED));
+                    self.slots.push(Slot::new(integer));
+                    index
+                };
+                index as Id
+            };
+            let Value::List(values) = self.get_mut(list) else {
+                unreachable!()
+            };
+            values.push(value);
+        }
+        Ok(())
+    }
+
     pub fn alloc(&mut self, value: Value) -> Id {
         if let Value::Str(text) = value {
             return self.owned_text(text);
@@ -9613,6 +9695,59 @@ mod tests {
 #[cfg(test)]
 mod reachability_tests {
     use super::{Heap, Value};
+
+    #[test]
+    fn position_batch_reuses_free_slots_and_preserves_integer_identity_through_collection() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        heap.alloc(Value::Float(1.5));
+        heap.alloc(Value::Float(2.5));
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::empty());
+
+        let mark = heap.temporary_mark();
+        let list = heap.alloc(Value::List(Vec::new()));
+        let reused = heap.free_head as u64;
+        heap.try_extend_position_list(list, [0, 256, 257, 257, 258].into_iter())
+            .unwrap();
+        let Value::List(values) = heap.get(list) else {
+            unreachable!()
+        };
+        let values = values.clone();
+        assert_eq!(values[0], Heap::cached_integer(0).unwrap());
+        assert_eq!(values[1], Heap::cached_integer(256).unwrap());
+        assert_eq!(values[2], reused);
+        assert_ne!(values[2], values[3]);
+
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::once(list));
+        for (&id, expected) in values.iter().zip([0, 256, 257, 257, 258]) {
+            assert!(matches!(heap.get(id), Value::Int(value) if value.to_i64() == Some(expected)));
+        }
+        heap.collect(std::iter::empty());
+        assert!(heap.slots[values[2] as usize].value.is_none());
+        assert!(matches!(heap.get(values[0]), Value::Int(_)));
+    }
+
+    #[test]
+    fn position_batch_keeps_new_integers_rooted_during_an_active_full_collection() {
+        let mut heap = Heap::new();
+        let mark = heap.temporary_mark();
+        let list = heap.alloc(Value::List(Vec::new()));
+        heap.begin_collection(std::iter::once(list), 2).unwrap();
+        heap.try_extend_position_list(list, [257, 258, 259].into_iter())
+            .unwrap();
+        heap.finish_full_collection(std::iter::once(list), false);
+        heap.end_full_collection();
+        heap.release_temporaries_since(mark);
+        heap.collect(std::iter::once(list));
+        let Value::List(values) = heap.get(list) else {
+            unreachable!()
+        };
+        assert!(values.iter().zip([257, 258, 259]).all(|(&id, expected)| {
+            matches!(heap.get(id), Value::Int(value) if value.to_i64() == Some(expected))
+        }));
+    }
 
     #[test]
     fn recycled_slot_starts_in_the_young_generation() {

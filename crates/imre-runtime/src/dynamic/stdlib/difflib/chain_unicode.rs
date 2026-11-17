@@ -100,11 +100,12 @@ pub(super) fn build(ctx: &mut Context, receiver: Id, b: Id, autojunk: bool) -> R
         values
             .try_reserve_exact(words.len())
             .map_err(|_| crate::Error::memory_error())?;
-        // Exact integer allocation cannot enter Python or collect between
-        // checkpoints; the list owns these handles before the next call.
-        values.extend(words.iter().map(|word| ctx.int((word & index.mask) as i64)));
         let list = ctx.alloc(Value::List(values));
         ctx.set_dictionary_key(b2j, key, list, None, false)?;
+        ctx.heap.try_extend_position_list(
+            list,
+            words.iter().map(|word| (word & index.mask) as usize),
+        )?;
         ctx.heap.release_temporaries_since(mark);
     }
     let bjunk = ctx.alloc(Value::Set {
