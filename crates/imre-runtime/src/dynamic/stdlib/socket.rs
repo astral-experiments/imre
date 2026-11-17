@@ -954,30 +954,85 @@ fn getaddrinfo_args(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> 
 }
 
 /// An importlib-only executable may use socket without its bundled Python source.
-fn public_getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+pub(in crate::dynamic) struct PublicAddrInfo {
+    socket: Id,
+    resolver: Id,
+    args: [Id; 6],
+}
+
+pub(in crate::dynamic) fn prepare_public_getaddrinfo(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<PublicAddrInfo> {
     let args = getaddrinfo_args(ctx, args, kwargs)?;
     let socket = ctx.module("socket")?;
     let low = ctx.lookup_attr(socket, "_socket")?;
     let resolver = ctx.lookup_attr(low, "getaddrinfo")?;
-    let rows = ctx.call(resolver, args.to_vec(), Vec::new())?;
-    let iter = ctx.iterator(rows)?;
-    let mut result = Vec::new();
-    while let Some(row) = ctx.next_item(iter)? {
-        let mut fields = ctx.unpack_items(row, 5, None)?;
-        for (value, name) in fields.iter_mut().zip(["AddressFamily", "SocketKind"]) {
-            let class = ctx.lookup_attr(socket, name)?;
-            match ctx.call(class, vec![*value], Vec::new()) {
-                Ok(member) => *value = member,
-                Err(error) if ctx.is_builtin_error(&error, "ValueError") => {}
-                Err(error) => return Err(error),
-            }
-        }
-        result.push(ctx.alloc(Value::Tuple(fields)));
-    }
-    Ok(ctx.alloc(Value::List(result)))
+    Ok(PublicAddrInfo {
+        socket,
+        resolver,
+        args,
+    })
 }
 
-pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)]) -> Result<Id> {
+/// Prepare under a short Context borrow; run only after that borrow has ended.
+unsafe fn nested_call(context: *mut Context, callable: Id, args: Vec<Id>) -> Result<Id> {
+    // SAFETY: the registered caller owns the active context while preparing the nested call.
+    let call = unsafe { &mut *context }.prepare_call(callable, args.into(), Vec::new())?;
+    // SAFETY: no Context reference survives preparation; the caller roots the operands.
+    unsafe { call.run(context) }
+}
+
+impl PublicAddrInfo {
+    /// # Safety
+    /// The registered caller owns the context and roots the public call's operands.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        // SAFETY: the nested resolver is prepared and run in separate Context phases.
+        let rows = unsafe { nested_call(context, self.resolver, self.args.to_vec()) }?;
+        // SAFETY: the nested call has returned to this execution.
+        let iter = unsafe { &mut *context }.iterator(rows)?;
+        let mut result = Vec::new();
+        loop {
+            // SAFETY: all previous nested calls have returned.
+            let Some(row) = unsafe { &mut *context }.next_item(iter)? else {
+                break;
+            };
+            // SAFETY: this execution owns the resumed context.
+            let mut fields = unsafe { &mut *context }.unpack_items(row, 5, None)?;
+            for (value, name) in fields.iter_mut().zip(["AddressFamily", "SocketKind"]) {
+                // SAFETY: lookup finishes before the nested constructor can run.
+                let class = unsafe { &mut *context }.lookup_attr(self.socket, name)?;
+                // SAFETY: no Context borrow crosses the constructor, which can be monkeypatched.
+                match unsafe { nested_call(context, class, vec![*value]) } {
+                    Ok(member) => *value = member,
+                    Err(error) if unsafe { &*context }.is_builtin_error(&error, "ValueError") => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            // SAFETY: enum construction has returned.
+            result.push(unsafe { &mut *context }.alloc(Value::Tuple(fields)));
+        }
+        // SAFETY: no nested call remains active.
+        Ok(unsafe { &mut *context }.alloc(Value::List(result)))
+    }
+}
+
+/// Owned native operands prepared and audited before the resolver parks.
+pub(in crate::dynamic) struct GetAddrInfo {
+    host: Option<Vec<u8>>,
+    service: Option<Vec<u8>>,
+    family: i32,
+    ty: i32,
+    protocol: i32,
+    flags: i32,
+}
+
+pub(in crate::dynamic) fn prepare_getaddrinfo(
+    ctx: &mut Context,
+    args: &[Id],
+    kwargs: &[(String, Id)],
+) -> Result<GetAddrInfo> {
     let [host_arg, service_arg, family, ty, protocol, flags] = getaddrinfo_args(ctx, args, kwargs)?;
     let family = ctx.index_c_int(family)?;
     let ty = ctx.index_c_int(ty)?;
@@ -1015,18 +1070,49 @@ pub(super) fn getaddrinfo(ctx: &mut Context, args: &[Id], kwargs: &[(String, Id)
         "socket.getaddrinfo",
         &[host_arg, service_arg, family_arg, type_arg, protocol_arg],
     )?;
-    // CPython passes the NUL-terminated host and service buffers to libc.
-    fn c_string_prefix(value: &[u8]) -> &[u8] {
-        value.split(|&byte| byte == 0).next().unwrap_or_default()
+    // CPython passes only the prefix before the first NUL to libc.
+    fn prefix(mut value: Vec<u8>) -> Vec<u8> {
+        if let Some(end) = value.iter().position(|&byte| byte == 0) {
+            value.truncate(end);
+        }
+        value
     }
-    let rows = native::getaddrinfo(
-        host.as_deref().map(c_string_prefix),
-        service.as_deref().map(c_string_prefix),
+    Ok(GetAddrInfo {
+        host: host.map(prefix),
+        service: service.map(prefix),
         family,
         ty,
         protocol,
         flags,
-    )?;
+    })
+}
+
+impl GetAddrInfo {
+    /// # Safety
+    /// The registered caller owns the context; only native operands/results enter the wait.
+    pub(in crate::dynamic) unsafe fn run(self, context: *mut Context) -> Result<Id> {
+        use crate::dynamic::value::ParkedExecution;
+        // SAFETY: self contains owned byte vectors and scalars only. Native rows and raw failure
+        // statuses are Send, and libc's addrinfo list is freed inside getaddrinfo_raw.
+        let rows = unsafe {
+            ParkedExecution::wait(context, || {
+                native::getaddrinfo_raw(
+                    self.host.as_deref(),
+                    self.service.as_deref(),
+                    self.family,
+                    self.ty,
+                    self.protocol,
+                    self.flags,
+                )
+            })
+        }?
+        .map_err(native::ResolverFailure::into_error)?;
+        // SAFETY: resolution and cleanup have completed before Python packing begins.
+        pack_addrinfo(unsafe { &mut *context }, rows)
+    }
+}
+
+fn pack_addrinfo(ctx: &mut Context, rows: Vec<native::AddressInfo>) -> Result<Id> {
     let mut result = Vec::with_capacity(rows.len());
     for row in rows {
         let family = ctx.int(i64::from(row.addr.family()));
@@ -1787,7 +1873,6 @@ pub(super) fn call(
             let arg = super::super::builtins::one_positional_arg(name, args, kwargs)?;
             if_indextoname(ctx, arg)
         }
-        "getaddrinfo" => public_getaddrinfo(ctx, args, kwargs),
         "getnameinfo" => getnameinfo(ctx, args, kwargs),
         "getservbyname" | "getservbyport" => lookup_service(ctx, name, args, kwargs),
         "gethostname" => {
