@@ -1,37 +1,39 @@
 # Publisher cargo fixture policy v1
 
-This supplemental policy applies only to the cargo-stub subprocess in the frozen
-`ruff-publisher` and `uv-publisher` cases at stock commit
-`99964c6734dbe008d69d5016eb60d25abd31ab0d`. It grants no workload, general
-Python, Rich, ty, historical-cohort, or blanket stdlib allowance. The executable,
-stub, accepted argv tails, and each relative bytecode path and SHA256 are fixed
-in `policy.json`. Resolve the stdlib root from the trusted pinned executable's
-directory, not from a receipt.
+This supplemental policy covers only the frozen cargo-stub subprocess for
+`ruff-publisher` and `uv-publisher` at stock commit
+`99964c6734dbe008d69d5016eb60d25abd31ab0d`. `policy.json` fixes the executable
+and stub hashes, both accepted argv tails, and exactly 25 relative CPython
+stdlib source paths and hashes. It grants no general Python or stdlib exception.
 
-The frozen stub imports `json`, `os`, `pathlib`, and `sys`. The 25 bytecode
-files fall into these legitimate groups:
+The profile uses a private hardlink copy of the pinned CPython 3.14.5
+distribution, excluding every `__pycache__` directory and leaving the shared
+toolchain unchanged. The effective executable retains the pinned SHA256, and
+`sys.prefix` must equal the private distribution root. Normalize the stdlib root
+as `resolve(dirname(effective_executable) / "../lib/python3.14")`, using the
+independently pinned effective executable directory, never a receipt-selected
+root. Public prospective activation must independently bind the effective
+private executable path, prefix, and file identities as well as their hashes.
+The frozen `PYTHONDONTWRITEBYTECODE=1` environment entry is unchanged.
 
-- `encodings/{__init__,aliases,utf_8}` loads during CPython startup.
-- `json/{__init__,decoder,encoder,scanner}` implements the stub's metadata and
-  journal JSON.
-- `pathlib/{__init__,_os}` implements the stub's publish-marker path.
-- The exact `re`, `collections`, and top-level modules enumerated in the policy
-  are transitive stdlib imports of startup and those explicit imports. `os` and
-  `sys` need no extra bytecode allowance in this interpreter.
+The stub imports `json`, `os`, `pathlib`, and `sys`. The three `encodings`
+sources support interpreter bootstrap; the four `json` sources implement
+metadata and journal JSON; the two `pathlib` sources support the publish-marker
+path. The enumerated `re`, `collections`, and top-level sources are transitive
+stdlib imports. `os` and `sys` require no additional source allowance.
 
-The independent fixture-only control supplied for this freeze ran the pinned
-interpreter and stub with the metadata argv under the frozen environment. It
-exited 0; its successful sensitive stdlib bytecode opens were exactly the 25
-listed paths. Every file had magic `2b0e0d0a`, flags 0, and timestamp/source-size
-header fields matching its adjacent CPython stdlib `.py` source. Four older
-publisher traces agreed, but were not used to define the policy. In this
-authoring workspace the stock stub hash was independently verified; the pinned
-interpreter was unavailable, so the fixture-only execution and bytecode/header
-checks could not be repeated here.
+Prior native traces initially suggested the candidate list. Authority comes from
+the coordinator's independent, isolated fixture-only control, not from native
+outcome hindsight: the private pinned interpreter ran the exact frozen stub and
+metadata argv with the original frozen environment and unchanged stock subtree.
+It exited 0, produced byte-exact stock metadata stdout, empty stderr, and one
+cargo-journal row. Its successful sensitive opens were precisely the 25 listed
+`.py` sources, with matching hashes and zero bytecode opens. This branch update
+did not rerun that control.
 
-To reproduce only that control, first obtain the exact pinned executable and the
-stub from the stock commit and verify their policy SHA256 values. Set `PYTHON`
-and `STUB` to those trusted paths, then run in a disposable directory:
+To reproduce the fixture-only control, prepare the private copy excluding caches,
+verify the effective executable hash and prefix, and verify the stock stub hash.
+Set `PYTHON` to that private executable and `STUB` to the immutable stock stub:
 
 ```sh
 work=$(mktemp -d)
@@ -47,12 +49,8 @@ mkdir "$work/home"
 )
 ```
 
-Compare successful sensitive bytecode opens against the exact policy set and
-hash each opened file. Inspect each 16-byte pyc header and compare its little
-endian timestamp and size fields to the adjacent source's mtime and size.
-
-A prospective validator must anchor the independently reviewed public policy
-commit, blob, and SHA256 after merge. It must reject unlisted cases, processes,
-paths, rebound paths, mismatched hashes, and injected payloads. Receipt-supplied
-policy content, roots, lists, or hashes cannot add permissions or replace those
-anchors; the negative controls belong in that separate validator change.
+Compare the output and journal to stock and the successful sensitive opens to
+the exact source manifest; reject any bytecode open. A separate prospective
+validator must anchor the reviewed public policy commit, blob, and SHA256 after
+merge, reject rebound paths, hash mismatches, and injected payloads, and never
+accept receipt-supplied roots, policy content, or permissions as authority.
