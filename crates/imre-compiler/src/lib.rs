@@ -2110,6 +2110,48 @@ print("result", call(b=2, a=1))
         .unwrap();
         let error = super::check_file(&path, None).unwrap_err();
         assert!(error.contains("expected int, got bool"), "{error}");
+
+        let prefix = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n";
+        for (source, expected) in [
+            ("status: int = 1\nstatus = True\n", "expected int, got bool"),
+            ("status: float = 1\n", "float"),
+            ("status: int | None = True\n", "bool"),
+            (
+                "if False:\n    status: int = True\n",
+                "expected int, got bool",
+            ),
+        ] {
+            std::fs::write(&path, format!("{prefix}{source}")).unwrap();
+            let error = super::check_file(&path, None).unwrap_err();
+            assert!(error.contains(expected), "{source}: {error}");
+        }
+        std::fs::write(&path, format!("{prefix}status: int | bool = True\n")).unwrap();
+        super::check_file(&path, None).unwrap();
+
+        std::fs::write(
+            &path,
+            format!("{prefix}first: int = True\nsecond: int = 'bad'\n"),
+        )
+        .unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(
+            error.find("expected int, got bool").unwrap()
+                < error.find("invalid-assignment").unwrap(),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn imported_scalar_store_is_checked_before_graph_fallback() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("main.py");
+        std::fs::write(root.path().join("poison.py"), "status: int = True\n").unwrap();
+        std::fs::write(&path, "import argparse\nimport re\nimport tomllib\nimport urllib.parse\nimport poison\nprint('entry')\n").unwrap();
+        let error = super::check_file(&path, None).unwrap_err();
+        assert!(
+            error.contains("poison.py:1:15: Imre: expected int, got bool"),
+            "{error}"
+        );
     }
 
     const INFERRED_SET_GATHER: &str = "def gather(text):\n    values = set()\n    for char in text:\n        values.add(char)\n    return sorted(values)\n";

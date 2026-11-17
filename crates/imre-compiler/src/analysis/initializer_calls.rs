@@ -730,6 +730,7 @@ impl Session {
                     &[][..],
                     super::FileChecks::DeclaredSignatures,
                     false,
+                    false,
                     self.explicit_check,
                     None,
                     &[scope][..],
@@ -909,42 +910,65 @@ impl Session {
         annotation: &Expr,
         actual: Type<'db>,
     ) -> bool {
-        use ruff_python_ast::Operator;
-        use ty_python_semantic::types::SpecialFormType;
+        fn accepts<'db>(
+            model: &SemanticModel<'db>,
+            annotation: &Expr,
+            actual: crate::ir::Type,
+            seen: &mut std::collections::HashSet<ty_python_core::definition::Definition<'db>>,
+        ) -> bool {
+            use ruff_python_ast::Operator;
+            use ty_python_semantic::types::SpecialFormType;
 
-        let mut pending = match annotation {
-            Expr::BinOp(union) if union.op == Operator::BitOr => {
-                vec![union.left.as_ref(), union.right.as_ref()]
+            let db = model.db();
+            let env = model.program_environment();
+            if let Some(Type::TypeAlias(alias)) = annotation.inferred_type(model) {
+                return super::with_alias_value(db, &env, alias, |definition, owner, value, _| {
+                    seen.insert(definition) && accepts(owner, value, actual, seen)
+                })
+                .unwrap_or(false);
             }
-            Expr::Subscript(union)
-                if union.value.inferred_type(model)
-                    == Some(Type::SpecialForm(SpecialFormType::Union)) =>
-            {
-                match union.slice.as_ref() {
-                    Expr::Tuple(members) => members.elts.iter().collect(),
-                    arm => vec![arm],
+            let mut pending = match annotation {
+                Expr::BinOp(union) if union.op == Operator::BitOr => {
+                    vec![union.left.as_ref(), union.right.as_ref()]
+                }
+                Expr::Subscript(union)
+                    if union.value.inferred_type(model)
+                        == Some(Type::SpecialForm(SpecialFormType::Union)) =>
+                {
+                    match union.slice.as_ref() {
+                        Expr::Tuple(members) => members.elts.iter().collect(),
+                        arm => vec![arm],
+                    }
+                }
+                _ => return false,
+            };
+            while let Some(arm) = pending.pop() {
+                if let Expr::BinOp(part) = arm
+                    && part.op == Operator::BitOr
+                {
+                    pending.extend([part.left.as_ref(), part.right.as_ref()]);
+                } else if super::annotation_type(db, model, arm)
+                    .and_then(|ty| Session::scalar_layout(db, &env, ty, ScalarMatch::Exact))
+                    == Some(actual)
+                    || accepts(model, arm, actual, seen)
+                {
+                    return true;
                 }
             }
-            _ => return false,
-        };
+            false
+        }
+
         let db = model.db();
         let env = model.program_environment();
         let Some(actual) = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable) else {
             return false;
         };
-        while let Some(arm) = pending.pop() {
-            if let Expr::BinOp(part) = arm
-                && part.op == Operator::BitOr
-            {
-                pending.extend([part.left.as_ref(), part.right.as_ref()]);
-            } else if super::annotation_type(db, model, arm)
-                .and_then(|ty| Self::scalar_layout(db, &env, ty, ScalarMatch::Exact))
-                == Some(actual)
-            {
-                return true;
-            }
-        }
-        false
+        accepts(
+            model,
+            annotation,
+            actual,
+            &mut std::collections::HashSet::new(),
+        )
     }
 
     fn initialized_member(
@@ -993,18 +1017,61 @@ impl Session {
         actual: Type<'db>,
         evaluated: impl FnOnce() -> bool,
     ) -> Option<Diagnostic> {
+        Self::scalar_representation_error(model, expected, operand, actual, evaluated, false)
+    }
+
+    /// Stores enforce exact scalar and nullable scalar layouts even when ty accepts
+    /// a numeric subtype or widens the annotation's semantic representation.
+    pub(super) fn scalar_store_contract_error<'db>(
+        model: &SemanticModel<'db>,
+        expected: Type<'db>,
+        operand: &impl Ranged,
+        actual: Type<'db>,
+    ) -> Option<Diagnostic> {
+        Self::scalar_representation_error(model, expected, operand, actual, || true, true)
+    }
+
+    fn scalar_representation_error<'db>(
+        model: &SemanticModel<'db>,
+        expected: Type<'db>,
+        operand: &impl Ranged,
+        actual: Type<'db>,
+        evaluated: impl FnOnce() -> bool,
+        store: bool,
+    ) -> Option<Diagnostic> {
         let db = model.db();
         let env = model.program_environment();
-        if !concrete_scalar(db, &env, expected) {
+        if !(if store {
+            super::scalar_store_type(db, &env, expected)
+        } else {
+            concrete_scalar(db, &env, expected)
+        }) {
             return None;
         }
         let layout = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable);
         let expected = if actual.is_assignable_to(db, &env, expected) {
-            let parameter = Self::scalar_layout(db, &env, expected, ScalarMatch::Exact)?;
-            if layout? == parameter || !evaluated() {
+            let actual_layout = layout?;
+            let rule = if store {
+                ScalarMatch::Assignable
+            } else {
+                ScalarMatch::Exact
+            };
+            if let Some(parameter) = Self::scalar_layout(db, &env, expected, rule) {
+                if actual_layout == parameter || !evaluated() {
+                    return None;
+                }
+                parameter.to_string()
+            } else if store && let Type::Union(union) = expected {
+                if union.elements(db).iter().any(|&arm| {
+                    Self::scalar_layout(db, &env, arm, ScalarMatch::Exact) == Some(actual_layout)
+                }) || !evaluated()
+                {
+                    return None;
+                }
+                expected.display(db, &env).to_string()
+            } else {
                 return None;
             }
-            parameter.to_string()
         } else {
             expected.display(db, &env).to_string()
         };
