@@ -528,6 +528,50 @@ fn an_escaping_bound_method_keeps_its_default_and_fixed_callable() {
 }
 
 #[test]
+fn a_bound_callback_and_an_independent_lambda_lower_once() {
+    let project = tempfile::tempdir().unwrap();
+    let path = project.path().join("capture.py");
+    let source = include_str!("../../../tests/fixtures/callables/stable_bound_callback.py");
+    let mixed = format!("{source}def escape(value: int):\n    return lambda: value\n");
+    std::fs::write(&path, &mixed).unwrap();
+    let mut passes = 0;
+    let error = object_fallback(
+        None,
+        ProgramEntry::File(&path, None),
+        &CompileOptions::default(),
+        Default::default(),
+        None,
+        |graph, _, call_error| {
+            passes += 1;
+            graph.session.explicit_check = true;
+            checked_lower_with(graph, None, call_error)
+        },
+    )
+    .err()
+    .unwrap();
+    assert_eq!(passes, 1);
+    assert!(
+        error.contains("a lambda requires an exact Callable context"),
+        "{error}"
+    );
+
+    for (invalid, expected) in [
+        (
+            source.replace("return saved()", "return saved('wrong')"),
+            ":18:22: Imre: expected int, got str; annotations are enforced contracts",
+        ),
+        (
+            format!("{source}status: int = True\n"),
+            ":38:15: Imre: expected int, got bool; annotations are enforced contracts",
+        ),
+    ] {
+        std::fs::write(&path, invalid).unwrap();
+        let error = check_file(&path, None).unwrap_err();
+        assert_source_diagnostic(&error, &path, expected);
+    }
+}
+
+#[test]
 fn an_escaping_bound_method_preserves_registered_callers() {
     let project = tempfile::tempdir().unwrap();
     let path = project.path().join("capture.py");

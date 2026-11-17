@@ -218,12 +218,6 @@ impl Function {
                 "local callbacks must be noncapturing and have positional parameters",
             ));
         }
-        if self.bound_capture {
-            checker
-                .graph
-                .layout_hint
-                .set(crate::modules::LayoutHint::Applied);
-        }
         Ok(Expr {
             ty: types.callable(
                 self.signature.params.iter().map(|p| p.ty).collect(),
@@ -872,9 +866,19 @@ impl Checker<'_> {
             }
             _ => None,
         };
+        // A native callable owns one stable callable as its context. A declared
+        // aggregate of callables needs Python storage, so select closure cells before
+        // lowering the helper instead of speculating on a native bound context.
+        let python_storage = capture.is_some()
+            && self
+                .functions
+                .values()
+                .any(|signature| callables::invalid_aggregate(signature.returns, self.types));
         let bound_capture = capture.is_some()
+            && !python_storage
             && !self.graph.registered_startup
-            && self.graph.layout_hint.get() != crate::modules::LayoutHint::Disabled;
+            && self.registered_local_start.is_none()
+            && self.unrepresented.borrow().is_none();
         let captured_method = !bound_capture
             && capture
                 .and_then(|slot| self.narrowed.get(&slot))
