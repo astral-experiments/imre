@@ -292,13 +292,17 @@ fn run() -> Result<ExitCode, String> {
         .as_ref()
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
     let native_link = target.is_none() && lto_linker.is_none() && link.args.is_empty();
-    let native_objects = native_link && llvm_path.is_none();
-    let native =
-        if runtime_is_file && native_objects && clang.is_none() && !options.address_sanitizer {
-            build_cache::native_toolchain(&runtime, bundled_native)
-        } else {
-            None
-        };
+    let native_objects = target.is_none() && lto_linker.is_none() && llvm_path.is_none();
+    let native = if runtime_is_file
+        && native_link
+        && native_objects
+        && clang.is_none()
+        && !options.address_sanitizer
+    {
+        build_cache::native_toolchain(&runtime, bundled_native)
+    } else {
+        None
+    };
     let split = !whole_program
         && native_objects
         && (native.is_some()
