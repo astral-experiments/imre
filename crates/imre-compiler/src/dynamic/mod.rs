@@ -1394,7 +1394,7 @@ pub(crate) fn compile(
     let first_implicit = ordered.len();
     ordered.extend(&installed_roots);
     let mut roots: Vec<_> = ordered.into_iter().cloned().collect();
-    let implicit_dirs = &roots[first_implicit..];
+    let implicit_dirs = roots[first_implicit..].to_vec();
     let bundled_root = BUNDLED_SOURCE_ROOT;
     let mut inputs = SourceInputs::default();
     let mut archives = HashMap::new();
@@ -1440,6 +1440,7 @@ pub(crate) fn compile(
     let mut wheel_roots: Vec<_> = roots
         .iter()
         .filter(|root| !archives.contains_key(*root))
+        .cloned()
         .collect();
     // The runtime executes the first FILE body in __main__. Its finder and
     // relative imports use the qualified name belonging to that same file.
@@ -1527,6 +1528,7 @@ pub(crate) fn compile(
     // Site imports its hook before the launcher inserts path[0]. Let the
     // ordinary source collector prepare its initializer and dependencies.
     let mut site_roots = Vec::new();
+    let mut startup_added_roots = HashSet::new();
     let mut site_root_count = 0;
     if options.sitecustomize || options.stdlib_sitecustomize {
         site_roots.extend_from_slice(startup_paths);
@@ -1717,6 +1719,33 @@ pub(crate) fn compile(
             )
         };
         let ((owner, package, imports), origin) = item;
+        if origin == ImportOrigin::Startup {
+            for path in &imports.explicit_roots {
+                let path = cwd.join(path);
+                if startup_added_roots.insert(path.clone()) {
+                    if !roots.contains(&path) {
+                        roots.push(path.clone());
+                    }
+                    if !site_roots.contains(&path) {
+                        site_roots.push(path.clone());
+                    }
+                    if !wheel_roots.contains(&path) && !archives.contains_key(&path) {
+                        if let Some(archive) = crate::zip_entry::ZipSources::discover(
+                            &path,
+                            &mut inputs,
+                            &mut filesystem,
+                        )? {
+                            archive_modules
+                                .get_or_insert_with(Default::default)
+                                .extend(archive.modules());
+                            archives.insert(path, archive);
+                        } else {
+                            wheel_roots.push(path);
+                        }
+                    }
+                }
+            }
+        }
         let file_alternatives = ordinary_registrations.is_some();
         if imports
             .names
@@ -2019,7 +2048,9 @@ pub(crate) fn compile(
                         .is_none_or(|(selected, package)| *package && selected == root);
                     let winner = on_package_path
                         && !entry_sources.contains_key(&prefix)
-                        && (origin != ImportOrigin::Startup || index < site_root_count);
+                        && (origin != ImportOrigin::Startup
+                            || index < site_root_count
+                            || startup_added_roots.contains(root));
                     let child_origin = origin
                         .file(winner && (filesystem_import || origin == ImportOrigin::Startup));
                     let selected_child = winner
@@ -2392,7 +2423,7 @@ pub(crate) fn compile(
                             }
                             child_origin.enqueue(queue, (prefix.clone(), package, imports));
                         }
-                        file_origins.push((sources.len(), root));
+                        file_origins.push((sources.len(), origin == ImportOrigin::Startup, index));
                         let registration = (prefix.clone(), path, src.into());
                         if winner && !loader_error {
                             // Only path zero belongs to the program. With safe path
@@ -2562,7 +2593,12 @@ pub(crate) fn compile(
     // file's own search root and wheel membership, including for shadowed sources.
     let mut semantic_roots = HashMap::new();
     let mut semantic_files = HashMap::new();
-    for (id, root) in file_origins {
+    for (id, startup, index) in file_origins {
+        let root = if startup {
+            &site_roots[index]
+        } else {
+            &roots[index]
+        };
         let (_, path, _) = &sources[id];
         if root
             .components()
