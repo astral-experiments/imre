@@ -2227,7 +2227,12 @@ impl Context {
         inherited: u32,
     ) -> Result<Id> {
         let program = self.prepare_source_program(source, filename, mode, false, inherited)?;
-        Ok(self.box_source_code(program, filename))
+        let source = if mode == "exec" && matches!(self.heap.get(source), Value::Str(_)) {
+            source
+        } else {
+            NONE
+        };
+        Ok(self.box_source_code(program, filename, source))
     }
 
     fn prepare_source_program(
@@ -2506,11 +2511,12 @@ impl Context {
         }
     }
 
-    fn box_source_code(&mut self, module: ParsedModule, filename: Id) -> Id {
+    fn box_source_code(&mut self, module: ParsedModule, filename: Id, source: Id) -> Id {
         let name = self.heap.code_name("<module>");
         self.realize_code(
             Body::Parsed {
                 constants: module.constants,
+                source,
             },
             value::CodeDefinition {
                 module_definition: true,

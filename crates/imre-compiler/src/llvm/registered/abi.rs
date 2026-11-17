@@ -82,6 +82,7 @@ pub(crate) struct Declarations {
     pub(crate) unwind_slots: bool,
     pub(crate) registered_expression: bool,
     pub(crate) exec_operand: bool,
+    pub(crate) eval_operand: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,
     pub(crate) reads_exact_int_word: bool,
     pub(super) releases_integer_owner: bool,

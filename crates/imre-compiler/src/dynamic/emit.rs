@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 
 use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{Visitor, walk_expr};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::{Initializer, PreparedUnit};
@@ -734,6 +735,7 @@ impl<'a> PreparedBody<'a> {
         let statement_sites = prepare.sites;
         let source = SourceInfo {
             exec_literals,
+            eval_literals: EvalLiterals::collect(&body, python_optimization),
             annotation_children,
             scopes,
             #[cfg(test)]
@@ -995,6 +997,7 @@ impl<'a> RegisteredBody<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
+    eval_literals: HashMap<TextRange, EvalLiteral>,
     annotation_children:
         indexmap::IndexMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
@@ -1020,6 +1023,55 @@ struct SourceInfo<'a> {
     method_imports: Cow<'a, std::collections::BTreeSet<String>>,
     future_flags: u32,
     text: Cow<'a, str>,
+}
+
+struct EvalLiteral {
+    text: String,
+    body: crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>,
+}
+
+struct EvalLiterals {
+    optimization: i32,
+    sites: HashMap<TextRange, EvalLiteral>,
+}
+
+impl EvalLiterals {
+    /// Prepare literal expression bodies at direct `eval(...)` sites. The
+    /// runtime guard still decides whether the selected callable is builtin
+    /// `eval`; a Python function named `eval` receives the original string.
+    fn collect(body: &[ast::Stmt], optimization: i32) -> HashMap<TextRange, EvalLiteral> {
+        let mut visitor = Self {
+            optimization,
+            sites: HashMap::new(),
+        };
+        visitor.visit_body(body);
+        visitor.sites
+    }
+}
+
+impl<'a> Visitor<'a> for EvalLiterals {
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "eval")
+            && let Some(ast::Expr::StringLiteral(literal)) = call.arguments.args.first()
+            && crate::analysis::check_source_complexity(literal.value.to_str()).is_ok()
+            && let Ok(parsed) = ruff_python_parser::parse_expression(literal.value.to_str())
+            && let Some(body) =
+                PreparedBody::prepare_annotation(literal.value.to_str(), &parsed, self.optimization)
+        {
+            self.sites.insert(
+                call.range(),
+                EvalLiteral {
+                    text: literal.value.to_string(),
+                    body,
+                },
+            );
+        }
+        walk_expr(self, expr);
+    }
 }
 
 impl SourceInfo<'_> {
@@ -1249,7 +1301,6 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
     }
 
     fn exec_literal_at(&mut self, site: TextRange) -> Option<sites::CompiledExec> {
-        let children = self.source.exec_literals.bodies(site)?;
         let output = &mut self.frame.output;
         if output.diagnostic.is_some() {
             return None;
@@ -1259,6 +1310,35 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             std::collections::hash_map::Entry::Occupied(entry) => return Some(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => entry,
         };
+        if let Some(literal) = self.source.eval_literals.get(&site) {
+            let body = &literal.body;
+            let file = output.data(b"<string>");
+            let location = SourceMap {
+                info: &body.scope,
+                callable_code: Default::default(),
+                exec_code: Default::default(),
+                unit: self.source.unit,
+                positions: &SourcePositions::new(&body.scope.path, &literal.text, &file)
+                    .with_names(&body.scope.private_names),
+            };
+            let code = location.code(
+                output,
+                QualnameScope::MODULE,
+                Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
+                false,
+                None,
+            );
+            let compiled = sites::CompiledExec {
+                alternatives: vec![sites::CompiledExecAlternative {
+                    entry: code,
+                    flags: self.source.future_flags,
+                    source: output.data(literal.text.as_bytes()),
+                    expression: true,
+                }],
+            };
+            return Some(entry.insert(compiled).clone());
+        }
+        let children = self.source.exec_literals.bodies(site)?;
         let children = match children {
             Ok(children) => children,
             Err((operand, reason)) => {
@@ -1288,6 +1368,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 entry: code,
                 flags: child.body.source.future_flags,
                 source: output.data(text.as_bytes()),
+                expression: false,
             });
         }
         let compiled = sites::CompiledExec { alternatives };

@@ -1292,7 +1292,13 @@ pub(super) unsafe extern "C" fn imre_dyn_bind_expression(ctx: *mut Context, text
         .insert(text, LinkedSource::Expression(entry));
 }
 
-/// Select the prelinked module for the actual builtin and the exact source at this call.
+/// Select a prelinked module only for builtin `exec` and the exact source and
+/// flags retained by its string or parsed code operand. Shadowed callables and
+/// unmatched code objects keep the operand they were given.
+///
+/// # Safety
+/// The caller supplies an active context, a linked native entry, and static
+/// NUL-terminated UTF-8 source.
 #[unsafe(no_mangle)]
 pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     ctx: *mut Context,
@@ -1304,9 +1310,22 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
 ) -> Id {
     // SAFETY: compiled callers supply an active context and static NUL-terminated UTF-8 source.
     let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
-    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec")
-        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "exec") {
+        return text;
+    }
+    if let Value::Code(code) = ctx.heap.get(text)
+        && let value::Body::Parsed { constants, source } = &code.body
+        && code.definition.flags == flags
+        && matches!(ctx.heap.get(*source), Value::Str(value) if value.as_str() == expected)
     {
+        let constants = *constants;
+        let Value::Code(code) = ctx.heap.get_mut(text) else {
+            unreachable!("validated code object")
+        };
+        code.body = value::Body::Native(entry, constants);
+        return text;
+    }
+    if !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected) {
         return text;
     }
     if let Err(error) = ctx.heap.reserve_temporaries(3) {
@@ -1314,6 +1333,38 @@ pub(super) unsafe extern "C" fn imre_dyn_exec_operand(
     }
     let filename = ctx.text("<string>");
     ctx.native_module_code(entry, filename, Some(flags))
+}
+
+/// Link a fixed expression only when the evaluated callable is builtin `eval`
+/// and its actual string and inherited flags match the compiled alternative.
+/// This leaves a shadowed callable's original string argument untouched.
+///
+/// # Safety
+/// The caller supplies a live context, native entry, and NUL-terminated expected source.
+#[unsafe(no_mangle)]
+pub(super) unsafe extern "C" fn imre_dyn_eval_operand(
+    ctx: *mut Context,
+    callable: Id,
+    text: Id,
+    entry: Code,
+    flags: u32,
+    expected: *const c_char,
+) -> Id {
+    // SAFETY: compiled callers supply an active context and static UTF-8 source.
+    let (ctx, expected) = unsafe { (&mut *ctx, cstr(expected)) };
+    if !matches!(ctx.heap.get(callable), Value::Native(name) if name == "eval")
+        || !matches!(ctx.heap.get(text), Value::Str(value) if value.as_str() == expected)
+        || ctx.inherited_compile_flags() != flags
+    {
+        return text;
+    }
+    if ctx.heap.linked_sources.try_reserve(1).is_err() {
+        return finish(ctx, Err(Error::new("MemoryError", "")));
+    }
+    ctx.heap
+        .linked_sources
+        .insert(text, LinkedSource::Expression(entry));
+    text
 }
 
 fn register_source(

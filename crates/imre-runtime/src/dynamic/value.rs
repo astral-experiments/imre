@@ -94,6 +94,7 @@ pub(super) enum Body {
     /// Constants retained by a parsed code object with no executable entry.
     Parsed {
         constants: Id,
+        source: Id,
     },
 }
 
@@ -2620,7 +2621,10 @@ impl Value {
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 match code.body {
                     Body::Native(_, operands) if operands != NONE => visit.push(operands),
-                    Body::Parsed { constants } => visit.push(constants),
+                    Body::Parsed { constants, source } => {
+                        visit.push(constants);
+                        visit.push(source);
+                    }
                     _ => {}
                 }
             }
@@ -8071,7 +8075,10 @@ mod tests {
             let name = ctx.text(name);
             let file = ctx.text("parked.py");
             let code = ctx.prelinked_code(
-                Body::Parsed { constants: NONE },
+                Body::Parsed {
+                    constants: NONE,
+                    source: NONE,
+                },
                 scope,
                 name,
                 NONE,
