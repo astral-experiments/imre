@@ -184,7 +184,7 @@ fn owned_registered_entry_roots_bound_slots_and_restores_its_frame() {
             // A parked native entry leaves the complete binding layout with its code.
             let definition = &ctx.code_object(code).definition;
             let layout = definition.parsed_parameters.get().unwrap();
-            assert_eq!(Arc::strong_count(layout), 1);
+            assert_eq!(triomphe::Arc::strong_count(layout), 1);
             (value, frame)
         };
         // SAFETY: preparation released its RefMut. This thread owns the stable Context.

@@ -56,7 +56,7 @@ pub(super) struct CodeObject {
 #[derive(Clone, Default)]
 pub(super) struct CodeDefinition {
     /// Decoded on first use. Worker callbacks reuse the defining code's binding layout.
-    pub parsed_parameters: std::cell::OnceCell<Arc<super::CallParameters>>,
+    pub parsed_parameters: std::cell::OnceCell<triomphe::Arc<super::CallParameters>>,
     pub module_definition: bool,
     /// CPython flags for boxed Python function definitions.
     pub flags: u32,
@@ -1292,11 +1292,19 @@ impl Scope {
 
 /// Lexical names shared by calls to the same code object until a frame adds a name.
 #[derive(Clone, Debug, Default)]
-pub(super) struct DeclaredLocals(Option<Arc<IndexSet<String>>>);
+pub(super) struct DeclaredLocals(Option<triomphe::Arc<IndexSet<String>>>);
 
-impl From<IndexSet<String>> for DeclaredLocals {
-    fn from(names: IndexSet<String>) -> Self {
-        Self((!names.is_empty()).then(|| Arc::new(names)))
+impl TryFrom<IndexSet<String>> for DeclaredLocals {
+    type Error = Error;
+
+    fn try_from(names: IndexSet<String>) -> Result<Self> {
+        if names.is_empty() {
+            Ok(Self(None))
+        } else {
+            triomphe::Arc::try_new(names)
+                .map(|names| Self(Some(names)))
+                .map_err(|_| Error::new("MemoryError", ""))
+        }
     }
 }
 
@@ -1309,7 +1317,7 @@ impl TryFrom<Vec<String>> for DeclaredLocals {
             .try_reserve_exact(names.len())
             .map_err(|_| Error::new("MemoryError", ""))?;
         declared.extend(names);
-        Ok(declared.into())
+        declared.try_into()
     }
 }
 
@@ -1325,7 +1333,7 @@ impl std::ops::Deref for DeclaredLocals {
 
 impl std::ops::DerefMut for DeclaredLocals {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        Arc::make_mut(self.0.get_or_insert_with(Default::default))
+        triomphe::Arc::make_mut(self.0.get_or_insert_with(Default::default))
     }
 }
 
