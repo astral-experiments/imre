@@ -1,0 +1,203 @@
+25799 execve("/workspace/scratch/json-strict-8571/probe", ["/workspace/scratch/json-strict-8571/probe", "withdraw", "/workspace/scratch/imre-cpython-test-fixtures/Lib/test", "/workspace/scratch/imre-cpython-test-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", "/workspace/scratch/json-strict-8571/images/decode-O3.exe"], 0x7ffeb9268208 /* 7 vars */) = 0
+25799 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+25799 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", {st_mode=S_IFREG|0600, st_size=5368, ...}, 0) = 0
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test.raw-control-stash", 0x7ffdf0ce3e20, 0) = -1 ENOENT (No such file or directory)
+25799 rename("/workspace/scratch/imre-cpython-test-fixtures/Lib/test", "/workspace/scratch/imre-cpython-test-fixtures/Lib/test.raw-control-stash") = 0
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test", 0x7ffdf0ce3e20, 0) = -1 ENOENT (No such file or directory)
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", 0x7ffdf0ce3e20, 0) = -1 ENOENT (No such file or directory)
+25799 wait4(25800,  <unfinished ...>
+25800 execve("/workspace/scratch/json-strict-8571/images/decode-O3.exe", ["/workspace/scratch/json-strict-8571/images/decode-O3.exe"], 0x7ffdf0ce4100 /* 7 vars */) = 0
+25800 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libm.so.6", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/etc/nsswitch.conf", {st_mode=S_IFREG|0644, st_size=494, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/", {st_mode=S_IFDIR|0755, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/etc/nsswitch.conf", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/etc/passwd", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/usr/lib/locale/locale-archive", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+25800 openat(AT_FDCWD, "/usr/share/locale/locale.alias", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+25800 openat(AT_FDCWD, "/usr/lib/locale/C.UTF-8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = -1 ENOENT (No such file or directory)
+25800 openat(AT_FDCWD, "/usr/lib/locale/C.utf8/LC_CTYPE", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/usr/lib/x86_64-linux-gnu/gconv/gconv-modules.cache", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 open("/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 open("/workspace/scratch/imre-cpython-test-fixtures/Lib", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_CLOEXEC|O_DIRECTORY) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/proc/self/cgroup", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/sys/fs/cgroup/cpu.max", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/etc/localtime", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup", 0x7ffe0af22ea8, 0) = -1 ENOENT (No such file or directory)
+25800 newfstatat(AT_FDCWD, "/workspace/imre/target/release/Modules/Setup.local", 0x7ffe0af22ea8, 0) = -1 ENOENT (No such file or directory)
+25800 newfstatat(AT_FDCWD, "/etc/nsswitch.conf", {st_mode=S_IFREG|0644, st_size=494, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/etc/passwd", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support", 0x7ffe0af28208, 0) = -1 ENOENT (No such file or directory)
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/support", 0x7ffe0af24868, 0) = -1 ENOENT (No such file or directory)
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json", 0x7ffe0af2e5d8, 0) = -1 ENOENT (No such file or directory)
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/decode", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib", {st_mode=S_IFDIR|0700, st_size=4096, ...}, 0) = 0
+25800 openat(AT_FDCWD, "/workspace/scratch/json-strict-8571/images/decode-O3.exe", O_RDONLY|O_CLOEXEC) = 3
+25800 exit_group(0)                     = ?
+25799 <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 25800
+25799 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=25800, si_uid=1000, si_status=0, si_utime=81 /* 0.81 s */, si_stime=7 /* 0.07 s */} ---
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test", 0x7ffdf0ce3e20, 0) = -1 ENOENT (No such file or directory)
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", 0x7ffdf0ce3e20, 0) = -1 ENOENT (No such file or directory)
+25799 rename("/workspace/scratch/imre-cpython-test-fixtures/Lib/test.raw-control-stash", "/workspace/scratch/imre-cpython-test-fixtures/Lib/test") = 0
+25799 newfstatat(AT_FDCWD, "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_json/test_decode.py", {st_mode=S_IFREG|0600, st_size=5368, ...}, 0) = 0
+25799 exit_group(0)                     = ?

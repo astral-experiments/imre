@@ -1,0 +1,47 @@
+{
+  "family": "json",
+  "command": [
+    "/workspace/imre/target/release/imre",
+    "build",
+    "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/positive_launcher.py",
+    "--module-root",
+    "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups",
+    "--extension-path",
+    "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+    "--no-cache",
+    "--quiet",
+    "--opt-level",
+    "0",
+    "--runtime",
+    "/workspace/imre/target/release/libimre_runtime.a",
+    "--clang",
+    "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+    "-o",
+    "/workspace/scratch/json-strict-8571/images/speedups-gate.exe"
+  ],
+  "first_party_module": "/workspace/imre-json/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/json/strict/speedups/bad_status.py",
+  "launcher_sha256": "fba65b5ec5583040e7e437d4f404ff4434c36cfc5b191b13c1053df834b4a913",
+  "first_party_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+  "build": {
+    "head": "8571ca2dbecabf8d7863c369dc776611fd57d8ad",
+    "tree": "c6ff919e0ddeb2c23265857f299f785034e5b4bc",
+    "cli_sha256": "b07018ea9eb8e9af234307899c33a6b14e498ba5fded97a26a582a9e2ad9be9e",
+    "runtime_sha256": "6c71c26ec0f9d9a34c56a0b82226574243c189c2854f689ef127b8d92e481fb5",
+    "command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--release",
+      "--locked",
+      "-p",
+      "imre-compiler",
+      "-p",
+      "imre-runtime",
+      "--target-dir",
+      "/workspace/imre/target",
+      "-j",
+      "2"
+    ],
+    "result": "Finished `release` profile [optimized + debuginfo] target(s) in 5m 12s"
+  }
+}

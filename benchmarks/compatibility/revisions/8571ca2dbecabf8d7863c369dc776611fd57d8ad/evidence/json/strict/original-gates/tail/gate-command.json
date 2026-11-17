@@ -1,0 +1,18 @@
+[
+  "/workspace/imre/target/release/imre",
+  "build",
+  "/workspace/scratch/json-strict-8571/tail/positive_launcher.py",
+  "--module-root",
+  "/workspace/scratch/json-strict-8571/tail",
+  "--extension-path",
+  "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+  "--no-cache",
+  "--opt-level",
+  "0",
+  "--runtime",
+  "/workspace/imre/target/release/libimre_runtime.a",
+  "--clang",
+  "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+  "-o",
+  "/workspace/scratch/json-strict-8571/images/tail-gate.exe"
+]

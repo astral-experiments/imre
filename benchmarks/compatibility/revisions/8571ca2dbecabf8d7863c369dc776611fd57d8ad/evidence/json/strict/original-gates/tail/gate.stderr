@@ -1,0 +1,2 @@
+ Compiling /workspace/scratch/json-strict-8571/tail/positive_launcher.py (-O0)
+/workspace/scratch/json-strict-8571/tail/bad_status.py:1:15: Imre: expected int, got bool; annotations are enforced contracts

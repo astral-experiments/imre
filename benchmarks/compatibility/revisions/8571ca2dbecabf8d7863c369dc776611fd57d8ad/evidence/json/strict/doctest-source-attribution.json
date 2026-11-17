@@ -1,0 +1,78 @@
+{
+  "receipt_preimage_sha256": "d0b3ea2580bb8c2cf92ac55318466c45b33ada4f0e76a865abe79ee1b922b098",
+  "reason": "Frozen original identity is anchored to the CPython test_json registration source; the docstring files are distinct supplemental provenance and do not replace that anchor. IDs, occurrences and raw outcomes are unchanged.",
+  "originals": [
+    {
+      "id": "json",
+      "occurrence": 1,
+      "docstring_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "9eaa4f3fbc16793adc061f9f5ee9dd0aab159b20",
+        "path": "Lib/json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "95022d150a27a2bfd54ac21bfce35812c96b53c420bb7b018dcb573f13e52da0"
+      },
+      "frozen_registration_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "74b64ed86a3183db5a54166d89cf2fb227281e06",
+        "path": "Lib/test/test_json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73"
+      }
+    },
+    {
+      "id": "json.encoder.JSONEncoder.encode",
+      "occurrence": 1,
+      "docstring_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "5cf6d64f3eade60b65f1324ae394454e97883c45",
+        "path": "Lib/json/encoder.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "d68a4d04d2cfd95897498307f29349058b42c3f48ea6aa6739714a09200a7d01"
+      },
+      "frozen_registration_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "74b64ed86a3183db5a54166d89cf2fb227281e06",
+        "path": "Lib/test/test_json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73"
+      }
+    },
+    {
+      "id": "json",
+      "occurrence": 2,
+      "docstring_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "9eaa4f3fbc16793adc061f9f5ee9dd0aab159b20",
+        "path": "Lib/json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "95022d150a27a2bfd54ac21bfce35812c96b53c420bb7b018dcb573f13e52da0"
+      },
+      "frozen_registration_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "74b64ed86a3183db5a54166d89cf2fb227281e06",
+        "path": "Lib/test/test_json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73"
+      }
+    },
+    {
+      "id": "json.encoder.JSONEncoder.encode",
+      "occurrence": 2,
+      "docstring_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "5cf6d64f3eade60b65f1324ae394454e97883c45",
+        "path": "Lib/json/encoder.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "d68a4d04d2cfd95897498307f29349058b42c3f48ea6aa6739714a09200a7d01"
+      },
+      "frozen_registration_source": {
+        "commit": "5607950ef232dad16d75c0cf53101d9649d89115",
+        "git_blob": "74b64ed86a3183db5a54166d89cf2fb227281e06",
+        "path": "Lib/test/test_json/__init__.py",
+        "repo": "https://github.com/python/cpython",
+        "sha256": "b99348d18818d4a27ad5db018045a1c3abf50f2bbb0bad81643f082389201d73"
+      }
+    }
+  ]
+}

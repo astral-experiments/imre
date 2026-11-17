@@ -1,0 +1,44 @@
+IMRE_UNITTEST {"event": "collection", "count": 14}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_failures"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_linecol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_extra_data"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_failures"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_linecol"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "inventory", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_failures"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_failures", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_linecol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_linecol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_non_string_keys_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_not_serializable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_truncated_input", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestCFail.test_unexpected_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_extra_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_extra_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_failures"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_failures", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_linecol"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_linecol", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_non_string_keys_dict", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_not_serializable", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_truncated_input", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "start", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data"}
+IMRE_UNITTEST {"event": "result", "id": "test.test_json.test_fail.TestPyFail.test_unexpected_data", "outcome": "pass", "details": []}
+IMRE_UNITTEST {"event": "summary", "run": 14, "successful": true}
