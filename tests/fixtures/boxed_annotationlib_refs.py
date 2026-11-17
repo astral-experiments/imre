@@ -247,6 +247,15 @@ def current():
     else:
         raise AssertionError("expected syntax error")
 
+    namespace = {}
+    try:
+        module.ForwardRef("int\n \t").evaluate(globals=namespace)
+    except SyntaxError as error:
+        assert str(error) == "Forward reference must be an expression -- got 'int\\n \\t'"
+        assert "__builtins__" not in namespace
+    else:
+        raise AssertionError("invalid ForwardRef indentation accepted")
+
     def compound(value: "list[Choice]"):
         pass
 

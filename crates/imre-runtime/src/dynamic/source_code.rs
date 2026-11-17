@@ -2012,6 +2012,10 @@ impl Context {
                 )?);
             }
         };
+        if let Some(issue) = IndentationDiagnostic::find(&parsed, &source, false, None, true) {
+            let filename = self.text("<string>");
+            return issue.raise(self, filename);
+        }
         if check_scope && let Err(error) = forward_refs::validate(&parsed) {
             return Err(match error {
                 forward_refs::Error::Syntax(message) => Error::new("SyntaxError", message),
