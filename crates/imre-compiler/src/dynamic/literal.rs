@@ -48,17 +48,21 @@ pub(crate) struct LiteralSites {
 }
 
 impl LiteralSites {
-    /// Select a suite or a checked expression at the registered call range.
+    /// Borrow the selected suites or the one checked expression at this call.
     pub(super) fn plan<'a>(
         &'a self,
         site: TextRange,
         expression: Option<&'a str>,
-    ) -> Option<Result<Vec<LiteralBody<'a>>, (TextSize, &'a str)>> {
-        match self.bodies(site) {
-            Some(Ok(bodies)) => Some(Ok(bodies.iter().map(LiteralBody::Suite).collect())),
-            Some(Err(reason)) => Some(Err(reason)),
-            None => expression.map(|text| Ok(vec![LiteralBody::Expression(text)])),
-        }
+    ) -> Option<Result<impl Iterator<Item = LiteralBody<'a>>, (TextSize, &'a str)>> {
+        let (suites, expression) = match self.sites.get(&site) {
+            Some(Ok(suites)) => (suites.as_slice(), None),
+            Some(Err((operand, reason))) => return Some(Err((*operand, reason.as_str()))),
+            None => (&[][..], Some(expression?)),
+        };
+        Some(Ok(suites
+            .iter()
+            .map(LiteralBody::Suite)
+            .chain(expression.map(LiteralBody::Expression))))
     }
 
     fn insert(&mut self, site: LiteralSite, body: Result<PreparedLiteral, String>) {
@@ -90,33 +94,6 @@ impl LiteralSites {
 
     pub(crate) fn has_refusals(&self) -> bool {
         self.sites.values().any(Result::is_err)
-    }
-
-    /// Absence means the ordinary callable owns this string. A selected builtin
-    /// with a refused child must retain its diagnostic through placement.
-    pub(super) fn body(
-        &self,
-        site: TextRange,
-    ) -> Option<Result<&PreparedLiteral, (TextSize, &str)>> {
-        Some(
-            self.sites
-                .get(&site)?
-                .as_ref()
-                .map(|bodies| bodies.first().expect("selected literal body"))
-                .map_err(|(operand, reason)| (*operand, reason.as_str())),
-        )
-    }
-
-    pub(super) fn bodies(
-        &self,
-        site: TextRange,
-    ) -> Option<Result<&[PreparedLiteral], (TextSize, &str)>> {
-        Some(
-            self.sites
-                .get(&site)?
-                .as_deref()
-                .map_err(|(operand, reason)| (*operand, reason.as_str())),
-        )
     }
 }
 

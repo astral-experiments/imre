@@ -473,7 +473,7 @@ impl<'a> PreparedBody<'a> {
                     let (operand, reason) = body
                         .source
                         .exec_literals
-                        .body(site)
+                        .plan(site, None)
                         .and_then(Result::err)
                         .expect("selected literal refusal belongs to this source");
                     body.source.literal_diagnostic(operand, reason)
@@ -1216,6 +1216,27 @@ impl SourceMap<'_> {
     }
 }
 
+impl crate::frontend::AnnotationBody<Box<SourceInfo<'static>>> {
+    /// Emit a decoded expression through the same checked provider used for annotations.
+    fn emit(&self, output: &mut Output, unit: usize, file: &str) -> String {
+        let location = SourceMap {
+            info: &self.scope,
+            callable_code: Default::default(),
+            exec_code: Default::default(),
+            unit,
+            positions: &SourcePositions::new(&self.scope.path, &self.scope.text, file)
+                .with_names(&self.scope.private_names),
+        };
+        location.code(
+            output,
+            QualnameScope::MODULE,
+            Body::CheckedProvider(Ok(&self.code), AnnotationScope::Plain),
+            false,
+            None,
+        )
+    }
+}
+
 enum Callable<'a> {
     Lambda(&'a RegisteredLambda, bool),
     Named(&'a NamedFunction<'a>),
@@ -1269,23 +1290,8 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
         let code = entries
             .entry(RequiredSite::AnnotationString(child))
             .or_insert_with(|| {
-                let text = body.scope.text.as_ref();
                 let file = self.frame.output.data(b"<string>");
-                let location = SourceMap {
-                    info: &body.scope,
-                    callable_code: Default::default(),
-                    exec_code: Default::default(),
-                    unit: self.source.unit,
-                    positions: &SourcePositions::new(&body.scope.path, text, &file)
-                        .with_names(&body.scope.private_names),
-                };
-                location.code(
-                    self.frame.output,
-                    QualnameScope::MODULE,
-                    Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
-                    false,
-                    None,
-                )
+                body.emit(self.frame.output, self.source.unit, &file)
             });
         let text = self.frame.source_text(spelling, None);
         self.frame.bind_annotation_expression(&text, code);
@@ -1313,7 +1319,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 return None;
             }
         };
-        let mut alternatives = Vec::with_capacity(children.len());
+        let mut alternatives = Vec::new();
         for child in children {
             let path = match &child {
                 LiteralBody::Suite(child) => child.file.as_deref(),
@@ -1330,13 +1336,9 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                     let parent_names = std::mem::take(&mut output.interned_identifiers);
                     let compiled = body.emit(output, self.source.unit, &file);
                     output.interned_identifiers = parent_names;
-                    let code = match compiled {
-                        Ok(code) => code,
-                        Err(error) => {
-                            output.diagnostic = Some(error);
-                            return None;
-                        }
-                    };
+                    let code = compiled
+                        .map_err(|error| output.diagnostic = Some(error))
+                        .ok()?;
                     (
                         code,
                         child.original_text.as_deref().unwrap_or(&body.source.text),
@@ -1352,21 +1354,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                         &parsed,
                         self.source.python_optimization,
                     )?;
-                    let location = SourceMap {
-                        info: &body.scope,
-                        callable_code: Default::default(),
-                        exec_code: Default::default(),
-                        unit: self.source.unit,
-                        positions: &SourcePositions::new(&body.scope.path, text, &file)
-                            .with_names(&body.scope.private_names),
-                    };
-                    let code = location.code(
-                        output,
-                        QualnameScope::MODULE,
-                        Body::CheckedProvider(Ok(&body.code), AnnotationScope::Plain),
-                        false,
-                        None,
-                    );
+                    let code = body.emit(output, self.source.unit, &file);
                     (code, text, self.source.future_flags, true)
                 }
             };

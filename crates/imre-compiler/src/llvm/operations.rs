@@ -328,30 +328,22 @@ impl<'f, 'a, 'p, 'module> CheckedBody<'f, 'a, 'p, 'module> {
         use ir::{RegisteredArguments, RegisteredCallTarget};
 
         let frame = self.python();
-        let positional = match &call.arguments {
-            RegisteredArguments::Positional => true,
-            RegisteredArguments::Keywords { positional, .. } => *positional > 0,
-            RegisteredArguments::Packed(pack) => pack.starred.first() == Some(&false),
-        };
-        let expression = if positional
-            && matches!(
-                call.target,
-                RegisteredCallTarget::Callable {
-                    direct_eval: true,
-                    ..
-                }
-            ) {
-            args.first()
-                .and_then(|value| match &value.without_location().kind {
-                    ExprKind::Str(text) => Some(text.as_str()),
-                    ExprKind::Builtin(ir::Builtin::RegisteredString(bytes), _) => {
-                        std::str::from_utf8(bytes).ok()
-                    }
-                    _ => None,
-                })
-        } else {
-            None
-        };
+        let expression = matches!(
+            call.target,
+            RegisteredCallTarget::Callable {
+                direct_eval: true,
+                ..
+            }
+        )
+        .then(|| args.first())
+        .flatten()
+        .and_then(|value| match &value.without_location().kind {
+            ExprKind::Str(text) => Some(text.as_str()),
+            ExprKind::Builtin(ir::Builtin::RegisteredString(bytes), _) => {
+                std::str::from_utf8(bytes).ok()
+            }
+            _ => None,
+        });
         let exec = frame.exec_literal_at(call.range, expression);
         let mark = usage.operand_mark(frame);
         let edge = frame.begin_operand_scope();
