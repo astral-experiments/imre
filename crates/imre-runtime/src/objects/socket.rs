@@ -2070,17 +2070,18 @@ pub(crate) fn recv_bytes<E: From<Error>>(
     Ok(bytes)
 }
 
-/// Receive one message and preserve the source address, including a missing stream peer.
+pub(crate) type ReceivedFrom = (usize, libc::sockaddr_storage, libc::socklen_t);
+
+/// Own the message buffer across attempts and preserve the native source address.
 pub(crate) fn recv_from<E: From<Error>>(
-    s: &Object,
     size: usize,
     flags: i32,
-    check_signals: impl FnMut() -> std::result::Result<(), E>,
+    read: impl FnOnce(
+        &mut (dyn FnMut(RawFd) -> io::Result<ReceivedFrom> + Send),
+    ) -> std::result::Result<ReceivedFrom, E>,
 ) -> std::result::Result<(Vec<u8>, SocketName), E> {
     let mut bytes = zeroed_receive_buffer(size)?;
-    let (count, addr, len) = local_read(s, check_signals, |raw| {
-        receive_from_once(raw, &mut bytes, flags)
-    })?;
+    let (count, addr, len) = read(&mut |raw| receive_from_once(raw, &mut bytes, flags))?;
     let peer = unpack_socket_name(&addr, len)?;
     // MSG_TRUNC may report the full datagram size even when fewer bytes were copied.
     if count > size {
@@ -2100,7 +2101,7 @@ pub(crate) fn receive_from_once(
     raw: RawFd,
     buffer: &mut [u8],
     flags: i32,
-) -> io::Result<(usize, libc::sockaddr_storage, libc::socklen_t)> {
+) -> io::Result<ReceivedFrom> {
     // SAFETY: zero initializes the entire socket-address storage, including padding.
     let mut peer: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
     let mut len = size_of_val(&peer) as libc::socklen_t;
