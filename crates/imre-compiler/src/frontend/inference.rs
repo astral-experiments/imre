@@ -7,12 +7,6 @@ use ruff_python_ast::visitor::{Visitor, walk_stmt};
 
 use super::*;
 
-/// An element inserted into a local container and its direct iteration source, when known.
-struct Insertion<'a> {
-    value: &'a ast::Expr,
-    for_loop: Option<&'a ast::StmtFor>,
-}
-
 fn insertion_operand<'a>(stmt: &'a ast::Stmt, name: &str, method: &str) -> Option<&'a ast::Expr> {
     let call = stmt.as_expr_stmt()?.value.as_call_expr()?;
     let attr = call.func.as_attribute_expr()?;
@@ -25,20 +19,15 @@ fn insertion_operand<'a>(stmt: &'a ast::Stmt, name: &str, method: &str) -> Optio
     .then_some(value)
 }
 
-/// A direct element insertion in this lexical scope can supply a container layout hint.
-/// The ordinary checker still checks its operand and every other use of the list.
-fn first_insertion<'ast>(
+/// A direct list insertion in this lexical scope can supply a layout hint.
+fn first_list_insertion<'ast>(
     name: &str,
-    method: &str,
     statements: &'ast [ast::Stmt],
-) -> Option<Insertion<'ast>> {
+) -> Option<&'ast ast::Expr> {
     struct Appends<'name, 'ast> {
         name: &'name str,
-        method: &'name str,
-        insertion: Option<Insertion<'ast>>,
-        for_loop: Option<&'ast ast::StmtFor>,
+        insertion: Option<&'ast ast::Expr>,
     }
-
     impl<'ast> Visitor<'ast> for Appends<'_, 'ast> {
         fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
             if self.insertion.is_some()
@@ -46,34 +35,47 @@ fn first_insertion<'ast>(
             {
                 return;
             }
-            if let ast::Stmt::For(loop_) = stmt {
-                let enclosing = self.for_loop.replace(loop_);
-                self.visit_body(&loop_.body);
-                self.for_loop = enclosing;
-                self.visit_body(&loop_.orelse);
-                return;
-            }
-            if let Some(value) = insertion_operand(stmt, self.name, self.method) {
-                self.insertion = Some(Insertion {
-                    value,
-                    for_loop: self.for_loop,
-                });
+            if let Some(value) = insertion_operand(stmt, self.name, "append") {
+                self.insertion = Some(value);
             } else {
                 walk_stmt(self, stmt);
             }
         }
-
         fn visit_expr(&mut self, _: &'ast ast::Expr) {}
     }
-
     let mut appends = Appends {
         name,
-        method,
         insertion: None,
-        for_loop: None,
     };
     appends.visit_body(statements);
     appends.insertion
+}
+
+/// Fresh set roots and the exact insertions that have actually been checked in this frame.
+#[derive(Default)]
+pub(super) struct LocalSetPlan(HashMap<usize, (Type, bool)>);
+
+impl LocalSetPlan {
+    /// Register the provisional element layout of a fresh inferred set.
+    pub(super) fn defer(&mut self, slot: usize, element: Type) {
+        self.0.insert(slot, (element, false));
+    }
+
+    /// Record an insertion only after ordinary operand checking and coercion succeeded.
+    pub(super) fn checked_insert(&mut self, receiver: &Expr, value: &Expr) {
+        if let ExprKind::Local(slot) = receiver.kind
+            && let Some((element, inserted)) = self.0.get_mut(&slot)
+        {
+            *inserted |= value.ty == *element;
+        }
+    }
+
+    /// A retained native body must contain a checked insertion into an inferred set root.
+    fn has_checked_insertion(&self, locals: &[Type], types: &Types) -> bool {
+        self.0.iter().any(|(&slot, &(element, inserted))| {
+            inserted && types.set_element(locals[slot]) == Some(element)
+        })
+    }
 }
 
 impl Checker<'_> {
@@ -81,44 +83,55 @@ impl Checker<'_> {
     /// filled from an exact text iterator can also use its inferred element type.
     pub(super) fn inserted_element(
         &self,
-        name: &str,
+        target: &ast::ExprName,
         set: bool,
         later: &[ast::Stmt],
     ) -> Option<Type> {
-        let insertion = first_insertion(name, if set { "add" } else { "append" }, later)?;
-        if let ast::Expr::Call(call) = insertion.value
-            && let Some(class) = self.class_reference(&call.func)
-        {
-            return Some(Type::Class(class));
-        }
-        if let Some(ty) = self.graph.session.scalar_type(self.module, insertion.value) {
-            return Some(ty);
-        }
-        if !set || self.returns == Type::PythonObject {
-            return None;
-        }
-        let for_loop = insertion.for_loop?;
-        let item = for_loop.target.as_name_expr()?;
-        let source = for_loop.iter.as_name_expr()?;
-        let element = match self.locals[*self.names.get(source.id.as_str())?] {
-            Type::Str => Type::Str,
-            Type::Bytes | Type::ByteArray => Type::Int,
-            _ => return None,
+        let concrete = |value: &ast::Expr| {
+            if let ast::Expr::Call(call) = value
+                && let Some(class) = self.class_reference(&call.func)
+            {
+                return Some(Type::Class(class));
+            }
+            self.graph.session.scalar_type(self.module, value)
         };
-        let assigned = narrowing::assigned_names(later);
-        if for_loop.is_async
-            || insertion.value.as_name_expr()?.id != item.id
-            || narrowing::assigned_names(&for_loop.body).contains(item.id.as_str())
-            || assigned.contains(source.id.as_str())
-        {
-            return None;
+        if !set {
+            return concrete(first_list_insertion(target.id.as_str(), later)?);
         }
-        (!assigned.contains(name)
-            && !["len", "sorted", "list", "tuple"]
-                .iter()
-                .any(|builtin| assigned.contains(*builtin))
-            && self.local_set_storage(name, element, for_loop, item.id.as_str(), later))
-        .then_some(element)
+        let suite = TextRange::new(later.first()?.start(), later.last()?.end());
+        self.graph.session.with_collection_insertion(
+            self.module,
+            target,
+            "add",
+            suite,
+            |value, loop_info| {
+                if let Some(ty) = concrete(value) {
+                    return Some(ty);
+                }
+                if self.returns == Type::PythonObject {
+                    return None;
+                }
+                let (loop_target, iterable, is_async) = loop_info?;
+                let item = loop_target.as_name_expr()?;
+                let source = iterable.as_name_expr()?;
+                let element = match self.locals[*self.names.get(source.id.as_str())?] {
+                    Type::Str => Type::Str,
+                    Type::Bytes | Type::ByteArray => Type::Int,
+                    _ => return None,
+                };
+                (!is_async
+                    && value.as_name_expr()?.id == item.id
+                    && self.local_set_storage(
+                        target.id.as_str(),
+                        element,
+                        loop_target.range(),
+                        item.id.as_str(),
+                        source.id.as_str(),
+                        later,
+                    ))
+                .then_some(element)
+            },
+        )?
     }
 
     /// Select iteration-derived native storage only when the fresh set cannot escape
@@ -136,21 +149,23 @@ impl Checker<'_> {
         &self,
         name: &str,
         element: Type,
-        insertion_loop: &ast::StmtFor,
+        insertion_target: TextRange,
         item: &str,
+        source: &str,
         later: &[ast::Stmt],
     ) -> bool {
-        struct Uses<'checker, 'graph, 'ast> {
+        struct Uses<'checker, 'graph> {
             checker: &'checker Checker<'graph>,
             name: &'checker str,
             element: Type,
-            insertion_loop: &'ast ast::StmtFor,
+            insertion_target: TextRange,
             item: &'checker str,
+            source: &'checker str,
             in_insertion_loop: bool,
             safe: bool,
         }
 
-        impl Uses<'_, '_, '_> {
+        impl Uses<'_, '_> {
             fn owner(&self, value: &ast::Expr) -> bool {
                 value
                     .as_name_expr()
@@ -246,13 +261,14 @@ impl Checker<'_> {
             }
         }
 
-        impl<'ast> Visitor<'ast> for Uses<'_, '_, 'ast> {
+        impl<'ast> Visitor<'ast> for Uses<'_, '_> {
             fn visit_stmt(&mut self, stmt: &'ast ast::Stmt) {
                 if !self.safe {
                     return;
                 }
                 match stmt {
-                    ast::Stmt::For(loop_) if std::ptr::eq(loop_, self.insertion_loop) => {
+                    ast::Stmt::For(loop_) if loop_.target.range() == self.insertion_target => {
+                        self.visit_expr(&loop_.target);
                         self.visit_expr(&loop_.iter);
                         self.in_insertion_loop = true;
                         self.visit_body(&loop_.body);
@@ -345,7 +361,14 @@ impl Checker<'_> {
                             self.visit_expr(operand);
                         }
                     }
-                    ast::Expr::Name(name) => self.safe &= name.id != self.name,
+                    ast::Expr::Name(name) => {
+                        self.safe &= name.id != self.name
+                            && !(name.ctx == ast::ExprContext::Store
+                                && (name.id == self.source
+                                    || ["len", "sorted", "list", "tuple"]
+                                        .contains(&name.id.as_str())
+                                    || self.in_insertion_loop && name.id == self.item));
+                    }
                     ast::Expr::NumberLiteral(_)
                     | ast::Expr::BooleanLiteral(_)
                     | ast::Expr::StringLiteral(_)
@@ -363,8 +386,9 @@ impl Checker<'_> {
             checker: self,
             name,
             element,
-            insertion_loop,
+            insertion_target,
             item,
+            source,
             in_insertion_loop: false,
             safe: true,
         };
@@ -1872,9 +1896,8 @@ impl Inference {
                                 .element(ty)
                                 .is_some_and(|element| element.builtin_scalar_name().is_some())
                             && checker
-                                .inferred_containers
-                                .iter()
-                                .any(|&slot| types.set_element(checker.locals[slot]).is_some())
+                                .local_set_plan
+                                .has_checked_insertion(&checker.locals, types)
                         {
                             discovered_set_return = Some(ty);
                         }

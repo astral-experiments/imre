@@ -965,6 +965,63 @@ impl Session {
             })
     }
 
+    /// Check the first indexed direct insertion into an unannotated collection in this suite.
+    /// The optional loop information is the reaching definition of its inserted operand.
+    pub(crate) fn with_collection_insertion<R>(
+        &self,
+        module: usize,
+        target: &ruff_python_ast::ExprName,
+        method: &str,
+        suite: TextRange,
+        check: impl FnOnce(&Expr, Option<(&Expr, &Expr, bool)>) -> R,
+    ) -> Option<R> {
+        use ty_python_core::definition::DefinitionKind;
+        use ty_python_core::statement::Statement;
+
+        let file = self.db.program_file(self.files[module]);
+        let index = ty_python_core::semantic_index(&self.db, file);
+        let definition = index.try_definition(target)?;
+        let parsed = self.parsed(self.files[module]);
+        let insertion = index
+            .constraining_collection_uses(definition)
+            .filter_map(|(statement, receiver)| {
+                let Statement::Expression(expression) = statement else {
+                    return None;
+                };
+                let call = expression.node_ref(&self.db).node(&parsed).as_call_expr()?;
+                let attribute = call.func.as_attribute_expr()?;
+                let [value] = call.arguments.args.as_slice() else {
+                    return None;
+                };
+                (suite.contains_range(call.range())
+                    && attribute.attr.as_str() == method
+                    && ty_python_core::ExpressionNodeKey::from(&*attribute.value) == receiver
+                    && call.arguments.keywords.is_empty())
+                .then_some(value)
+            })
+            .min_by_key(|value| value.start())?;
+        let loop_definition = index
+            .try_expression_scope_id(insertion)
+            .zip(index.try_expression_use_id(insertion.into()))
+            .and_then(|(scope, use_id)| {
+                let map = index.use_def_map(scope);
+                let mut bindings = map
+                    .bindings_at_use(use_id)
+                    .filter_map(|binding| binding.binding.definition());
+                let first = bindings.next()?;
+                bindings.next().is_none().then_some(first)
+            });
+        let loop_info = loop_definition.and_then(|definition| match definition.kind(&self.db) {
+            DefinitionKind::For(loop_) => Some((
+                loop_.target(&parsed),
+                loop_.iterable(&parsed),
+                loop_.is_async(),
+            )),
+            _ => None,
+        });
+        Some(check(insertion, loop_info))
+    }
+
     /// Find the definitions of an unannotated function local with multiple writes.
     pub(crate) fn inferred_local_definitions(
         &self,

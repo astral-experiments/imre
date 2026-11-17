@@ -4256,6 +4256,7 @@ struct Checker<'a> {
     caller_frame_returns: Option<Box<assignments::Assigned>>,
     /// Inferred containers can acquire a new storage layout at an outermost plain assignment.
     inferred_containers: HashSet<usize>,
+    local_set_plan: inference::LocalSetPlan,
     /// Annotations constrain later assignments to the same lexical slot.
     declared_slots: HashMap<usize, TypeDeclaration>,
     /// Fresh bindings mentioned only as targets of a non-returning RHS have no stored layout.
@@ -4405,6 +4406,7 @@ impl<'a> Checker<'a> {
             returns: Type::None,
             caller_frame_returns: None,
             inferred_containers: HashSet::new(),
+            local_set_plan: inference::LocalSetPlan::default(),
             declared_slots: HashMap::new(),
             unstored_targets: HashSet::new(),
             document_list_sites: HashMap::new(),
@@ -7272,7 +7274,7 @@ impl<'a> Checker<'a> {
                         if matches!(&*sub.slice, ast::Expr::Slice(_)) && self.target_context(target, None) == Some(self.types.list(documents::ANY)))))) {
                     Some(self.types.list(documents::ANY))
                 } else if empty_list || empty_set {
-                    self.inserted_element(name.id.as_str(), empty_set, later)
+                    self.inserted_element(name, empty_set, later)
                         .map(|ty| if empty_list { self.types.list(ty) } else { self.types.set(ty) })
                 } else {
                     None
@@ -7281,6 +7283,12 @@ impl<'a> Checker<'a> {
                     let slot = self.declare(name.id.as_str(), ty, name)?;
                     if empty_list || empty_set {
                         self.remember_inferred_container(slot);
+                        if empty_set
+                            && self.inferred_containers.contains(&slot)
+                            && let Some(element) = self.types.set_element(ty)
+                        {
+                            self.local_set_plan.defer(slot, element);
+                        }
                     }
                 }
             }
@@ -15780,6 +15788,9 @@ impl<'a> Checker<'a> {
                         receiver,
                         Type::None,
                     ));
+                }
+                if matches!(builtin, Builtin::SetAdd) {
+                    self.local_set_plan.checked_insert(&receiver, &value);
                 }
                 return Ok(Expr {
                     ty: Type::None,
