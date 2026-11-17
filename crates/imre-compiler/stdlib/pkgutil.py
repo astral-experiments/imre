@@ -3,13 +3,17 @@
 from collections import namedtuple
 from itertools import count
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING, Iterator
 
 # Supplied by the checked import resolver.
 _filesystem_roots: tuple[str, ...]
 _module_suffixes: tuple[str, ...]
 
 ModuleInfo = namedtuple('ModuleInfo', ('module_finder', 'name', 'ispkg'))
+
+if TYPE_CHECKING:
+    # The executable body is linked from pkgutil/boxed.py.
+    def get_data(package: str, resource: str) -> bytes | None: ...
 
 
 def _absolute(directory: str) -> str:
