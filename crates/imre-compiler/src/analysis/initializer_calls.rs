@@ -912,6 +912,21 @@ impl Session {
         use ruff_python_ast::Operator;
         use ty_python_semantic::types::SpecialFormType;
 
+        if let Some(Type::TypeAlias(alias)) = annotation.inferred_type(model) {
+            // Reject cyclic aliases before following their written union arms.
+            if super::annotation_type(model.db(), model, annotation).is_none() {
+                return false;
+            }
+            return super::with_alias_value(
+                model.db(),
+                &model.program_environment(),
+                alias,
+                |_, alias_model, value, _| {
+                    Self::written_scalar_union_accepts(alias_model, value, actual)
+                },
+            )
+            .unwrap_or(false);
+        }
         let mut pending = match annotation {
             Expr::BinOp(union) if union.op == Operator::BitOr => {
                 vec![union.left.as_ref(), union.right.as_ref()]

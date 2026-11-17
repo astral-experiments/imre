@@ -4,6 +4,37 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn object_fallback_checks_first_party_scalar_stores() {
+    let project = tempdir().unwrap();
+    let main = project.path().join("main.py");
+    let dynamic = "buffer = bytearray()\nbuffer.append(97)\nprint(buffer)\n";
+    let reject = || {
+        for error in [
+            crate::check_file(&main, None).unwrap_err(),
+            crate::compile_file(&main, None, &Default::default())
+                .err()
+                .unwrap(),
+        ] {
+            assert!(error.contains("expected int, got bool"), "{error}");
+        }
+    };
+    for store in [
+        "status: int = True\n",
+        "status: int = 1\nstatus = True\n",
+        "def run():\n    status: int = True\nrun()\n",
+    ] {
+        fs::write(&main, format!("{dynamic}{store}")).unwrap();
+        reject();
+    }
+    fs::write(project.path().join("dynamic.py"), dynamic).unwrap();
+    fs::write(project.path().join("bad.py"), "status: int = True\n").unwrap();
+    fs::write(&main, "import dynamic\nimport bad\n").unwrap();
+    reject();
+    fs::write(&main, format!("{dynamic}status: int = 1\nchoice: int | bool = True\ntype Choice = int | bool\nother: Choice = True\nif False:\n    dead: int = True\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    hidden: int = True\n")).unwrap();
+    crate::check_file(&main, None).unwrap();
+}
+
+#[test]
 fn heterogeneous_unannotated_lists_use_object_storage_without_erasing_contracts() {
     let project = tempdir().unwrap();
     let main = project.path().join("main.py");
