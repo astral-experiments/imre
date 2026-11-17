@@ -2,18 +2,9 @@ test_inventory_and_individual_pairs (__main__.BindingTests.test_inventory_and_in
 test_rehashed_source_hash_in_capture (__main__.BindingTests.test_rehashed_source_hash_in_capture) ... ok
 test_rehashed_stock_launcher_mismatch (__main__.BindingTests.test_rehashed_stock_launcher_mismatch) ... ok
 test_rehashed_valid_cohort_remap_cannot_inherit_full_inventory (__main__.BindingTests.test_rehashed_valid_cohort_remap_cannot_inherit_full_inventory) ... ok
-test_rehashed_wrong_stock_source_archive (__main__.BindingTests.test_rehashed_wrong_stock_source_archive) ... FAIL
-
-======================================================================
-FAIL: test_rehashed_wrong_stock_source_archive (__main__.BindingTests.test_rehashed_wrong_stock_source_archive)
-----------------------------------------------------------------------
-Traceback (most recent call last):
-  File "/workspace/imre-hashlib-strict/benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/hashlib/raw-control/test_binding.py", line 35, in test_rehashed_wrong_stock_source_archive
-    with self.assertRaisesRegex(ValueError,'stock source archive'):self.validate()
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AssertionError: ValueError not raised
+test_rehashed_wrong_stock_source_archive (__main__.BindingTests.test_rehashed_wrong_stock_source_archive) ... ok
 
 ----------------------------------------------------------------------
-Ran 5 tests in 1.567s
+Ran 5 tests in 1.108s
 
-FAILED (failures=1)
+OK

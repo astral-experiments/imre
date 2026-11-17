@@ -5,7 +5,7 @@ HERE=pathlib.Path(__file__).resolve();R=next(p for p in HERE.parents if (p/'benc
 PIN='8571ca2dbecabf8d7863c369dc776611fd57d8ad';D=R/'benchmarks/compatibility/revisions'/PIN;E=D/'evidence/hashlib/raw-control';sha=lambda p:hashlib.sha256(p.read_bytes()).hexdigest();loc=lambda p:p.relative_to(R).as_posix()
 class BindingTests(unittest.TestCase):
  def setUp(self):
-  a=json.loads((D/'activation.json').read_text()); self.entry=copy.deepcopy(a['families'].get('hashlib') or json.loads((E/'proposed-activation.json').read_text())); self.binding=json.loads((R/self.entry['sources']['binding']).read_text());self.rows=[json.loads(s) for s in (R/self.entry['receipt']).read_text().splitlines()];self.addCleanup(patch.stopall);patch.object(scorecard,'DATA_ROOT',D).start();patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}).start();patch.object(scorecard,'snapshot_activation',return_value={'families':{'hashlib':self.entry}}).start()
+  a=json.loads((D/'activation.json').read_text()); self.entry=copy.deepcopy(a['families']['hashlib']); self.binding=json.loads((R/self.entry['sources']['binding']).read_text());self.rows=[json.loads(s) for s in (R/self.entry['receipt']).read_text().splitlines()];self.addCleanup(patch.stopall);patch.object(scorecard,'DATA_ROOT',D).start();patch.object(scorecard,'COHORT',{**scorecard.CANONICAL_COHORT,'imre_revision':PIN}).start();patch.object(scorecard,'snapshot_activation',return_value={'families':{'hashlib':self.entry}}).start()
  def artifact(self,tmp,role,data):
   p=tmp/role;p.write_bytes(data);self.binding['cohorts']['finite-native']['artifacts'][role]=loc(p);self.entry['files'][loc(p)]=sha(p);return p
  def reseal(self,tmp):
