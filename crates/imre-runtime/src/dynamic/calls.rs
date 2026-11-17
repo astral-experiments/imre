@@ -294,6 +294,7 @@ pub(super) enum RegisteredCall {
     Sleep(i64),
     Select(Vec<Id>),
     Accept(Id),
+    Connect(stdlib::socket::Connect),
     Recv(stdlib::socket::Recv),
 }
 
@@ -389,6 +390,8 @@ impl RegisteredCall {
             }
             // SAFETY: the caller roots the frame and owns the context on this thread.
             Self::Accept(listener) => unsafe { stdlib::socket::accept(listener, context) },
+            // SAFETY: the registered caller owns the context and roots the active frame.
+            Self::Connect(connect) => unsafe { connect.run(context) },
             // SAFETY: the registered caller owns the context and roots the active frame.
             Self::Recv(recv) => unsafe { recv.run(context) },
         }
