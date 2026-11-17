@@ -6,6 +6,36 @@ mod tests {
     use crate::frontend::fixed_body_source::FixedNode;
 
     #[test]
+    fn registered_tuple_comparisons_keep_the_first_checked_body() {
+        let text = include_str!(
+            "../../../../../tests/fixtures/containers/registered_tuple_comparison_body.py"
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("app.py");
+        std::fs::write(&path, text).unwrap();
+        let mut graph = SourceGraph::load(&path, None, &[]).unwrap();
+        let (_, lowerings) =
+            caller_cache::observe_lowerings(|| crate::checked_lower(&mut graph).unwrap());
+        for name in ["truth", "left_eq", "right_eq", "boom_eq", "probe"] {
+            assert_eq!(
+                lowerings.iter().filter(|lowered| *lowered == name).count(),
+                1
+            );
+        }
+        let start = TextSize::try_from(text.find("def probe").unwrap()).unwrap();
+        let functions = graph.registered_functions();
+        let frame = &functions[&graph.entry][&start];
+        let mut comparisons = 0;
+        ir::walk_expressions(&frame.function.body, &mut |value| {
+            if let ExprKind::Compare(_, ops) = &value.kind {
+                assert_eq!(ops.as_slice(), [ast::CmpOp::Eq]);
+                comparisons += 1;
+            }
+        });
+        assert_eq!(comparisons, 2);
+    }
+
+    #[test]
     fn a_discarded_call_does_not_hide_a_sibling_argument_contract() {
         let project = tempfile::tempdir().unwrap();
         let path = project.path().join("app.py");

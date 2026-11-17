@@ -1959,14 +1959,21 @@ impl Checker<'_> {
                     .is_some_and(|&slot| self.locals[slot] == Type::PythonObject)
                     || graph.session.is_dynamic_receiver(owner, receiver)
             };
-            let mut previous_fixed = false;
-            if matches!(frame_op, Some(ast::CmpOp::Eq | ast::CmpOp::NotEq))
-                || !frame_identity
-                    && cmp.operands.iter().map(opaque).any(|dynamic| {
-                        let fixed_pair = previous_fixed && !dynamic;
-                        previous_fixed = !dynamic;
-                        fixed_pair
+            let exact_tuple_equality = cmp.as_single().is_some_and(|(left, op, right)| {
+                matches!(op, ast::CmpOp::Eq | ast::CmpOp::NotEq)
+                    && [left, right].into_iter().all(|operand| {
+                        matches!(display_elements(operand), Some((_, DisplayKind::Tuple)))
                     })
+            });
+            let mut previous_fixed = false;
+            if !exact_tuple_equality
+                && (matches!(frame_op, Some(ast::CmpOp::Eq | ast::CmpOp::NotEq))
+                    || !frame_identity
+                        && cmp.operands.iter().map(opaque).any(|dynamic| {
+                            let fixed_pair = previous_fixed && !dynamic;
+                            previous_fixed = !dynamic;
+                            fixed_pair
+                        }))
             {
                 if frame_op.and_then(ir::Compare::from_operator).is_none() {
                     return Ok(None);
