@@ -693,8 +693,9 @@ impl Session {
             Kind::DeclaredArgument
         };
         for ((p, value), actual) in supplied.clone() {
-            if p.parameter.annotation.is_some()
+            if let Some(annotation) = p.parameter.annotation.as_deref()
                 && let Some(expected) = p.parameter.inferred_type(&owner_model)
+                && !Session::written_scalar_union_accepts(&owner_model, annotation, actual)
                 && let Some(error) =
                     Session::scalar_contract_error(model, expected, value, actual, || {
                         bound.missing.is_none() && *reached
@@ -789,6 +790,51 @@ impl Session {
             _ => return None,
         };
         Some(Err(error.classified(Kind::RegisteredInitializer)))
+    }
+
+    /// Preserve explicitly written scalar arms when ty simplifies a subtype union
+    /// such as `int | bool` to `int`.
+    pub(super) fn written_scalar_union_accepts<'db>(
+        model: &SemanticModel<'db>,
+        annotation: &Expr,
+        actual: Type<'db>,
+    ) -> bool {
+        use ruff_python_ast::Operator;
+        use ty_python_semantic::types::SpecialFormType;
+
+        let mut pending = match annotation {
+            Expr::BinOp(union) if union.op == Operator::BitOr => {
+                vec![union.left.as_ref(), union.right.as_ref()]
+            }
+            Expr::Subscript(union)
+                if union.value.inferred_type(model)
+                    == Some(Type::SpecialForm(SpecialFormType::Union)) =>
+            {
+                match union.slice.as_ref() {
+                    Expr::Tuple(members) => members.elts.iter().collect(),
+                    arm => vec![arm],
+                }
+            }
+            _ => return false,
+        };
+        let db = model.db();
+        let env = model.program_environment();
+        let Some(actual) = Self::scalar_layout(db, &env, actual, ScalarMatch::Assignable) else {
+            return false;
+        };
+        while let Some(arm) = pending.pop() {
+            if let Expr::BinOp(part) = arm
+                && part.op == Operator::BitOr
+            {
+                pending.extend([part.left.as_ref(), part.right.as_ref()]);
+            } else if super::annotation_type(db, model, arm)
+                .and_then(|ty| Self::scalar_layout(db, &env, ty, ScalarMatch::Exact))
+                == Some(actual)
+            {
+                return true;
+            }
+        }
+        false
     }
 
     fn initialized_member(
