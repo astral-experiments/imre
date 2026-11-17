@@ -1,7 +1,7 @@
 //! Resolve first-class execution operations using the declarations of their operands.
 
 use super::{Session, is_stdlib_function_type};
-use crate::dynamic::literal::{LiteralSite, ParsedLiteral};
+use crate::dynamic::literal::{LiteralCandidate, LiteralSite, ParsedLiteral};
 use crate::frontend::phase::Diagnostic;
 use ruff_db::files::File;
 use ruff_db::parsed::ParsedModuleRef;
@@ -1207,7 +1207,7 @@ impl Session {
                 .is_some()
     }
 
-    /// Resolve fixed operands after the selected parent's immediate imports are registered.
+    /// Resolve fixed exec operands and file-write sources after the parent's imports are registered.
     /// Each returned parse supplies the next level's imports and its eventual checked module.
     pub(crate) fn select_literal_level(
         &self,
@@ -1215,7 +1215,7 @@ impl Session {
         parsed: &ParsedModuleRef,
         source: &str,
         inherited_flags: u32,
-        candidates: &[TextRange],
+        candidates: &[LiteralCandidate],
         (launcher_arguments, site_lines): (&[Option<String>], &[String]),
     ) -> Vec<(LiteralSite, Result<ParsedLiteral, String>)> {
         use ruff_python_ast::{AnyNodeRef, find_node::covering_node};
@@ -1224,7 +1224,8 @@ impl Session {
         }
         let model = SemanticModel::new(&self.db, self.db.program_file(parent));
         let mut sites = Vec::new();
-        for &range in candidates {
+        for candidate in candidates {
+            let range = candidate.call;
             let AnyNodeRef::ExprCall(call) = covering_node(parsed.syntax().into(), range).node()
             else {
                 continue;
@@ -1232,20 +1233,41 @@ impl Session {
             if call.range() != range {
                 continue;
             }
-            let Some(argument) = crate::frontend::exec_source_operand(call) else {
+            let Some(argument) = (if candidate.file.is_some() {
+                call.arguments.args.first()
+            } else {
+                crate::frontend::exec_source_operand(call)
+            }) else {
                 continue;
             };
             let operand = argument.start();
             let mut add = |original: Result<&str, String>, optional| {
                 let module = original.and_then(|original| {
+                    // A text write emits UTF-8 bytes, but a loader decodes those bytes
+                    // according to any PEP 263 cookie before compiling the module.
+                    let decoded;
+                    let input = if candidate.file.is_some() {
+                        decoded = imre_ast::source_encoding::decode_compile_source(
+                            original.as_bytes(),
+                            |_, error| error.to_string(),
+                        )
+                        .map_err(|error| format!("{error:?}"))?;
+                        decoded.as_str()
+                    } else {
+                        original
+                    };
                     let (file, text, parsed) =
-                        checked_literal_source(&self.db, parent, operand, original)?;
+                        checked_literal_source(&self.db, parent, operand, input)?;
                     Ok(ParsedLiteral::new(
                         file,
                         text,
                         original,
                         parsed,
-                        inherited_flags,
+                        if candidate.file.is_some() {
+                            0
+                        } else {
+                            inherited_flags
+                        },
                     ))
                 });
                 sites.push((
@@ -1253,11 +1275,19 @@ impl Session {
                         call: range,
                         operand,
                         optional,
+                        file: candidate.file.clone(),
                     },
                     module,
                 ));
             };
-            if let Some(literal) = self.selected_exec_literal(parent, parsed, &model, call) {
+            if candidate.file.is_some() {
+                if let Some(literal) = argument.as_string_literal_expr() {
+                    add(
+                        crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
+                        true,
+                    );
+                }
+            } else if let Some(literal) = self.selected_exec_literal(parent, parsed, &model, call) {
                 add(
                     crate::frontend::exec_literal_text(literal, source).map_err(str::to_owned),
                     false,

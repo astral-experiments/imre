@@ -152,6 +152,15 @@ struct SourceModule {
     single_inputs: Option<Rc<Vec<SingleInput>>>,
 }
 
+/// An exact file source emitted for a fixed write operand in the application.
+#[derive(Clone, Copy)]
+struct LinkedFileSource {
+    path: &'static Path,
+    source: &'static str,
+    entry: Code,
+    flags: u32,
+}
+
 struct DoctestSource {
     path: PathBuf,
     inputs: Rc<Vec<SingleInput>>,
@@ -384,6 +393,7 @@ pub(crate) struct Context {
     native_type_dicts: NativeTypeDictionaries,
     // Most names have one provider. Conflicting registrations retain their lookup order.
     sources: HashMap<&'static str, smallvec::SmallVec<[SourceModule; 1]>>,
+    linked_file_sources: smallvec::SmallVec<[LinkedFileSource; 4]>,
     deque_comparison_repeats: usize,
 }
 
