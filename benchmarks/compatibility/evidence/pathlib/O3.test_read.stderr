@@ -1,0 +1,62 @@
+test_glob (__main__.LocalPathReadTest.test_glob) ... ok
+test_info_exists (__main__.LocalPathReadTest.test_info_exists) ... ok
+test_info_is_dir (__main__.LocalPathReadTest.test_info_is_dir) ... ok
+test_info_is_file (__main__.LocalPathReadTest.test_info_is_file) ... ok
+test_info_is_symlink (__main__.LocalPathReadTest.test_info_is_symlink) ... ok
+test_is_readable (__main__.LocalPathReadTest.test_is_readable) ... ok
+test_iterdir (__main__.LocalPathReadTest.test_iterdir) ... ok
+test_iterdir_info (__main__.LocalPathReadTest.test_iterdir_info) ... ok
+test_iterdir_nodir (__main__.LocalPathReadTest.test_iterdir_nodir) ... ok
+test_open_r (__main__.LocalPathReadTest.test_open_r) ... ok
+test_open_r_encoding_warning (__main__.LocalPathReadTest.test_open_r_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_rb (__main__.LocalPathReadTest.test_open_rb) ... ok
+test_read_bytes (__main__.LocalPathReadTest.test_read_bytes) ... ok
+test_read_text (__main__.LocalPathReadTest.test_read_text) ... ok
+test_read_text_encoding_warning (__main__.LocalPathReadTest.test_read_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_read_text_with_newlines (__main__.LocalPathReadTest.test_read_text_with_newlines) ... ok
+test_walk_bottom_up (__main__.LocalPathReadTest.test_walk_bottom_up) ... ok
+test_walk_prune (__main__.LocalPathReadTest.test_walk_prune) ... ok
+test_walk_top_down (__main__.LocalPathReadTest.test_walk_top_down) ... ok
+test_glob (__main__.PathReadTest.test_glob) ... ok
+test_info_exists (__main__.PathReadTest.test_info_exists) ... ok
+test_info_is_dir (__main__.PathReadTest.test_info_is_dir) ... ok
+test_info_is_file (__main__.PathReadTest.test_info_is_file) ... ok
+test_info_is_symlink (__main__.PathReadTest.test_info_is_symlink) ... ok
+test_is_readable (__main__.PathReadTest.test_is_readable) ... ok
+test_iterdir (__main__.PathReadTest.test_iterdir) ... ok
+test_iterdir_info (__main__.PathReadTest.test_iterdir_info) ... ok
+test_iterdir_nodir (__main__.PathReadTest.test_iterdir_nodir) ... ok
+test_open_r (__main__.PathReadTest.test_open_r) ... ok
+test_open_r_encoding_warning (__main__.PathReadTest.test_open_r_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_rb (__main__.PathReadTest.test_open_rb) ... ok
+test_read_bytes (__main__.PathReadTest.test_read_bytes) ... ok
+test_read_text (__main__.PathReadTest.test_read_text) ... ok
+test_read_text_encoding_warning (__main__.PathReadTest.test_read_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_read_text_with_newlines (__main__.PathReadTest.test_read_text_with_newlines) ... ok
+test_walk_bottom_up (__main__.PathReadTest.test_walk_bottom_up) ... ok
+test_walk_prune (__main__.PathReadTest.test_walk_prune) ... ok
+test_walk_top_down (__main__.PathReadTest.test_walk_top_down) ... ok
+test_glob (__main__.ZipPathReadTest.test_glob) ... ok
+test_info_exists (__main__.ZipPathReadTest.test_info_exists) ... ok
+test_info_is_dir (__main__.ZipPathReadTest.test_info_is_dir) ... ok
+test_info_is_file (__main__.ZipPathReadTest.test_info_is_file) ... ok
+test_info_is_symlink (__main__.ZipPathReadTest.test_info_is_symlink) ... ok
+test_is_readable (__main__.ZipPathReadTest.test_is_readable) ... ok
+test_iterdir (__main__.ZipPathReadTest.test_iterdir) ... ok
+test_iterdir_info (__main__.ZipPathReadTest.test_iterdir_info) ... ok
+test_iterdir_nodir (__main__.ZipPathReadTest.test_iterdir_nodir) ... ok
+test_open_r (__main__.ZipPathReadTest.test_open_r) ... ok
+test_open_r_encoding_warning (__main__.ZipPathReadTest.test_open_r_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_open_rb (__main__.ZipPathReadTest.test_open_rb) ... ok
+test_read_bytes (__main__.ZipPathReadTest.test_read_bytes) ... ok
+test_read_text (__main__.ZipPathReadTest.test_read_text) ... ok
+test_read_text_encoding_warning (__main__.ZipPathReadTest.test_read_text_encoding_warning) ... skipped 'Requires warn_default_encoding'
+test_read_text_with_newlines (__main__.ZipPathReadTest.test_read_text_with_newlines) ... ok
+test_walk_bottom_up (__main__.ZipPathReadTest.test_walk_bottom_up) ... ok
+test_walk_prune (__main__.ZipPathReadTest.test_walk_prune) ... ok
+test_walk_top_down (__main__.ZipPathReadTest.test_walk_top_down) ... ok
+
+----------------------------------------------------------------------
+Ran 57 tests in 81.527s
+
+OK (skipped=6)

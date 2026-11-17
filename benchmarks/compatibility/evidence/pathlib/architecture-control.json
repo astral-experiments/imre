@@ -1,0 +1,76 @@
+{
+  "controls": {
+    "test_join_posix": {
+      "argv": [
+        "/workspace/imre/target/release/imre",
+        "build",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/imre_control_test_join_posix.py",
+        "--module-root",
+        "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "--no-cache",
+        "--quiet",
+        "--opt-level",
+        "0",
+        "--runtime",
+        "/workspace/imre/target/release/libimre_runtime.a",
+        "--clang",
+        "/workspace/.toolchains/imre-x86_64-unknown-linux-gnu/imre-toolchain/bin/clang",
+        "-o",
+        "/workspace/scratch/control-test_join_posix.exe"
+      ],
+      "environment": {
+        "PYTHONPATH": "/workspace/scratch/imre-cpython-test-fixtures/Lib",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "TMPDIR": "/workspace/scratch/pathlib-tmp",
+        "IMRE_PYTHON": "/workspace/imre/target/release/imre",
+        "IMREFLAGS": "--opt-level 0",
+        "PYTHON_COLORS": "0",
+        "NO_COLOR": "1"
+      },
+      "cwd": "/workspace/scratch",
+      "timeout_seconds": 90,
+      "exit_code": 0,
+      "timed_out": false,
+      "elapsed_seconds": 79.651,
+      "logs": [
+        {
+          "path": "benchmarks/compatibility/evidence/pathlib/control.test_join_posix.stdout",
+          "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "raw_bytes": 0,
+          "public_bytes": 0,
+          "public_is_raw": true,
+          "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "benchmarks/compatibility/evidence/pathlib/control.test_join_posix.stderr",
+          "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "raw_bytes": 0,
+          "public_bytes": 0,
+          "public_is_raw": true,
+          "public_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "original_sha256": "999694e58f17faa73ce7edba33d8e54e09b952f48b05d8364a4ad41a8e1f120e",
+      "negative_sha256": "5aea61a666bfcb3bcd29409a0de2740ad7095c993c7c8af3ea2cc2980f878758",
+      "control_module_sha256": "14841721c7b84f57d26a6a38a53827c683daf10930b9f297cfc15335bd1257b5",
+      "image_exists": true,
+      "original_launcher": "/workspace/scratch/imre-cpython-test-fixtures/Lib/test/test_pathlib/test_join_posix.py",
+      "control_module": "/workspace/scratch/imre-cpython-test-fixtures/Lib/imre_architecture_control.py",
+      "control_module_evidence": "benchmarks/compatibility/evidence/pathlib/architecture_control.py",
+      "negative_launcher_transformation": "prepend the exact bytes import imre_architecture_control\\n to the unchanged original launcher; keep all other bytes identical",
+      "expected": "fresh O0 build rejects expected int got bool and produces no image",
+      "expected_diagnostic_observed": false,
+      "control_passed": false,
+      "observed": "exit 0, empty stderr, image produced",
+      "image_removed_after_observation": true
+    }
+  },
+  "distinct_untested_launchers": [
+    "test_join_windows",
+    "test_write",
+    "test_copy",
+    "test_read",
+    "test_join"
+  ],
+  "policy": "No candidate pair is verified unless its own distinct launcher has a passing first-party control. A tested direct FILE launcher silently accepted the error, and the other launchers were not subjected to additional expensive control builds."
+}
