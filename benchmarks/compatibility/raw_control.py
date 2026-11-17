@@ -9,6 +9,8 @@ import hashlib
 import json
 import posixpath
 import re
+import tarfile
+import zipfile
 from functools import lru_cache
 from pathlib import Path
 
@@ -20,6 +22,44 @@ SHA = re.compile(r'^([0-9a-f]{64})  (.+)$')
 
 
 def sha(data): return hashlib.sha256(data).hexdigest()
+
+
+def stock_source_bytes(path, member, source, require):
+    """Read the pinned source file or its exact regular archive member."""
+    if member is None:
+        return path.read_bytes()
+    require(member in {source['path'], f"cpython-{source['commit']}/{source['path']}"},
+            'stock source archive member path differs from the pinned source')
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as archive:
+            entries = [entry for entry in archive.infolist() if entry.filename == member]
+            require(len(entries) == 1 and not entries[0].is_dir()
+                    and (entries[0].external_attr >> 16) & 0o170000 in {0, 0o100000},
+                    'stock source archive member is missing, duplicated or not a regular file')
+            return archive.read(entries[0])
+    try:
+        with tarfile.open(path, 'r:*') as archive:
+            entries = [entry for entry in archive.getmembers() if entry.name == member]
+            require(len(entries) == 1 and entries[0].isreg(),
+                    'stock source archive member is missing, duplicated or not a regular file')
+            return archive.extractfile(entries[0]).read()
+    except tarfile.TarError as exc:
+        raise ValueError('stock source archive format is invalid') from exc
+
+
+def validate_stock_source(path, member, source, capture, require):
+    """Anchor actual archive and member bytes to the immutable original source."""
+    archived = stock_source_bytes(path, member, source, require)
+    blob = hashlib.sha1(f'blob {len(archived)}\0'.encode() + archived).hexdigest()
+    require(sha(archived) == source['sha256'] and blob == source['git_blob'],
+            'stock source archive member differs from the pinned source')
+    if capture is not None:
+        require(capture.get('source_commit') == source['commit']
+                and capture.get('source_archive_sha256') == sha(path.read_bytes())
+                and ('source' not in capture or capture['source'] == source)
+                and ('source_sha256' not in capture or capture['source_sha256'] == source['sha256'])
+                and ('source_member' not in capture or capture['source_member'] == member),
+                'fresh stock capture metadata or raw stdout differs: stock source identity or archive digest differs')
 
 
 def sha_lines(text):
@@ -251,9 +291,10 @@ def adapt(api, family, locator, digest, source_json, activation_digest, cohort):
     require(sha(stock_launcher)==expected_stock_sha and f'import {module} as ' in stock_launcher.decode(), 'stock launcher archive differs')
     if kind == 'finite':
         require(stock_launcher == positive and expected_stock_sha == run['launcher_sha256'], 'credited finite cohort stock launcher bytes differ from native')
-    if 'stock_capture' in artifacts:
-        capture = obj('stock_capture')
-        require(all(capture.get(k) == stock_meta.get(k) for k in ('argv','cwd','environment','timeout_seconds','exit_code','timed_out','stderr_sha256','stdout_sha256','collection','inventory_complete','summary')) and capture.get('launcher_sha256') == sha(stock_launcher) and capture.get('python_sha256') == run.get('stock_python_sha256') and capture.get('version') == run.get('stock_version') and capture.get('source_commit') == source['commit'] and capture.get('source_archive_sha256') == source['sha256'] and sha(data('stock_stdout')) == stock_meta.get('stdout_sha256'), 'fresh stock capture metadata or raw stdout differs')
+    capture = obj('stock_capture') if 'stock_capture' in artifacts else None
+    validate_stock_source(file('stock_source'), binding.get('stock_source_member'), source, capture, require)
+    if capture is not None:
+        require(all(capture.get(k) == stock_meta.get(k) for k in ('argv','cwd','environment','timeout_seconds','exit_code','timed_out','stderr_sha256','stdout_sha256','collection','inventory_complete','summary')) and capture.get('launcher_sha256') == sha(stock_launcher) and capture.get('python_sha256') == run.get('stock_python_sha256') and capture.get('version') == run.get('stock_version') and sha(data('stock_stdout')) == stock_meta.get('stdout_sha256'), 'fresh stock capture metadata or raw stdout differs')
     opt = api.option(command,'--extension-path')
     if kind == 'finite':
         comparable_run(run, opt, compiler, require)

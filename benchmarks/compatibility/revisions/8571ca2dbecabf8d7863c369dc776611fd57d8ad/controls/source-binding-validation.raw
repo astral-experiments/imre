@@ -1,0 +1,54 @@
+$ Minimal rehashed stock_source attack before fix (188b0f733)
+immutable_commit 5607950ef232dad16d75c0cf53101d9649d89115
+immutable_member Lib/test/test_dataclasses/__init__.py
+immutable_sha256 725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0
+archived_bytes b'# incorrect source archive\n'
+actual_archive_sha256 0d3bc9c3c13812c4c2167bea90445b17b238851f692da4d15ac56d5b0d1cc25c
+attack ACCEPTED
+
+$ Same attack after fix
+immutable_commit 5607950ef232dad16d75c0cf53101d9649d89115
+immutable_member Lib/test/test_dataclasses/__init__.py
+immutable_sha256 725ec19fa8c47f91b7aed7a8f2b1f3e74e6454647efd11e9a3e0e29245605af0
+archived_bytes b'# incorrect source archive\n'
+actual_archive_sha256 0d3bc9c3c13812c4c2167bea90445b17b238851f692da4d15ac56d5b0d1cc25c
+attack REJECTED: stock source archive member differs from the pinned source
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest -v test_raw_control test_raw_control_source; exit 0
+csv {'stock': {'pass': 124, 'skip': 4}, 'O0': {'pass': 122, 'skip': 6}, 'O3': {'pass': 122, 'skip': 6}} validated pairs 122
+base64 {'stock': {'pass': 41}, 'O0': {'pass': 35, 'skip': 1, 'not_run': 5}, 'O3': {'pass': 35, 'skip': 1, 'not_run': 5}} validated pairs 35
+test_common_configuration_and_semantic_cwd (test_raw_control.RawControlTests.test_common_configuration_and_semantic_cwd) ... ok
+test_finite_and_stock_only_cohorts_preserve_base64_outcomes (test_raw_control.RawControlTests.test_finite_and_stock_only_cohorts_preserve_base64_outcomes) ... ok
+test_gate_accepts_strace_pid_padding (test_raw_control.RawControlTests.test_gate_accepts_strace_pid_padding) ... ok
+test_real_receipts_and_five_child_execution_originals (test_raw_control.RawControlTests.test_real_receipts_and_five_child_execution_originals) ... ok
+test_receipt_flag_cannot_override_raw_credit (test_raw_control.RawControlTests.test_receipt_flag_cannot_override_raw_credit) ... ok
+test_rehashed_credited_finite_configuration_mismatch_is_rejected (test_raw_control.RawControlTests.test_rehashed_credited_finite_configuration_mismatch_is_rejected) ... ok
+test_rehashed_different_stock_launcher_archive_cannot_receive_credit (test_raw_control.RawControlTests.test_rehashed_different_stock_launcher_archive_cannot_receive_credit) ... ok
+test_rehashed_enoent_probe_is_allowed_with_padded_pid (test_raw_control.RawControlTests.test_rehashed_enoent_probe_is_allowed_with_padded_pid) ... ok
+test_rehashed_failed_child_exec_attempt_is_rejected (test_raw_control.RawControlTests.test_rehashed_failed_child_exec_attempt_is_rejected) ... ok
+test_rehashed_mixed_case_cwd_relative_creat_is_rejected (test_raw_control.RawControlTests.test_rehashed_mixed_case_cwd_relative_creat_is_rejected) ... ok
+test_rehashed_other_source_errors_are_rejected (test_raw_control.RawControlTests.test_rehashed_other_source_errors_are_rejected) ... ok
+test_rehashed_paired_row_cannot_move_to_full_stock_cohort (test_raw_control.RawControlTests.test_rehashed_paired_row_cannot_move_to_full_stock_cohort) ... ok
+test_rehashed_python_and_libpython_probes_reject_even_enoent (test_raw_control.RawControlTests.test_rehashed_python_and_libpython_probes_reject_even_enoent) ... ok
+test_rehashed_raw_openat2_witness_is_rejected (test_raw_control.RawControlTests.test_rehashed_raw_openat2_witness_is_rejected) ... ok
+test_rehashed_relative_creat_preserves_posix_case (test_raw_control.RawControlTests.test_rehashed_relative_creat_preserves_posix_case) ... ok
+test_rehashed_stock_capture_with_wrong_source_hash_is_rejected (test_raw_control.RawControlTests.test_rehashed_stock_capture_with_wrong_source_hash_is_rejected) ... ok
+test_rehashed_stock_inventory_order_must_match_native (test_raw_control.RawControlTests.test_rehashed_stock_inventory_order_must_match_native) ... ok
+test_rehashed_successful_creat_and_relative_dirfd_read_reject (test_raw_control.RawControlTests.test_rehashed_successful_creat_and_relative_dirfd_read_reject) ... ok
+test_rehashed_successful_source_read_is_rejected (test_raw_control.RawControlTests.test_rehashed_successful_source_read_is_rejected) ... ok
+test_second_launcher_cannot_inherit_first_gate (test_raw_control.RawControlTests.test_second_launcher_cannot_inherit_first_gate) ... ok
+test_stock_only_cohort_can_have_independent_stock_configuration (test_raw_control.RawControlTests.test_stock_only_cohort_can_have_independent_stock_configuration) ... ok
+test_unmapped_original_cannot_inherit_family_control (test_raw_control.RawControlTests.test_unmapped_original_cannot_inherit_family_control) ... ok
+test_capture_commit_hash_and_nested_identity_cannot_be_rehashed (test_raw_control_source.StockSourceTests.test_capture_commit_hash_and_nested_identity_cannot_be_rehashed) ... ok
+test_member_path_cannot_remap_to_another_commit (test_raw_control_source.StockSourceTests.test_member_path_cannot_remap_to_another_commit) ... ok
+test_nested_tar_and_zip_member_bytes_are_anchored (test_raw_control_source.StockSourceTests.test_nested_tar_and_zip_member_bytes_are_anchored) ... ok
+test_rehashed_wrong_file_cannot_replace_immutable_source (test_raw_control_source.StockSourceTests.test_rehashed_wrong_file_cannot_replace_immutable_source) ... ok
+test_row_commit_and_hash_remain_independently_frozen (test_raw_control_source.StockSourceTests.test_row_commit_and_hash_remain_independently_frozen) ... ok
+test_source_role_cannot_be_removed (test_raw_control_source.StockSourceTests.test_source_role_cannot_be_removed) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 4.745s
+
+OK
+
+$ PYTHONDONTWRITEBYTECODE=1 python3 benchmarks/compatibility/scorecard.py --snapshot 8571ca2dbecabf8d7863c369dc776611fd57d8ad --check --root-summary; exit 0

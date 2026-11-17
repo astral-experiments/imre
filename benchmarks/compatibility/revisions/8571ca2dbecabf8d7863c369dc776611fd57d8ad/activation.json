@@ -174,7 +174,7 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.stderr": "3eab99e91af94ac7fc65ac080620a9cb1a1f8b68e7d6e8a81daa7a942dfa7674",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/O3.trace": "0e13f3c978155b02488076aed87295c2efa3feace56c871d80217fd9c3a99bc8",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/binding.json": "b31c939d86edc3701e0e674ddb42546d4b4f86f9ecddf5ad5ab3e6c04f0f4d62",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/binding.json": "d6dee9fae9fda927bc0175d85416e143e3fb00f9cabe7de60727fb3fdd18358c",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/cargo.raw": "408e4d5b895cd3b965b15ec4f64e0d2f2e70588048ac6d5ea98e98ceaefe808f",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/clean.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/gate-files.raw": "28e7dc1ae5f923b7ad92b6181d691951a89967a2e3ee65c8bbe050a0321032c1",
@@ -189,7 +189,8 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/raw-control/stock_version.raw": "de6df9a1bd2e340abea78cdb1742f78a008f1deb30458715680c76e78e16f436",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/run.json": "3de095329775e742eb11dc9aa65f8e1b2c55aa8b2701d800f14be3493c2e9dbb",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/stock.stderr": "9a75d8e622628dd4ce723366d6655b2fd72492bd5e19b7a1762a33b0aa253015",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/csv.jsonl": "eedc6e508f948f449f1a8f6c08bab9d38b4717ec8de2fad5e77958203bf15801"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/csv.jsonl": "eedc6e508f948f449f1a8f6c08bab9d38b4717ec8de2fad5e77958203bf15801",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/csv/stock.source.py": "ef78a79df80ad95b07516fb1b176fcdc71af2e8665820eda40de201a1030e03d"
       }
     },
     "base64": {
@@ -216,7 +217,7 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stderr": "dcb38033e8517947941333501d7f6605729833af677518ff478a1c763277ffb3",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/O3.trace": "fd9d729034972c7d27728ab595a184131a2b18d82fe2b0d1c757210459c9cdbb",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/binding.json": "ba342b6aac88e3f028aefc1683cc28da919a22873253dd37629e28b9f374404c",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/binding.json": "4747b3c28c01a2c66743cb4832121792c7377d07c2780120d96632335eca2ef2",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/cargo.raw": "408e4d5b895cd3b965b15ec4f64e0d2f2e70588048ac6d5ea98e98ceaefe808f",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/clean.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/raw-control/gate-files.raw": "8a9057670f17f1cf679af036513ae8ca88349e355d5e5eb4a88d093979f926f9",
@@ -238,7 +239,8 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.stderr": "8e1f04ddff35c32ed6942f363ef7f15dba1950057a08642b9f24d4155ee157ca",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.version.raw": "8ec626acd0d3353bb4a7e0f367270a241b0025c9daac7743e9c0b18454c538c4",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.identity.raw": "51c3c471a9f8e08d6c601b15c9db7751b555a6c502527943262ef5d0363c50c6",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.capture.json": "500c9faa653574484cf7decfacee38d825a12eeacc36a4f8b93a1053d08e785e"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/finite.stock.capture.json": "500c9faa653574484cf7decfacee38d825a12eeacc36a4f8b93a1053d08e785e",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/base64/stock.source.py": "681d2ca1cd1e937fc5b27b43078ca39ac55068ed0fe3577c70e92fac4fb40ba3"
       }
     },
     "argparse": {
@@ -267,7 +269,7 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stderr": "49342c4f024da075b53fd1149f401dd7d8c6587a60677e613d1a9ddd99720554",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.stdout": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/O3.trace": "d8f83232f752f172d6960b17344838780af6a1a51b7b236d757726c95f97ea6d",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/binding.json": "492ff0884c3e4d64fcf07315577aae2a27673b797e4854e53765a56937c5d4a6",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/binding.json": "1078eaaa71b5f7c44d3780d45ed0d32b11324b2c938ac56ef5106025f91085a6",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/cargo.raw": "f5f3fab0411d5c2a581ac266ef82b170c09f62e8371279fb639bbab9b28b8d3c",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/clean.raw": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/raw-control/gate-files.raw": "dcc65c61aafdd34dcfa825ec9743dcc69b24c562d348d19561be0b7f7e90b2f6",
@@ -292,7 +294,8 @@
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.launcher.py": "58433b766472878fbaef022ab901575918abaf9a2a35f5e3407acaf2489ed836",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.stderr": "fe3147f1170612b80836adb276239129b5fae62769eb791b8f7278fa520f5a1c",
         "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/strict-readiness.json": "06e0e2838372e9233a34fc81ed28c2453336b9d1deffd45fff743c2c0f972cd7",
-        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/argparse.jsonl": "5a5917f2aef4f31533752c85f7905c096c30cfee69b089bfa1106f030fc87140"
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/stdlib/argparse.jsonl": "5a5917f2aef4f31533752c85f7905c096c30cfee69b089bfa1106f030fc87140",
+        "benchmarks/compatibility/revisions/8571ca2dbecabf8d7863c369dc776611fd57d8ad/evidence/argparse/stock.source.py": "bd3892b42c83f276327c141a7d6b38ed08c07a56c6076e4d3aefeddf90515499"
       }
     },
     "dataclasses": {
