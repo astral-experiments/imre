@@ -314,7 +314,7 @@ pub(crate) fn frame_inputs(
                 iteration.is_ok()
             }
             ExprKind::Builtin(Builtin::FormatConversion(_), args) => {
-                protocol_reads += args.first().map_or(0, &protocol_parameter);
+                protocol_reads += args.first().map_or(0, protocol_parameter);
                 args.len() == 1
             }
             ExprKind::Builtin(Builtin::FormatField(_), args) => {
@@ -690,6 +690,13 @@ impl<'f> Frame<'f, '_, '_> {
         let mut frame = self.reborrow();
         frame.fixed_sites = None;
         frame.kept_call_value(expr, next)
+    }
+
+    /// A packed source callee owns its positions just like its fixed-layout counterpart.
+    pub(super) fn source_callee_handle(&mut self, expr: &Expr) -> String {
+        let mut frame = self.reborrow();
+        frame.fixed_sites = None;
+        frame.evaluate_handle(expr)
     }
 
     pub(super) fn next_fixed_site(&self, node: ir::Node<'_>) -> Option<TextRange> {

@@ -98,8 +98,20 @@ pub struct PythonCommand {
     pub executable: String,
 }
 
+/// Canonical runtime ABI entry points explicitly interposed by the final linker.
+///
+/// Only newly generated source units use these alternatives. Existing sealed provider
+/// objects retain their original symbol references and are linked normally.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LinkInterposition {
+    pub literal: bool,
+    pub scoped_call: bool,
+}
+
 #[derive(Default)]
 pub struct CompileOptions {
+    /// Preserve explicitly wrapped canonical entry points in newly emitted source units.
+    pub link_interposition: LinkInterposition,
     /// Operating system for the linked runtime. Library callers default to the compiler's target.
     pub target_os: Option<&'static str>,
     /// Compile the supplied command without creating a script in the caller's working directory.
@@ -247,6 +259,7 @@ pub fn compile(source: &str, options: &CompileOptions) -> Result<String, String>
         return Err("an entry profile requires a source file and its module name".to_owned());
     }
     let options = CompileOptions {
+        link_interposition: options.link_interposition,
         target_os: options.target_os,
         reachable_only: options.reachable_only,
         address_sanitizer: options.address_sanitizer,
@@ -485,6 +498,7 @@ pub enum CodegenLayout {
 /// The ordered code and optional whole-program dump requested by a build.
 struct ProgramOutput {
     layout: CodegenLayout,
+    link_interposition: LinkInterposition,
     compilation: UnitCompilation,
     whole: Option<String>,
 }
@@ -933,6 +947,7 @@ impl ProgramOutput {
     fn new(layout: CodegenLayout) -> Self {
         Self {
             layout,
+            link_interposition: LinkInterposition::default(),
             compilation: UnitCompilation::default(),
             whole: None,
         }

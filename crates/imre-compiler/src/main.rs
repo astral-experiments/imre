@@ -243,6 +243,7 @@ fn run() -> Result<ExitCode, String> {
     let source_path = source_path.ok_or(USAGE)?;
     let target_os = target_os(target.as_deref());
     options.target_os = Some(target_os);
+    options.link_interposition = link.interposition();
     if command == "check" {
         if watch {
             imre_compiler::IncrementalCompiler::default().watch_file_with_options(
@@ -317,16 +318,12 @@ fn run() -> Result<ExitCode, String> {
         .filter(|_| target.as_deref().is_none_or(native_linux_gnu_target));
     let native_link = target.is_none() && lto_linker.is_none() && link.args.is_empty();
     let native_objects = target.is_none() && lto_linker.is_none() && llvm_path.is_none();
-    let native = if runtime_is_file
-        && native_link
-        && native_objects
-        && clang.is_none()
-        && !options.address_sanitizer
-    {
-        build_cache::native_toolchain(&runtime, bundled_native)
-    } else {
-        None
-    };
+    let native =
+        if runtime_is_file && native_objects && clang.is_none() && !options.address_sanitizer {
+            build_cache::native_toolchain(&runtime, bundled_native)
+        } else {
+            None
+        };
     let split = !whole_program
         && native_objects
         && (native.is_some()
@@ -385,11 +382,12 @@ fn run() -> Result<ExitCode, String> {
                 &link,
             )
         });
-    // Keep explicit extension paths on their ordinary linker path.
-    // Generated module objects are still keyed by their complete LLVM IR.
+    // Explicit extension paths and custom linker arguments always take the ordinary
+    // linker path: the executable recipe does not identify those arguments. Generated
+    // module objects remain reusable because their recipe includes the complete LLVM IR.
     let executable_cache = cache
         .as_ref()
-        .filter(|_| options.extension_paths.is_empty());
+        .filter(|_| options.extension_paths.is_empty() && link.args.is_empty());
     if let Some(cache) = &cache {
         if identity(&output)?.starts_with(&cache.root) {
             return Err("output cannot overwrite the executable cache".into());
@@ -541,7 +539,7 @@ fn run() -> Result<ExitCode, String> {
                 || {
                     native
                         .as_ref()
-                        .map_or_else(&clang_driver, |tools| tools.driver())
+                        .map_or_else(clang_driver, |tools| tools.driver())
                 },
                 &optimization,
                 options.address_sanitizer,
@@ -550,6 +548,7 @@ fn run() -> Result<ExitCode, String> {
                     stage.is_some()
                         || sources.relink_site_wheel
                         || !options.extension_paths.is_empty()
+                        || !link.args.is_empty()
                 }),
                 |name, hit| progress.unit(name, hit),
             )?;

@@ -1,6 +1,6 @@
 //! Source-local exec occurrences selected by registered import resolution.
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use ruff_db::{files::File, parsed::ParsedModuleRef};
@@ -11,6 +11,7 @@ use super::Imports;
 use super::emit::{ModuleOrigin, PreparedBody, PreparedEval};
 use crate::analysis::Session;
 use crate::frontend::module_source::ParsedModule;
+use crate::llvm::registered::sites::CompiledSourceMode;
 
 /// The existing IR call range identifies the operation. Python reports its source
 /// argument's position when a selected child cannot be compiled.
@@ -33,10 +34,18 @@ pub(super) enum LiteralBody<'a> {
     Expression(&'a str, Option<&'a PreparedEval>),
 }
 
+/// Checked static bodies and narrowly guarded runtime execution sites at one source level.
+#[derive(Default)]
+pub(crate) struct SelectedLiteralLevel {
+    pub(crate) literals: Vec<(LiteralSite, Result<ParsedLiteral, String>)>,
+    pub(crate) bounded_file_exec: Vec<TextRange>,
+}
+
 pub(super) struct PreparedLiteral {
     pub(super) body: PreparedBody<'static>,
     /// Original operand bytes when source decoding or normalization changed the checked text.
     pub(super) original_text: Option<Box<str>>,
+    pub(super) mode: CompiledSourceMode,
     pub(super) file: Option<PathBuf>,
 }
 
@@ -50,6 +59,7 @@ enum LiteralEntry {
 #[derive(Default)]
 pub(crate) struct LiteralSites {
     sites: HashMap<TextRange, Result<LiteralEntry, (TextSize, String)>>,
+    bounded_file_exec: HashSet<TextRange>,
 }
 
 /// The source unit's literal records and actual Python optimization during checking.
@@ -124,7 +134,11 @@ impl LiteralSites {
     }
 
     pub(crate) fn contains(&self, site: TextRange) -> bool {
-        self.sites.contains_key(&site)
+        self.sites.contains_key(&site) || self.bounded_file_exec.contains(&site)
+    }
+
+    pub(super) fn bounded_file_exec(&self, site: TextRange) -> bool {
+        self.bounded_file_exec.contains(&site)
     }
 
     pub(crate) fn refused(&self, site: TextRange) -> bool {
@@ -145,6 +159,7 @@ pub(crate) struct ParsedLiteral {
     original_text: Option<Box<str>>,
     pub(crate) parsed: ParsedModuleRef,
     pub(crate) flags: u32,
+    mode: CompiledSourceMode,
     imports: Vec<String>,
     candidates: Vec<LiteralCandidate>,
 }
@@ -156,6 +171,7 @@ impl ParsedLiteral {
         original: &str,
         parsed: ParsedModuleRef,
         inherited_flags: u32,
+        mode: CompiledSourceMode,
     ) -> Self {
         let body = &parsed.syntax().body;
         let flags = inherited_flags | imre_ast::future_flags(body);
@@ -169,6 +185,7 @@ impl ParsedLiteral {
             text: text.into_owned(),
             parsed,
             flags,
+            mode,
             candidates: imports.literal_calls,
             imports: imports
                 .names
@@ -202,6 +219,7 @@ impl ParsedLiteral {
         Ok(PreparedLiteral {
             body,
             original_text: self.original_text,
+            mode: self.mode,
             file: None,
         })
     }
@@ -231,11 +249,7 @@ pub(super) struct LiteralForest {
 }
 
 impl LiteralForest {
-    pub(super) fn record_root(
-        &mut self,
-        unit: usize,
-        sites: Vec<(LiteralSite, Result<ParsedLiteral, String>)>,
-    ) -> Vec<String> {
+    pub(super) fn record_root(&mut self, unit: usize, sites: SelectedLiteralLevel) -> Vec<String> {
         self.record(Parent::Unit(unit), unit, sites)
     }
 
@@ -276,14 +290,12 @@ impl LiteralForest {
         }
     }
 
-    fn record(
-        &mut self,
-        parent: Parent,
-        unit: usize,
-        sites: Vec<(LiteralSite, Result<ParsedLiteral, String>)>,
-    ) -> Vec<String> {
+    fn record(&mut self, parent: Parent, unit: usize, sites: SelectedLiteralLevel) -> Vec<String> {
+        self.table(parent)
+            .bounded_file_exec
+            .extend(sites.bounded_file_exec);
         let mut names = Vec::new();
-        for (site, result) in sites {
+        for (site, result) in sites.literals {
             match result {
                 Ok(mut source) => {
                     names.append(&mut source.imports);

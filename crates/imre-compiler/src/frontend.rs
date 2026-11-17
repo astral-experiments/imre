@@ -12949,6 +12949,16 @@ impl<'a> Checker<'a> {
             self.namespace_calls.insert(call.range());
             return Ok(registered::values::name_call(call, "globals", vec![]));
         }
+        if self
+            .graph
+            .session
+            .fixed_source_compile_call(self.module, call)
+        {
+            return Err(self.scoped_builtin_error("compile", call));
+        }
+        if self.graph.session.fixed_eval_call(self.module, call) {
+            return Err(self.scoped_builtin_error("eval", call));
+        }
         if self.graph.session.fixed_exec_call(self.module, call) {
             let refusal = self.scoped_builtin_error("exec", call);
             if self.registered.is_none()

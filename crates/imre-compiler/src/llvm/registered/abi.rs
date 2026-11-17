@@ -70,6 +70,7 @@ declare i32 @imre_dyn_pull_item(ptr, i64, ptr, i1)
 declare i64 @imre_dyn_builtin_method_target(ptr, i64, ptr, ptr)
 declare i64 @imre_dyn_dict_get_target(ptr, i64, ptr)
 declare i64 @imre_dyn_positional_call_at(ptr, i64, ptr, i64, i64, ptr, i64)
+declare i1 @imre_dyn_positional_call_abi(ptr, i64, i64, ptr)
 declare i64 @imre_dyn_keyword_call_at(ptr, i64, ptr, i64, ptr, i64, i64, ptr, i64)
 declare i32 @imre_dyn_statement_line(ptr)
 declare void @imre_dyn_expression_line(ptr, i32)
@@ -88,6 +89,8 @@ pub(crate) struct Declarations {
     pub(crate) registered_expression: bool,
     pub(crate) exec_operand: bool,
     pub(crate) eval_operand: bool,
+    pub(crate) single_operand: bool,
+    pub(crate) bounded_file_exec_operand: bool,
     pub(crate) linked_file_source: bool,
     pub(super) integers: crate::llvm::body::IntegerFunctions,
     pub(crate) reads_exact_int_word: bool,
@@ -99,6 +102,7 @@ pub(crate) struct Output {
     pub(crate) declarations: Declarations,
     pub(crate) diagnostic: Option<String>,
     pub(crate) keep_docstrings: bool,
+    pub(crate) link_interposition: crate::LinkInterposition,
     pub(crate) constant_slots: HashMap<(usize, Constant), usize>,
     pub(crate) strings: IndexSet<Vec<u8>>,
     pub(crate) interned_identifiers: BTreeSet<String>,

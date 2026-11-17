@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 
 use ruff_python_ast as ast;
+use ruff_python_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use ruff_text_size::{Ranged, TextRange, TextSize};
 
 use super::prepare::{Initializer, PreparedUnit};
@@ -121,6 +122,7 @@ impl crate::ProgramOutput {
         python_optimization: i32,
         providers: &HashSet<String>,
     ) -> Result<bool, String> {
+        let interposition = self.link_interposition;
         let split = !matches!(self.layout, crate::CodegenLayout::Whole);
         let whole_requested = matches!(self.layout, crate::CodegenLayout::SplitWithWhole);
         let mut unidentified = providers.len();
@@ -128,7 +130,8 @@ impl crate::ProgramOutput {
         let mut used_archive = false;
         // Independently loadable objects retain their sealed producer and their own symbols.
         let mut shared: Vec<(Weak<PreparedBody<'a>>, String)> = Vec::new();
-        let root = ModuleLauncher::new(config, python_optimization < 2);
+        let mut root = ModuleLauncher::new(config, python_optimization < 2);
+        root.output.link_interposition = interposition;
         // The requested whole IR and split native root share their exact prefix.
         // Fork only when the split layout acquires its first independent local unit.
         self.emit_sources(
@@ -197,7 +200,7 @@ impl crate::ProgramOutput {
                     } else {
                         None
                     };
-                    let (symbol, body) = initializer.provider_body(name, target)?;
+                    let (symbol, body) = initializer.provider_body_interposed(name, target, interposition)?;
                     suspends = body.suspends;
                     archived = check_archive && providers.contains(&symbol);
                     // A seal selects this registration only. A full match also proves which
@@ -742,6 +745,7 @@ impl<'a> PreparedBody<'a> {
         let statement_sites = prepare.sites;
         let source = SourceInfo {
             exec_literals,
+            eval_literals: EvalLiterals::collect(&body, source, python_optimization),
             annotation_children,
             scopes,
             #[cfg(test)]
@@ -868,6 +872,12 @@ impl<'a> PreparedBody<'a> {
     ) -> Result<String, String> {
         #[cfg(test)]
         crate::single_emission_tests::record_llvm_start(Some(&self.source.path));
+        // Sealed bundled providers predate the caller's link request. Their emitted
+        // ABI must remain identical so a stored archive can still own their body.
+        let requested = output.link_interposition;
+        if self.source.bundled {
+            output.link_interposition = crate::LinkInterposition::default();
+        }
         // A shared body takes its filename from the executing Code object.
         let code_file = file.map(|file| match (self.source.bundled, name) {
             (true, "_frozen_importlib") => output.data(b"<frozen importlib._bootstrap>"),
@@ -893,6 +903,7 @@ impl<'a> PreparedBody<'a> {
             false,
             None,
         );
+        output.link_interposition = requested;
         match output.diagnostic.take() {
             Some(diagnostic) => Err(diagnostic),
             None => Ok(code),
@@ -910,10 +921,20 @@ impl<'a> PreparedBody<'a> {
     pub(super) fn provider_body(
         &self,
         name: &str,
+        placement: Option<(&mut Output, usize, &mut String)>,
+    ) -> Result<(String, ProviderBody), String> {
+        self.provider_body_interposed(name, placement, crate::LinkInterposition::default())
+    }
+
+    fn provider_body_interposed(
+        &self,
+        name: &str,
         mut placement: Option<(&mut Output, usize, &mut String)>,
+        interposition: crate::LinkInterposition,
     ) -> Result<(String, ProviderBody), String> {
         let mut output = Output {
             keep_docstrings: self.source.python_optimization < 2,
+            link_interposition: interposition,
             ..Output::default()
         };
         if let Some((target, unit, _)) = &mut placement {
@@ -1003,6 +1024,7 @@ impl<'a> RegisteredBody<'a> {
 #[derive(Default)]
 struct SourceInfo<'a> {
     exec_literals: LiteralSites,
+    eval_literals: HashMap<TextRange, Vec<EvalLiteral>>,
     annotation_children:
         indexmap::IndexMap<String, crate::frontend::AnnotationBody<Box<SourceInfo<'static>>>>,
     scopes: crate::frontend::function_scope::ScopeFacts<'a>,
@@ -1065,6 +1087,154 @@ impl PreparedEval {
 
     pub(super) fn text(&self) -> &str {
         &self.text
+    }
+}
+
+struct EvalLiteral {
+    text: String,
+    body: PreparedEval,
+}
+
+struct EvalLiterals<'a> {
+    optimization: i32,
+    sites: HashMap<TextRange, Vec<EvalLiteral>>,
+    loops: Vec<(String, Vec<usize>)>,
+    bindings: Vec<HashMap<String, String>>,
+    source: &'a str,
+}
+
+impl<'a> EvalLiterals<'a> {
+    /// Prepare literal expression bodies at direct `eval(...)` sites. The
+    /// runtime guard still decides whether the selected callable is builtin
+    /// `eval`; a Python function named `eval` receives the original string.
+    fn collect(
+        body: &'a [ast::Stmt],
+        source: &'a str,
+        optimization: i32,
+    ) -> HashMap<TextRange, Vec<EvalLiteral>> {
+        let mut visitor = Self {
+            optimization,
+            sites: HashMap::new(),
+            loops: Vec::new(),
+            bindings: vec![Default::default()],
+            source,
+        };
+        visitor.visit_body(body);
+        visitor.sites
+    }
+
+    fn compiled_source(&self, value: &ast::Expr) -> Option<String> {
+        if let Some(name) = value.as_name_expr() {
+            return self
+                .bindings
+                .iter()
+                .rev()
+                .find_map(|codes| codes.get(name.id.as_str()).cloned());
+        }
+        let call = value.as_call_expr()?;
+        if !call
+            .func
+            .as_name_expr()
+            .is_some_and(|name| name.id == "compile")
+            || !call.arguments.keywords.is_empty()
+        {
+            return None;
+        }
+        let [source, filename, mode] = call.arguments.args.as_ref() else {
+            return None;
+        };
+        if filename
+            .as_string_literal_expr()?
+            .value
+            .to_str()
+            .contains('\0')
+            || mode.as_string_literal_expr()?.value.to_str() != "eval"
+        {
+            return None;
+        }
+        crate::analysis::bounded_source_string(source, self.source)
+    }
+}
+
+impl<'a> Visitor<'a> for EvalLiterals<'a> {
+    fn visit_stmt(&mut self, statement: &'a ast::Stmt) {
+        if matches!(
+            statement,
+            ast::Stmt::FunctionDef(_) | ast::Stmt::ClassDef(_)
+        ) {
+            self.bindings.push(Default::default());
+            walk_stmt(self, statement);
+            self.bindings.pop();
+            return;
+        }
+        if let ast::Stmt::Assign(assign) = statement {
+            let code = self.compiled_source(&assign.value);
+            let codes = self.bindings.last_mut().expect("module bindings");
+            for target in &assign.targets {
+                if let Some(name) = target.as_name_expr() {
+                    codes.remove(name.id.as_str());
+                    if let Some(source) = &code {
+                        codes.insert(name.id.to_string(), source.clone());
+                    }
+                }
+            }
+        }
+        if let ast::Stmt::For(loop_) = statement
+            && !loop_.is_async
+            && let Some(target) = loop_
+                .target
+                .as_tuple_expr()
+                .and_then(|tuple| tuple.elts.first())
+            && let Some(name) = target.as_name_expr()
+            && let Some(counts) = crate::analysis::finite_first_integer_choices(&loop_.iter)
+        {
+            self.loops.push((name.id.to_string(), counts));
+            walk_stmt(self, statement);
+            self.loops.pop();
+        } else {
+            walk_stmt(self, statement);
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &'a ast::Expr) {
+        if let ast::Expr::Call(call) = expr
+            && call
+                .func
+                .as_name_expr()
+                .is_some_and(|name| name.id == "eval")
+            && let Some(operand) = call.arguments.args.first()
+        {
+            let sources = if operand.is_string_literal_expr()
+                || !crate::analysis::valid_eval_arguments(call)
+            {
+                None
+            } else if let Some(source) = self.compiled_source(operand) {
+                Some(vec![source])
+            } else {
+                crate::analysis::finite_eval_count_operand(operand)
+                    .and_then(ast::Expr::as_name_expr)
+                    .and_then(|name| {
+                        self.loops
+                            .iter()
+                            .rev()
+                            .find(|(id, _)| id == name.id.as_str())
+                    })
+                    .and_then(|(_, counts)| crate::analysis::finite_eval_sources(operand, counts))
+            };
+            if let Some(sources) = sources {
+                let alternatives: Vec<_> = sources
+                    .into_iter()
+                    .filter_map(|text| {
+                        let body = PreparedEval::new(&text, self.optimization).ok()?;
+                        Some(EvalLiteral { text, body })
+                    })
+                    .collect();
+                if !alternatives.is_empty() {
+                    self.sites.insert(call.range(), alternatives);
+                }
+            }
+        }
+        walk_expr(self, expr);
     }
 }
 
@@ -1356,6 +1526,32 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
             std::collections::hash_map::Entry::Occupied(entry) => return Some(entry.get().clone()),
             std::collections::hash_map::Entry::Vacant(entry) => entry,
         };
+        if self.source.exec_literals.bounded_file_exec(site) {
+            let compiled = sites::CompiledExec {
+                alternatives: Vec::new(),
+                bounded_file_flags: Some(self.source.future_flags),
+            };
+            return Some(entry.insert(compiled).clone());
+        }
+        if let Some(literals) = self.source.eval_literals.get(&site) {
+            let mut alternatives = Vec::with_capacity(literals.len());
+            for literal in literals {
+                let file = output.data(b"<string>");
+                let code = literal.body.body.emit(output, self.source.unit, &file);
+                alternatives.push(sites::CompiledExecAlternative {
+                    entry: code,
+                    flags: self.source.future_flags,
+                    source: output.data(literal.text.as_bytes()),
+                    mode: sites::CompiledSourceMode::Eval,
+                    file: None,
+                });
+            }
+            let compiled = sites::CompiledExec {
+                alternatives,
+                bounded_file_flags: None,
+            };
+            return Some(entry.insert(compiled).clone());
+        }
         let children = match self.source.exec_literals.plan(site, expression)? {
             Ok(children) => children,
             Err((operand, reason)) => {
@@ -1373,7 +1569,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                 Some(path) => output.data(path.as_os_str().as_encoded_bytes()),
                 None => output.data(b"<string>"),
             };
-            let (code, text, flags, expression) = match child {
+            let (code, text, flags, mode) = match child {
                 LiteralBody::Suite(child) => {
                     let body = &child.body;
                     // A decoded module interns its own constants when its prologue runs.
@@ -1387,7 +1583,7 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                         code,
                         child.original_text.as_deref().unwrap_or(&body.source.text),
                         body.source.future_flags,
-                        false,
+                        child.mode,
                     )
                 }
                 LiteralBody::Expression(text, checked) => {
@@ -1401,18 +1597,26 @@ impl<'a, 'p> crate::llvm::registered::PreparedSuiteEmitter<'a, 'p> for Function<
                         }
                     };
                     let code = checked.body.emit(output, self.source.unit, &file);
-                    (code, text, self.source.future_flags, true)
+                    (
+                        code,
+                        text,
+                        self.source.future_flags,
+                        sites::CompiledSourceMode::Eval,
+                    )
                 }
             };
             alternatives.push(sites::CompiledExecAlternative {
                 entry: code,
                 flags,
                 source: output.data(text.as_bytes()),
-                expression,
+                mode,
                 file: path.is_some().then_some(file),
             });
         }
-        let compiled = sites::CompiledExec { alternatives };
+        let compiled = sites::CompiledExec {
+            alternatives,
+            bounded_file_flags: None,
+        };
         Some(entry.insert(compiled).clone())
     }
 }

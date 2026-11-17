@@ -104,11 +104,27 @@ pub(super) enum Body {
     /// The immutable operand tuple is owned by this interpreter's code object.
     Native(Code, Id),
     Suspended(ResumeCode),
-    /// Constants retained by a parsed code object with no executable entry.
+    /// Constants and immutable source retained by parsed exec-mode code.
     Parsed {
         constants: Id,
         source: Id,
     },
+    ParsedEval {
+        constants: Id,
+        source: Id,
+    },
+    ParsedSingle {
+        constants: Id,
+        source: Id,
+    },
+}
+
+/// The compilation mode that must agree with a prelinked executable body.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParsedMode {
+    Exec,
+    Eval,
+    Single,
 }
 
 #[derive(Clone, Copy)]
@@ -2642,7 +2658,9 @@ impl Value {
                 visit.extend(code.nested.iter().map(|&(_, id)| id));
                 match code.body {
                     Body::Native(_, operands) if operands != NONE => visit.push(operands),
-                    Body::Parsed { constants, source } => {
+                    Body::Parsed { constants, source }
+                    | Body::ParsedEval { constants, source }
+                    | Body::ParsedSingle { constants, source } => {
                         visit.push(constants);
                         visit.push(source);
                     }
@@ -5929,6 +5947,11 @@ impl Heap {
 
     pub fn current_scope(&self) -> Id {
         self.execution.current().scope
+    }
+
+    /// Identify an actual module initializer activation, independent of the scope's storage.
+    pub(super) fn current_frame_is_module(&self) -> bool {
+        matches!(self.execution.current().owner, FrameOwner::Module(_))
     }
 
     /// Iterate over live Python warning locations, starting at the innermost caller.
