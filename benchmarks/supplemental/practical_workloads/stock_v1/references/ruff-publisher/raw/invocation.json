@@ -1,20 +1,26 @@
 {
+  "capture_context": {
+    "ambient_umask_before_override": "0022"
+  },
+  "execution_controls": {
+    "umask": "0077"
+  },
   "invocation": {
     "argv": [
       "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
       "-B",
       "scripts/publish-crates.py",
       "--api-url",
-      "http://127.0.0.1:43625/api/v1",
+      "http://127.0.0.1:37485/api/v1",
       "--cargo",
       "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
       "/workspace/scratch/imre-stock-reference/benchmarks/supplemental/practical_workloads/stock_v1/fixtures/cargo_stub.py",
       "--no-verify"
     ],
-    "cwd": "/workspace/scratch/stock-reference-e32z0_qz",
+    "cwd": "/workspace/scratch/stock-reference-ex1ds1t0",
     "env": {
-      "CARGO_LOG": "/workspace/scratch/stock-reference-e32z0_qz/cargo.log",
-      "HOME": "/workspace/scratch/stock-reference-e32z0_qz/home",
+      "CARGO_LOG": "/workspace/scratch/stock-reference-ex1ds1t0/cargo.log",
+      "HOME": "/workspace/scratch/stock-reference-ex1ds1t0/home",
       "LANG": "C.UTF-8",
       "LC_ALL": "C.UTF-8",
       "NO_PROXY": "127.0.0.1",
@@ -28,8 +34,8 @@
   "roles": {
     "$CORPUS": "/workspace/scratch/imre-stock-reference/benchmarks/supplemental/practical_workloads/stock_v1",
     "$PYTHON": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
-    "$REGISTRY_AUTHORITY": "127.0.0.1:43625",
-    "$REGISTRY_ORIGIN": "http://127.0.0.1:43625",
-    "$WORK": "/workspace/scratch/stock-reference-e32z0_qz"
+    "$REGISTRY_AUTHORITY": "127.0.0.1:37485",
+    "$REGISTRY_ORIGIN": "http://127.0.0.1:37485",
+    "$WORK": "/workspace/scratch/stock-reference-ex1ds1t0"
   }
 }

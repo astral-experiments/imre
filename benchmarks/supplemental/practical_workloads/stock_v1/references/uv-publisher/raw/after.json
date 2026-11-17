@@ -4,7 +4,7 @@
     "kind": "file",
     "mode": "0o600",
     "path": "cargo.log",
-    "sha256": "dc49a3b0f0173a0fe29dd6f3ac80f19a90e884c3ef7a17257986aa327067361e"
+    "sha256": "03c142f92ac61ceadd4e69494b77d7eeb921a0af7ccc08fb20489f5f4f87417c"
   },
   {
     "kind": "directory",

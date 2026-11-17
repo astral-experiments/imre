@@ -9,6 +9,7 @@
     "scope",
     "source",
     "invocation",
+    "execution_controls",
     "tool",
     "fixture",
     "observation",
@@ -89,6 +90,18 @@
       "minProperties": 1,
       "additionalProperties": {
         "$ref": "#/$defs/fact"
+      }
+    },
+    "execution_controls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "umask"
+      ],
+      "properties": {
+        "umask": {
+          "const": "0077"
+        }
       }
     }
   },

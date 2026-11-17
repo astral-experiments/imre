@@ -73,6 +73,8 @@ def main():
         raw=base/'raw';expected={f'raw/{p.name}' for p in raw.iterdir()}|{'effects.normalized.json'};require(set(ref['evidence'])==expected,'evidence inventory')
         for name,f in ref['evidence'].items():require(name==f['path'],'fact path');check_fact(safe(base,name),f)
         inv=load(raw/'invocation.json');require(normalize(inv['invocation'],inv['roles'])==ref['invocation'],'invocation normalization')
+        require(ref['execution_controls']=={'umask':'0077'} and inv['execution_controls']==ref['execution_controls'],'explicit execution umask')
+        require(inv['capture_context']=={'ambient_umask_before_override':'0022'},'fresh ambient-0022 override capture')
         require(ref['invocation']['argv'][0]=='$PYTHON' and ref['invocation']['cwd']=='$WORK','invocation scope')
         allowed={'HOME','LANG','LC_ALL','PATH','PYTHONDONTWRITEBYTECODE','PYTHONHASHSEED','PYTHONNOUSERSITE','TZ','CARGO_LOG','NO_PROXY','PYTHONPATH','TERM','NO_COLOR','COLUMNS'}
         require(set(inv['invocation']['env'])<=allowed,'unexpected ambient environment key')
@@ -106,5 +108,16 @@ def main():
             require((raw/'stdout').read_bytes()==b'','ty unexpectedly wrote stdout')
         else:require(not events and not procs and not any(changes.values()),'Rich unexpectedly had effects')
         require(ref['observation']['exit_code']==0 and (raw/'stderr').read_bytes()==b'','stock failure')
+    comparison=load(ROOT/'umask-recapture.json')
+    require(re.fullmatch('[0-9a-f]{40}',comparison['prior_commit']) and comparison['prior_execution_control_status']=='not_recorded','prior control provenance')
+    require(comparison['fresh_capture_context']=={'ambient_umask_before_override':'0022'} and comparison['fresh_execution_controls']=={'umask':'0077'},'recapture controls')
+    require(set(comparison['cases'])==set(sources),'comparison inventory')
+    for case,artifacts in comparison['cases'].items():
+        required={'raw/stdout','raw/stderr','raw/wait.json','raw/before.json','effects.normalized.json'}
+        require(required<=set(artifacts) and all(artifacts[x]['identical'] for x in required),'stock outcome/effect comparison')
+        for name,f in artifacts.items():
+            b=safe(ROOT/'references'/case,name).read_bytes()
+            require(len(b)==f['fresh_bytes'] and sha(b)==f['fresh_sha256'],'fresh comparison digest')
+            require(re.fullmatch('[0-9a-f]{64}',f['prior_sha256']) and f['identical']==(f['prior_sha256']==f['fresh_sha256'] and f['prior_bytes']==f['fresh_bytes']),'prior comparison digest')
     print(f"validated {len(sources)} supplemental stock references, {len(members['members'])} Rich source members; no workload executed")
 if __name__=='__main__':main()

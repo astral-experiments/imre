@@ -16,6 +16,7 @@ import threading
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = json.loads((ROOT / "sources.json").read_text())
+EXECUTION_UMASK = 0o077
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -66,7 +67,7 @@ class Registry(http.server.BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(body)
     def log_message(self, *args): pass
 
-def freeze(case: str) -> None:
+def freeze(case: str, ambient_umask: int) -> None:
     source=SOURCES[case]; out=ROOT/"references"/case; out.mkdir(parents=True, exist_ok=False); raw=out/"raw"; raw.mkdir()
     with tempfile.TemporaryDirectory(prefix="stock-reference-", dir="/workspace/scratch") as temp:
         work=Path(temp); (work/"scripts").mkdir(mode=0o755); (work/"home").mkdir(mode=0o755)
@@ -107,7 +108,9 @@ def freeze(case: str) -> None:
         changes={"created":[x for p,x in final.items() if p not in original],"deleted":[x for p,x in original.items() if p not in final],"modified":[x for p,x in final.items() if p in original and x!=original[p]]}
         effects={"registry":Registry.events,"processes":[json.loads(x) for x in processes.splitlines()],"files":changes}
         write_json(out/"effects.normalized.json",normalized_effects(effects,roles))
-        invocation={"argv":argv,"cwd":str(work),"env":dict(sorted(env.items()))}; write_json(raw/"invocation.json",{"roles":roles,"invocation":invocation})
+        invocation={"argv":argv,"cwd":str(work),"env":dict(sorted(env.items()))}
+        controls={"umask":f"{EXECUTION_UMASK:04o}"}
+        write_json(raw/"invocation.json",{"roles":roles,"invocation":invocation,"execution_controls":controls,"capture_context":{"ambient_umask_before_override":f"{ambient_umask:04o}"}})
         evidence={}
         for p in sorted(raw.iterdir()): evidence["raw/"+p.name]=file_fact(p,"raw/"+p.name)
         evidence["effects.normalized.json"]=file_fact(out/"effects.normalized.json","effects.normalized.json")
@@ -115,15 +118,16 @@ def freeze(case: str) -> None:
               "executable_sha256":digest(Path(sys.executable).read_bytes()),"soabi":sysconfig.get_config_var("SOABI"),
               "system":platform.system(),"machine":platform.machine(),"kernel":platform.release(),"libc":list(platform.libc_ver())}
         ref={"schema":"prospective-stock-reference-v1","case":case,"scope":"supplemental-stock-only","source":source,
-             "invocation":normalize(invocation,roles),"tool":tool,"fixture":{"before":"raw/before.json","external_inputs":external},
+             "invocation":normalize(invocation,roles),"execution_controls":controls,"tool":tool,"fixture":{"before":"raw/before.json","external_inputs":external},
              "observation":{"exit_code":result.returncode,"stdout":"raw/stdout","stderr":"raw/stderr","effects":"effects.normalized.json"},"evidence":evidence}
         if project_inputs: ref["fixture"]["project_inputs"]=project_inputs
         write_json(out/"reference.json",ref)
         print(case,result.returncode,len(result.stdout),len(result.stderr),len(Registry.events),flush=True)
 
 def main():
+    ambient_umask=os.umask(EXECUTION_UMASK)
     if sys.version_info[:3] != (3,14,5) or platform.python_implementation()!="CPython" or platform.system()!="Linux":
         raise SystemExit("capture requires CPython 3.14.5 on Linux")
     parser=argparse.ArgumentParser(); parser.add_argument("--case",choices=SOURCES,action="append"); args=parser.parse_args()
-    for case in args.case or SOURCES: freeze(case)
+    for case in args.case or SOURCES: freeze(case, ambient_umask)
 if __name__=="__main__":main()

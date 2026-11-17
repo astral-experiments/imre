@@ -9,7 +9,7 @@
     "raw/after.json": {
       "bytes": 697,
       "path": "raw/after.json",
-      "sha256": "716f97731bd82e05431162467b028766e7e22f964b349108516f1c5b77684d2d"
+      "sha256": "f76473b5b681adb4ba23617bfa6698b2b16178026e7de669c51c0e2546c4db6f"
     },
     "raw/before.json": {
       "bytes": 345,
@@ -17,14 +17,14 @@
       "sha256": "893826edfd812e8a709a9bac544639dee2f5723c9743c7a667c28a0408ed373b"
     },
     "raw/invocation.json": {
-      "bytes": 1318,
+      "bytes": 1441,
       "path": "raw/invocation.json",
-      "sha256": "0d6509cd545a9279d5a91e004c72b0986db5f5c6ec0df61486d6ad9f93855bc3"
+      "sha256": "7583f63e7d068fa324666c7356e90a5f46260d24384fb4cf1aa62a64c5e22ef4"
     },
     "raw/processes.jsonl": {
       "bytes": 1206,
       "path": "raw/processes.jsonl",
-      "sha256": "dc49a3b0f0173a0fe29dd6f3ac80f19a90e884c3ef7a17257986aa327067361e"
+      "sha256": "03c142f92ac61ceadd4e69494b77d7eeb921a0af7ccc08fb20489f5f4f87417c"
     },
     "raw/published.txt": {
       "bytes": 66,
@@ -34,7 +34,7 @@
     "raw/registry.jsonl": {
       "bytes": 768,
       "path": "raw/registry.jsonl",
-      "sha256": "4100e0fdc78badbafa973b9e484a8bb56ccdc77df26d2dd904e9c75edcb6a871"
+      "sha256": "153c334fa807d4e963d64da79face866e5f34a61043e2009f5ca0f2a0d1b511f"
     },
     "raw/stderr": {
       "bytes": 0,
@@ -51,6 +51,9 @@
       "path": "raw/wait.json",
       "sha256": "ac3e0602f1590968085f79df3e078d9f081c074cdbf1d48826ebaf2bf641419b"
     }
+  },
+  "execution_controls": {
+    "umask": "0077"
   },
   "fixture": {
     "before": "raw/before.json",

@@ -1,13 +1,19 @@
 {
+  "capture_context": {
+    "ambient_umask_before_override": "0022"
+  },
+  "execution_controls": {
+    "umask": "0077"
+  },
   "invocation": {
     "argv": [
       "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
       "-B",
       "scripts/transform_readme.py"
     ],
-    "cwd": "/workspace/scratch/stock-reference-awzhsuhn",
+    "cwd": "/workspace/scratch/stock-reference-5s918xps",
     "env": {
-      "HOME": "/workspace/scratch/stock-reference-awzhsuhn/home",
+      "HOME": "/workspace/scratch/stock-reference-5s918xps/home",
       "LANG": "C.UTF-8",
       "LC_ALL": "C.UTF-8",
       "PATH": "/usr/bin",
@@ -20,6 +26,6 @@
   "roles": {
     "$CORPUS": "/workspace/scratch/imre-stock-reference/benchmarks/supplemental/practical_workloads/stock_v1",
     "$PYTHON": "/workspace/.toolchains/uv-python/cpython-3.14.5-linux-x86_64-gnu/bin/python3.14",
-    "$WORK": "/workspace/scratch/stock-reference-awzhsuhn"
+    "$WORK": "/workspace/scratch/stock-reference-5s918xps"
   }
 }

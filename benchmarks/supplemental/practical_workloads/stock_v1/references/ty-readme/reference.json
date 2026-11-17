@@ -22,9 +22,9 @@
       "sha256": "63b593bfc3409136f7faa523692cc3a2c1c40bf3e313260a5c28a5cc7418e264"
     },
     "raw/invocation.json": {
-      "bytes": 807,
+      "bytes": 930,
       "path": "raw/invocation.json",
-      "sha256": "fa20f2681f8bb60a597cc5c4c92807af99989e179acb6e367a45c898eb01468f"
+      "sha256": "dc863c28d7cc37fcb6fffacf63e2df1e13d94ab366deb0e93795686e0d3c87eb"
     },
     "raw/processes.jsonl": {
       "bytes": 0,
@@ -51,6 +51,9 @@
       "path": "raw/wait.json",
       "sha256": "ac3e0602f1590968085f79df3e078d9f081c074cdbf1d48826ebaf2bf641419b"
     }
+  },
+  "execution_controls": {
+    "umask": "0077"
   },
   "fixture": {
     "before": "raw/before.json",
