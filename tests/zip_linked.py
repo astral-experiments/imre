@@ -44,8 +44,8 @@ assert sample is again
 assert sample.__spec__.loader is sample.__loader__
 assert type(sample.__loader__) is zipimport.zipimporter
 assert sample.__spec__.origin == sample.__file__
-assert sample.__file__.endswith("/modules.zip/sample/__init__.py")
-assert sample.__path__[0].endswith("/modules.zip/sample")
+assert sample.__file__.endswith("/sample/__init__.py")
+assert sample.__path__[0].endswith("/sample")
 print(sample.value, child.answer)
 import sys
 if len(sys.argv) > 1:
@@ -63,9 +63,9 @@ if len(sys.argv) > 1:
         for publisher, flags, levels in [('split', [], (0, 3)), ('whole', ['--whole-program'], (0,))]:
             for level in levels:
                 image = root / f'{publisher}-O{level}'
-                roots = ['--extension-path', bundle]
+                roots = ['--extension-path', alias if publisher == 'whole' else bundle]
                 if publisher == 'split' and level == 0:
-                    roots += ['--extension-path', bundle, '--extension-path', alias]
+                    roots += ['--extension-path', bundle]
                 result = call([compiler, 'build', entry, *roots, '--runtime', runtime, '--no-cache', '-q', '--opt-level', level, *flags, '-o', image], cwd=root)
                 require(result, (0, '', ''))
                 images.append(image)
