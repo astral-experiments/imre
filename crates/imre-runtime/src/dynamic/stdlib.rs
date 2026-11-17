@@ -2937,9 +2937,6 @@ pub(super) fn call(
     if name == "_socket.getprotobyname" {
         return socket::getprotobyname(ctx, args, kwargs);
     }
-    if name == "_socket.getaddrinfo" {
-        return socket::getaddrinfo(ctx, args, kwargs);
-    }
     if matches!(
         name,
         "_socket.htons" | "_socket.ntohs" | "_socket.htonl" | "_socket.ntohl"

@@ -897,6 +897,8 @@ pub(crate) enum ResolverFailure {
     WildcardMultiple,
     NonIpv6,
     FamilyMismatch,
+    InconsistentFamily,
+    Memory,
 }
 
 impl ResolverFailure {
@@ -936,6 +938,11 @@ impl ResolverFailure {
             }
             Self::NonIpv6 => Error::new(Kind::OSError, "resolver returned a non-IPv6 address"),
             Self::FamilyMismatch => Error::new(Kind::OSError, "address family mismatched"),
+            Self::InconsistentFamily => Error::new(
+                Kind::OSError,
+                "resolver returned an inconsistent address family",
+            ),
+            Self::Memory => Error::memory_error(),
         }
     }
 }
@@ -990,28 +997,26 @@ fn address_list(
         .map_err(ResolverFailure::into_error)
 }
 
-pub(crate) fn getaddrinfo(
+/// Enumerate and free libc's list before returning only native rows or raw failure status.
+pub(crate) fn getaddrinfo_raw(
     host: Option<&[u8]>,
     service: Option<&[u8]>,
     family: i32,
     ty: i32,
     protocol: i32,
     flags: i32,
-) -> Result<Vec<AddressInfo>> {
-    let list = address_list(host, service, family, ty, protocol, flags)?;
+) -> std::result::Result<Vec<AddressInfo>, ResolverFailure> {
+    let list = address_list_raw(host, service, family, ty, protocol, flags)?;
     let mut cursor = list.0;
     let mut rows = Vec::new();
-    // SAFETY: all nodes and canonical names remain live until the list guard is dropped.
+    // SAFETY: list owns all nodes and canonical names until this function returns.
     while let Some(entry) = unsafe { cursor.as_ref() } {
-        // SAFETY: the list guard owns the address and libc supplies its readable length.
-        let addr = unsafe { InternetAddress::read(entry.ai_addr, entry.ai_addrlen)? };
+        // SAFETY: libc supplies the readable address and length owned by list.
+        let addr = unsafe { InternetAddress::read_raw(entry.ai_addr, entry.ai_addrlen)? };
         if entry.ai_family != addr.family() {
-            return Err(Error::new(
-                Kind::OSError,
-                "resolver returned an inconsistent address family",
-            ));
+            return Err(ResolverFailure::InconsistentFamily);
         }
-        rows.try_reserve(1).map_err(|_| Error::memory_error())?;
+        rows.try_reserve(1).map_err(|_| ResolverFailure::Memory)?;
         let canonical = if entry.ai_canonname.is_null() {
             String::new()
         } else {

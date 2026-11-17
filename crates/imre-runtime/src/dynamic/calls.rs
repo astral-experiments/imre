@@ -295,6 +295,8 @@ pub(super) enum RegisteredCall {
     Select(Vec<Id>),
     Accept(Id),
     Connect(stdlib::socket::Connect),
+    GetAddrInfo(stdlib::socket::GetAddrInfo),
+    PublicAddrInfo(stdlib::socket::PublicAddrInfo),
     Recv(stdlib::socket::Recv),
 }
 
@@ -392,6 +394,10 @@ impl RegisteredCall {
             Self::Accept(listener) => unsafe { stdlib::socket::accept(listener, context) },
             // SAFETY: the registered caller owns the context and roots the active frame.
             Self::Connect(connect) => unsafe { connect.run(context) },
+            // SAFETY: the registered caller owns the context across native resolver work.
+            Self::GetAddrInfo(query) => unsafe { query.run(context) },
+            // SAFETY: nested calls run after the public fallback releases its Context borrow.
+            Self::PublicAddrInfo(call) => unsafe { call.run(context) },
             // SAFETY: the registered caller owns the context and roots the active frame.
             Self::Recv(recv) => unsafe { recv.run(context) },
         }
@@ -8766,6 +8772,16 @@ impl Context {
                     let wait = match name.as_str() {
                         "_contextvars.Context.run" => {
                             return self.prepare_context_run(&args, kwargs);
+                        }
+                        "_socket.getaddrinfo" => {
+                            return stdlib::socket::prepare_getaddrinfo(self, &args, &kwargs)
+                                .map(RegisteredCall::GetAddrInfo);
+                        }
+                        "socket.getaddrinfo" => {
+                            return stdlib::socket::prepare_public_getaddrinfo(
+                                self, &args, &kwargs,
+                            )
+                            .map(RegisteredCall::PublicAddrInfo);
                         }
                         "time.sleep" => {
                             return stdlib::time::prepare_sleep(self, &args, &kwargs)
