@@ -6714,7 +6714,8 @@ second = (lambda data: data)(t'{client.lookup(*args)}{(lambda v: v)(values)}')",
         let source = concat!(
             "async def get(x):\n    return x\n\n",
             "async def update(values):\n",
-            "    values[[lambda v=await get(x): v for x in [0]][0]()] = 'stored'\n",
+            // The bad target owns the refusal before the RHS needs a provider.
+            "    values[[lambda v=await get(x): v for x in [0]][0]()] = [lambda v=await get(y): v for y in [0]]\n",
             "    return values[0]\n\n",
             "try:\n    update({}).send(None)\n",
             "except StopIteration as exc:\n    print(exc.value)\n",

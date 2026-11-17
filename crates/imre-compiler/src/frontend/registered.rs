@@ -797,7 +797,7 @@ pub(super) fn finish_source_statement(
     scope.names = std::mem::take(&mut checker.names);
     let locals = scope.locals.len();
     let start = body.len();
-    let result = (&mut scope, SourceScope::statement_operand)
+    let result = (&mut scope, SourceScope::statement_operand, false)
         .source_statement(statement, false, body)
         .ok()
         .map(|(op, continues)| {
@@ -1899,24 +1899,6 @@ impl SuiteBody {
             self.check_from = self.falls_through.then_some(end);
         }
     }
-
-    fn mixed(
-        &mut self,
-        preparation: &SuitePreparation<'_>,
-        statement: Statement,
-        refusal: Option<PreparedRefusal>,
-    ) {
-        self.check_run(preparation);
-        if self.check_from.is_some() {
-            self.refusal = self.refusal.or(refusal);
-        }
-        let continues = !matches!(statement, Statement::Return(_) | Statement::Raise(_));
-        self.statements.push(statement);
-        if !continues {
-            self.falls_through = false;
-            self.check_run(preparation);
-        }
-    }
 }
 
 fn bind_operand(operands: &mut Vec<PhysicalOperand>, value: PhysicalOperand, ty: Type) -> Expr {
@@ -2864,51 +2846,68 @@ impl<'a> SuitePreparation<'a> {
                         stmt,
                         ast::Stmt::If(_) | ast::Stmt::While(_) | ast::Stmt::Try(_)
                     ));
-            let lowered = if physical && !scope.checked_physical_statement(stmt) {
+            let inline = !physical || scope.checked_physical_statement(stmt);
+            let lowered = if !inline && !stmt.is_assign_stmt() {
                 scope.physical_statement(stmt, &mut body, self)
             } else {
                 let first = operands.len();
                 let enclosing = self.refusal.take();
                 let body_start = body.statements.len();
-                let mut group = false;
+                let mut group = stmt
+                    .as_ann_assign_stmt()
+                    .is_some_and(|ann| ann.value.is_none());
                 let lowered =
-                    scope.written_statement(stmt, &mut body.statements, |scope, input| {
+                    scope.written_statement(stmt, &mut body.statements, false, |scope, input| {
                         if let StatementOperand::Result(expr) = input {
                             let checked = scope.try_operand(|scope| scope.frame_value(expr));
                             Some(self.region_operand(expr, kind, &mut operands, checked, suspended))
                         } else {
                             group = true;
-                            input.lower(scope)
+                            if inline { input.lower(scope) } else { None }
                         }
                     });
                 let lowered = if lowered.is_err() && group {
                     scope.truncate_locals(slots_before);
-                    scope.written_statement(stmt, &mut body.statements, |_, input| {
+                    scope.written_statement(stmt, &mut body.statements, true, |_, input| {
                         let held =
                             self.owned_operand(input.expression(), kind, suspended, |owner| {
                                 input.retained(owner, suspended)
                             });
-                        let ty = if matches!(input, StatementOperand::Condition(_)) {
-                            Type::Bool
-                        } else {
-                            Type::PythonObject
-                        };
-                        Some(bind_operand(&mut operands, held, ty))
+                        Some(match input {
+                            StatementOperand::Assignment(_) => self.bind_value(&mut operands, held),
+                            StatementOperand::Condition(_) => {
+                                bind_operand(&mut operands, held, Type::Bool)
+                            }
+                            _ => bind_operand(&mut operands, held, Type::PythonObject),
+                        })
                     })
                 } else {
                     lowered
                 };
+                let lowered = lowered.or_else(|()| {
+                    imre_ast::assignment_parts(stmt).ok_or(())?;
+                    scope.truncate_locals(slots_before);
+                    operands.truncate(first);
+                    let fault = scope.refusal.unwrap_or((
+                        stmt.range(),
+                        "cannot compile this assignment target ahead of time",
+                    ));
+                    self.refusal = Some(PreparedRefusal::Operand(fault));
+                    body.statements.push(checkpoint(stmt));
+                    Ok((
+                        Some(RegisteredSuite::bind_refusal(&mut operands, fault)),
+                        true,
+                    ))
+                });
                 let refusal = std::mem::replace(&mut self.refusal, enclosing);
                 match lowered {
-                    Ok((operation, continues)) if operands.len() != first => {
-                        body.check_through(self, body_start);
-                        if body.check_from.is_some() {
-                            body.refusal = body.refusal.or(refusal);
-                        }
-                        body.statements.extend(operation);
-                        Ok(continues)
-                    }
                     Ok((operation, continues)) => {
+                        if operands.len() != first {
+                            body.check_through(self, body_start);
+                            if body.check_from.is_some() {
+                                body.refusal = body.refusal.or(refusal);
+                            }
+                        }
                         body.statements.extend(operation);
                         Ok(continues)
                     }
@@ -2935,83 +2934,6 @@ impl<'a> SuitePreparation<'a> {
                 continue;
             }
             scope.truncate_locals(slots_before);
-            let frame_value = |expr: &ast::Expr| {
-                let checked = RegisteredOperand::prepare_with(self.source, kind, |scope| {
-                    if suspended {
-                        scope.frame_value(expr)
-                    } else {
-                        scope.ordinary_operand(expr)
-                    }
-                });
-                self.retain_operand(expr, kind, suspended, checked)
-            };
-            if let ast::Stmt::AnnAssign(ann) = stmt
-                && ann.value.is_none()
-            {
-                body.statements.push(checkpoint(stmt));
-                continue;
-            }
-            if stmt.is_ann_assign_stmt()
-                && let Some(effect) = attribute_write(stmt)
-            {
-                let start = operands.len();
-                let values = effect
-                    .operands()
-                    .map(|expr| bind_operand(&mut operands, frame_value(expr), Type::PythonObject))
-                    .collect();
-                body.statements.push(checkpoint(stmt));
-                body.mixed(
-                    self,
-                    effect.statement(values),
-                    self.operand_refusals(&operands[start..]),
-                );
-                continue;
-            }
-            if let Some((targets, rhs)) = imre_ast::assignment_parts(stmt) {
-                let input = scope.hidden(Type::PythonObject);
-                let value = unpacking::take_pattern_temporary(
-                    Expr::local(input, Type::PythonObject),
-                    input,
-                );
-                let first_refusal = scope.refusal.take();
-                scope.report_child_refusals = true;
-                let targets = scope.assignment_targets(targets, value);
-                scope.report_child_refusals = false;
-                body.statements.push(checkpoint(stmt));
-                let targets = match targets {
-                    Ok(targets) => {
-                        let rhs = frame_value(rhs);
-                        let refusal = self.operand_refusal(&rhs);
-                        let value = self.bind_value(&mut operands, rhs);
-                        let value = if let ast::Stmt::AnnAssign(ann) = stmt {
-                            scope.local_initializer(ann, value)
-                        } else {
-                            value
-                        };
-                        body.mixed(self, Statement::Assign(input, value), refusal);
-                        targets
-                    }
-                    Err(()) => {
-                        scope.truncate_locals(slots_before);
-                        let refusal = scope.refusal.or(first_refusal).unwrap_or((
-                            stmt.range(),
-                            "cannot compile this assignment target ahead of time",
-                        ));
-                        let statement = RegisteredSuite::bind_refusal(&mut operands, refusal);
-                        body.mixed(self, statement, Some(PreparedRefusal::Operand(refusal)));
-                        Vec::new()
-                    }
-                };
-                body.statements.extend(targets);
-                if let ast::Stmt::AnnAssign(ann) = stmt
-                    && ann.simple
-                    && !matches!(kind, RegisteredScope::Function { .. })
-                    && let Some(marker) = self.operations.get(&ann.target.range())
-                {
-                    body.statements.push(Statement::Expr(marker.clone()));
-                }
-                continue;
-            }
             if matches!(stmt, ast::Stmt::While(_)) {
                 body.statements.push(checkpoint(stmt));
             }
@@ -3249,7 +3171,7 @@ pub(super) fn raised_value<E>(
 }
 
 // Nested suites own their operand placement. The reader supplies this statement's inputs.
-impl<'s, F> statements::StatementLowering for (&mut SourceScope<'s>, F)
+impl<'s, F> statements::StatementLowering for (&mut SourceScope<'s>, F, bool)
 where
     F: FnMut(&mut SourceScope<'s>, StatementOperand<'_>) -> Option<Expr>,
 {
@@ -3257,13 +3179,13 @@ where
 
     fn assignment(
         &mut self,
+        annotation: Option<&ast::StmtAnnAssign>,
         targets: &[ast::Expr],
         rhs: &ast::Expr,
         body: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
-        let scope = &mut *self.0;
-        let value = scope.frame_value(rhs).ok_or(())?;
-        unpacking::bind_assignment(scope, targets, value, body)?;
+        self.0
+            .assign(annotation, targets, rhs, body, &mut self.1, self.2)?;
         Ok(true)
     }
 
@@ -3276,7 +3198,7 @@ where
         def: &ast::StmtFunctionDef,
         body: &mut Vec<Statement>,
     ) -> StdResult<Option<Statement>, ()> {
-        let (scope, read) = self;
+        let (scope, read, _) = self;
         // Decorators and parameter defaults execute in the enclosing frame, including for generics.
         let header = scope
             .with_binding_operands(|scope| {
@@ -3307,7 +3229,7 @@ where
     }
 
     fn effect(&mut self, value: &ast::Expr) -> StdResult<(Option<Statement>, bool), ()> {
-        let (scope, read) = self;
+        let (scope, read, _) = self;
         if !scope.interactive && value.is_string_literal_expr() {
             return Ok((None, true));
         }
@@ -3321,7 +3243,7 @@ where
     }
 
     fn returned(&mut self, ret: &ast::StmtReturn) -> StdResult<Statement, ()> {
-        let (scope, read) = self;
+        let (scope, read, _) = self;
         Ok(Statement::Return(match ret.value.as_deref() {
             Some(value) => read(scope, StatementOperand::Result(value)).ok_or(())?,
             None => Expr::none(),
@@ -3339,7 +3261,7 @@ where
         raise: &ast::StmtRaise,
         value: &ast::Expr,
     ) -> StdResult<Statement, ()> {
-        let (scope, read) = self;
+        let (scope, read, _) = self;
         raised_value(raise, value, |expr| {
             read(scope, StatementOperand::Result(expr)).ok_or(())
         })
@@ -3354,7 +3276,7 @@ where
         stmt: &ast::Stmt,
         output: &mut Vec<Statement>,
     ) -> StdResult<bool, ()> {
-        self.0.other_statement(stmt, output, &mut self.1)
+        self.0.other_statement(stmt, output, &mut self.1, self.2)
     }
 }
 
@@ -3364,6 +3286,7 @@ impl SourceScope<'_> {
         stmt: &ast::Stmt,
         output: &mut Vec<Statement>,
         read: &mut impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
+        retained: bool,
     ) -> StdResult<bool, ()> {
         let (statements, continues) = match stmt {
             ast::Stmt::AugAssign(assign) => {
@@ -3428,21 +3351,27 @@ impl SourceScope<'_> {
                     output.push(Statement::Expr(effect));
                     return Ok(true);
                 }
-                let mut body = if let Some(value) = &ann.value {
-                    let value = self.frame_value(value).ok_or(())?;
-                    let value = self.local_initializer(ann, value);
-                    self.assignment_targets(std::slice::from_ref(ann.target.as_ref()), value)?
-                } else {
-                    Vec::new()
-                };
-                // A function-local annotation has no runtime operand. A simple
-                // namespace annotation records its declaration for later evaluation.
+                let mut body = Vec::new();
+                if let Some(value) = &ann.value {
+                    self.assign(
+                        Some(ann),
+                        std::slice::from_ref(ann.target.as_ref()),
+                        value,
+                        &mut body,
+                        read,
+                        retained,
+                    )?;
+                }
+                // A simple namespace annotation records its declaration when the provider is present.
                 if !matches!(self.kind, RegisteredScope::Function { .. }) && ann.simple {
-                    let marker = self
+                    match self
                         .suite_operations
                         .and_then(|operations| operations.get(&ann.target.range()))
-                        .ok_or(())?;
-                    body.push(Statement::Expr(marker.clone()));
+                    {
+                        Some(marker) => body.push(Statement::Expr(marker.clone())),
+                        None if !retained => return Err(()),
+                        None => {}
+                    }
                 }
                 Ok((body, true))
             }
@@ -3482,6 +3411,7 @@ impl SourceScope<'_> {
 
 #[derive(Clone, Copy)]
 enum StatementOperand<'a> {
+    Assignment(&'a ast::Expr),
     Result(&'a ast::Expr),
     Frame(&'a ast::Expr),
     Condition(&'a ast::Expr),
@@ -3494,7 +3424,8 @@ enum StatementOperand<'a> {
 impl<'a> StatementOperand<'a> {
     fn expression(self) -> &'a ast::Expr {
         match self {
-            Self::Result(expr)
+            Self::Assignment(expr)
+            | Self::Result(expr)
             | Self::Frame(expr)
             | Self::Condition(expr)
             | Self::Value(expr)
@@ -3506,6 +3437,7 @@ impl<'a> StatementOperand<'a> {
 
     fn retained(self, owner: &mut SourceScope<'_>, suspended: bool) -> Option<Expr> {
         match self {
+            Self::Assignment(expr) if !suspended => owner.ordinary_operand(expr),
             Self::ClassHeader(expr) => owner.operand(expr),
             Self::Suspendable(expr) if suspended => owner.frame_value(expr),
             _ => self.lower(owner),
@@ -3519,7 +3451,9 @@ impl<'a> StatementOperand<'a> {
 
     fn lower(self, scope: &mut SourceScope<'_>) -> Option<Expr> {
         match self {
-            Self::Frame(expr) | Self::Result(expr) => scope.frame_value(expr),
+            Self::Assignment(expr) | Self::Frame(expr) | Self::Result(expr) => {
+                scope.frame_value(expr)
+            }
             Self::Condition(expr) => scope.condition_operand(expr),
             Self::Value(expr) | Self::Suspendable(expr) | Self::ClassHeader(expr) => {
                 scope.ordinary_operand(expr)
@@ -3834,14 +3768,56 @@ impl SourceScope<'_> {
         ))
     }
 
-    fn assignment_targets(
+    fn assign(
         &mut self,
+        annotation: Option<&ast::StmtAnnAssign>,
         targets: &[ast::Expr],
-        value: Expr,
-    ) -> StdResult<Vec<Statement>, ()> {
-        let mut body = Vec::with_capacity(1);
-        unpacking::bind_assignment(self, targets, value, &mut body)?;
-        Ok(body)
+        rhs: &ast::Expr,
+        output: &mut Vec<Statement>,
+        read: &mut impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
+        retained: bool,
+    ) -> StdResult<(), ()> {
+        let mut value = |scope: &mut Self| {
+            let value = read(scope, StatementOperand::Assignment(rhs)).ok_or(())?;
+            Ok(if let Some(ann) = annotation {
+                scope.local_initializer(ann, value)
+            } else {
+                value
+            })
+        };
+        if let Some(field) = annotation.and_then(|ann| ann.target.as_attribute_expr()) {
+            let value = value(self)?;
+            let receiver = self
+                .with_binding_operands(|scope| {
+                    read(scope, StatementOperand::Suspendable(&field.value))
+                })
+                .ok_or(())?;
+            output.push(attribute_statement(
+                ir::AttributeAction::Store,
+                field,
+                vec![value, receiver],
+            ));
+            return Ok(());
+        }
+
+        // Prepare retained targets before the RHS, then store its value before any target runs.
+        let start = output.len();
+        let slot = retained.then(|| self.hidden(Type::PythonObject));
+        let input = match slot {
+            Some(slot) => {
+                unpacking::take_pattern_temporary(Expr::local(slot, Type::PythonObject), slot)
+            }
+            None => value(self)?,
+        };
+        let report = self.report_child_refusals;
+        self.report_child_refusals |= retained;
+        let bound = unpacking::bind_assignment(self, targets, input, output);
+        self.report_child_refusals = report;
+        bound?;
+        if let Some(slot) = slot {
+            output.insert(start, Statement::Assign(slot, value(self)?));
+        }
+        Ok(())
     }
 
     fn augmented_assignment(
@@ -3977,7 +3953,8 @@ impl SourceScope<'_> {
     }
 
     fn statement(&mut self, stmt: &ast::Stmt, body: &mut Vec<Statement>) -> StdResult<bool, ()> {
-        let (operation, continues) = self.written_statement(stmt, body, Self::statement_operand)?;
+        let (operation, continues) =
+            self.written_statement(stmt, body, false, Self::statement_operand)?;
         body.extend(operation);
         Ok(continues)
     }
@@ -3986,6 +3963,7 @@ impl SourceScope<'_> {
         &mut self,
         stmt: &ast::Stmt,
         body: &mut Vec<Statement>,
+        retained: bool,
         mut read: impl FnMut(&mut Self, StatementOperand<'_>) -> Option<Expr>,
     ) -> StdResult<(Option<Statement>, bool), ()> {
         if let ast::Stmt::Assert(assertion) = stmt {
@@ -3999,7 +3977,7 @@ impl SourceScope<'_> {
         let start = body.len();
         push_checkpoint(body, stmt);
         let module = matches!(self.kind, RegisteredScope::Module);
-        (self, read)
+        (self, read, retained)
             .source_statement(stmt, module, body)
             .inspect_err(|_| body.truncate(start))
     }
