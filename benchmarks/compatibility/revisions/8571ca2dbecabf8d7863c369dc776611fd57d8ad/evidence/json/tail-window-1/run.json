@@ -279,7 +279,66 @@
       "timed_out": false
     }
   },
-  "receipt_update": {
+  "matching_stock": {
+    "fresh": true,
+    "capture": "stock.capture.json",
+    "trace_sha256": "1c18182178356b6a0db8e96d49c2a5012228c340e1acacc5b6c80dc446544912",
+    "controls_match_native": true,
+    "launcher_sha256": "e1ea0582a2e58d7f227491818ac2fefbd8e43c4a4c8616c24ebbdac6ca4c6375",
+    "actual_launcher_gate": "../architecture-control/run.json",
+    "extra_skips_vs_original_stock": [
+      {
+        "id": "test.test_json.test_recursion.TestCRecursion.test_endless_recursion",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      },
+      {
+        "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_decoding",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      },
+      {
+        "id": "test.test_json.test_recursion.TestCRecursion.test_highly_nested_objects_encoding",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      },
+      {
+        "id": "test.test_json.test_recursion.TestPyRecursion.test_endless_recursion",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      },
+      {
+        "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_decoding",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      },
+      {
+        "id": "test.test_json.test_recursion.TestPyRecursion.test_highly_nested_objects_encoding",
+        "occurrence": 1,
+        "details": [
+          "Not run due to unlimited stack size"
+        ]
+      }
+    ],
+    "unrelated_extra_skips": [],
+    "counts": {
+      "pass": 175,
+      "skip": 7,
+      "error": 34
+    },
+    "suite_credited": false
+  },
+  "withdrawn_provisional_receipt_update": {
     "base_commit": "85f8f6772ccc8d71b87d9104a28a364d39aeb32a",
     "receipt_preimage_sha256": "a915837768d403cc5378068c70420905f74c7686b8c39e8cbdbddc71b84da7b8",
     "receipt_postimage_sha256": "20373fc98627ffc4b11118acad4eb8757d0fa6ac73536fb562e2d87584588f5f",
@@ -339,5 +398,11 @@
       }
     },
     "status": "withdrawn: prior stock did not use matching stack/process controls"
+  },
+  "receipt_update": {
+    "status": "auxiliary evidence only; provisional receipt update withdrawn",
+    "new_pairs": 0,
+    "base_pairs": 114,
+    "stock_reused": false
   }
 }
