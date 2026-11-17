@@ -3840,14 +3840,11 @@ impl SourceScope<'_> {
         if complete {
             return Ok(continues);
         }
-        // A disabled loop selects only its else. If every statement there uses
-        // ordinary checked lowering in both frames, keep the one prepared block.
+        // A disabled loop selects only its else. The successful checked lowering
+        // already allocated that block's private slots in this scope, so keep it
+        // in the same frame instead of preparing a separate physical child.
         if let ast::Stmt::While(loop_) = stmt
             && disabled_while(loop_)
-            && loop_
-                .orelse
-                .iter()
-                .all(|stmt| self.checked_physical_statement(stmt))
             && let Some(Statement::While(_, _, otherwise)) = body.pop()
         {
             suite.check_run(preparation);
@@ -4433,6 +4430,39 @@ mod tests {
                 assert_eq!(suite.falls_through, falls_through, "{text}");
             }
         }
+    }
+
+    #[test]
+    fn a_false_loop_else_keeps_its_suspending_iterator_in_the_same_frame() {
+        let text = "def f():\n    while False:\n        yield 0\n    else:\n        for x in [1, 2]:\n            yield x\n";
+        let graph = SourceGraph::single(text).unwrap();
+        let module = &graph.modules[graph.entry];
+        let def = module.parsed.syntax().body[0]
+            .as_function_def_stmt()
+            .unwrap();
+        let source = module.registered_values().context(text);
+        let operations = HashMap::new();
+        let mut prepare = SuitePreparation::new(&operations, source, true);
+        let suite = prepare.function_suite(
+            &def.body,
+            RegisteredScope::Function { is_async: false },
+            true,
+        );
+        assert!(suite.fully_checked());
+        assert!(suite.refusal.is_none());
+        crate::verify::registered(suite.checked.region()).unwrap();
+        let mut cursors = Vec::new();
+        ir::walk_statements(&suite.checked.function.body, &mut |stmt| {
+            if let Statement::IterNext { iterator, .. } = stmt {
+                cursors.push(*iterator);
+            }
+        });
+        assert!(!suite.checked.function.body.iter().any(|stmt| matches!(
+            stmt, Statement::While(test, _, _) if ir::control::boolean_literal(test) == Some(false)
+        )));
+        assert_eq!(cursors.len(), 1);
+        assert!(suite.checked.region().private_slots().contains(&cursors[0]));
+        assert!(suite.checked.frame_slots.cursor(&cursors[0]).is_some());
     }
 
     #[test]
