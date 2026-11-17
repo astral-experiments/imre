@@ -1480,16 +1480,60 @@ impl Session {
                     return Err(error.to_string());
                 }
                 Some(error)
-            } else if let Some((id, function)) = initializer.entered_function
-                && let Some((graph, native)) = native
-                && let Some((_, winner)) = sources.clone().find(|(owner, _)| *owner == id)
-                && winner.declares_signatures
-                && let Some((_, report)) = native.function_reports().find(|((module, range), _)| {
-                    let source = &graph.modules[*module];
-                    function == *range
-                        && crate::modules::same_source_path(winner.path, &source.path)
-                        && winner.source == source.original_source()
-                })
+            } else if let Some((graph, native)) = native
+                && let Some(report) = {
+                    let matching = |(id, function)| {
+                        let (_, winner) = sources.clone().find(|(owner, _)| *owner == id)?;
+                        winner.declares_signatures.then_some(())?;
+                        native
+                            .function_reports()
+                            .find_map(|((module, range), report)| {
+                                let source = &graph.modules[module];
+                                (function == range
+                                    && crate::modules::same_source_path(winner.path, &source.path)
+                                    && winner.source == source.original_source())
+                                .then_some(report)
+                            })
+                    };
+                    initializer.entered_function.and_then(matching).or_else(|| {
+                        native.function_reports().next()?;
+                        // A module found in a separate search root retains its runtime
+                        // execution boundary after an effect in the importing launcher.
+                        if self
+                            .extension_roots
+                            .iter()
+                            .any(|root| root != &self.root && start.path.starts_with(root))
+                        {
+                            return None;
+                        }
+                        let owner = original.map_or(self, |(_, owner)| owner);
+                        let after_output = owner.initializer_contract_after_output(
+                            (entry, start.path),
+                            start.main_body,
+                            |name| {
+                                sources.clone().find_map(|(id, source)| {
+                                    (source.name == name).then(|| {
+                                        initializer_calls::InitializerSource {
+                                            module: id,
+                                            path: source.path,
+                                            declares_signatures: source.declares_signatures,
+                                            native: source.checked_module.and_then(|module| {
+                                                let original = &graph.modules[module];
+                                                (crate::modules::same_source_path(
+                                                    source.path,
+                                                    &original.path,
+                                                ) && source.source == original.original_source())
+                                                .then_some((module, native))
+                                            }),
+                                        }
+                                    })
+                                })
+                            },
+                        );
+                        after_output.error.is_none().then_some(())?;
+                        after_output.entered_function.and_then(matching)
+                    })
+                }
             {
                 Some(report)
             } else if let Some((graph, report)) = native
