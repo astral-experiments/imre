@@ -132,6 +132,22 @@ class RawControlTests(unittest.TestCase):
             self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
             with self.assertRaisesRegex(ValueError,'ordered stock/native inventories differ'):self.rows()
 
+    def test_stock_only_cohort_can_have_independent_stock_configuration(self):
+        entry=self.entries['base64'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['stock-only']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/base64/raw-control') as folder:
+            tmp=Path(folder);run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());stock=run['runs']['stock']
+            stock['timeout_seconds']=180;stock['environment']={'PYTHONPATH':stock['environment']['PYTHONPATH']}
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            rows=self.rows();child=[r for r in rows if r['family']=='base64' and '.TestMain.' in r['id']]
+            self.assertEqual(len(child),5);self.assertTrue(all(not r['paired'] and r['runs']['O0']['outcome']==r['runs']['O3']['outcome']=='not_run' for r in child))
+
+    def test_rehashed_credited_finite_configuration_mismatch_is_rejected(self):
+        entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
+        with tempfile.TemporaryDirectory(dir=SNAPSHOT/'evidence/csv/raw-control') as folder:
+            tmp=Path(folder);run=json.loads((scorecard.ROOT/cohort['artifacts']['run']).read_text());run['runs']['stock']['timeout_seconds']=180
+            self.artifact_temp(entry,cohort,'run',tmp/'run.json',(json.dumps(run)+'\n').encode());self.bind_temp(entry,binding,tmp)
+            with self.assertRaisesRegex(ValueError,'finite cohort common configuration differs'):self.rows()
+
     def test_common_configuration_and_semantic_cwd(self):
         import raw_control
         entry=self.entries['csv'];binding=json.loads((scorecard.ROOT/entry['sources']['binding']).read_text());cohort=binding['cohorts']['finite-native']
